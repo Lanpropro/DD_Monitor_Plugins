@@ -30,6 +30,7 @@ def main():
                 assert len(names) == len(set(names))
                 manifest = json.loads(archive.read(f"{plugin_id}/plugin.json"))
                 assert manifest["id"] == plugin_id
+                assert manifest["version"] == "1.0"
                 assert f"{plugin_id}-{manifest['version']}.zip" == path.name
                 assert archive.read(f"{plugin_id}/LICENSE") == (ROOT / "LICENSE").read_bytes()
                 for name in names:
@@ -40,10 +41,12 @@ def main():
         assert not manager.plugins  # 安装阶段不执行插件代码
         manager.load()
         assert len(manager.plugins) == 2 and not manager.skipped
+        assert all(plugin.version == "1.0" for plugin in manager.plugins)
         assert set(manager.platforms) == {"huya", "douyu", "douyin", "twitch", "youtube"}
         assert manager._platform_owner["huya"] == "domestic_live"
         assert manager._platform_owner["youtube"] == "global_live"
         assert {entry["id"] for entry in manager.catalog()} == {"domestic_live", "global_live"}
+        assert all(entry["version"] == "1.0" for entry in manager.catalog())
         manager.unload()
     print("PASS: package integrity, source consistency, install without execution and five platforms")
 
