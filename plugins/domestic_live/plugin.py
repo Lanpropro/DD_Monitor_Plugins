@@ -306,17 +306,32 @@ class DouyuPlatform(NumericLivePlatform):
     hosts = ("www.douyu.com", "douyu.com", "m.douyu.com")
     image_hosts = ("douyucdn.cn", "douyu.com")
 
+    def _room_data(self, raw):
+        with requests.get(f"https://www.douyu.com/betard/{raw}", headers={
+                "User-Agent": "Mozilla/5.0", "Referer": "https://www.douyu.com/"},
+                timeout=(4, 8)) as response:
+            response.raise_for_status()
+            return response.json()["room"]
+
     def room_info(self, room_id: str) -> api.RoomInfo:
         canonical = self.normalize(room_id)
         raw = canonical.split(":", 1)[1]
         try:
-            with requests.get(f"https://www.douyu.com/betard/{raw}", headers={
-                    "User-Agent": "Mozilla/5.0", "Referer": "https://www.douyu.com/"},
-                    timeout=(4, 8)) as response:
-                response.raise_for_status()
-                room = response.json()["room"]
+            try:
+                room = self._room_data(raw)
+            except ValueError:
+                # 靓号的资料接口可能返回提示页，从公开直播页取得实际房间号。
+                with requests.get(self.room_url(canonical), headers={
+                        "User-Agent": "Mozilla/5.0", "Referer": "https://www.douyu.com/"},
+                        timeout=(4, 8)) as response:
+                    response.raise_for_status()
+                    match = re.search(r"\bwindow\.room_id\s*=\s*([1-9][0-9]{0,19})\s*;", response.text)
+                if match is None or match[1] == raw:
+                    raise ValueError("Missing actual room ID")
+                room = self._room_data(match[1])
             if type(room.get("show_status")) is not int or not room.get("room_id"):
                 raise ValueError("Missing room status")
+            canonical = self.normalize(f"douyu:{room['room_id']}")
             return api.RoomInfo(room_id=canonical, uname=room.get("nickname") or f"斗鱼 · {raw}",
                 title=room.get("room_name") or "斗鱼直播间", platform=self.kind,
                 live=room["show_status"] == 1 and not room.get("videoLoop"),
@@ -327,10 +342,11 @@ class DouyuPlatform(NumericLivePlatform):
             raise RuntimeError("斗鱼房间信息获取失败，请稍后重试") from error
 
     def _streams(self, session, room_id, quality=250, *, preview=False):
-        if not self.room_info(room_id).live:
+        info = self.room_info(room_id)
+        if not info.live:
             return {}
-        parser = Douyu(session, self.room_url(room_id))
-        raw = self.normalize(room_id).split(":", 1)[1]
+        parser = Douyu(session, self.room_url(info.room_id))
+        raw = self.normalize(info.room_id).split(":", 1)[1]
         data = self._request_source(parser, raw)
         # 网页默认的 P2P 边缘线路可能很快断流，优先使用接口明确给出的普通 CDN。
         cdns = {item.get("cdn") for item in data.get("cdnsWithName", [])}
