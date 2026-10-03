@@ -1,0 +1,12 @@
+{
+  "verifiedOn": "2026-10-03",
+  "tag": "v0.2",
+  "download": "https://github.com/Lanpropro/DD_Monitor_CE/releases/download/v0.2/DDMonitorCE-v0.2-exe.zip",
+  "bytes": 331339180,
+  "sha256": "a3b423be41e50ac66db9c9d898cad56601bcd36edcb2fc01a0740b293e54bc36",
+  "sourceMain": "9f007e851911e84cf338351eac89c7c281e57ca4",
+  "packageInspection": {
+    "result": "missing_required_host_modules",
+    "missing_modules": ["ddm.live_danmaku", "ddm.global_danmaku", "ddm.auto_quality"]
+  }
+}
