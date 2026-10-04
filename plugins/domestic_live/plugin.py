@@ -5,7 +5,7 @@ import json
 import re
 import uuid
 import zlib
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 import requests
 from streamlink import Streamlink
@@ -307,6 +307,48 @@ class DouyuPlatform(NumericLivePlatform):
     image_hosts = ("douyucdn.cn", "douyu.com")
     follow_login_url = "https://www.douyu.com/directory/myFollow?from=normalFollow"
     follow_cookie_domain = "douyu.com"
+
+    def account_info(self, session, cancelled) -> dict:
+        if cancelled():
+            return {}
+        with session.get("https://www.douyu.com/lapi/member/api/getInfo",
+                params={"client_type": 0}, headers={"User-Agent": "Mozilla/5.0",
+                "Referer": self.follow_login_url}, timeout=(4, 8)) as response:
+            response.raise_for_status()
+            payload = response.json()
+        data = payload.get("msg")
+        uid = str(data.get("uid") or "") if isinstance(data, dict) else ""
+        if str(payload.get("error")) != "0" or not uid.isdigit() or int(uid) <= 0:
+            raise RuntimeError("斗鱼未登录或登录已过期，请在官方页面完成登录")
+        # 官方网页 USER_INFO.nickname 与头像缓存同样来自 acf_ Cookie。
+        cookies = {cookie.name: unquote(cookie.value) for cookie in session.cookies
+                   if cookie.domain.lstrip(".") == "douyu.com"}
+        uname = cookies.get("acf_nickname") or uid
+        face = cookies.get("acf_avatar", "")
+        if face.endswith("_"):
+            face += "middle.jpg"
+        elif face.endswith("="):
+            face += "middle"
+        face = self._image_url(face)
+        if not face and not cancelled():
+            try:
+                with session.get(f"https://www.douyu.com/lapi/member/userInfo/getInfo/{uid}",
+                        params={"size": "middle", "icon": 1},
+                        headers={"User-Agent": "Mozilla/5.0", "Referer": self.follow_login_url},
+                        timeout=(4, 8)) as response:
+                    response.raise_for_status()
+                    avatar = response.json().get("data")
+                if isinstance(avatar, str):
+                    avatar = json.loads(avatar)
+                icon = avatar.get("icon") if isinstance(avatar, dict) else None
+                if isinstance(icon, dict) and str(icon.get("code")) == "0":
+                    image = icon.get("msg")
+                    image = image.get("middle") if isinstance(image, dict) else image
+                    if isinstance(image, str):
+                        face = self._image_url("https://apic.douyucdn.cn/upload/" + image)
+            except (requests.RequestException, ValueError):
+                pass  # 头像暂不可用仍保留已确认的账号 ID。
+        return {"uid": uid, "uname": uname, "face": face}
 
     def follow_rooms(self, session, cancelled) -> list:
         result = {}

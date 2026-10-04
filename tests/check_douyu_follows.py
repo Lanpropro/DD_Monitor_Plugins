@@ -5,6 +5,9 @@ import os
 from pathlib import Path
 import sys
 from unittest.mock import Mock
+from urllib.parse import quote
+
+import requests
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -29,6 +32,7 @@ def main():
     platform = manager.platforms["douyu"]
     assert platform.follow_cookie_domain == "douyu.com"
     assert platform.follow_login_url.startswith("https://www.douyu.com/")
+    assert callable(platform.account_info)
     assert not manager.platforms["huya"].follow_login_url and not manager.platforms["douyin"].follow_login_url
     live = {"room_id": 6979222, "nickname": "Machine", "room_name": "live", "show_status": "1",
             "avatar_small": "//apic.douyucdn.cn/avatar.jpg", "room_src": "https://rpic.douyucdn.cn/cover.jpg",
@@ -64,8 +68,45 @@ def main():
     session.get.return_value = response({"error": 0, "data": {"list": [live], "pageCount": 2}})
     assert platform.follow_rooms(session, lambda: session.get.call_count > 0) == []
     assert session.get.call_count == 1
+    check_account(platform)
     manager.unload()
     print("PASS: paginated follows, offline rooms, canonical IDs, dedup, images, no counts, errors/cancellation")
+
+
+def check_account(platform):
+    session = Mock()
+    session.cookies = requests.cookies.RequestsCookieJar()
+    session.cookies.set("acf_nickname", quote("测试账号"), domain=".douyu.com", path="/")
+    session.cookies.set("acf_avatar", "https://apic.douyucdn.cn/upload/test_", domain=".douyu.com", path="/")
+    session.cookies.set("acf_nickname", "foreign-account", domain="unrelated.test", path="/")
+    session.get.return_value = response({"error": 0, "msg": {"uid": 123}})
+    account = platform.account_info(session, lambda: False)
+    assert account == {"uid": "123", "uname": "测试账号",
+                       "face": "https://apic.douyucdn.cn/upload/test_middle.jpg"}
+    assert session.get.call_count == 1
+    assert session.get.call_args.args[0] == "https://www.douyu.com/lapi/member/api/getInfo"
+    assert session.get.call_args.kwargs["timeout"] == (4, 8)
+    for payload in ({"error": 1, "msg": {"uid": 0}}, {"error": 0, "msg": {"uid": 0}},
+                    {"error": 0, "msg": {}}, {"error": 0, "msg": {"uid": "invalid"}}):
+        session.get.return_value = response(payload)
+        try:
+            platform.account_info(session, lambda: False)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("Unverified account must not appear logged in")
+    session.cookies.clear()
+    session.get.side_effect = [response({"error": 0, "msg": {"uid": "123"}}),
+        response({"error": 0, "data": json.dumps({"icon": {"code": 0,
+                  "msg": {"middle": "sample.jpg"}}})})]
+    assert platform.account_info(session, lambda: False) == {"uid": "123", "uname": "123",
+                "face": "https://apic.douyucdn.cn/upload/sample.jpg"}
+    session.get.side_effect = [response({"error": 0, "msg": {"uid": 123}}),
+                               requests.Timeout("avatar unavailable")]
+    assert platform.account_info(session, lambda: False)["uid"] == "123"
+    session.get.reset_mock()
+    assert platform.account_info(session, lambda: True) == {} and not session.get.called
+    print("PASS: verified identity, scoped decoded nickname, UID/avatar, expiry, missing avatar and cancellation")
 
 
 if __name__ == "__main__":
