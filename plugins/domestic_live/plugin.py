@@ -307,6 +307,7 @@ class DouyuPlatform(NumericLivePlatform):
     image_hosts = ("douyucdn.cn", "douyu.com")
     follow_login_url = "https://www.douyu.com/directory/myFollow?from=normalFollow"
     follow_cookie_domain = "douyu.com"
+    account_login_url = "https://passport.douyu.com/index/login?client_id=1"
 
     def account_info(self, session, cancelled) -> dict:
         if cancelled():

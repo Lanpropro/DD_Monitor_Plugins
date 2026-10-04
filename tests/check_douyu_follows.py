@@ -32,6 +32,7 @@ def main():
     platform = manager.platforms["douyu"]
     assert platform.follow_cookie_domain == "douyu.com"
     assert platform.follow_login_url.startswith("https://www.douyu.com/")
+    assert platform.account_login_url == "https://passport.douyu.com/index/login?client_id=1"
     assert callable(platform.account_info)
     assert not manager.platforms["huya"].follow_login_url and not manager.platforms["douyin"].follow_login_url
     live = {"room_id": 6979222, "nickname": "Machine", "room_name": "live", "show_status": "1",
