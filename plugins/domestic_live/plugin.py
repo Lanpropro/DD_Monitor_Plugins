@@ -2,7 +2,9 @@
 import base64
 from html import unescape
 import json
+import os
 import re
+import time
 import uuid
 import zlib
 from urllib.parse import parse_qsl, unquote, urlsplit
@@ -425,7 +427,32 @@ class DouyuPlatform(NumericLivePlatform):
         except (requests.RequestException, ValueError, KeyError, TypeError) as error:
             raise RuntimeError("斗鱼房间信息获取失败，请稍后重试") from error
 
+    @staticmethod
+    def _playback_cookies():
+        jar = requests.cookies.RequestsCookieJar()
+        if os.environ.get("DDM_NO_SAVE") == "1":
+            return jar
+        try:
+            from ddm.account_store import AccountStore
+        except ImportError:
+            return jar  # Older hosts still support public playback without saved accounts.
+        from PySide6.QtCore import QByteArray
+        from PySide6.QtNetwork import QNetworkCookie
+        for raw in AccountStore("douyu").load():
+            for cookie in QNetworkCookie.parseCookies(QByteArray(raw.encode("utf-8"))):
+                domain = cookie.domain().lstrip(".").lower()
+                if domain != "douyu.com" and not domain.endswith(".douyu.com"):
+                    continue
+                expiry = None if cookie.isSessionCookie() else cookie.expirationDate().toSecsSinceEpoch()
+                if expiry is not None and expiry <= time.time():
+                    continue
+                jar.set(bytes(cookie.name()).decode("utf-8"), bytes(cookie.value()).decode("utf-8"),
+                        domain=cookie.domain(), path=cookie.path() or "/", expires=expiry,
+                        secure=cookie.isSecure())
+        return jar
+
     def _streams(self, session, room_id, quality=250, *, preview=False):
+        session.http.cookies.update(self._playback_cookies())
         info = self.room_info(room_id)
         if not info.live:
             return {}
@@ -449,12 +476,10 @@ class DouyuPlatform(NumericLivePlatform):
             item["rate"] == 0, item["bit"]), reverse=True)
         selected = self._select_quality(room_id, quality, preview)
         rate = selected["rate"]
-        if cdn or rate:
-            changed = self._request_source(parser, raw, cdn, rate=rate)
-            if changed:
-                data = changed
-            else:
-                rate = 0
+        if cdn or data.get("rate") != rate:
+            data = self._request_source(parser, raw, cdn, rate=rate)
+            if not data:
+                raise RuntimeError("斗鱼所选画质取流失败，请重试或选择其他画质")
         if not data:
             return {}
         stream = HTTPStream(session, f"{data['rtmp_url']}/{data['rtmp_live']}")
