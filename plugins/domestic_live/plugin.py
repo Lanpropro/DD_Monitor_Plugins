@@ -45,6 +45,33 @@ class HuyaPlatform(LiveQualityPlatform):
     kind = "huya"
     label = "虎牙"
     playback_mode = "stream"
+    account_login_url = "https://www.huya.com/"
+    account_cookie_domain = "huya.com"
+
+    def account_info(self, session, cancelled) -> dict:
+        if cancelled():
+            return {}
+        with session.get("https://l.huya.com/udb_web/udbport2.php",
+                params={"m": "HuyaLogin", "do": "checkLogin", "callback": "ddmAccount"},
+                headers={"User-Agent": "Mozilla/5.0", "Referer": self.account_login_url},
+                timeout=(4, 8)) as response:
+            response.raise_for_status()
+            match = re.fullmatch(r"\s*ddmAccount\((.*)\)\s*;?\s*", response.text, re.S)
+            if match is None:
+                raise RuntimeError("虎牙账号确认失败，请在官方页面重新登录后重试")
+            data = json.loads(match[1])
+        uid = str(data.get("uid") or "")
+        if data.get("isLogined") is not True or not uid.isdigit() or int(uid) <= 0:
+            raise RuntimeError("虎牙未登录或登录已过期，请在官方页面完成登录")
+        face = str(data.get("userLogo") or "")
+        if face.startswith("//"):
+            face = "https:" + face
+        parts = urlsplit(face)
+        if (parts.scheme != "https" or parts.username or parts.password or
+                not (parts.hostname or "").endswith(".msstatic.com")):
+            face = ""
+        return {"uid": uid, "uname": data.get("userNick") or data.get("userName") or uid,
+                "face": face}
 
     def matches(self, room_id: str) -> bool:
         text = str(room_id or "").strip()
@@ -514,6 +541,25 @@ class DouyinPlatform(NumericLivePlatform):
     label = "抖音"
     hosts = ("live.douyin.com", "douyin.com")
     image_hosts = ("douyinpic.com", "byteimg.com", "ibytedtos.com", "douyincdn.com")
+    account_login_url = "https://live.douyin.com/"
+    account_cookie_domain = "douyin.com"
+
+    def account_info(self, session, cancelled) -> dict:
+        if cancelled():
+            return {}
+        with session.get("https://live.douyin.com/webcast/user/me/",
+                params={"aid": 6383, "device_platform": "web", "room_id": 0},
+                headers={"User-Agent": "Mozilla/5.0", "Referer": self.account_login_url},
+                timeout=(4, 8)) as response:
+            response.raise_for_status()
+            payload = response.json()
+        data = payload.get("data")
+        uid = str(data.get("id_str") or data.get("id") or "") if isinstance(data, dict) else ""
+        if str(payload.get("status_code")) != "0" or not uid.isdigit() or int(uid) <= 0:
+            raise RuntimeError("抖音未登录或登录已过期，请在官方页面完成登录")
+        avatar = data.get("avatar_thumb") or {}
+        face = next((url for value in avatar.get("url_list", []) if (url := self._image_url(value))), "")
+        return {"uid": uid, "uname": data.get("nickname") or uid, "face": face}
 
     def _room_id_from_url(self, parts) -> str:
         path = super()._room_id_from_url(parts)

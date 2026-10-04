@@ -1,4 +1,4 @@
-"""Twitch、YouTube 公开直播；不读取浏览器账号或 Cookie。"""
+"""Twitch、YouTube 公开直播；Twitch 登录仅使用软件内授权会话。"""
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 import re
@@ -150,6 +150,41 @@ class TwitchPlatform(PublicLivePlatform):
     hosts = ("twitch.tv", "www.twitch.tv", "m.twitch.tv", "player.twitch.tv")
     origin = "https://www.twitch.tv/"
     parser = Twitch
+    account_login_url = "https://www.twitch.tv/login"
+    account_cookie_domain = "twitch.tv"
+
+    def account_info(self, session, cancelled) -> dict:
+        if cancelled():
+            return {}
+        token = next((cookie.value for cookie in session.cookies if cookie.name == "auth-token"
+                      and (cookie.domain.lstrip(".") == "twitch.tv"
+                           or cookie.domain.lstrip(".").endswith(".twitch.tv"))), "")
+        if not token:
+            raise RuntimeError("Twitch 未登录，请在官方页面完成登录")
+        with session.get("https://id.twitch.tv/oauth2/validate",
+                headers={"Authorization": "OAuth " + token}, timeout=(4, 8)) as response:
+            if response.status_code == 401:
+                raise RuntimeError("Twitch 登录已过期，请在官方页面重新登录")
+            response.raise_for_status()
+            identity = response.json()
+        uid = str(identity.get("user_id") or "")
+        client = identity.get("client_id")
+        if not uid.isdigit() or int(uid) <= 0 or not client or not identity.get("login"):
+            raise RuntimeError("Twitch 未返回有效用户账号，请重新登录")
+        if cancelled():
+            return {}
+        with session.get("https://api.twitch.tv/helix/users", params={"id": uid},
+                headers={"Authorization": "Bearer " + token, "Client-ID": client},
+                timeout=(4, 8)) as response:
+            if response.status_code == 401:
+                raise RuntimeError("Twitch 登录已过期，请在官方页面重新登录")
+            response.raise_for_status()
+            users = response.json().get("data", [])
+        if len(users) != 1 or str(users[0].get("id")) != uid:
+            raise RuntimeError("Twitch 账号信息不匹配，请重新登录")
+        user = users[0]
+        return {"uid": uid, "uname": user.get("display_name") or identity["login"],
+                "face": image_url(user.get("profile_image_url"), ("jtvnw.net",))}
 
     def normalize(self, room_id):
         text = str(room_id or "").strip()
@@ -205,6 +240,9 @@ class YouTubePlatform(PublicLivePlatform):
     origin = "https://www.youtube.com/"
     parser = LiveYouTube
     image_hosts = ("ytimg.com", "ggpht.com", "googleusercontent.com")
+
+    account_login_notice = ("YouTube 账号登录待接入：需要 Google 桌面 OAuth 客户端，\n"
+                            "通过系统浏览器授权。目前公开直播播放不需要登录。")
 
     def normalize(self, room_id):
         text = str(room_id or "").strip()
