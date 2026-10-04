@@ -152,10 +152,10 @@ class TwitchPlatform(PublicLivePlatform):
     parser = Twitch
     account_login_url = "https://www.twitch.tv/login"
     account_cookie_domain = "twitch.tv"
+    follow_login_url = "https://www.twitch.tv/directory/following/channels"
+    follow_cookie_domain = "twitch.tv"
 
-    def account_info(self, session, cancelled) -> dict:
-        if cancelled():
-            return {}
+    def _authorization(self, session):
         token = next((cookie.value for cookie in session.cookies if cookie.name == "auth-token"
                       and (cookie.domain.lstrip(".") == "twitch.tv"
                            or cookie.domain.lstrip(".").endswith(".twitch.tv"))), "")
@@ -171,6 +171,13 @@ class TwitchPlatform(PublicLivePlatform):
         client = identity.get("client_id")
         if not uid.isdigit() or int(uid) <= 0 or not client or not identity.get("login"):
             raise RuntimeError("Twitch 未返回有效用户账号，请重新登录")
+        return identity, token
+
+    def account_info(self, session, cancelled) -> dict:
+        if cancelled():
+            return {}
+        identity, token = self._authorization(session)
+        uid, client = str(identity["user_id"]), identity["client_id"]
         if cancelled():
             return {}
         with session.get("https://api.twitch.tv/helix/users", params={"id": uid},
@@ -185,6 +192,46 @@ class TwitchPlatform(PublicLivePlatform):
         user = users[0]
         return {"uid": uid, "uname": user.get("display_name") or identity["login"],
                 "face": image_url(user.get("profile_image_url"), ("jtvnw.net",))}
+
+    def follow_rooms(self, session, cancelled) -> list:
+        if cancelled():
+            return []
+        identity, token = self._authorization(session)
+        if "user:read:follows" not in identity.get("scopes", []):
+            raise RuntimeError("Twitch 账号已登录，但当前授权缺少 user:read:follows 权限，无法读取关注列表。"
+                               "普通网页登录不保证包含此权限，需要另行接入 Twitch OAuth 授权。")
+        rooms, seen, cursors = [], set(), set()
+        cursor = ""
+        while not cancelled():
+            params = {"user_id": str(identity["user_id"]), "first": 100}
+            if cursor:
+                params["after"] = cursor
+            with session.get("https://api.twitch.tv/helix/channels/followed", params=params,
+                    headers={"Authorization": "Bearer " + token, "Client-ID": identity["client_id"]},
+                    timeout=(4, 8)) as response:
+                if response.status_code in (401, 403):
+                    raise RuntimeError("Twitch 关注读取未获授权，请重新授权 user:read:follows 权限")
+                response.raise_for_status()
+                payload = response.json()
+            if not isinstance(payload.get("data"), list):
+                raise RuntimeError("Twitch 关注列表返回异常，请稍后重试")
+            for item in payload["data"]:
+                login = str(item.get("broadcaster_login") or "")
+                if not re.fullmatch(r"[A-Za-z0-9_]{1,25}", login):
+                    raise RuntimeError("Twitch 关注列表缺少有效频道名，请稍后重试")
+                rid = self.normalize("twitch:" + login)
+                if rid not in seen:
+                    seen.add(rid)
+                    rooms.append({"room_id": rid, "uname": item.get("broadcaster_name") or login,
+                                  "platform": self.kind, "live_known": False,
+                                  "playback_mode": self.playback_mode})
+            cursor = payload.get("pagination", {}).get("cursor", "")
+            if not cursor:
+                return rooms
+            if cursor in cursors:
+                raise RuntimeError("Twitch 关注分页没有前进，请稍后重试")
+            cursors.add(cursor)
+        return []
 
     def normalize(self, room_id):
         text = str(room_id or "").strip()

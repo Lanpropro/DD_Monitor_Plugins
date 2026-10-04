@@ -36,7 +36,10 @@ Twitch 使用匿名只读 IRC WebSocket，处理 PING/PONG；YouTube 使用网�
 底部账号条的“登录其他平台”可切换到 Twitch 官方登录页，完成后点击“确认登录”。
 软件使用当前授权会话调用 Twitch 官方令牌验证和用户信息接口，展示头像、昵称及 ID；
 退出只清除软件内对应平台的会话。“记住登录”在本机使用 Windows DPAPI 加密保存。
-本次不接入 Twitch 关注导入，公开播放和匿名聊天保持原流程。
+导入关注菜单提供 Twitch 入口，使用官方 `channels/followed` 接口分页读取并去重。
+当前会话必须包含 `user:read:follows` 权限；普通网页登录不保证包含此权限，
+缺少权限时会明确提示需要另行接入 Twitch OAuth 授权，不会显示为“没有关注”。
+公开播放和匿名聊天保持原流程。
 YouTube 显示“待接入”说明：Google 登录需要桌面 OAuth 客户端和系统浏览器授权，
 目前未配置该客户端；不能把公开直播能播放视为账号已经登录。
 
@@ -57,6 +60,7 @@ YouTube 显示“待接入”说明：Google 登录需要桌面 OAuth 客户端�
 
 ## 验收
 
+- 本体仓库 `python dev/selfcheck_platform_accounts.py`：账号、菜单及 Twitch 关注分页、去重、权限不足、取消回归。
 - `python dev/selfcheck_global_live.py`：离线链接、状态、头像封面请求头、真实竖屏尺寸/帧率、
   画质与预览隔离、Qt 添加/拖放/弹幕、图标、禁用暂存和恢复；本地真实网络服务验证 IRC 分帧、
   PING/PONG、YouTube 轮询/全部聊天 continuation、去重、Unicode、线程取消。

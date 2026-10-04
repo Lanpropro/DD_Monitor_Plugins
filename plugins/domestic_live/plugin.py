@@ -45,8 +45,9 @@ class HuyaPlatform(LiveQualityPlatform):
     kind = "huya"
     label = "虎牙"
     playback_mode = "stream"
-    account_login_url = "https://www.huya.com/"
+    account_login_url = "https://www.huya.com/?evt_fe=login"
     account_cookie_domain = "huya.com"
+    follow_import_notice = "虎牙账号登录已接入，完整关注列表读取尚待接入。可先通过官方直播间链接添加主播。"
 
     def account_info(self, session, cancelled) -> dict:
         if cancelled():
@@ -543,6 +544,7 @@ class DouyinPlatform(NumericLivePlatform):
     image_hosts = ("douyinpic.com", "byteimg.com", "ibytedtos.com", "douyincdn.com")
     account_login_url = "https://live.douyin.com/"
     account_cookie_domain = "douyin.com"
+    follow_import_notice = "抖音账号登录已接入，完整关注列表读取尚待接入。可先通过官方直播间链接添加主播。"
 
     def account_info(self, session, cancelled) -> dict:
         if cancelled():
