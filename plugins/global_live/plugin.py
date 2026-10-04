@@ -222,9 +222,9 @@ class TwitchPlatform(PublicLivePlatform):
                 rid = self.normalize("twitch:" + login)
                 if rid not in seen:
                     seen.add(rid)
-                    rooms.append({"room_id": rid, "uname": item.get("broadcaster_name") or login,
-                                  "platform": self.kind, "live_known": False,
-                                  "playback_mode": self.playback_mode})
+                    rooms.append(api.RoomInfo(room_id=rid, uname=item.get("broadcaster_name") or login,
+                                  platform=self.kind, extra={"live_known": False,
+                                  "playback_mode": self.playback_mode}).as_dict())
             cursor = payload.get("pagination", {}).get("cursor", "")
             if not cursor:
                 return rooms

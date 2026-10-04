@@ -4,6 +4,7 @@ from html import unescape
 import json
 import os
 import re
+import struct
 import time
 import uuid
 import zlib
@@ -17,6 +18,54 @@ from streamlink.plugins.douyin import Douyin
 from streamlink.stream.http import HTTPStream
 
 from ddm import plugins as api
+from ddm.live_danmaku import tars_bytes, tars_fields, tars_int
+
+
+def huya_string(tag, value):
+    data = str(value).encode("utf-8")
+    return (bytes([tag << 4 | 6, len(data)]) if len(data) < 256 else
+            bytes([tag << 4 | 7]) + struct.pack(">I", len(data))) + data
+
+
+def huya_user(session, uid):
+    cookies = {c.name: c.value for c in session.cookies if
+               c.domain.lstrip(".") == "huya.com" or c.domain.lstrip(".").endswith(".huya.com")}
+    raw = ";".join(f"{key}={value}" for key, value in cookies.items())
+    ua = "webh5&1.0.0&websocket"
+    user = (tars_int(0, int(uid)) + huya_string(1, cookies.get("guid", "")) +
+            huya_string(2, "") + huya_string(3, ua) + huya_string(4, raw) + tars_int(5, 0))
+    base = (tars_int(0, int(uid)) + huya_string(1, cookies.get("guid", "")) +
+            huya_string(2, ua) + huya_string(8, raw))
+    return user, base
+
+
+def huya_follow_request(session, method, uid, target):
+    """官网 huyauserui 的只读 WUP 请求，复用本体已验证的 TARS 编解码。"""
+    user, base = huya_user(session, uid)
+    request = b"\x0a" + b"\x0a" + user + b"\x0b" + tars_int(1, int(target)) + b"\x0b"
+    values = b"\x08" + tars_int(0, 1) + huya_string(0, "tReq") + tars_bytes(1, request)
+    body = (tars_int(1, 3) + tars_int(2, 0) + tars_int(3, 0) + tars_int(4, 1) +
+            huya_string(5, "huyauserui") + huya_string(6, method) + tars_bytes(7, values) +
+            tars_int(8, 8000) + b"\x98\x0c\xa8\x0c")
+    with session.post("https://cdnws.api.huya.com/",
+            params={"baseinfo": base64.b64encode(base).decode("ascii")},
+            data=struct.pack(">I", len(body) + 4) + body,
+            headers={"Content-Type": "application/octet-stream", "Referer": "https://www.huya.com/"},
+            timeout=(4, 8)) as response:
+        response.raise_for_status()
+        data = response.content
+    if len(data) < 4 or len(data) > 4 * 1024 * 1024 or struct.unpack(">I", data[:4])[0] != len(data):
+        raise RuntimeError("虎牙关注数据格式异常，请稍后重试")
+    envelope = tars_fields(data[4:])
+    if envelope.get(1) != 3 or envelope.get(6) != method:
+        raise RuntimeError("虎牙关注响应不匹配，请稍后重试")
+    entries = tars_fields(envelope.get(7, b""))[0]
+    values = dict(zip(entries[::2], entries[1::2]))
+    if "" in values and tars_fields(values[""]).get(0, -1) != 0:
+        raise RuntimeError("虎牙关注读取失败，请重新登录后重试")
+    if "tRsp" not in values:
+        raise RuntimeError("虎牙关注响应缺少列表数据，请稍后重试")
+    return tars_fields(values["tRsp"])[0]
 
 
 class LiveQualityPlatform(api.Platform):
@@ -47,7 +96,36 @@ class HuyaPlatform(LiveQualityPlatform):
     playback_mode = "stream"
     account_login_url = "https://www.huya.com/?evt_fe=login"
     account_cookie_domain = "huya.com"
-    follow_import_notice = "虎牙账号登录已接入，完整关注列表读取尚待接入。可先通过官方直播间链接添加主播。"
+    follow_login_url = "https://www.huya.com/?evt_fe=login"
+    follow_cookie_domain = "huya.com"
+
+    def follow_rooms(self, session, cancelled) -> list:
+        if cancelled():
+            return []
+        account = self.account_info(session, cancelled)
+        if cancelled():
+            return []
+        uid = account["uid"]
+        data = huya_follow_request(session, "getAllSubscribeToUidList", uid, uid)
+        targets = data.get(1)
+        if not isinstance(targets, list) or any(not isinstance(value, int) or value <= 0 for value in targets):
+            raise RuntimeError("虎牙关注列表格式异常，请稍后重试")
+        rooms = {}
+        for target in dict.fromkeys(targets):
+            if cancelled():
+                return []
+            profile = huya_follow_request(session, "getUserProfile", uid, target).get(0, {})
+            user, presenter, recent = profile.get(0, {}), profile.get(1, {}), profile.get(2, {})
+            rid = presenter.get(10) or presenter.get(3)
+            if not rid:
+                continue  # 普通用户和注销账号没有可导入的直播间。
+            if user.get(0) != target:
+                raise RuntimeError("虎牙关注主播信息不匹配，请稍后重试")
+            canonical = self.normalize("huya:" + str(rid))
+            rooms[canonical] = api.RoomInfo(room_id=canonical, platform=self.kind,
+                uname=user.get(1) or presenter.get(1) or str(rid), title=recent.get(24, ""),
+                face=user.get(2, ""), extra={"playback_mode": "stream", "live_known": False}).as_dict()
+        return list(rooms.values())
 
     def account_info(self, session, cancelled) -> dict:
         if cancelled():
@@ -544,7 +622,65 @@ class DouyinPlatform(NumericLivePlatform):
     image_hosts = ("douyinpic.com", "byteimg.com", "ibytedtos.com", "douyincdn.com")
     account_login_url = "https://live.douyin.com/"
     account_cookie_domain = "douyin.com"
-    follow_import_notice = "抖音账号登录已接入，完整关注列表读取尚待接入。可先通过官方直播间链接添加主播。"
+    follow_login_url = "https://www.douyin.com/follow"
+    follow_cookie_domain = "douyin.com"
+    follow_browser_url = "https://www.douyin.com/aweme/v1/web/user/following/list/"
+
+    def follow_rooms(self, session, cancelled) -> list:
+        if cancelled():
+            return []
+        account = self.account_info(session, cancelled)
+        params = {"aid": 6383, "device_platform": "webapp", "user_id": account.get("uid"),
+                  "count": 20, "source_type": 2, "is_top": 1, "offset": 0,
+                  "min_time": 0, "max_time": 0, "gps_access": 0, "address_book_access": 0}
+        headers = {"User-Agent": "Mozilla/5.0", "Referer": self.follow_login_url}
+        rooms, cursors = {}, {(0, 0, 0)}
+        while not cancelled():
+            with session.get("https://www.douyin.com/aweme/v1/web/user/following/list/",
+                    params=params, headers=headers, timeout=(4, 8)) as response:
+                response.raise_for_status()
+                if not response.content:
+                    raise RuntimeError("抖音关注读取被官网拒绝，请在官方页面重新登录后重试")
+                payload = response.json()
+            if payload.get("status_code") != 0 or not isinstance(payload.get("followings"), list):
+                raise RuntimeError("抖音关注获取失败，请在官方页面重新登录后重试")
+            for user in payload["followings"]:
+                if cancelled():
+                    return []
+                room = user.get("room_data") or {}
+                if isinstance(room, str):
+                    room = json.loads(room)
+                rid = user.get("web_rid") or room.get("web_rid") or (room.get("owner") or {}).get("web_rid")
+                if not rid and user.get("uid"):
+                    with session.get("https://live.douyin.com/webcast/user/",
+                            params={"aid": 6383, "device_platform": "web", "room_id": 0,
+                                    "target_uid": str(user["uid"])}, headers=headers, timeout=(4, 8)) as response:
+                        response.raise_for_status()
+                        profile = response.json()
+                    if profile.get("status_code") != 0 or not isinstance(profile.get("data"), dict):
+                        raise RuntimeError("抖音关注主播信息获取失败，请稍后重试")
+                    if str(profile["data"].get("id_str")) != str(user["uid"]):
+                        raise RuntimeError("抖音关注主播信息不匹配，请稍后重试")
+                    rid = profile["data"].get("web_rid")
+                if not rid:
+                    continue  # 普通用户和注销账号没有可导入的直播间。
+                canonical = self.normalize("douyin:" + str(rid))
+                face = next((url for item in [user.get("avatar_medium") or {}, user.get("avatar_thumb") or {}]
+                             for raw in item.get("url_list", []) if (url := self._image_url(raw))), "")
+                rooms[canonical] = api.RoomInfo(room_id=canonical, platform=self.kind,
+                    uname=user.get("remark_name") or user.get("nickname") or str(rid),
+                    title=room.get("title", ""), live=room.get("status") == 2, face=face,
+                    extra={"playback_mode": "stream", "live_known": "status" in room}).as_dict()
+            if payload.get("has_more") in (False, 0):
+                return list(rooms.values())
+            if payload.get("has_more") not in (True, 1):
+                raise RuntimeError("抖音关注分页信息缺失，请稍后重试")
+            cursor = tuple(payload.get(key) for key in ("offset", "min_time", "max_time"))
+            if any(value is None for value in cursor) or cursor in cursors:
+                raise RuntimeError("抖音关注分页没有前进，请稍后重试")
+            cursors.add(cursor)
+            params.update(zip(("offset", "min_time", "max_time"), cursor))
+        return []
 
     def account_info(self, session, cancelled) -> dict:
         if cancelled():
