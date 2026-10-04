@@ -305,6 +305,47 @@ class DouyuPlatform(NumericLivePlatform):
     label = "斗鱼"
     hosts = ("www.douyu.com", "douyu.com", "m.douyu.com")
     image_hosts = ("douyucdn.cn", "douyu.com")
+    follow_login_url = "https://www.douyu.com/directory/myFollow?from=normalFollow"
+    follow_cookie_domain = "douyu.com"
+
+    def follow_rooms(self, session, cancelled) -> list:
+        result = {}
+        for page in range(1, 101):
+            if cancelled():
+                return []
+            with session.get("https://www.douyu.com/wgapi/livenc/liveweb/follow/list",
+                    params={"page": page, "sort": 0, "cid1": 0},
+                    headers={"User-Agent": "Mozilla/5.0", "Referer": self.follow_login_url},
+                    timeout=(4, 8)) as response:
+                response.raise_for_status()
+                payload = response.json()
+            if str(payload.get("error")) != "0":
+                raise RuntimeError("斗鱼关注获取失败，请先在页面登录；登录已过期时请重新登录")
+            # 官方网页 GSON.parse 就是 JSON.parse，接口 data 为 JSON 字符串。
+            data = payload.get("data")
+            if isinstance(data, str):
+                data = json.loads(data)
+            if not isinstance(data, dict) or not isinstance(data.get("list"), list):
+                raise RuntimeError("斗鱼关注数据格式已变化，请稍后重试")
+            for room in data["list"]:
+                if not isinstance(room, dict) or not room.get("room_id"):
+                    continue  # 关注页中的视频/频道推荐不是直播间
+                canonical = self.normalize(f"douyu:{room['room_id']}")
+                live = str(room.get("show_status")) == "1" and not room.get("videoLoop")
+                result[canonical] = api.RoomInfo(room_id=canonical,
+                    uname=room.get("nickname") or canonical, title=room.get("room_name") or "",
+                    platform=self.kind, live=live, face=self._image_url(room.get("avatar_small")),
+                    cover_url=self._image_url(room.get("room_src")),
+                    extra={"playback_mode": "stream", "live_known": True}).as_dict()
+            try:
+                page_count = int(data["pageCount"])
+            except (KeyError, TypeError, ValueError) as error:
+                raise RuntimeError("斗鱼关注分页信息缺失，请稍后重试") from error
+            if page_count < 0 or page_count > 100:
+                raise RuntimeError("斗鱼关注列表页数异常，请稍后重试")
+            if page >= page_count:
+                return list(result.values())
+        raise RuntimeError("斗鱼关注列表未完整读取，请稍后重试")
 
     def _room_data(self, raw):
         with requests.get(f"https://www.douyu.com/betard/{raw}", headers={

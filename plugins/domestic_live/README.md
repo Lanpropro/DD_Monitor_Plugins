@@ -71,7 +71,7 @@
 关注栏只有一个平台时隐藏平台图标，混合多个平台时才显示。
 
 使用 Streamlink 8.6.1 的网页取流协议，不是平台官方 SDK。仅处理公开直播流，
-不读取登录凭据，不接入付费、登录限制或 DRM 内容。网页或 CDN 变化可能导致取流失败。
+播放和弹幕不读取账号登录凭据，不接入付费、登录限制或 DRM 内容。网页或 CDN 变化可能导致取流失败。
 虎牙使用网页 HLS，斗鱼和抖音使用对应档位的公开 FLV。
 斗鱼优先选择接口提供的普通 CDN，播放地址仅交给播放器连接，避免提前探流导致短时断开。
 房间状态查询与取流独立，网络错误保留上次状态，不误报下播。
@@ -82,6 +82,21 @@
 
 取流协议参考：[斗鱼解析器](https://github.com/streamlink/streamlink/blob/8.6.1/src/streamlink/plugins/douyu.py)、
 [抖音解析器](https://github.com/streamlink/streamlink/blob/8.6.1/src/streamlink/plugins/douyin.py)。
+
+## 斗鱼关注导入（试用）
+
+需要支持平台关注导入的新版宿主软件。点击关注栏「导入关注」，选择「斗鱼」，
+在斗鱼官方页面完成登录后点击「读取关注」，勾选要加入软件的直播间。
+后台读取所有分页，保留未开播主播，重复导入不会重复添加；不自动加入播放格子。
+本版仅接入斗鱼，虎牙与抖音继续使用手动添加。
+可选择记住登录，Windows 下使用当前系统用户的 DPAPI 加密保存至软件目录
+`utils/accounts/douyu.bin`；「退出账号」清除本机登录状态，不删除已导入关注。
+浏览器仅在主动导入时打开；登录 Cookie 只用于读取关注，不传给播放与弹幕。
+关注接口来自[斗鱼官方关注页](https://www.douyu.com/directory/myFollow?from=normalFollow)，
+属于网页接口，可能随网站调整。实际账号的完整列表仍需登录实测。
+
+- 关注分页离线回归：`python tests/check_douyu_follows.py --host ../DD_Monitor_CE`。
+- 宿主登录、加密存储及取消回归：`python dev/selfcheck_platform_follows.py`。
 
 ## 验收
 
