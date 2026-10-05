@@ -120,7 +120,7 @@ class PublicLivePlatform(api.Platform):
     def play_url(self, room_id, quality=10000, *, preview=False):
         canonical = self.normalize(room_id)
         session = Streamlink({"http-timeout": 8, "webbrowser": False})
-        session.http.request = partial(session.http.request, retries=1)
+        session.http.request = partial(session.http.request, retries=2)
         try:
             parser = self.parser(session, self.room_url(canonical))
             streams = parser.streams()
