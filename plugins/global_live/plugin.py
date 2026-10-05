@@ -1,4 +1,4 @@
-"""Twitch、YouTube 公开直播；Twitch 登录仅使用软件内授权会话。"""
+"""Twitch、YouTube 公开直播与软件内独立 OAuth 授权会话。"""
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 import re
@@ -146,6 +146,7 @@ class PublicLivePlatform(api.Platform):
 
 class TwitchPlatform(PublicLivePlatform):
     kind = "twitch"
+    oauth_provider = "twitch"
     label = "Twitch"
     hosts = ("twitch.tv", "www.twitch.tv", "m.twitch.tv", "player.twitch.tv")
     origin = "https://www.twitch.tv/"
@@ -169,6 +170,9 @@ class TwitchPlatform(PublicLivePlatform):
             identity = response.json()
         uid = str(identity.get("user_id") or "")
         client = identity.get("client_id")
+        expected = getattr(session, "ddm_oauth_client_id", "")
+        if expected and client != expected:
+            raise RuntimeError("Twitch 授权客户端不匹配，请重新授权")
         if not uid.isdigit() or int(uid) <= 0 or not client or not identity.get("login"):
             raise RuntimeError("Twitch 未返回有效用户账号，请重新登录")
         return identity, token
@@ -288,8 +292,56 @@ class YouTubePlatform(PublicLivePlatform):
     parser = LiveYouTube
     image_hosts = ("ytimg.com", "ggpht.com", "googleusercontent.com")
 
-    account_login_notice = ("YouTube 账号登录待接入：需要 Google 桌面 OAuth 客户端，\n"
-                            "通过系统浏览器授权。目前公开直播播放不需要登录。")
+    oauth_provider = "youtube"
+
+    def account_info(self, session, cancelled):
+        if cancelled():
+            return {}
+        with session.get("https://openidconnect.googleapis.com/v1/userinfo", timeout=(4, 8)) as response:
+            if response.status_code == 401:
+                raise RuntimeError("Google 登录已过期，请重新授权")
+            response.raise_for_status()
+            user = response.json()
+        uid = str(user.get("sub") or "")
+        if not uid or not user.get("name"):
+            raise RuntimeError("Google 未返回有效用户身份，请重新授权")
+        return {"uid": uid, "uname": user["name"],
+                "face": image_url(user.get("picture"), self.image_hosts)}
+
+    def follow_rooms(self, session, cancelled):
+        rooms, cursors = {}, set()
+        params = {"part": "snippet", "mine": "true", "maxResults": 50}
+        while not cancelled():
+            with session.get("https://www.googleapis.com/youtube/v3/subscriptions", params=params,
+                    timeout=(4, 8)) as response:
+                if response.status_code in (401, 403):
+                    raise RuntimeError("YouTube 订阅读取未获授权，请确认已启用 YouTube Data API 并重新授权")
+                response.raise_for_status()
+                payload = response.json()
+            if not isinstance(payload.get("items"), list):
+                raise RuntimeError("YouTube 订阅列表响应异常，请稍后重试")
+            for item in payload["items"]:
+                if cancelled():
+                    return []
+                snippet = item.get("snippet") or {}
+                channel = snippet.get("resourceId", {}).get("channelId", "")
+                if not re.fullmatch(r"UC[A-Za-z0-9_-]{22}", channel):
+                    raise RuntimeError("YouTube 订阅缺少有效频道 ID，请稍后重试")
+                rid = self.normalize("youtube:" + channel)
+                images = snippet.get("thumbnails") or {}
+                face = next((url for key in ("high", "medium", "default") if (
+                    url := image_url((images.get(key) or {}).get("url"), self.image_hosts))), "")
+                rooms[rid] = api.RoomInfo(room_id=rid, platform=self.kind,
+                    uname=snippet.get("title") or channel, face=face,
+                    extra={"live_known": False, "playback_mode": "stream"}).as_dict()
+            cursor = payload.get("nextPageToken")
+            if not cursor:
+                return list(rooms.values())
+            if not isinstance(cursor, str) or cursor in cursors:
+                raise RuntimeError("YouTube 订阅分页没有前进，请稍后重试")
+            cursors.add(cursor)
+            params["pageToken"] = cursor
+        return []
 
     def normalize(self, room_id):
         text = str(room_id or "").strip()

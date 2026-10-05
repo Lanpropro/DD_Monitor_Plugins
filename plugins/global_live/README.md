@@ -33,15 +33,35 @@ Twitch 使用匿名只读 IRC WebSocket，处理 PING/PONG；YouTube 使用网�
 
 ## 账号登录
 
-底部账号条的“登录其他平台”可切换到 Twitch 官方登录页，完成后点击“确认登录”。
-软件使用当前授权会话调用 Twitch 官方令牌验证和用户信息接口，展示头像、昵称及 ID；
-退出只清除软件内对应平台的会话。“记住登录”在本机使用 Windows DPAPI 加密保存。
-导入关注菜单提供 Twitch 入口，使用官方 `channels/followed` 接口分页读取并去重。
-当前会话必须包含 `user:read:follows` 权限；普通网页登录不保证包含此权限，
-缺少权限时会明确提示需要另行接入 Twitch OAuth 授权，不会显示为“没有关注”。
+底部账号条的“登录其他平台”提供 Twitch 与 YouTube；授权通过系统默认浏览器完成。
+已登录平台只展示账号身份，不会再次弹出登录网页。两个平台沿用头像、昵称、ID、
+粉色登录边框与指定账号退出；未加载本插件时不显示入口。
+“记住登录”使用 Windows DPAPI 加密保存账号与访问/刷新令牌；令牌不进入普通配置文件。
+重启后恢复身份，访问接口前复用有效令牌或刷新过期令牌；退出只清除软件内该平台的会话。
+取消记住登录时仅在本次进程保留授权，不在磁盘保留账号令牌。
+
+首次使用需要注册自己的 OAuth 客户端（发行软件时由发行方注册并提供客户端配置）：
+
+- Twitch：在 [开发者控制台](https://dev.twitch.tv/console/apps) 注册公共客户端，
+  将 Client ID 填入登录页后点击“开始授权”。软件申请只读 `user:read:follows` 权限，
+  系统浏览器打开设备授权页，必要时输入软件显示的授权码；完成后自动确认账号。
+  导入关注使用官方 `channels/followed` 接口，分页去重，频道沿用现有状态刷新与播放。
+  注册与设备流程参见 [Twitch 注册文档](https://dev.twitch.tv/docs/authentication/register-app/)、
+  [设备授权文档](https://dev.twitch.tv/docs/authentication/getting-tokens-oauth/#device-code-grant-flow)。
+- YouTube：在 Google Cloud 项目启用 YouTube Data API v3，配置 Google Auth Platform
+  的授权受众；测试应用需要将自己的 Google 账号加入测试用户。
+  在客户端页面创建 **桌面应用** OAuth 客户端，下载 JSON，登录页点击
+  “导入 Google 桌面客户端 JSON”后开始授权。不要导入 Web 应用客户端。
+  软件使用系统浏览器、本机临时回调端口和 PKCE；确认 Google 用户身份后，
+  使用只读 `youtube.readonly` 权限通过官方 subscriptions 接口分页导入订阅频道。
+  导入的频道使用固定频道 ID，后续刷新解析该频道当前直播。
+  参见 [Google 桌面 OAuth](https://developers.google.com/identity/protocols/oauth2/native-app)、
+  [YouTube API 设置](https://developers.google.com/youtube/v3/getting-started)。
+
+客户端配置在本机单独加密保存，退出账号不删除客户端配置。没有客户端配置时展示配置入口，
+不会宣称已登录或打开缺少客户端参数的授权页。需要换账号或重新授予权限时点击“重新授权”。
+授权等待、订阅读取中均可停止、切换平台或关闭窗口；不会保存取消后的迟到结果。
 公开播放和匿名聊天保持原流程。
-YouTube 显示“待接入”说明：Google 登录需要桌面 OAuth 客户端和系统浏览器授权，
-目前未配置该客户端；不能把公开直播能播放视为账号已经登录。
 
 ## 实现范围
 
@@ -60,6 +80,8 @@ YouTube 显示“待接入”说明：Google 登录需要桌面 OAuth 客户端�
 
 ## 验收
 
+- `python dev/selfcheck_oauth.py`：真实本机 HTTP 回调、PKCE/state 校验、取消清理、设备轮询和刷新令牌轮换。
+- `python dev/selfcheck_oauth_accounts.py`：真实 Qt 授权/导入、订阅分页、DPAPI 加密恢复、指定退出和取消隔离（模拟远端平台响应）。
 - 本体仓库 `python dev/selfcheck_platform_accounts.py`：账号、菜单及 Twitch 关注分页、去重、权限不足、取消回归。
 - `python dev/selfcheck_global_live.py`：离线链接、状态、头像封面请求头、真实竖屏尺寸/帧率、
   画质与预览隔离、Qt 添加/拖放/弹幕、图标、禁用暂存和恢复；本地真实网络服务验证 IRC 分帧、
