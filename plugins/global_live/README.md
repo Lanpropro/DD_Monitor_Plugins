@@ -42,6 +42,12 @@ Twitch 使用匿名只读 IRC WebSocket，处理 PING/PONG；YouTube 使用网�
 
 首次使用需要注册自己的 OAuth 客户端（发行软件时由发行方注册并提供客户端配置）：
 
+登录窗口内的“首次配置与步骤说明”按编号列出操作，每一步的蓝色链接均可打开对应官方页面，
+也可直接点击“打开 Twitch 开发者控制台”或“打开 Google Cloud 控制台”。
+已有配置默认收起，点击“修改登录配置与查看步骤”可以再次展开；Google JSON 导入按钮始终可见。
+开始授权后自动打开系统浏览器，同时提供“重新打开授权页”和 Twitch“复制授权码”按钮。
+默认浏览器打开失败时保留当前授权等待，可以重试或取消。
+
 - Twitch：在 [开发者控制台](https://dev.twitch.tv/console/apps) 注册公共客户端，
   将 Client ID 填入登录页后点击“开始授权”。软件申请只读 `user:read:follows` 权限，
   系统浏览器打开设备授权页，必要时输入软件显示的授权码；完成后自动确认账号。
@@ -80,6 +86,7 @@ Twitch 使用匿名只读 IRC WebSocket，处理 PING/PONG；YouTube 使用网�
 
 ## 验收
 
+- `python dev/selfcheck_oauth_guide.py`：编号步骤与官方链接、配置收起与滚动布局、JSON 导入、浏览器重试、授权码复制和取消隔离。
 - `python dev/selfcheck_oauth.py`：真实本机 HTTP 回调、PKCE/state 校验、取消清理、设备轮询和刷新令牌轮换。
 - `python dev/selfcheck_oauth_accounts.py`：真实 Qt 授权/导入、订阅分页、DPAPI 加密恢复、指定退出和取消隔离（模拟远端平台响应）。
 - 本体仓库 `python dev/selfcheck_platform_accounts.py`：账号、菜单及 Twitch 关注分页、去重、权限不足、取消回归。
