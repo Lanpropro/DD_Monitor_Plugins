@@ -668,6 +668,16 @@ class DouyinPlatform(NumericLivePlatform):
         throw new Error('Official request client not ready');
     }"""
 
+    def __init__(self):
+        super().__init__()
+        self._anchor_uids = {}
+
+    def restore_follow_rooms(self, rooms):
+        for room in rooms:
+            rid, uid = str(room.get("room_id") or ""), str(room.get("anchor_uid") or "")
+            if re.fullmatch(r"douyin:[0-9]{1,20}", rid) and re.fullmatch(r"[0-9]{1,20}", uid):
+                self._anchor_uids[rid] = uid
+
     def follow_rooms(self, session, cancelled) -> list:
         if cancelled():
             return []
@@ -699,8 +709,9 @@ class DouyinPlatform(NumericLivePlatform):
                 if isinstance(room, str):
                     room = json.loads(room)
                 rid = user.get("web_rid") or room.get("web_rid") or (room.get("owner") or {}).get("web_rid")
-                from_list = bool(rid)
-                if not rid and user.get("uid"):
+                if rid and self.normalize("douyin:" + str(rid)) in rooms:
+                    continue
+                if user.get("uid"):
                     room = self._follow_room(session, str(user["uid"]), cancelled)
                     if cancelled():
                         return []
@@ -710,19 +721,14 @@ class DouyinPlatform(NumericLivePlatform):
                 canonical = self.normalize("douyin:" + str(rid))
                 if canonical in rooms:
                     continue
-                if from_list:
-                    info = self.room_info(canonical)
-                    if cancelled():
-                        return []
-                    room = {"status": 2 if info.live else 4, "title": info.title,
-                            "face": info.face, "cover": info.cover_url}
                 face = next((url for item in [user.get("avatar_medium") or {}, user.get("avatar_thumb") or {}]
                              for raw in item.get("url_list", []) if (url := self._image_url(raw))), "")
                 rooms[canonical] = api.RoomInfo(room_id=canonical, platform=self.kind,
                     uname=user.get("remark_name") or user.get("nickname") or str(rid),
                     title=room.get("title", ""), live=room.get("status") == 2,
                     face=face or self._image_url(room.get("face")), cover_url=self._image_url(room.get("cover")),
-                    extra={"playback_mode": "stream", "live_known": "status" in room}).as_dict()
+                    extra={"playback_mode": "stream", "live_known": "status" in room,
+                           "anchor_uid": str(user.get("uid") or "")}).as_dict()
             if payload.get("has_more") in (False, 0):
                 return list(rooms.values())
             if payload.get("has_more") not in (True, 1):
@@ -735,6 +741,16 @@ class DouyinPlatform(NumericLivePlatform):
         return []
 
     def _follow_room(self, session, uid, cancelled):
+        room = self._share_room(session, uid, cancelled)
+        if not room:
+            return {}
+        owner = room["owner"]
+        rid = owner["web_rid"]
+        self._anchor_uids["douyin:" + rid] = uid
+        return {"web_rid": rid, "status": room["status"], "title": room.get("title", ""),
+                "face": owner.get("avatar_thumb"), "cover": room.get("cover")}
+
+    def _share_room(self, session, uid, cancelled):
         # 个人页下播后没有 room_data；直播资料的 web_rid 也可能为空。
         # 通过最近直播记录的内部 ID 读取官方分享页，得到长期有效的网页房间号。
         with session.get("https://live.douyin.com/webcast/room/info_by_user/",
@@ -743,21 +759,33 @@ class DouyinPlatform(NumericLivePlatform):
                 timeout=(4, 8)) as response:
             response.raise_for_status()
             payload = response.json()
-        data = payload.get("data")
-        if payload.get("status_code") != 0 or not isinstance(data, dict):
-            raise RuntimeError("抖音关注主播信息获取失败，请稍后重试")
-        if not data or cancelled():
+        internal = self._share_identity(payload, uid)
+        if not internal or cancelled():
             return {}
-        internal = str(data.get("id_str") or "")
-        if not re.fullmatch(r"[0-9]{1,20}", internal) or str(data.get("owner_user_id")) != uid:
-            raise RuntimeError("抖音关注主播信息不匹配，请稍后重试")
         with requests.get("https://webcast.amemv.com/webcast/reflow/" + internal,
                 headers={"User-Agent": "Mozilla/5.0"}, timeout=(4, 8)) as response:
             response.raise_for_status()
             response.encoding = "utf-8"
             page = response.text
+            visitor = response.cookies.get("ttwid")
         if cancelled():
             return {}
+        return self._share_info(page, internal, uid, visitor)
+
+    @staticmethod
+    def _share_identity(payload, uid):
+        data = payload.get("data")
+        if payload.get("status_code") != 0 or not isinstance(data, dict):
+            raise RuntimeError("抖音关注主播信息获取失败，请稍后重试")
+        if not data:
+            return ""
+        internal = str(data.get("id_str") or "")
+        if not re.fullmatch(r"[0-9]{1,20}", internal) or str(data.get("owner_user_id")) != uid:
+            raise RuntimeError("抖音关注主播信息不匹配，请稍后重试")
+        return internal
+
+    @staticmethod
+    def _share_info(page, internal, uid, visitor):
         chunks = re.findall(r'self\.__rsc_f\.push\(\[1,("(?:\\.|[^"\\])*")\]\)', page)
         for chunk in reversed(chunks):
             text = re.sub(r"^\w+:", "", json.loads(chunk))
@@ -776,9 +804,18 @@ class DouyinPlatform(NumericLivePlatform):
             rid = str(owner.get("webRid") or "")
             if not re.fullmatch(r"[0-9]{1,20}", rid) or type(room.get("status")) is not int:
                 break
-            return {"web_rid": rid, "status": room["status"], "title": room.get("title", ""),
-                    "face": {"url_list": (owner.get("avatarThumb") or {}).get("urlList", [])},
-                    "cover": {"url_list": (room.get("cover") or {}).get("urlList", [])}}
+            stream = room.get("streamUrl") or {}
+            qualities = stream.get("liveCoreSdkData", {}).get("pullData", {}).get("options", {}).get("qualities", [])
+            return {"id_str": internal, "status": room["status"], "title": room.get("title", ""),
+                    "ttwid": visitor if isinstance(visitor, str) else "",
+                    "owner": {"id_str": uid, "web_rid": rid, "nickname": owner.get("nickname", ""),
+                              "avatar_thumb": {"url_list": (owner.get("avatarThumb") or {}).get("urlList", [])}},
+                    "cover": {"url_list": (room.get("cover") or {}).get("urlList", [])},
+                    "stream_url": {"flv_pull_url": stream.get("flvPullUrl") or {},
+                        "hls_pull_url_map": stream.get("hlsPullUrlMap") or {},
+                        "live_core_sdk_data": {"pull_data": {"options": {"qualities": [
+                            dict(item, sdk_key=item.get("sdkKey")) for item in qualities]}}}}}
+
         raise RuntimeError("抖音直播分享页信息获取失败，请稍后重试")
 
     def account_info(self, session, cancelled) -> dict:
@@ -814,21 +851,75 @@ class DouyinPlatform(NumericLivePlatform):
         canonical = self.normalize(room_id)
         raw = canonical.split(":", 1)[1]
         try:
-            with requests.get(self.room_url(canonical), headers={
-                    "User-Agent": "Mozilla/5.0", "Referer": "https://live.douyin.com/"},
-                    cookies={"__ac_nonce": uuid.uuid4().hex[:21]}, timeout=(4, 8)) as response:
-                response.raise_for_status()
-                page = response.text
-            info = self._page_info(page)
+            info = self.room_data(canonical)
             room = info["room"]
             owner = room.get("owner") or info.get("anchor") or {}
             return api.RoomInfo(room_id=canonical, uname=owner.get("nickname") or f"抖音 · {raw}",
                 title=room.get("title") or "抖音直播间", live=room["status"] == 2,
                 platform=self.kind, face=self._image_url(owner.get("avatar_thumb")),
                 cover_url=self._image_url(room.get("cover")),
-                extra={"playback_mode": "stream", "live_known": True})
+                extra={"playback_mode": "stream", "live_known": True,
+                       "anchor_uid": str(owner.get("id_str") or owner.get("id") or "")})
         except (requests.RequestException, ValueError, KeyError, TypeError, StopIteration) as error:
             raise RuntimeError("抖音房间信息获取失败，请使用直播间完整链接或稍后重试") from error
+
+    def room_data(self, room_id, session=None):
+        canonical = self.normalize(room_id)
+        uid = self._anchor_uids.get(canonical)
+        if uid:
+            room = self._share_room(requests, uid, lambda: False)
+            if not room or room["owner"]["web_rid"] != canonical.split(":", 1)[1]:
+                raise ValueError("Mismatched Douyin room")
+            return {"room": room, "ttwid": room.pop("ttwid", "")}
+        getter = session.http.get if session is not None else requests.get
+        response = getter(self.room_url(canonical), headers={
+            "User-Agent": "Mozilla/5.0", "Referer": "https://live.douyin.com/"},
+            cookies={"__ac_nonce": uuid.uuid4().hex[:21]}, timeout=(4, 8))
+        try:
+            response.raise_for_status()
+            info = self._page_info(response.text)
+            visitor = response.cookies.get("ttwid")
+            info["ttwid"] = visitor if isinstance(visitor, str) else ""
+        finally:
+            response.close()
+        owner = info["room"].get("owner") or info.get("anchor") or {}
+        uid = str(owner.get("id_str") or owner.get("id") or "")
+        if re.fullmatch(r"[0-9]{1,20}", uid):
+            self._anchor_uids[canonical] = uid
+        return info
+
+    async def room_data_async(self, session, room_id):
+        # 弹幕使用可取消的异步请求，共用关注/视频的身份校验与分享页解析。
+        canonical = self.normalize(room_id)
+        uid = self._anchor_uids.get(canonical)
+        if uid:
+            async with session.get("https://live.douyin.com/webcast/room/info_by_user/",
+                    params={"aid": 6383, "user_id": uid}, headers={
+                        "User-Agent": "Mozilla/5.0", "Referer": "https://live.douyin.com/"}) as response:
+                response.raise_for_status()
+                internal = self._share_identity(await response.json(), uid)
+            if not internal:
+                raise ValueError("Missing Douyin room")
+            async with session.get("https://webcast.amemv.com/webcast/reflow/" + internal,
+                    headers={"User-Agent": "Mozilla/5.0"}) as response:
+                response.raise_for_status()
+                visitor = response.cookies.get("ttwid")
+                room = self._share_info(await response.text(encoding="utf-8"), internal, uid,
+                                        visitor.value if visitor else "")
+            if room["owner"]["web_rid"] != canonical.split(":", 1)[1]:
+                raise ValueError("Mismatched Douyin room")
+            return {"room": room, "ttwid": room.pop("ttwid", "")}
+        async with session.get(self.room_url(canonical),
+                cookies={"__ac_nonce": uuid.uuid4().hex[:21]}) as response:
+            response.raise_for_status()
+            info = self._page_info(await response.text())
+            visitor = response.cookies.get("ttwid")
+            info["ttwid"] = visitor.value if visitor else ""
+        owner = info["room"].get("owner") or info.get("anchor") or {}
+        uid = str(owner.get("id_str") or owner.get("id") or "")
+        if re.fullmatch(r"[0-9]{1,20}", uid):
+            self._anchor_uids[canonical] = uid
+        return info
 
     @staticmethod
     def _page_info(page):
@@ -848,9 +939,7 @@ class DouyinPlatform(NumericLivePlatform):
         raise ValueError("Missing public room data")
 
     def _streams(self, session, room_id, quality=250, *, preview=False):
-        page = session.http.get(self.room_url(room_id),
-                                cookies={"__ac_nonce": uuid.uuid4().hex[:21]}).text
-        room = self._page_info(page)["room"]
+        room = self.room_data(room_id, session)["room"]
         if room["status"] != 2:
             return {}
         stream_url = room.get("stream_url") or {}
