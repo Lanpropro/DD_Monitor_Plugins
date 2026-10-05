@@ -79,11 +79,12 @@
     });
     const openPanel = () => {
         // 只点击包含数字的关注计数，不能点击会改变关注关系的“关注”按钮。
-        const counter = [...document.querySelectorAll('button,p,span,div')].find(element => {
+        const counter = [...document.querySelectorAll('[data-e2e="user-info-follow"]'),
+            ...document.querySelectorAll('button,p,span,div')].find(element => {
             const text = element.textContent.trim();
             // 侧栏的“关注 1”是信息流导航，不是个人页的关注列表入口。
             return !element.closest('a,nav,[role="navigation"]') && typeof element.onclick === 'function' &&
-                visible(element) && /^(?:关注\s*[\d.,万亿kKmM]+|[\d.,万亿kKmM]+\s*关注|Following\s*[\d.,kKmM]+)$/.test(text);
+                visible(element) && /^(?:关注\s*[\d.,万亿kKmM]+(?:\s*[\d.,万亿]+人正在直播)?|[\d.,万亿kKmM]+\s*关注|Following\s*[\d.,kKmM]+)$/.test(text);
         });
         if (counter) counter.click();
         return !!counter;

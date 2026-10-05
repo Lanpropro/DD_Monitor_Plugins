@@ -691,25 +691,29 @@ class DouyinPlatform(NumericLivePlatform):
                 if isinstance(room, str):
                     room = json.loads(room)
                 rid = user.get("web_rid") or room.get("web_rid") or (room.get("owner") or {}).get("web_rid")
+                from_list = bool(rid)
                 if not rid and user.get("uid"):
-                    with session.get("https://live.douyin.com/webcast/user/",
-                            params={"aid": 6383, "device_platform": "web", "room_id": 0,
-                                    "target_uid": str(user["uid"])}, headers=headers, timeout=(4, 8)) as response:
-                        response.raise_for_status()
-                        profile = response.json()
-                    if profile.get("status_code") != 0 or not isinstance(profile.get("data"), dict):
-                        raise RuntimeError("抖音关注主播信息获取失败，请稍后重试")
-                    if str(profile["data"].get("id_str")) != str(user["uid"]):
-                        raise RuntimeError("抖音关注主播信息不匹配，请稍后重试")
-                    rid = profile["data"].get("web_rid")
+                    room = self._follow_room(session, str(user["uid"]), cancelled)
+                    if cancelled():
+                        return []
+                    rid = room.get("web_rid")
                 if not rid:
                     continue  # 普通用户和注销账号没有可导入的直播间。
                 canonical = self.normalize("douyin:" + str(rid))
+                if canonical in rooms:
+                    continue
+                if from_list:
+                    info = self.room_info(canonical)
+                    if cancelled():
+                        return []
+                    room = {"status": 2 if info.live else 4, "title": info.title,
+                            "face": info.face, "cover": info.cover_url}
                 face = next((url for item in [user.get("avatar_medium") or {}, user.get("avatar_thumb") or {}]
                              for raw in item.get("url_list", []) if (url := self._image_url(raw))), "")
                 rooms[canonical] = api.RoomInfo(room_id=canonical, platform=self.kind,
                     uname=user.get("remark_name") or user.get("nickname") or str(rid),
-                    title=room.get("title", ""), live=room.get("status") == 2, face=face,
+                    title=room.get("title", ""), live=room.get("status") == 2,
+                    face=face or self._image_url(room.get("face")), cover_url=self._image_url(room.get("cover")),
                     extra={"playback_mode": "stream", "live_known": "status" in room}).as_dict()
             if payload.get("has_more") in (False, 0):
                 return list(rooms.values())
@@ -721,6 +725,53 @@ class DouyinPlatform(NumericLivePlatform):
             cursors.add(cursor)
             params.update(zip(("offset", "min_time", "max_time"), cursor))
         return []
+
+    def _follow_room(self, session, uid, cancelled):
+        # 个人页下播后没有 room_data；直播资料的 web_rid 也可能为空。
+        # 通过最近直播记录的内部 ID 读取官方分享页，得到长期有效的网页房间号。
+        with session.get("https://live.douyin.com/webcast/room/info_by_user/",
+                params={"aid": 6383, "user_id": uid},
+                headers={"User-Agent": "Mozilla/5.0", "Referer": "https://live.douyin.com/"},
+                timeout=(4, 8)) as response:
+            response.raise_for_status()
+            payload = response.json()
+        data = payload.get("data")
+        if payload.get("status_code") != 0 or not isinstance(data, dict):
+            raise RuntimeError("抖音关注主播信息获取失败，请稍后重试")
+        if not data or cancelled():
+            return {}
+        internal = str(data.get("id_str") or "")
+        if not re.fullmatch(r"[0-9]{1,20}", internal) or str(data.get("owner_user_id")) != uid:
+            raise RuntimeError("抖音关注主播信息不匹配，请稍后重试")
+        with requests.get("https://webcast.amemv.com/webcast/reflow/" + internal,
+                headers={"User-Agent": "Mozilla/5.0"}, timeout=(4, 8)) as response:
+            response.raise_for_status()
+            response.encoding = "utf-8"
+            page = response.text
+        if cancelled():
+            return {}
+        chunks = re.findall(r'self\.__rsc_f\.push\(\[1,("(?:\\.|[^"\\])*")\]\)', page)
+        for chunk in reversed(chunks):
+            text = re.sub(r"^\w+:", "", json.loads(chunk))
+            if not text.startswith('["$",'):
+                continue
+            node = json.loads(text)
+            if len(node) != 4 or not isinstance(node[3], dict):
+                continue
+            data = node[3].get("data")
+            if not isinstance(data, dict) or not isinstance(data.get("room"), dict):
+                continue
+            room = data["room"]
+            owner = room.get("owner") or {}
+            if str(room.get("idStr")) != internal or str(owner.get("idStr")) != uid:
+                continue
+            rid = str(owner.get("webRid") or "")
+            if not re.fullmatch(r"[0-9]{1,20}", rid) or type(room.get("status")) is not int:
+                break
+            return {"web_rid": rid, "status": room["status"], "title": room.get("title", ""),
+                    "face": {"url_list": (owner.get("avatarThumb") or {}).get("urlList", [])},
+                    "cover": {"url_list": (room.get("cover") or {}).get("urlList", [])}}
+        raise RuntimeError("抖音直播分享页信息获取失败，请稍后重试")
 
     def account_info(self, session, cancelled) -> dict:
         if cancelled():
