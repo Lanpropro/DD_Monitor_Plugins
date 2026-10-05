@@ -620,11 +620,12 @@ class DouyinPlatform(NumericLivePlatform):
     label = "抖音"
     hosts = ("live.douyin.com", "douyin.com")
     image_hosts = ("douyinpic.com", "byteimg.com", "ibytedtos.com", "douyincdn.com")
-    account_login_url = "https://live.douyin.com/"
+    account_login_url = "https://www.douyin.com/follow"
     account_cookie_domain = "douyin.com"
     follow_login_url = "https://www.douyin.com/follow"
     follow_cookie_domain = "douyin.com"
-    follow_browser_url = "https://www.douyin.com/aweme/v1/web/user/following/list/"
+    follow_browser_url = ("https://www.douyin.com/aweme/v1/web/user/following/list/",
+                          "https://www.douyin.com/aweme/v1/web/user/profile/self/")
     follow_browser_script = """async (url) => {
         const deadline = Date.now() + 15000;
         while (Date.now() < deadline) {
@@ -640,7 +641,8 @@ class DouyinPlatform(NumericLivePlatform):
                 if (common && client) {
                     const endpoint = new URL(url);
                     if (endpoint.origin !== location.origin ||
-                        endpoint.pathname !== '/aweme/v1/web/user/following/list/') throw new Error('Invalid endpoint');
+                        !['/aweme/v1/web/user/following/list/', '/aweme/v1/web/user/profile/self/'].includes(
+                            endpoint.pathname)) throw new Error('Invalid endpoint');
                     const params = {...require(common[0]).COMMON_SEARCH_PARAMS,
                         ...Object.fromEntries(endpoint.searchParams)};
                     // 官网客户端负责设备参数、签名初始化和验证弹窗。
@@ -670,8 +672,12 @@ class DouyinPlatform(NumericLivePlatform):
                 if not response.content:
                     raise RuntimeError("抖音关注读取被官网拒绝，请在官方页面重新登录后重试")
                 payload = response.json()
-            if payload.get("status_code") != 0 or not isinstance(payload.get("followings"), list):
-                raise RuntimeError("抖音关注获取失败，请在官方页面重新登录后重试")
+            if payload.get("status_code") != 0:
+                code = payload.get("status_code")
+                detail = f"（状态 {code}）" if isinstance(code, int) else "（响应格式异常）"
+                raise RuntimeError(f"抖音关注获取失败{detail}，请在官方页面完成登录或验证后重试")
+            if not isinstance(payload.get("followings"), list):
+                raise RuntimeError("抖音关注响应缺少列表，请稍后重试")
             for user in payload["followings"]:
                 if cancelled():
                     return []
@@ -713,14 +719,15 @@ class DouyinPlatform(NumericLivePlatform):
     def account_info(self, session, cancelled) -> dict:
         if cancelled():
             return {}
-        with session.get("https://live.douyin.com/webcast/user/me/",
-                params={"aid": 6383, "device_platform": "web", "room_id": 0},
+        with session.get("https://www.douyin.com/aweme/v1/web/user/profile/self/",
+                params={"aid": 6383, "device_platform": "webapp", "source": "channel_pc_web",
+                        "personal_center_strategy": 1},
                 headers={"User-Agent": "Mozilla/5.0", "Referer": self.account_login_url},
                 timeout=(4, 8)) as response:
             response.raise_for_status()
             payload = response.json()
-        data = payload.get("data")
-        uid = str(data.get("id_str") or data.get("id") or "") if isinstance(data, dict) else ""
+        data = payload.get("user")
+        uid = str(data.get("uid") or "") if isinstance(data, dict) else ""
         if str(payload.get("status_code")) != "0" or not uid.isdigit() or int(uid) <= 0:
             raise RuntimeError("抖音未登录或登录已过期，请在官方页面完成登录")
         avatar = data.get("avatar_thumb") or {}
