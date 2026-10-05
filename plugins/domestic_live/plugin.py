@@ -625,6 +625,32 @@ class DouyinPlatform(NumericLivePlatform):
     follow_login_url = "https://www.douyin.com/follow"
     follow_cookie_domain = "douyin.com"
     follow_browser_url = "https://www.douyin.com/aweme/v1/web/user/following/list/"
+    follow_browser_script = """async (url) => {
+        const deadline = Date.now() + 15000;
+        while (Date.now() < deadline) {
+            const chunks = window.webpackChunkdouyin_web;
+            let require;
+            if (chunks) chunks.push([['ddm-follow-' + Date.now()], {}, r => { require = r; }]);
+            if (require && require.m) {
+                const modules = Object.entries(require.m);
+                const common = modules.find(([, fn]) => fn.toString().includes('CHANNEL_PC_WEB:function') &&
+                    fn.toString().includes('COMMON_SEARCH_PARAMS:function'));
+                const client = modules.find(([, fn]) => fn.toString().includes('skipCheckCode') &&
+                    fn.toString().includes('securitySdkInitWeb') && fn.toString().includes('withCredentials'));
+                if (common && client) {
+                    const endpoint = new URL(url);
+                    if (endpoint.origin !== location.origin ||
+                        endpoint.pathname !== '/aweme/v1/web/user/following/list/') throw new Error('Invalid endpoint');
+                    const params = {...require(common[0]).COMMON_SEARCH_PARAMS,
+                        ...Object.fromEntries(endpoint.searchParams)};
+                    // 官网客户端负责设备参数、签名初始化和验证弹窗。
+                    return await require(client[0]).U2(endpoint.pathname, params, {timeout: 12000});
+                }
+            }
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        throw new Error('Official request client not ready');
+    }"""
 
     def follow_rooms(self, session, cancelled) -> list:
         if cancelled():
@@ -633,6 +659,8 @@ class DouyinPlatform(NumericLivePlatform):
         params = {"aid": 6383, "device_platform": "webapp", "user_id": account.get("uid"),
                   "count": 20, "source_type": 2, "is_top": 1, "offset": 0,
                   "min_time": 0, "max_time": 0, "gps_access": 0, "address_book_access": 0}
+        if account.get("sec_uid"):
+            params["sec_user_id"] = account["sec_uid"]
         headers = {"User-Agent": "Mozilla/5.0", "Referer": self.follow_login_url}
         rooms, cursors = {}, {(0, 0, 0)}
         while not cancelled():
@@ -697,7 +725,8 @@ class DouyinPlatform(NumericLivePlatform):
             raise RuntimeError("抖音未登录或登录已过期，请在官方页面完成登录")
         avatar = data.get("avatar_thumb") or {}
         face = next((url for value in avatar.get("url_list", []) if (url := self._image_url(value))), "")
-        return {"uid": uid, "uname": data.get("nickname") or uid, "face": face}
+        return {"uid": uid, "uname": data.get("nickname") or uid, "face": face,
+                "sec_uid": data.get("sec_uid") or ""}
 
     def _room_id_from_url(self, parts) -> str:
         path = super()._room_id_from_url(parts)
