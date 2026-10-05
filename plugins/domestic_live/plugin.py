@@ -116,16 +116,18 @@ class HuyaPlatform(LiveQualityPlatform):
             if cancelled():
                 return []
             profile = huya_follow_request(session, "getUserProfile", uid, target).get(0, {})
-            user, presenter, recent = profile.get(0, {}), profile.get(1, {}), profile.get(2, {})
+            user, presenter = profile.get(0, {}), profile.get(1, {})
             rid = presenter.get(10) or presenter.get(3)
             if not rid:
                 continue  # 普通用户和注销账号没有可导入的直播间。
             if user.get(0) != target:
                 raise RuntimeError("虎牙关注主播信息不匹配，请稍后重试")
             canonical = self.normalize("huya:" + str(rid))
-            rooms[canonical] = api.RoomInfo(room_id=canonical, platform=self.kind,
-                uname=user.get(1) or presenter.get(1) or str(rid), title=recent.get(24, ""),
-                face=user.get(2, ""), extra={"playback_mode": "stream", "live_known": False}).as_dict()
+            if canonical not in rooms:
+                # 账号资料中的最近直播不能代表当前开播状态，复用房间状态查询。
+                rooms[canonical] = self.room_info(canonical).as_dict()
+                if cancelled():
+                    return []
         return list(rooms.values())
 
     def account_info(self, session, cancelled) -> dict:
