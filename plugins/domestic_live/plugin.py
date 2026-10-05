@@ -13,6 +13,7 @@ from urllib.parse import parse_qsl, unquote, urlsplit
 
 import requests
 from streamlink import Streamlink
+from streamlink.exceptions import PluginError
 from streamlink.plugins.huya import Huya
 from streamlink.plugins.douyu import Douyu
 from streamlink.plugins.douyin import Douyin
@@ -398,11 +399,18 @@ class NumericLivePlatform(LiveQualityPlatform):
             if self.kind == "douyu":
                 # 斗鱼部分地址只允许一个消费者，提前探流会使随后播放器连接短时间断开。
                 return url, qn, self.kind, headers
-            with session.http.get(url, headers=headers, stream=True, timeout=(4, 6)) as response:
-                response.raise_for_status()
-                if next(response.iter_content(3), b"") != b"FLV":
-                    raise RuntimeError(f"{self.label}直播线路暂不可用，请重试")
-                return response.url, qn, self.kind, headers
+            candidates = [stream] + [item for item in streams.values() if item is not stream
+                                     and getattr(item, "ddm_quality", 10000) == qn]
+            for candidate in candidates:
+                try:
+                    with session.http.get(candidate.to_url(), headers=headers, stream=True, timeout=(4, 6)) as response:
+                        response.raise_for_status()
+                        prefix = next(response.iter_content(7), b"")
+                        if prefix[:3] == b"FLV" or prefix == b"#EXTM3U":
+                            return response.url, qn, self.kind, headers
+                except (requests.RequestException, PluginError):
+                    continue  # 抖音部分房间拒绝 FLV，同画质 HLS 仍可用。
+            raise RuntimeError(f"{self.label}直播线路暂不可用，请重试")
         except RuntimeError:
             raise
         except Exception as error:  # noqa: BLE001
@@ -846,16 +854,18 @@ class DouyinPlatform(NumericLivePlatform):
         if room["status"] != 2:
             return {}
         stream_url = room.get("stream_url") or {}
-        urls = {key.lower(): value for key, value in stream_url.get("flv_pull_url", {}).items()
+        urls = {key.lower(): value for key, value in (stream_url.get("flv_pull_url") or {}).items()
                 if isinstance(value, str) and urlsplit(value).scheme in ("http", "https")}
-        if not urls:
+        hls_urls = {key.lower(): value for key, value in (stream_url.get("hls_pull_url_map") or {}).items()
+                    if isinstance(value, str) and urlsplit(value).scheme in ("http", "https")}
+        if not urls and not hls_urls:
             return {}
-        # 这些 FLV 档位对应网页 SDK 的 ld/sd/hd/uhd；分辨率、帧率只用本房间元数据。
+        # 这些档位对应网页 SDK 的 ld/sd/hd/uhd；分辨率、帧率只用本房间元数据。
         sdk_keys = {"sd1": "ld", "sd2": "sd", "hd1": "hd", "full_hd1": "uhd"}
         metadata = stream_url.get("live_core_sdk_data", {}).get("pull_data", {}).get(
             "options", {}).get("qualities", [])
         metadata = {item.get("sdk_key"): item for item in metadata}
-        keys = sorted(urls, key=lambda key: Douyin.stream_weight(key)[0], reverse=True)
+        keys = sorted(urls.keys() | hls_urls.keys(), key=lambda key: Douyin.stream_weight(key)[0], reverse=True)
         options = []
         for index, key in enumerate(keys):
             item = metadata.get(sdk_keys.get(key, key), {})
@@ -871,12 +881,17 @@ class DouyinPlatform(NumericLivePlatform):
             options.append({"qn": qn, "desc": desc, "label": label, "key": key})
         self._qualities[room_id] = options
         selected = self._select_quality(room_id, quality, preview)
-        url = urls[selected["key"]]
-        if url.startswith("http://"):
-            url = "https://" + url[7:]
-        stream = HTTPStream(session, url)
-        stream.ddm_quality = selected["qn"]
-        return {"source": stream}
+        streams = {}
+        for candidates in (urls, hls_urls):
+            url = candidates.get(selected["key"])
+            if not url:
+                continue
+            if url.startswith("http://"):
+                url = "https://" + url[7:]
+            stream = HTTPStream(session, url)
+            stream.ddm_quality = selected["qn"]
+            streams["hls" if streams else "source"] = stream
+        return streams
 
 
 class LivePlatformsPlugin(api.Plugin):
