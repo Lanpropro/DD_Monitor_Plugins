@@ -79,9 +79,11 @@
     });
     const openPanel = () => {
         // 只点击包含数字的关注计数，不能点击会改变关注关系的“关注”按钮。
-        const counter = [...document.querySelectorAll('button,a,span,div')].find(element => {
+        const counter = [...document.querySelectorAll('button,p,span,div')].find(element => {
             const text = element.textContent.trim();
-            return visible(element) && /^(?:关注\s*[\d.,万亿kKmM]+|[\d.,万亿kKmM]+\s*关注|Following\s*[\d.,kKmM]+)$/.test(text);
+            // 侧栏的“关注 1”是信息流导航，不是个人页的关注列表入口。
+            return !element.closest('a,nav,[role="navigation"]') && typeof element.onclick === 'function' &&
+                visible(element) && /^(?:关注\s*[\d.,万亿kKmM]+|[\d.,万亿kKmM]+\s*关注|Following\s*[\d.,kKmM]+)$/.test(text);
         });
         if (counter) counter.click();
         return !!counter;
@@ -91,11 +93,12 @@
         const uid = params.get('user_id');
         const prefix = params.get('user_id') + ':';
         const index = Number(params.get('offset') || 0);
+        const generation = window.__ddmFollowGeneration;
         if (index === 0) renderedCounts.delete(uid);
         const deadline = Date.now() + 25000;
         let clicked = false, nextScroll = 0;
         while (Date.now() < deadline) {
-            if (window.__ddmFollowCancelled) throw new Error('cancelled');
+            if (window.__ddmFollowCancelled || window.__ddmFollowGeneration !== generation) throw new Error('cancelled');
             const container = panel();
             if (!container && !clicked) clicked = openPanel();
             const props = container && listProps(container);
