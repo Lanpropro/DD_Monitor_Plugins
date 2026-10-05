@@ -1,4 +1,4 @@
-// 只收集官网关注面板自己发出的响应；不发 API 请求，也不记录 Cookie 或签名 URL。
+// 读取官网已经加载的关注面板；不发 API 请求，也不记录 Cookie 或签名 URL。
 (() => {
     if (window.__ddmDouyinFollows) return;
     const pages = new Map();
@@ -55,6 +55,28 @@
     };
     const visible = element => element.getClientRects().length && getComputedStyle(element).visibility !== 'hidden';
     const panel = () => [...document.querySelectorAll('[data-e2e="user-fans-container"]')].find(visible);
+    const listProps = container => {
+        // React DOM 上的当前 props 包含列表组件；只读取已知列表字段，不遍历网站状态。
+        const propsKey = Object.keys(container).find(key => key.startsWith('__reactProps$'));
+        const fromProps = props => {
+            if (Array.isArray(props?.userList)) return props;
+            const children = Array.isArray(props?.children) ? props.children : [props?.children];
+            return children.find(child => Array.isArray(child?.props?.userList))?.props;
+        };
+        const current = fromProps(container[propsKey]);
+        if (current) return current;
+        const fiberKey = Object.keys(container).find(key => key.startsWith('__reactFiber$'));
+        let fiber = container[fiberKey];
+        for (let depth = 0; fiber && depth < 8; depth++, fiber = fiber.return) {
+            const props = fromProps(fiber.memoizedProps);
+            if (props) return props;
+        }
+    };
+    const renderedUser = user => ({
+        uid: user.uid, sec_uid: user.secUid, nickname: user.nickname, remark_name: user.remarkName,
+        web_rid: user.webRid, avatar_medium: {url_list: user.avatarUri ? [user.avatarUri] : []},
+        room_data: roomInfo(user.roomData)
+    });
     const openPanel = () => {
         // 只点击包含数字的关注计数，不能点击会改变关注关系的“关注”按钮。
         const counter = [...document.querySelectorAll('button,a,span,div')].find(element => {
@@ -64,24 +86,47 @@
         if (counter) counter.click();
         return !!counter;
     };
+    const renderedCounts = new Map();
     const read = async params => {
+        const uid = params.get('user_id');
         const prefix = params.get('user_id') + ':';
         const index = Number(params.get('offset') || 0);
+        if (index === 0) renderedCounts.delete(uid);
         const deadline = Date.now() + 25000;
-        let clicked = false;
+        let clicked = false, nextScroll = 0;
         while (Date.now() < deadline) {
             if (window.__ddmFollowCancelled) throw new Error('cancelled');
-            const received = [...pages].filter(([key]) => key.startsWith(prefix));
-            if (received[index]) {
-                // 本地页号只用于读取已经观察到的页面；官网自行决定请求游标。
-                return {...received[index][1], offset: index + 1, min_time: 0, max_time: 0};
-            }
             const container = panel();
             if (!container && !clicked) clicked = openPanel();
+            const props = container && listProps(container);
+            if (props) {
+                if (!props.isSelf || props.activeTab !== 0 || props.searchVal ||
+                        String(props.currentUserInfo?.uid) !== uid) throw new Error('follow_panel_wrong_list');
+                const count = renderedCounts.get(uid) || 0;
+                const footer = container.querySelector('[data-e2e="user-fans-footer"]');
+                const text = footer?.textContent.trim();
+                const complete = props.refIsLoadingShow?.current === false &&
+                    props.refNoMoreText?.current === '暂时没有更多了' &&
+                    (text === '暂时没有更多了' || (!props.userList.length && text === '你还没有关注'));
+                if (complete || props.userList.length > count) {
+                    const followings = props.userList.slice(count).map(renderedUser);
+                    renderedCounts.set(uid, props.userList.length);
+                    return {status_code: 0, followings, has_more: complete ? 0 : 1,
+                        offset: index + 1, min_time: 0, max_time: 0};
+                }
+            } else if (!renderedCounts.has(uid)) {
+                const received = [...pages].filter(([key]) => key.startsWith(prefix));
+                if (received[index]) {
+                    // 本地页号只用于读取已经观察到的页面；官网自行决定请求游标。
+                    return {...received[index][1], offset: index + 1, min_time: 0, max_time: 0};
+                }
+            }
             if (container) {
                 const scroll = [container, ...container.querySelectorAll('*')].find(element =>
-                    element.scrollHeight > element.clientHeight && /auto|scroll/.test(getComputedStyle(element).overflowY));
-                if (scroll) {
+                    element.clientHeight > 0 && /auto|scroll/.test(getComputedStyle(element).overflowY));
+                // 官网的滚动监听有 250ms 防抖；连续每 150ms 触发会使下一页永远不加载。
+                if (scroll && Date.now() >= nextScroll) {
+                    nextScroll = Date.now() + 600;
                     scroll.scrollTop = scroll.scrollHeight;
                     scroll.dispatchEvent(new Event('scroll', {bubbles: true}));
                 }
