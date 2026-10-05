@@ -3,6 +3,7 @@ import base64
 from html import unescape
 import json
 import os
+from pathlib import Path
 import re
 import struct
 import time
@@ -620,13 +621,18 @@ class DouyinPlatform(NumericLivePlatform):
     label = "抖音"
     hosts = ("live.douyin.com", "douyin.com")
     image_hosts = ("douyinpic.com", "byteimg.com", "ibytedtos.com", "douyincdn.com")
-    account_login_url = "https://www.douyin.com/follow"
+    account_login_url = "https://www.douyin.com/user/self"
     account_cookie_domain = "douyin.com"
-    follow_login_url = "https://www.douyin.com/follow"
+    follow_login_url = "https://www.douyin.com/user/self"
     follow_cookie_domain = "douyin.com"
     follow_browser_url = ("https://www.douyin.com/aweme/v1/web/user/following/list/",
                           "https://www.douyin.com/aweme/v1/web/user/profile/self/")
+    follow_browser_init_script = (Path(__file__).parent / "douyin_follows.js").read_text(encoding="utf-8")
     follow_browser_script = """async (url) => {
+        const endpoint = new URL(url);
+        if (endpoint.pathname === '/aweme/v1/web/user/following/list/') {
+            return await window.__ddmDouyinFollows.read(endpoint.searchParams);
+        }
         const deadline = Date.now() + 15000;
         while (Date.now() < deadline) {
             const chunks = window.webpackChunkdouyin_web;
@@ -639,10 +645,8 @@ class DouyinPlatform(NumericLivePlatform):
                 const client = modules.find(([, fn]) => fn.toString().includes('skipCheckCode') &&
                     fn.toString().includes('securitySdkInitWeb') && fn.toString().includes('withCredentials'));
                 if (common && client) {
-                    const endpoint = new URL(url);
                     if (endpoint.origin !== location.origin ||
-                        !['/aweme/v1/web/user/following/list/', '/aweme/v1/web/user/profile/self/'].includes(
-                            endpoint.pathname)) throw new Error('Invalid endpoint');
+                        endpoint.pathname !== '/aweme/v1/web/user/profile/self/') throw new Error('Invalid endpoint');
                     const params = {...require(common[0]).COMMON_SEARCH_PARAMS,
                         ...Object.fromEntries(endpoint.searchParams)};
                     // 官网客户端负责设备参数、签名初始化和验证弹窗。
