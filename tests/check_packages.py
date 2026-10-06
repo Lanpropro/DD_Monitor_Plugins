@@ -21,6 +21,7 @@ def main():
     from ddm.plugins import PluginManager
     versions = {path.parent.name: json.loads(path.read_text(encoding="utf-8"))["version"]
                 for path in (ROOT / "plugins").glob("*/plugin.json")}
+    display_names = {"domestic_live": "国内直播平台", "global_live": "海外直播平台"}
     with tempfile.TemporaryDirectory() as directory:
         manager = PluginManager(plugins_dir=directory, enabled=[])
         for path in build():
@@ -32,6 +33,7 @@ def main():
                 assert len(names) == len(set(names))
                 manifest = json.loads(archive.read(f"{plugin_id}/plugin.json"))
                 assert manifest["id"] == plugin_id
+                assert manifest["name"] == display_names[plugin_id]
                 assert manifest["version"] == versions[plugin_id]
                 assert f"{plugin_id}-{manifest['version']}.zip" == path.name
                 assert archive.read(f"{plugin_id}/LICENSE") == (ROOT / "LICENSE").read_bytes()
@@ -48,6 +50,7 @@ def main():
         assert manager._platform_owner["huya"] == "domestic_live"
         assert manager._platform_owner["youtube"] == "global_live"
         assert {entry["id"] for entry in manager.catalog()} == {"domestic_live", "global_live"}
+        assert all(entry["name"] == display_names[entry["id"]] for entry in manager.catalog())
         assert all(entry["version"] == versions[entry["id"]] for entry in manager.catalog())
         manager.unload()
     print("PASS: package integrity, source consistency, install without execution and five platforms")

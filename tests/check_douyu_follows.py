@@ -34,7 +34,9 @@ def main():
     assert platform.follow_login_url.startswith("https://www.douyu.com/")
     assert platform.account_login_url == "https://passport.douyu.com/index/login?client_id=1"
     assert callable(platform.account_info)
-    assert not manager.platforms["huya"].follow_login_url and not manager.platforms["douyin"].follow_login_url
+    for kind in ("huya", "douyin"):
+        assert manager.platforms[kind].follow_login_url
+        assert callable(manager.platforms[kind].follow_rooms)
     live = {"room_id": 6979222, "nickname": "Machine", "room_name": "live", "show_status": "1",
             "avatar_small": "//apic.douyucdn.cn/avatar.jpg", "room_src": "https://rpic.douyucdn.cn/cover.jpg",
             "online": 99999}

@@ -1,6 +1,6 @@
 {
   "id": "global_live",
-  "name": "Twitch 与 YouTube",
-  "description": "海外直播关注卡片、格子播放、画质、悬停预览与聊天弹幕",
+  "name": "海外直播平台",
+  "description": "Youtube 和 Twitch 关注卡片、格子播放、自动选择画质、悬停预览与聊天弹幕",
   "version": "1.0"
 }

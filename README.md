@@ -8,7 +8,7 @@
 | 插件 | ID | 版本 | 支持平台 |
 | --- | --- | --- | --- |
 | [国内直播平台](plugins/domestic_live/README.md) | `domestic_live` | 1.1 | 虎牙、斗鱼、抖音 |
-| [Twitch 与 YouTube](plugins/global_live/README.md) | `global_live` | 1.0 | Twitch、YouTube |
+| [海外直播平台](plugins/global_live/README.md) | `global_live` | 1.0 | Twitch、YouTube |
 
 均支持关注卡片、拖入格子播放、直播实际画质、横竖屏静音悬停预览与聊天弹幕。
 海外插件支持根据网络调整画质的“自动”选项。平台标识使用图标，单平台关注栏隐藏图标；
