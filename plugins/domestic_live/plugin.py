@@ -629,7 +629,7 @@ class DouyuPlatform(NumericLivePlatform):
 class DouyinPlatform(NumericLivePlatform):
     kind = "douyin"
     label = "抖音"
-    hosts = ("live.douyin.com", "douyin.com")
+    hosts = ("live.douyin.com", "douyin.com", "www.douyin.com")
     image_hosts = ("douyinpic.com", "byteimg.com", "ibytedtos.com", "douyincdn.com")
     account_login_url = "https://www.douyin.com/user/self"
     account_cookie_domain = "douyin.com"
@@ -677,6 +677,30 @@ class DouyinPlatform(NumericLivePlatform):
             rid, uid = str(room.get("room_id") or ""), str(room.get("anchor_uid") or "")
             if re.fullmatch(r"douyin:[0-9]{1,20}", rid) and re.fullmatch(r"[0-9]{1,20}", uid):
                 self._anchor_uids[rid] = uid
+
+    def profile_sec_uid(self, text):
+        parts = urlsplit(str(text or "").strip())
+        if parts.hostname not in ("douyin.com", "www.douyin.com") or not parts.path.startswith("/user/"):
+            return ""
+        if (parts.scheme not in ("http", "https") or parts.username or parts.password
+                or parts.port not in (None, 80, 443)):
+            raise ValueError("请使用抖音官方主播主页链接")
+        sec_uid = parts.path.removeprefix("/user/").rstrip("/")
+        if not re.fullmatch(r"MS4wLjAB[A-Za-z0-9_-]{10,180}", sec_uid):
+            raise ValueError("请粘贴主播的完整个人主页链接，不支持「我的主页」链接")
+        return sec_uid
+
+    def profile_room(self, uid, cancelled):
+        if not re.fullmatch(r"[0-9]{1,20}", str(uid)) or int(uid) <= 0:
+            raise ValueError("抖音主页未返回有效主播身份")
+        if cancelled():
+            return ""
+        room = self._follow_room(requests, str(uid), cancelled)
+        if cancelled():
+            return ""
+        if not room:
+            raise RuntimeError("官网暂未返回可用的直播记录，请在主播开播时重试，或使用直播间完整链接")
+        return self.normalize("douyin:" + room["web_rid"])
 
     def follow_rooms(self, session, cancelled) -> list:
         if cancelled():
