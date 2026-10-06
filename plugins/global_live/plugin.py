@@ -148,6 +148,7 @@ class TwitchPlatform(PublicLivePlatform):
     kind = "twitch"
     oauth_provider = "twitch"
     label = "Twitch"
+    room_input_hint = "Twitch 频道链接"
     hosts = ("twitch.tv", "www.twitch.tv", "m.twitch.tv", "player.twitch.tv")
     origin = "https://www.twitch.tv/"
     parser = Twitch
@@ -287,6 +288,7 @@ class TwitchPlatform(PublicLivePlatform):
 class YouTubePlatform(PublicLivePlatform):
     kind = "youtube"
     label = "YouTube"
+    room_input_hint = "YouTube 视频或直播链接"
     hosts = ("youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be")
     origin = "https://www.youtube.com/"
     parser = LiveYouTube

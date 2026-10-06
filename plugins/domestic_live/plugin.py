@@ -95,6 +95,7 @@ class LiveQualityPlatform(api.Platform):
 class HuyaPlatform(LiveQualityPlatform):
     kind = "huya"
     label = "虎牙"
+    room_input_hint = "虎牙直播间链接"
     playback_mode = "stream"
     account_login_url = "https://www.huya.com/?evt_fe=login"
     account_cookie_domain = "huya.com"
@@ -422,6 +423,7 @@ class NumericLivePlatform(LiveQualityPlatform):
 class DouyuPlatform(NumericLivePlatform):
     kind = "douyu"
     label = "斗鱼"
+    room_input_hint = "斗鱼直播间链接"
     hosts = ("www.douyu.com", "douyu.com", "m.douyu.com")
     image_hosts = ("douyucdn.cn", "douyu.com")
     follow_login_url = "https://www.douyu.com/directory/myFollow?from=normalFollow"
@@ -629,6 +631,8 @@ class DouyuPlatform(NumericLivePlatform):
 class DouyinPlatform(NumericLivePlatform):
     kind = "douyin"
     label = "抖音"
+    room_input_hint = "抖音直播间链接或主播个人主页链接"
+    profile_browser_init_script = (Path(__file__).parent / "douyin_profile.js").read_text(encoding="utf-8")
     hosts = ("live.douyin.com", "douyin.com", "www.douyin.com")
     image_hosts = ("douyinpic.com", "byteimg.com", "ibytedtos.com", "douyincdn.com")
     account_login_url = "https://www.douyin.com/user/self"
@@ -690,11 +694,15 @@ class DouyinPlatform(NumericLivePlatform):
             raise ValueError("请粘贴主播的完整个人主页链接，不支持「我的主页」链接")
         return sec_uid
 
-    def profile_room(self, uid, cancelled):
+    def profile_room(self, uid, cancelled, *, web_rid=""):
         if not re.fullmatch(r"[0-9]{1,20}", str(uid)) or int(uid) <= 0:
             raise ValueError("抖音主页未返回有效主播身份")
         if cancelled():
             return ""
+        if web_rid:
+            canonical = self.normalize("douyin:" + str(web_rid))
+            self._anchor_uids[canonical] = str(uid)
+            return canonical
         room = self._follow_room(requests, str(uid), cancelled)
         if cancelled():
             return ""
@@ -892,9 +900,10 @@ class DouyinPlatform(NumericLivePlatform):
         uid = self._anchor_uids.get(canonical)
         if uid:
             room = self._share_room(requests, uid, lambda: False)
-            if not room or room["owner"]["web_rid"] != canonical.split(":", 1)[1]:
-                raise ValueError("Mismatched Douyin room")
-            return {"room": room, "ttwid": room.pop("ttwid", "")}
+            if room:
+                if room["owner"]["web_rid"] != canonical.split(":", 1)[1]:
+                    raise ValueError("Mismatched Douyin room")
+                return {"room": room, "ttwid": room.pop("ttwid", "")}
         getter = session.http.get if session is not None else requests.get
         response = getter(self.room_url(canonical), headers={
             "User-Agent": "Mozilla/5.0", "Referer": "https://live.douyin.com/"},
@@ -907,9 +916,11 @@ class DouyinPlatform(NumericLivePlatform):
         finally:
             response.close()
         owner = info["room"].get("owner") or info.get("anchor") or {}
-        uid = str(owner.get("id_str") or owner.get("id") or "")
-        if re.fullmatch(r"[0-9]{1,20}", uid):
-            self._anchor_uids[canonical] = uid
+        owner_uid = str(owner.get("id_str") or owner.get("id") or "")
+        if uid and owner_uid != uid:
+            raise ValueError("Mismatched Douyin anchor")
+        if re.fullmatch(r"[0-9]{1,20}", owner_uid):
+            self._anchor_uids[canonical] = owner_uid
         return info
 
     async def room_data_async(self, session, room_id):
@@ -922,17 +933,16 @@ class DouyinPlatform(NumericLivePlatform):
                         "User-Agent": "Mozilla/5.0", "Referer": "https://live.douyin.com/"}) as response:
                 response.raise_for_status()
                 internal = self._share_identity(await response.json(), uid)
-            if not internal:
-                raise ValueError("Missing Douyin room")
-            async with session.get("https://webcast.amemv.com/webcast/reflow/" + internal,
-                    headers={"User-Agent": "Mozilla/5.0"}) as response:
-                response.raise_for_status()
-                visitor = response.cookies.get("ttwid")
-                room = self._share_info(await response.text(encoding="utf-8"), internal, uid,
-                                        visitor.value if visitor else "")
-            if room["owner"]["web_rid"] != canonical.split(":", 1)[1]:
-                raise ValueError("Mismatched Douyin room")
-            return {"room": room, "ttwid": room.pop("ttwid", "")}
+            if internal:
+                async with session.get("https://webcast.amemv.com/webcast/reflow/" + internal,
+                        headers={"User-Agent": "Mozilla/5.0"}) as response:
+                    response.raise_for_status()
+                    visitor = response.cookies.get("ttwid")
+                    room = self._share_info(await response.text(encoding="utf-8"), internal, uid,
+                                            visitor.value if visitor else "")
+                if room["owner"]["web_rid"] != canonical.split(":", 1)[1]:
+                    raise ValueError("Mismatched Douyin room")
+                return {"room": room, "ttwid": room.pop("ttwid", "")}
         async with session.get(self.room_url(canonical),
                 cookies={"__ac_nonce": uuid.uuid4().hex[:21]}) as response:
             response.raise_for_status()
@@ -940,9 +950,11 @@ class DouyinPlatform(NumericLivePlatform):
             visitor = response.cookies.get("ttwid")
             info["ttwid"] = visitor.value if visitor else ""
         owner = info["room"].get("owner") or info.get("anchor") or {}
-        uid = str(owner.get("id_str") or owner.get("id") or "")
-        if re.fullmatch(r"[0-9]{1,20}", uid):
-            self._anchor_uids[canonical] = uid
+        owner_uid = str(owner.get("id_str") or owner.get("id") or "")
+        if uid and owner_uid != uid:
+            raise ValueError("Mismatched Douyin anchor")
+        if re.fullmatch(r"[0-9]{1,20}", owner_uid):
+            self._anchor_uids[canonical] = owner_uid
         return info
 
     @staticmethod
