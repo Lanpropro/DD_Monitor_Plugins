@@ -5,22 +5,44 @@
     "version": "1.0",
     "category": "国内直播",
     "description": "将虎牙、斗鱼、抖音直播加入同一面画面墙。",
-    "platforms": ["虎牙", "斗鱼", "抖音"],
-    "icons": ["huya.png", "douyu.ico", "douyin.ico"],
-    "features": ["实际画质档位", "静音悬停预览", "聊天弹幕"],
+    "platforms": [
+      "虎牙",
+      "斗鱼",
+      "抖音"
+    ],
+    "icons": [
+      "huya.png",
+      "douyu.ico",
+      "douyin.ico"
+    ],
+    "features": [
+      "实际画质档位",
+      "静音悬停预览",
+      "聊天弹幕"
+    ],
     "download": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/v1.0/domestic_live-1.0.zip",
-    "sha256": "fd0ee1403903bf7e75a4aefeaa626f31aa638a6a4a787203f7878eb7d2914030"
+    "sha256": "84fb3b1c90c8186a2ed4abf4cdcad0d520b5eee3f952fddd2eac403435a95533"
   },
   {
     "id": "global_live",
-    "name": "Twitch 与 YouTube",
+    "name": "海外直播平台",
     "version": "1.0",
     "category": "海外直播",
     "description": "关注海外频道，在软件内观看公开直播与聊天。",
-    "platforms": ["Twitch", "YouTube"],
-    "icons": ["twitch.ico", "youtube.ico"],
-    "features": ["自动画质", "静音悬停预览", "聊天弹幕"],
+    "platforms": [
+      "Twitch",
+      "YouTube"
+    ],
+    "icons": [
+      "twitch.ico",
+      "youtube.ico"
+    ],
+    "features": [
+      "自动画质",
+      "静音悬停预览",
+      "聊天弹幕"
+    ],
     "download": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/v1.0/global_live-1.0.zip",
-    "sha256": "5d71e1e1658842ca16af66ad49e6531354f1bda85b0e94d400d92f8a149f8807"
+    "sha256": "b3862c6e2c6fcdbfe278e5b3222408b1ef5f5b0ed78b4cae0e4214df294c0d5b"
   }
 ]

@@ -21,6 +21,8 @@ def main():
     from ddm.plugins import PluginManager
     versions = {path.parent.name: json.loads(path.read_text(encoding="utf-8"))["version"]
                 for path in (ROOT / "plugins").glob("*/plugin.json")}
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert all(f"| `{plugin_id}` | {version} |" in readme for plugin_id, version in versions.items())
     display_names = {"domestic_live": "国内直播平台", "global_live": "海外直播平台"}
     with tempfile.TemporaryDirectory() as directory:
         manager = PluginManager(plugins_dir=directory, enabled=[])

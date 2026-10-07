@@ -7,7 +7,7 @@
 
 | 插件 | ID | 版本 | 支持平台 |
 | --- | --- | --- | --- |
-| [国内直播平台](plugins/domestic_live/README.md) | `domestic_live` | 1.1 | 虎牙、斗鱼、抖音 |
+| [国内直播平台](plugins/domestic_live/README.md) | `domestic_live` | 1.0 | 虎牙、斗鱼、抖音 |
 | [海外直播平台](plugins/global_live/README.md) | `global_live` | 1.0 | Twitch、YouTube |
 
 均支持关注卡片、拖入格子播放、直播实际画质、横竖屏静音悬停预览与聊天弹幕。
@@ -58,7 +58,7 @@ python tools/build_plugins.py
 python tests/check_packages.py --host ../DD_Monitor_CE
 ```
 
-输出为 `dist/domestic_live-1.1.zip` 和 `dist/global_live-1.0.zip`，上传到 Releases。
+输出为 `dist/domestic_live-1.0.zip` 和 `dist/global_live-1.0.zip`，上传到 Releases。
 构建只读取 Git 跟踪文件，并将许可与来源说明放入每个安装包。
 各插件 README 中的播放、预览和弹幕集成测试在软件源码仓库执行，需先安装对应插件。
 
