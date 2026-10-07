@@ -22,6 +22,7 @@ export default defineConfig({
         { text: '所有插件', link: '/plugins/' },
         { text: '国内直播平台', link: '/plugins/domestic_live' },
         { text: 'Twitch 与 YouTube', link: '/plugins/global_live' },
+        { text: '比赛二路同步', link: '/plugins/match_sync' },
         { text: '安装与升级', link: '/guide' }
       ] }]
     },

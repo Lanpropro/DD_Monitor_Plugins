@@ -17,7 +17,7 @@ const filtered = computed(() => plugins.filter(p =>
       <input v-model="query" type="search" placeholder="例如：抖音、YouTube" />
     </label>
     <div class="filters" role="group" aria-label="插件分类">
-      <button v-for="item in ['全部', '国内直播', '海外直播']" :key="item"
+      <button v-for="item in ['全部', '国内直播', '海外直播', '比赛二路']" :key="item"
         :aria-pressed="category === item" @click="category = item">{{ item }}</button>
     </div>
   </div>

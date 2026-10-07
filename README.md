@@ -9,10 +9,13 @@
 | --- | --- | --- | --- |
 | [国内直播平台](plugins/domestic_live/README.md) | `domestic_live` | 1.0 | 虎牙、斗鱼、抖音 |
 | [海外直播平台](plugins/global_live/README.md) | `global_live` | 1.0 | Twitch、YouTube |
+| [比赛二路同步](plugins/match_sync/README.md) | `match_sync` | 1.0 | B 站及已启用平台插件 |
 
-均支持关注卡片、拖入格子播放、直播实际画质、横竖屏静音悬停预览与聊天弹幕。
+国内和海外平台插件均支持关注卡片、拖入格子播放、直播实际画质、横竖屏静音悬停预览与聊天弹幕。
 海外插件支持根据网络调整画质的“自动”选项。平台标识使用图标，单平台关注栏隐藏图标；
 关闭插件后关注和格子暂存，重新启用恢复。
+
+比赛二路同步提供主画面、自动对齐、多路混音和带来源的合并弹幕。需要 PyAV 17、NumPy 和 FFmpeg；旧本体 EXE 仅替换插件不能补齐运行依赖，详见插件 README。
 
 ## 安装
 
@@ -58,7 +61,7 @@ python tools/build_plugins.py
 python tests/check_packages.py --host ../DD_Monitor_CE
 ```
 
-输出为 `dist/domestic_live-1.0.zip` 和 `dist/global_live-1.0.zip`，上传到 Releases。
+输出为 `dist/domestic_live-1.0.zip` 、`dist/global_live-1.0.zip` 和 `dist/match_sync-1.0.zip`，上传到 Releases。
 构建只读取 Git 跟踪文件，并将许可与来源说明放入每个安装包。
 各插件 README 中的播放、预览和弹幕集成测试在软件源码仓库执行，需先安装对应插件。
 

@@ -22,5 +22,31 @@
     "features": ["自动画质", "静音悬停预览", "聊天弹幕"],
     "download": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/v1.0/global_live-1.0.zip",
     "sha256": "b3862c6e2c6fcdbfe278e5b3222408b1ef5f5b0ed78b4cae0e4214df294c0d5b"
+  },
+  {
+    "id": "match_sync",
+    "name": "比赛二路同步",
+    "version": "1.0",
+    "category": "比赛二路",
+    "description": "选择比赛主画面，自动对齐多位主播直播，混合声音与合并弹幕。",
+    "platforms": [
+      "B 站",
+      "虎牙",
+      "斗鱼",
+      "抖音"
+    ],
+    "icons": [
+      "bilibili.ico",
+      "huya.png",
+      "douyu.ico",
+      "douyin.ico"
+    ],
+    "features": [
+      "自动对齐比赛画面",
+      "主画面最高画质",
+      "多路混音与合并弹幕"
+    ],
+    "download": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/v1.0/match_sync-1.0.zip",
+    "sha256": "832092bd152112540082f157e74725de9087c744b239ae1a3469524df6958c8d"
   }
 ]

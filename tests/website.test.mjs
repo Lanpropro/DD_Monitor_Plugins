@@ -15,8 +15,8 @@ const walk = dir => readdirSync(dir, { withFileTypes: true }).flatMap(item => {
 })
 
 test('catalog versions and IDs agree with the actual plugin manifests', () => {
-  assert.equal(plugins.length, 2)
-  assert.equal(new Set(plugins.map(p => p.id)).size, 2)
+  assert.equal(plugins.length, 3)
+  assert.equal(new Set(plugins.map(p => p.id)).size, 3)
   for (const p of plugins) {
     const manifest = JSON.parse(read(`plugins/${p.id}/plugin.json`))
     assert.equal(p.name, manifest.name)
@@ -36,7 +36,7 @@ test('published package checksums match the local versioned ZIP files', () => {
 })
 
 test('built pages preserve compatibility boundaries and real downloads', () => {
-  for (const page of ['index.html', 'software.html', 'download.html', 'guide.html', 'plugins/index.html', 'plugins/domestic_live.html', 'plugins/global_live.html']) {
+  for (const page of ['index.html', 'software.html', 'download.html', 'guide.html', 'plugins/index.html', 'plugins/domestic_live.html', 'plugins/global_live.html', 'plugins/match_sync.html']) {
     assert.ok(existsSync(resolve(dist, page)), `missing page: ${page}; run npm run docs:build first`)
   }
   const download = readFileSync(resolve(dist, 'download.html'), 'utf8')
