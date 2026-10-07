@@ -48,7 +48,7 @@ def main():
         assert all(plugin.version == versions[plugin.context.name] for plugin in manager.plugins)
         assert set(manager.platforms) == {"huya", "douyu", "douyin", "twitch", "youtube"}
         assert all(platform.room_input_hint for platform in manager.platforms.values())
-        assert '个人主页链接' in manager.platforms['douyin'].room_input_hint
+        assert manager.platforms['douyin'].room_input_hint == '抖音直播间链接'
         assert '__ddmDouyinProfile' in manager.platforms['douyin'].profile_browser_init_script
         assert manager._platform_owner["huya"] == "domestic_live"
         assert manager._platform_owner["youtube"] == "global_live"

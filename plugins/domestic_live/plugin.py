@@ -631,7 +631,7 @@ class DouyuPlatform(NumericLivePlatform):
 class DouyinPlatform(NumericLivePlatform):
     kind = "douyin"
     label = "抖音"
-    room_input_hint = "抖音直播间链接或主播个人主页链接"
+    room_input_hint = "抖音直播间链接"
     profile_browser_init_script = (Path(__file__).parent / "douyin_profile.js").read_text(encoding="utf-8")
     hosts = ("live.douyin.com", "douyin.com", "www.douyin.com")
     image_hosts = ("douyinpic.com", "byteimg.com", "ibytedtos.com", "douyincdn.com")
