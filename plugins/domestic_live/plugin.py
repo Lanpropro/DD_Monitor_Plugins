@@ -740,27 +740,44 @@ class DouyinPlatform(NumericLivePlatform):
                 room = user.get("room_data") or {}
                 if isinstance(room, str):
                     room = json.loads(room)
+                uid = str(user.get("uid") or "")
+                owner = room.get("owner") or {}
+                owner_uid = str(owner.get("id_str") or owner.get("id") or "")
+                if owner_uid and owner_uid != uid:
+                    raise RuntimeError("抖音关注主播信息不匹配，请稍后重试")
                 rid = user.get("web_rid") or room.get("web_rid") or (room.get("owner") or {}).get("web_rid")
                 if rid and self.normalize("douyin:" + str(rid)) in rooms:
                     continue
-                if user.get("uid"):
-                    room = self._follow_room(session, str(user["uid"]), cancelled)
+                # 官网列表已提供固定房间和状态时直接采用，避免逐个查询拖慢读取。
+                # 补充接口返回空记录或超时时，不能丢掉官网已经确认的房间号。
+                if uid and (not rid or type(room.get("status")) is not int):
+                    try:
+                        resolved = self._follow_room(session, uid, cancelled)
+                    except requests.RequestException:
+                        if not rid:
+                            raise
+                        resolved = {}
                     if cancelled():
                         return []
-                    rid = room.get("web_rid")
+                    if resolved:
+                        if rid and str(resolved["web_rid"]) != str(rid):
+                            raise RuntimeError("抖音关注主播信息不匹配，请稍后重试")
+                        room, rid = resolved, resolved["web_rid"]
                 if not rid:
                     continue  # 普通用户和注销账号没有可导入的直播间。
                 canonical = self.normalize("douyin:" + str(rid))
                 if canonical in rooms:
                     continue
+                if re.fullmatch(r"[1-9][0-9]{0,19}", uid):
+                    self._anchor_uids[canonical] = uid
                 face = next((url for item in [user.get("avatar_medium") or {}, user.get("avatar_thumb") or {}]
                              for raw in item.get("url_list", []) if (url := self._image_url(raw))), "")
                 rooms[canonical] = api.RoomInfo(room_id=canonical, platform=self.kind,
                     uname=user.get("remark_name") or user.get("nickname") or str(rid),
                     title=room.get("title", ""), live=room.get("status") == 2,
                     face=face or self._image_url(room.get("face")), cover_url=self._image_url(room.get("cover")),
-                    extra={"playback_mode": "stream", "live_known": "status" in room,
-                           "anchor_uid": str(user.get("uid") or "")}).as_dict()
+                    extra={"playback_mode": "stream", "live_known": type(room.get("status")) is int,
+                           "anchor_uid": uid}).as_dict()
             if payload.get("has_more") in (False, 0):
                 return list(rooms.values())
             if payload.get("has_more") not in (True, 1):

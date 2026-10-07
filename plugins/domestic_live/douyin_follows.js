@@ -13,8 +13,9 @@
         try {
             const room = typeof value === 'string' ? JSON.parse(value) : value;
             if (!room) return {};
-            return {web_rid: room.web_rid, title: room.title, status: room.status,
-                owner: {web_rid: room.owner?.web_rid}};
+            return {web_rid: room.web_rid || room.webRid, title: room.title, status: room.status,
+                owner: {web_rid: room.owner?.web_rid || room.owner?.webRid,
+                    id_str: room.owner?.id_str || room.owner?.idStr}};
         } catch (_) { return {}; }
     };
     const capture = (url, data) => {
