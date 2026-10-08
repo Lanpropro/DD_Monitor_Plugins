@@ -23,7 +23,7 @@ def main():
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         manager = PluginManager(plugins_dir=str(root), enabled=[])
-        for plugin_id in ("domestic_live", "global_live"):
+        for plugin_id in ("domestic_live", "global_live", "match_sync"):
             old_zip = root / (plugin_id + "-1.0.zip")
             paths = subprocess.check_output(["git", "ls-tree", "-r", "--name-only", "252a51f",
                 "--", "plugins/" + plugin_id], cwd=ROOT, text=True).splitlines()
@@ -41,17 +41,17 @@ def main():
             assert read_manifest(str(target), plugin_id)["version"] == "1.0"
         apply_pending(manager)
         assert not pending_versions(manager)
-        for plugin_id in ("domestic_live", "global_live"):
+        for plugin_id in ("domestic_live", "global_live", "match_sync"):
             target = root / plugin_id
             assert read_manifest(str(target), plugin_id)["version"] == "1.1"
             assert (target / "user-data.txt").read_bytes() == b"preserve user data"
             assert (target / "plugin.py").read_bytes() == (ROOT / "plugins" / plugin_id / "plugin.py").read_bytes()
-        manager.enabled = {"domestic_live", "global_live"}
+        manager.enabled = {"domestic_live", "global_live", "match_sync"}
         manager.load()
-        assert len(manager.plugins) == 2 and not manager.skipped
+        assert len(manager.plugins) == 3 and not manager.skipped
         assert all(plugin.version == "1.1" for plugin in manager.plugins)
         manager.unload()
-    print("PASS: both plugins 1.0 -> staged 1.1 -> restarted 1.1; source and user data preserved")
+    print("PASS: three plugins 1.0 -> staged 1.1 -> restarted 1.1; source and user data preserved")
 
 
 if __name__ == "__main__":

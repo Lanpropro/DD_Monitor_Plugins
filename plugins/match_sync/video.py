@@ -13,7 +13,7 @@ try:
 except ImportError:
     av = None
 
-from .engine import History
+from .engine import History, np
 
 
 class StreamInput:
@@ -29,7 +29,13 @@ class StreamInput:
 def image_from_frame(frame):
     rgb = frame.reformat(format="bgra")
     plane = rgb.planes[0]
-    return QImage(bytes(plane), rgb.width, rgb.height, plane.line_size, QImage.Format_ARGB32).copy()
+    if np is None:
+        return QImage(bytes(plane), rgb.width, rgb.height, plane.line_size, QImage.Format_ARGB32).copy()
+    image = QImage(rgb.width, rgb.height, QImage.Format_ARGB32)
+    source = np.frombuffer(plane, dtype=np.uint8).reshape(rgb.height, plane.line_size)
+    target = np.frombuffer(image.bits(), dtype=np.uint8).reshape(rgb.height, image.bytesPerLine())
+    target[:, :rgb.width * 4] = source[:, :rgb.width * 4]
+    return image
 
 
 @dataclass(frozen=True)
@@ -201,6 +207,8 @@ class PictureReader:
                     codec = av.CodecContext.create(config[0], "r")
                     codec.extradata = config[1]
                     codec.thread_count = 2
+                    # Seekable picture workers must release promptly on switch/close.
+                    # Frame-thread teardown can block the GUI when two are active.
                     codec.thread_type = "SLICE"
                 owner, previous = history, target
                 for packet in packets:
