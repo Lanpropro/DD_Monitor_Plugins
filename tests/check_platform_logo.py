@@ -67,9 +67,15 @@ def main():
         settings.accept()
         app.processEvents()
         for item in window.sidebar._items:
-            disabled = ((item.room["platform"] in ("huya", "douyu", "douyin") and "domestic_live" in loaded)
+            disabled = ((item.room["platform"] in ("bilibili", "huya", "douyu", "douyin") and "domestic_live" in loaded)
                         or (item.room["platform"] in ("twitch", "youtube") and "global_live" in loaded))
             assert item.platform_badge.isHidden() == disabled, item.room
+        if "domestic_live" in loaded:
+            window.sidebar.add_room({"room_id": "456", "uname": "B without platform"})
+            app.processEvents()
+            item = next(i for i in window.sidebar._items if i.room["room_id"] == "456")
+            assert item.platform_badge.isHidden(), "Bilibili without explicit platform ignored Logo switch"
+            item.room["platform"] = "bilibili"
         # 宿主刷新、收起展开、列表/封面切换、新增关注均不能重新显示禁用的 Logo。
         window.sidebar._sync_count()
         window.sidebar.set_card_mode(False)
@@ -84,7 +90,7 @@ def main():
                 assert item.platform_badge.isHidden(), "New card ignored disabled Logo"
         for item in window.sidebar._items:
             item.thumb._set_overlay_visible(True)
-            disabled = ((item.room["platform"] in ("huya", "douyu", "douyin") and "domestic_live" in loaded)
+            disabled = ((item.room["platform"] in ("bilibili", "huya", "douyu", "douyin") and "domestic_live" in loaded)
                         or (item.room["platform"] in ("twitch", "youtube") and "global_live" in loaded))
             assert item.platform_badge.isHidden() == disabled, "Layout/preview lost Logo choice"
         settings = dialog()
@@ -112,7 +118,7 @@ def main():
             settings.accept()
             app.processEvents()
             for item in window.sidebar._items:
-                if item.room["platform"] in ("huya", "douyu", "douyin"):
+                if item.room["platform"] in ("bilibili", "huya", "douyu", "douyin"):
                     assert not item.platform_badge.isHidden(), "Enable did not restore domestic Logo"
                 elif item.room["platform"] in ("twitch", "youtube"):
                     assert item.platform_badge.isHidden(), "Domestic control changed overseas Logo"

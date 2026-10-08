@@ -1111,7 +1111,8 @@ class PlatformLogoControl(QObject):
                 parent = parent.parentWidget()
             if parent is not None and parent.window() is self.context.window:
                 room = parent.room
-                platform = room.get("platform") or str(room.get("room_id", "")).partition(":")[0]
+                platform = ("bilibili" if str(room.get("room_id", "")).isdigit() else
+                            room.get("platform") or str(room.get("room_id", "")).partition(":")[0])
                 if platform in self.platforms:
                     if watched.property("showPlatform") is not False:
                         watched.setProperty("showPlatform", False)
@@ -1130,7 +1131,8 @@ class PlatformLogoControl(QObject):
         if not self.enabled:
             for item in sidebar._items:
                 room = item.room
-                platform = room.get("platform") or str(room.get("room_id", "")).partition(":")[0]
+                platform = ("bilibili" if str(room.get("room_id", "")).isdigit() else
+                            room.get("platform") or str(room.get("room_id", "")).partition(":")[0])
                 if platform in self.platforms:
                     item.platform_badge.setProperty("showPlatform", False)
                     item.platform_badge.hide()
@@ -1157,7 +1159,7 @@ class LivePlatformsPlugin(api.Plugin):
         douyin._context = context
         context.register_platform(douyin)
         if QApplication.instance() is not None and context.window is not None:
-            self._logo_control = PlatformLogoControl(context, ("huya", "douyu", "douyin"), "显示国内平台 Logo")
+            self._logo_control = PlatformLogoControl(context, ("bilibili", "huya", "douyu", "douyin"), "显示国内平台 Logo")
 
     def on_unload(self):
         if getattr(self, "_logo_control", None) is not None:
