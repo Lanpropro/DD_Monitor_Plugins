@@ -48,7 +48,17 @@ def main():
             assert bool(check) == (plugin_id in loaded), "Unloaded plugin exposes control"
             assert settings.plugin_page.findChild(QCheckBox, plugin_id + "_show_platform_logo") is None, "Logo switch remains on plugin page"
             if check:
+                grid = settings.general_page.layout().itemAt(1).layout()
+                row = grid.getItemPosition(grid.indexOf(check))[0]
+                alert_row = grid.getItemPosition(grid.indexOf(settings.general_page._checks["live_alert"]))[0]
+                decode_row = grid.getItemPosition(grid.indexOf(settings.general_page.decode_mode))[0]
+                assert alert_row < row < decode_row, "Logo switch is not below live alert"
                 check.setChecked(False)
+        if len(loaded) == 2:
+            grid = settings.general_page.layout().itemAt(1).layout()
+            domestic = settings.general_page.findChild(QCheckBox, "domestic_live_show_platform_logo")
+            global_live = settings.general_page.findChild(QCheckBox, "global_live_show_platform_logo")
+            assert grid.getItemPosition(grid.indexOf(domestic))[0] < grid.getItemPosition(grid.indexOf(global_live))[0]
         settings.reject()
         assert not manager.plugin_settings and not snapshots, "Cancel saved changes"
         settings = dialog()

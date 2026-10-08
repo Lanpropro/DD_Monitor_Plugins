@@ -435,7 +435,14 @@ class PlatformLogoControl(QObject):
                     check = QCheckBox(self.label, page)
                     check.setObjectName(self.name)
                     check.setChecked(self.enabled)
-                    page.layout().insertWidget(1, check)
+                    grid = page.layout().itemAt(1).layout()
+                    row = grid.getItemPosition(grid.indexOf(page._checks["live_alert"]))[0] + 1
+                    for index in range(grid.count() - 1, -1, -1):
+                        old_row, column, rows, columns = grid.getItemPosition(index)
+                        if old_row >= row:
+                            item = grid.takeAt(index)
+                            grid.addItem(item, old_row + 1, column, rows, columns)
+                    grid.addWidget(check, row, 0, 1, 2)
                     watched.accepted.connect(lambda: self.save(check.isChecked()))
         elif (event.type() in (QEvent.Show, QEvent.ShowToParent, QEvent.DynamicPropertyChange)
                 and isinstance(watched, QLabel) and watched.objectName() == "NavPlatformBadge"
