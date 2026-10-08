@@ -1089,7 +1089,7 @@ class PlatformLogoControl(QObject):
     def eventFilter(self, watched, event):
         if event.type() == QEvent.Show and isinstance(watched, SettingsDialog):
             if watched.plugin_page.manager is self.context.manager:
-                page = watched.plugin_page
+                page = watched.general_page
                 if page.findChild(QCheckBox, self.name) is None:
                     check = QCheckBox(self.label, page)
                     check.setObjectName(self.name)

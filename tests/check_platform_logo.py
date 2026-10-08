@@ -44,15 +44,16 @@ def main():
             return result
         settings = dialog()
         for plugin_id in ("domestic_live", "global_live"):
-            check = settings.plugin_page.findChild(QCheckBox, plugin_id + "_show_platform_logo")
+            check = settings.general_page.findChild(QCheckBox, plugin_id + "_show_platform_logo")
             assert bool(check) == (plugin_id in loaded), "Unloaded plugin exposes control"
+            assert settings.plugin_page.findChild(QCheckBox, plugin_id + "_show_platform_logo") is None, "Logo switch remains on plugin page"
             if check:
                 check.setChecked(False)
         settings.reject()
         assert not manager.plugin_settings and not snapshots, "Cancel saved changes"
         settings = dialog()
         for plugin_id in loaded:
-            settings.plugin_page.findChild(QCheckBox, plugin_id + "_show_platform_logo").setChecked(False)
+            settings.general_page.findChild(QCheckBox, plugin_id + "_show_platform_logo").setChecked(False)
         settings.accept()
         app.processEvents()
         for item in window.sidebar._items:
@@ -80,24 +81,24 @@ def main():
         settings.hide()
         settings.show()
         for plugin_id in loaded:
-            assert len(settings.plugin_page.findChildren(QCheckBox, plugin_id + "_show_platform_logo")) == 1
+            assert len(settings.general_page.findChildren(QCheckBox, plugin_id + "_show_platform_logo")) == 1
         settings.reject()
         saved = copy.deepcopy(manager.plugin_settings)
         manager.unload()
         app.processEvents()
         settings = dialog()
-        assert not settings.plugin_page.findChildren(QCheckBox, "domestic_live_show_platform_logo")
-        assert not settings.plugin_page.findChildren(QCheckBox, "global_live_show_platform_logo")
+        assert not settings.general_page.findChildren(QCheckBox, "domestic_live_show_platform_logo")
+        assert not settings.general_page.findChildren(QCheckBox, "global_live_show_platform_logo")
         settings.reject()
         manager = PluginManager(window, str(plugin_dir), enabled=loaded)
         manager.plugin_settings = saved
         manager.load()
         settings = dialog()
         for plugin_id in loaded:
-            check = settings.plugin_page.findChild(QCheckBox, plugin_id + "_show_platform_logo")
+            check = settings.general_page.findChild(QCheckBox, plugin_id + "_show_platform_logo")
             assert not check.isChecked(), "Reload lost saved choice"
         if len(loaded) == 2:
-            settings.plugin_page.findChild(QCheckBox, "domestic_live_show_platform_logo").setChecked(True)
+            settings.general_page.findChild(QCheckBox, "domestic_live_show_platform_logo").setChecked(True)
             settings.accept()
             app.processEvents()
             for item in window.sidebar._items:
