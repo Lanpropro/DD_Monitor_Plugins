@@ -11,6 +11,10 @@ from streamlink.plugins.twitch import Twitch, TwitchAPI
 from streamlink.plugins.youtube import YouTube
 from streamlink.stream.hls import HLSStream
 
+from PySide6.QtCore import QEvent, QObject
+from PySide6.QtWidgets import QApplication, QCheckBox, QLabel
+
+from ddm.dialogs import SettingsDialog
 from ddm import plugins as api
 from ddm.auto_quality import AUTO_QUALITY
 from ddm.global_danmaku import GlobalDanmakuClient, page_json, renderers
@@ -411,10 +415,82 @@ class YouTubePlatform(PublicLivePlatform):
             raise RuntimeError("YouTube 直播信息获取失败；请使用公开直播或频道链接") from error
 
 
+class PlatformLogoControl(QObject):
+    """插件自己的设置入口与关注卡片标识；不修改本体类。"""
+    def __init__(self, context, platforms, label):
+        super().__init__(context.window)
+        self.context = context
+        self.platforms = platforms
+        self.label = label
+        self.name = context.name + "_show_platform_logo"
+        self.enabled = bool(context.setting("show_platform_logo", True))
+        QApplication.instance().installEventFilter(self)
+        self.refresh()
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.Show and isinstance(watched, SettingsDialog):
+            if watched.plugin_page.manager is self.context.manager:
+                page = watched.plugin_page
+                if page.findChild(QCheckBox, self.name) is None:
+                    check = QCheckBox(self.label, page)
+                    check.setObjectName(self.name)
+                    check.setChecked(self.enabled)
+                    page.layout().insertWidget(1, check)
+                    watched.accepted.connect(lambda: self.save(check.isChecked()))
+        elif (event.type() in (QEvent.Show, QEvent.ShowToParent, QEvent.DynamicPropertyChange)
+                and isinstance(watched, QLabel) and watched.objectName() == "NavPlatformBadge"
+                and not self.enabled):
+            parent = watched.parentWidget()
+            while parent is not None and parent.objectName() != "NavItem":
+                parent = parent.parentWidget()
+            if parent is not None and parent.window() is self.context.window:
+                room = parent.room
+                platform = room.get("platform") or str(room.get("room_id", "")).partition(":")[0]
+                if platform in self.platforms:
+                    if watched.property("showPlatform") is not False:
+                        watched.setProperty("showPlatform", False)
+                    watched.hide()
+        return False
+
+    def save(self, enabled):
+        self.enabled = bool(enabled)
+        self.context.set_setting("show_platform_logo", self.enabled)
+        self.refresh()
+
+    def refresh(self):
+        sidebar = self.context.window.sidebar
+        # 沿用宿主的单平台、悬停预览和紧凑布局规则。
+        sidebar._sync_count()
+        if not self.enabled:
+            for item in sidebar._items:
+                room = item.room
+                platform = room.get("platform") or str(room.get("room_id", "")).partition(":")[0]
+                if platform in self.platforms:
+                    item.platform_badge.setProperty("showPlatform", False)
+                    item.platform_badge.hide()
+                    item.thumb._layout_overlay()
+
+    def detach(self):
+        QApplication.instance().removeEventFilter(self)
+        for check in self.context.window.findChildren(QCheckBox, self.name):
+            check.hide()
+            check.deleteLater()
+        self.enabled = True
+        self.refresh()
+        self.deleteLater()
+
+
 class GlobalLivePlugin(api.Plugin):
     def on_load(self, context):
         context.register_platform(TwitchPlatform())
         context.register_platform(YouTubePlatform())
+        if QApplication.instance() is not None and context.window is not None:
+            self._logo_control = PlatformLogoControl(context, ("twitch", "youtube"), "显示海外平台 Logo")
+
+    def on_unload(self):
+        if getattr(self, "_logo_control", None) is not None:
+            self._logo_control.detach()
+            self._logo_control = None
 
 
 plugin = GlobalLivePlugin()
