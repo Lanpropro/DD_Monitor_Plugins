@@ -7,15 +7,9 @@
 
 | 插件 | ID | 版本 | 支持平台 |
 | --- | --- | --- | --- |
-| [国内直播平台](plugins/domestic_live/README.md) | `domestic_live` | 1.1 | 虎牙、斗鱼、抖音 |
-| [海外直播平台](plugins/global_live/README.md) | `global_live` | 1.1 | Twitch、YouTube |
-| [比赛二路同步](plugins/match_sync/README.md) | `match_sync` | 1.0 | B 站及已启用平台插件 |
-
-国内和海外平台插件均支持关注卡片、拖入格子播放、直播实际画质、横竖屏静音悬停预览与聊天弹幕。
-海外插件支持根据网络调整画质的“自动”选项。平台标识使用图标，单平台关注栏隐藏图标；
-关闭插件后关注和格子暂存，重新启用恢复。
-
-比赛二路同步提供主画面、自动对齐、多路混音和带来源的合并弹幕。需要 PyAV 17、NumPy 和 FFmpeg；旧本体 EXE 仅替换插件不能补齐运行依赖，详见插件 README。
+| [国内直播平台](plugins/domestic_live/README.md) | `domestic_live` | 1.1 | 提供虎牙、斗鱼、抖音的主播，直播流解析 |
+| [海外直播平台](plugins/global_live/README.md) | `global_live` | 1.1 | 提供Twitch、YouTube平台的主播，直播流解析 |
+| [比赛二路同步](plugins/match_sync/README.md) | `match_sync` | 1.0 | 提供保持单一直播流情况下的多路混音，合并弹幕观看 |
 
 ## 安装
 
@@ -28,13 +22,6 @@ ZIP 内必须只有插件 ID 对应的顶层文件夹。GitHub 自动生成的 S
 包含整个仓库，不能直接作为单插件安装包导入。
 手动安装时，将 `plugins/<ID>` 文件夹复制到软件的 `plugins_user/<ID>`。
 已存在同 ID 的插件不能重复导入；更新前通过插件页面删除旧版本，再导入新包并重启。
-
-### 从旧国内插件升级
-
-国内插件原 ID `huya_watch` 现改为 `domestic_live`（国内直播）。
-在最新版软件中导入新包后，原来的启用选择和插件设置会迁移。
-旧、新目录共存时只装载新插件；房间前缀仍为 `huya:`、`douyu:`、`douyin:`，
-原关注、格子位置、画质与禁用时暂存的房间继续保留。
 
 ## 软件依赖
 
