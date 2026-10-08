@@ -1,7 +1,7 @@
 # Twitch 与 YouTube
 
 一个独立插件提供两个平台的公开直播，与“国内直播平台”分别启用。
-从本仓库 Releases 下载 `global_live-1.0.zip`，在软件“设置 → 插件”中导入。
+从本仓库 Releases 下载 `global_live-1.1.zip`，在软件“设置 → 插件”中导入。
 在设置 → 插件中启用 **Twitch 与 YouTube**，按提示重启后，通过添加直播间输入官方链接。
 
 ## 使用

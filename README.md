@@ -7,8 +7,8 @@
 
 | 插件 | ID | 版本 | 支持平台 |
 | --- | --- | --- | --- |
-| [国内直播平台](plugins/domestic_live/README.md) | `domestic_live` | 1.0 | 虎牙、斗鱼、抖音 |
-| [海外直播平台](plugins/global_live/README.md) | `global_live` | 1.0 | Twitch、YouTube |
+| [国内直播平台](plugins/domestic_live/README.md) | `domestic_live` | 1.1 | 虎牙、斗鱼、抖音 |
+| [海外直播平台](plugins/global_live/README.md) | `global_live` | 1.1 | Twitch、YouTube |
 | [比赛二路同步](plugins/match_sync/README.md) | `match_sync` | 1.0 | B 站及已启用平台插件 |
 
 国内和海外平台插件均支持关注卡片、拖入格子播放、直播实际画质、横竖屏静音悬停预览与聊天弹幕。
