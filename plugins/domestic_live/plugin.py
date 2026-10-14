@@ -535,9 +535,11 @@ class DouyuPlatform(NumericLivePlatform):
                         timeout=(4, 8)) as response:
                     response.raise_for_status()
                     match = re.search(r"\bwindow\.room_id\s*=\s*([1-9][0-9]{0,19})\s*;", response.text)
-                if match is None or match[1] == raw:
+                    ids = {match[1]} if match else set(re.findall(
+                        r'''(?:\broomI[Dd]|["']roomI[Dd]["'])\s*:\s*([1-9][0-9]{0,19})\b''', response.text))
+                if len(ids) != 1 or raw in ids:
                     raise ValueError("Missing actual room ID")
-                room = self._room_data(match[1])
+                room = self._room_data(ids.pop())
             if type(room.get("show_status")) is not int or not room.get("room_id"):
                 raise ValueError("Missing room status")
             canonical = self.normalize(f"douyu:{room['room_id']}")

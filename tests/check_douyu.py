@@ -46,8 +46,14 @@ def main():
     with patch.object(module.requests, "get", return_value=response({"room": room})) as get:
         assert platform.room_info("douyu:6979222").room_id == "douyu:6979222"
         assert get.call_count == 1
+    for page in ('player({roomID: 6979222})', '{"roomId":6979222}',
+                 'player({roomID:6979222}); player({roomID:6979222})'):
+        with patch.object(module.requests, "get", side_effect=[response(invalid_json=True),
+                response(text=page), response({"room": room})]):
+            assert platform.room_info("douyu:6657").room_id == "douyu:6979222"
     for page in ("captcha", "window.room_id = 6657;", "window.room_id = 0;",
-                 "window.room_id = '6979222';"):
+                 "window.room_id = '6979222';", 'player({roomID:6979222,roomId:12345})',
+                 'player({roomID:6657})', 'player({roomID:"6979222"})'):
         with patch.object(module.requests, "get", side_effect=[response(invalid_json=True),
                 response(text=page)]) as get:
             try:
