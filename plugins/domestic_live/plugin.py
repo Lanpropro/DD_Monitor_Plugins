@@ -552,8 +552,7 @@ class DouyuPlatform(NumericLivePlatform):
         except (requests.RequestException, ValueError, KeyError, TypeError) as error:
             raise RuntimeError("斗鱼房间信息获取失败，请稍后重试") from error
 
-    @staticmethod
-    def _playback_cookies():
+    def _playback_cookies(self):
         jar = requests.cookies.RequestsCookieJar()
         if os.environ.get("DDM_NO_SAVE") == "1":
             return jar
@@ -563,7 +562,11 @@ class DouyuPlatform(NumericLivePlatform):
             return jar  # Older hosts still support public playback without saved accounts.
         from PySide6.QtCore import QByteArray
         from PySide6.QtNetwork import QNetworkCookie
-        for raw in AccountStore("douyu").load():
+        context = getattr(self, "_context", None)
+        window = context.window if context else None
+        session = getattr(window, "_platform_login_sessions", {}).get("douyu")
+        cookies = session["cookies"] if session is not None else AccountStore("douyu").load()
+        for raw in cookies:
             for cookie in QNetworkCookie.parseCookies(QByteArray(raw.encode("utf-8"))):
                 domain = cookie.domain().lstrip(".").lower()
                 if domain != "douyu.com" and not domain.endswith(".douyu.com"):
@@ -607,8 +610,15 @@ class DouyuPlatform(NumericLivePlatform):
                 raise RuntimeError("斗鱼所选画质取流失败，请重试或选择其他画质")
         if not data:
             return {}
-        stream = HTTPStream(session, f"{data['rtmp_url']}/{data['rtmp_live']}")
         actual_rate = data.get("rate", rate)
+        if actual_rate != rate:
+            try:
+                self.account_info(session.http, lambda: False)
+            except RuntimeError as error:
+                raise getattr(api, "LoginRequiredError", RuntimeError)(
+                    "斗鱼登录已失效或未登录，请重新登录后获取所选画质") from error
+            raise RuntimeError("斗鱼未返回所选画质，请重试或选择其他线路/画质")
+        stream = HTTPStream(session, f"{data['rtmp_url']}/{data['rtmp_live']}")
         stream.ddm_quality = 10000 if actual_rate == 0 else 2000000 + actual_rate
         return {"source": stream}
 
@@ -1153,7 +1163,9 @@ class PlatformLogoControl(QObject):
 class LivePlatformsPlugin(api.Plugin):
     def on_load(self, context: api.PluginContext) -> None:
         context.register_platform(HuyaPlatform())
-        context.register_platform(DouyuPlatform())
+        douyu = DouyuPlatform()
+        douyu._context = context
+        context.register_platform(douyu)
         douyin = DouyinPlatform()
         saved = context.setting("douyin_room_owners", {})
         if isinstance(saved, dict):

@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import sys
 from unittest.mock import patch
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 os.environ["DDM_NO_SAVE"] = "1"
@@ -30,6 +31,14 @@ def main():
             cookies = platform._playback_cookies()
         load.assert_called_once_with()
     assert cookies.get_dict() == {"auth": "fixture"}
+    window = SimpleNamespace(_platform_login_sessions={"douyu": {"cookies": [
+        "auth=live-session; Domain=.douyu.com; Path=/; Secure; HttpOnly"], "remember": False}})
+    with patch.object(platform, '_context', SimpleNamespace(window=window)), \
+            patch.dict(os.environ, {"DDM_NO_SAVE": "0"}), patch.object(AccountStore, 'load') as load:
+        assert platform._playback_cookies().get_dict() == {'auth': 'live-session'}
+        load.assert_not_called()
+        window._platform_login_sessions['douyu']['cookies'] = []
+        assert not platform._playback_cookies(), 'Cleared runtime login must not resurrect stale saved cookies'
     source = {"rtmp_url": "https://cdn.test", "rtmp_live": "source.flv", "rate": 4,
               "multirates": [{"rate": 0, "bit": 16000, "name": "原画1080P60"},
                              {"rate": 4, "bit": 4000, "name": "蓝光4M"}]}
@@ -59,6 +68,17 @@ def main():
             _url, quality, _profile, headers = platform.play_url("douyu:123", 10000)
             assert quality == 10000 and set(headers) == {"User-Agent", "Referer"}
             assert "fixture" not in str(headers), "Account cookies must stay in the official API session"
+        for valid in (False, True):
+            with patch.object(platform, 'room_info', return_value=plugins.RoomInfo('douyu:123', live=True)), \
+                    patch.object(platform, '_request_source', return_value=source), \
+                    patch.object(platform, 'account_info', **({'return_value': {'uid': '1'}} if valid else
+                                 {'side_effect': RuntimeError('expired login')})):
+                try:
+                    platform._streams(session, 'douyu:123', 10000)
+                except RuntimeError as error:
+                    assert ('未返回所选画质' if valid else '重新登录') in str(error)
+                else:
+                    raise AssertionError('4M must not replace an explicitly selected original stream')
     finally:
         session.http.close()
         manager.unload()
