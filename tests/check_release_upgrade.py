@@ -1,4 +1,4 @@
-"""用实际 1.0 代码验证 1.1 插件暂存、重启应用及数据保留。"""
+"""验证旧版本插件升级至当前清单版本，保留源码一致性与用户数据。"""
 import argparse
 import json
 import os
@@ -20,6 +20,8 @@ def main():
     os.environ["DDM_NO_SAVE"] = "1"
     from ddm.plugins import PluginManager, read_manifest
     from ddm.plugin_updates import apply_pending, pending_versions, stage
+    versions = {path.parent.name: json.loads(path.read_text(encoding="utf-8"))["version"]
+                for path in (ROOT / "plugins").glob("*/plugin.json")}
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         manager = PluginManager(plugins_dir=str(root), enabled=[])
@@ -36,22 +38,42 @@ def main():
             assert read_manifest(str(target), plugin_id)["version"] == "1.0"
             sentinel = target / "user-data.txt"
             sentinel.write_bytes(b"preserve user data")
-            stage(manager, str(ROOT / "dist" / (plugin_id + "-1.1.zip")), plugin_id, "1.1")
-            assert pending_versions(manager)[plugin_id] == "1.1"
+            stage(manager, str(ROOT / "dist" / (plugin_id + "-" + versions[plugin_id] + ".zip")), plugin_id, versions[plugin_id])
+            assert pending_versions(manager)[plugin_id] == versions[plugin_id]
             assert read_manifest(str(target), plugin_id)["version"] == "1.0"
         apply_pending(manager)
         assert not pending_versions(manager)
         for plugin_id in ("domestic_live", "global_live", "match_sync"):
             target = root / plugin_id
-            assert read_manifest(str(target), plugin_id)["version"] == "1.1"
+            assert read_manifest(str(target), plugin_id)["version"] == versions[plugin_id]
             assert (target / "user-data.txt").read_bytes() == b"preserve user data"
             assert (target / "plugin.py").read_bytes() == (ROOT / "plugins" / plugin_id / "plugin.py").read_bytes()
         manager.enabled = {"domestic_live", "global_live", "match_sync"}
         manager.load()
         assert len(manager.plugins) == 3 and not manager.skipped
-        assert all(plugin.version == "1.1" for plugin in manager.plugins)
+        assert all(plugin.version == versions[plugin.context.name] for plugin in manager.plugins)
         manager.unload()
-    print("PASS: three plugins 1.0 -> staged 1.1 -> restarted 1.1; source and user data preserved")
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        old_zip = root / "domestic_live-1.1.zip"
+        paths = subprocess.check_output(["git", "ls-tree", "-r", "--name-only", "v1.1",
+            "--", "plugins/domestic_live"], cwd=ROOT, text=True).splitlines()
+        with zipfile.ZipFile(old_zip, "w") as archive:
+            for source in paths:
+                data = subprocess.check_output(["git", "show", "v1.1:" + source], cwd=ROOT)
+                archive.writestr(source.removeprefix("plugins/"), data)
+        manager = PluginManager(plugins_dir=str(root / "plugins"), enabled=[])
+        manager.install_zip(str(old_zip))
+        target = root / "plugins/domestic_live"
+        assert read_manifest(str(target), "domestic_live")["version"] == "1.1"
+        (target / "user-data.txt").write_bytes(b"preserve 1.1 data")
+        stage(manager, str(ROOT / "dist" / "domestic_live-1.2.zip"), "domestic_live", "1.2")
+        assert read_manifest(str(target), "domestic_live")["version"] == "1.1"
+        apply_pending(manager)
+        assert read_manifest(str(target), "domestic_live")["version"] == "1.2"
+        assert (target / "user-data.txt").read_bytes() == b"preserve 1.1 data"
+        assert (target / "plugin.py").read_bytes() == (ROOT / "plugins/domestic_live/plugin.py").read_bytes()
+    print("PASS: 1.0 plugins upgrade to current versions; domestic 1.1 -> 1.2; source and user data preserved")
 
 
 if __name__ == "__main__":
