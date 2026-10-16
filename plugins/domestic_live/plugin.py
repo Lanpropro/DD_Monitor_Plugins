@@ -207,7 +207,7 @@ class HuyaPlatform(LiveQualityPlatform):
                         "rate": item["iBitRate"]}
                        for item in data.get("vMultiStreamInfo", [])
                        if isinstance(item.get("iBitRate"), int) and item["iBitRate"] >= 0]
-            if not any(item["rate"] == 0 for item in options):
+            if not options:
                 options.append({"qn": 10000, "desc": "原画", "rate": 0})
             self._qualities[room_id] = sorted(options, key=lambda item: (
                 item["rate"] == 0, item["rate"]), reverse=True)
