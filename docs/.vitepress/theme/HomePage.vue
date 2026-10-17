@@ -74,13 +74,13 @@ onUnmounted(() => observer?.disconnect())
     <section id="plugins" class="home-section home-plugins" data-reveal aria-labelledby="plugins-title">
       <div class="section-heading"><div><p class="eyebrow">02 / 插件扩展</p><h2 id="plugins-title">让直播墙，多一点可能。</h2></div><a :href="withBase('/plugins/')">全部插件与安装说明 ↗</a></div>
       <div class="home-plugin-grid"><article v-for="(plugin, i) in plugins" :key="plugin.id" class="home-plugin-card">
-        <div class="card-top"><span class="plugin-category">0{{ i + 1 }} / {{ plugin.category }}</span><span class="version">v{{ plugin.version }}</span></div>
-        <div class="platform-icons"><img v-for="(icon, j) in plugin.icons" :key="icon" :src="withBase('/platforms/' + icon)" :alt="plugin.platforms[j]" width="32" height="32" loading="lazy" /></div>
+        <div class="card-top"><div class="platform-icons"><img v-for="(icon, j) in plugin.icons" :key="icon" :src="withBase('/platforms/' + icon)" :alt="plugin.platforms[j]" width="32" height="32" loading="lazy" /></div><span class="version">v{{ plugin.version }}</span></div>
+        <span class="plugin-category">0{{ i + 1 }} / {{ plugin.category }}</span>
         <h3><a :href="withBase('/plugins/' + plugin.id)">{{ plugin.name }}</a></h3><p>{{ plugin.description }}</p>
         <div class="platform-tags"><span v-for="platform in plugin.platforms" :key="platform">{{ platform }}</span></div>
         <ul><li v-for="feature in plugin.features" :key="feature">{{ feature }}</li></ul>
         <button class="plugin-demo-trigger" :aria-pressed="previewPlugin === i" aria-controls="plugin-demo" @click="previewPlugin = i">查看功能流程 <span aria-hidden="true">↗</span></button>
-        <div class="card-actions"><a class="action secondary" :href="plugin.download">下载 v{{ plugin.version }} ZIP</a><a class="detail-link" :href="withBase('/plugins/' + plugin.id)">查看详情 ↗</a></div>
+        <div class="card-actions"><a class="action primary" :href="plugin.download">下载 ZIP</a><a class="detail-link" :href="withBase('/plugins/' + plugin.id)">查看详情 ↗</a></div>
       </article></div>
       <div id="plugin-demo" class="plugin-demo-panel" aria-live="polite">
         <div class="plugin-demo-heading"><p class="eyebrow">使用流程</p><h3>{{ plugins[previewPlugin].name }}</h3><a :href="withBase('/plugins/' + plugins[previewPlugin].id)">阅读完整说明 ↗</a></div>
