@@ -43,6 +43,6 @@ title: 国内直播平台
 
 ## 更新记录
 
-**1.0 · 2026-10-03**：统一国内插件版本为 1.0，沿用已有播放、画质、悬停预览与弹幕实现。[发布说明](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/v1.0)。
+**1.0 · 2026-10-03**：统一国内插件版本为 1.0，沿用已有播放、画质、悬停预览与弹幕实现。[当前版本发布说明](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v1.2)。
 
 [完整插件 README](https://github.com/Lanpropro/DD_Monitor_Plugins/blob/main/plugins/domestic_live/README.md) · [反馈问题](https://github.com/Lanpropro/DD_Monitor_Plugins/issues)

@@ -24,4 +24,4 @@ title: 比赛二路同步
 
 **1.0 · 2026-10-07**：首次正式发布。包含原始画质播放、后台解码、自动对齐优化、混音和合并弹幕；横屏保留原文字按钮位置和样式，竖屏采用顶部图标入口。
 
-[完整插件 README](https://github.com/Lanpropro/DD_Monitor_Plugins/blob/main/plugins/match_sync/README.md) · [发布页](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/v1.0)
+[完整插件 README](https://github.com/Lanpropro/DD_Monitor_Plugins/blob/main/plugins/match_sync/README.md) · [当前版本发布页](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.2)

@@ -1,8 +1,8 @@
 ---
-title: Twitch 与 YouTube
+title: 海外直播平台
 ---
 
-# Twitch 与 YouTube
+# 海外直播平台
 
 <PluginInfo id="global_live" />
 
@@ -40,6 +40,6 @@ title: Twitch 与 YouTube
 
 ## 更新记录
 
-**1.0 · 2026-10-03**：统一海外插件版本为 1.0，沿用已有播放、自动画质、悬停预览与聊天实现。[发布说明](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/v1.0)。
+**1.0 · 2026-10-03**：统一海外插件版本为 1.0，沿用已有播放、自动画质、悬停预览与聊天实现。[当前版本发布说明](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/v1.1)。
 
 [完整插件 README](https://github.com/Lanpropro/DD_Monitor_Plugins/blob/main/plugins/global_live/README.md) · [反馈问题](https://github.com/Lanpropro/DD_Monitor_Plugins/issues)
