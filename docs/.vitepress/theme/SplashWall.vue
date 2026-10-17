@@ -1,13 +1,14 @@
 <script setup>
 import { onMounted, onUnmounted, reactive, ref } from 'vue'
 
-// 标准画面墙：等尺寸格子按网格铺开，整面比视口大，可以拖动查看。
+// 标准画面墙：等尺寸格子铺成 2×2 的重复块，拖动按周期取模，四向都接得上。
 const TILE_COUNT = 56
+const REPEATS = 4
 const section = ref(null)
 const wall = ref(null)
 const offset = reactive({ x: 0, y: 0 })
 let tileNodes = []
-let limits = { x: 0, y: 0 }
+let period = { x: 0, y: 0 }
 let scrollProgress = 0
 let reduced = false
 let dragging = false
@@ -22,6 +23,12 @@ let driftY = 0
 let navRevealed = false
 
 const MAGNIFY_SCALE = 0.45
+
+// 把位移折回 [-p/2, p/2)，内容本来重复，折回去看不出接缝。
+function wrap(value, p) {
+  if (!p) return value
+  return (((value + p / 2) % p) + p) % p - p / 2
+}
 
 function applyTransform() {
   const element = wall.value
@@ -83,14 +90,15 @@ function resetMagnify() {
 
 function measure() {
   const element = wall.value
-  const host = section.value
-  if (!element || !host) return
-  limits = {
-    x: Math.max(0, (element.offsetWidth - host.clientWidth) / 2),
-    y: Math.max(0, (element.offsetHeight - host.clientHeight) / 2)
+  if (!element) return
+  const gap = parseFloat(getComputedStyle(element).gap) || 16
+  // 墙面由 2×2 份相同内容拼成，位移的重复周期就是其中一份的边长。
+  period = {
+    x: (element.offsetWidth + gap) / 2,
+    y: (element.offsetHeight + gap) / 2
   }
-  offset.x = Math.max(-limits.x, Math.min(limits.x, offset.x))
-  offset.y = Math.max(-limits.y, Math.min(limits.y, offset.y))
+  offset.x = wrap(offset.x, period.x)
+  offset.y = wrap(offset.y, period.y)
   applyTransform()
 }
 
@@ -131,8 +139,8 @@ function onPointerMove(event) {
     })
   }
   if (!dragging) return
-  offset.x = Math.max(-limits.x, Math.min(limits.x, dragStart.ox + (event.clientX - dragStart.x)))
-  offset.y = Math.max(-limits.y, Math.min(limits.y, dragStart.oy + (event.clientY - dragStart.y)))
+  offset.x = wrap(dragStart.ox + (event.clientX - dragStart.x), period.x)
+  offset.y = wrap(dragStart.oy + (event.clientY - dragStart.y), period.y)
   applyTransform()
 }
 
@@ -175,7 +183,7 @@ onUnmounted(() => {
     @pointerdown="onPointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp"
     @pointercancel="onPointerUp" @pointerleave="onPointerLeave">
     <div ref="wall" class="splash-wall">
-      <span v-for="n in TILE_COUNT" :key="n" class="splash-tile" :style="{ '--i': (n - 1) % 14 }"></span>
+      <span v-for="n in TILE_COUNT * REPEATS" :key="n" class="splash-tile" :style="{ '--i': (n - 1) % 14 }"></span>
     </div>
     <p class="splash-hint">拖动查看<span class="splash-dot">·</span>向下滚动进入主页</p>
   </section>
@@ -197,10 +205,10 @@ onUnmounted(() => {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: max(170vw, 1240px);
+  width: max(340vw, 2480px);
   display: grid;
-  /* 列数固定、行数由格子总数决定；窄屏换成 4 列，行数自然变多。 */
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  /* 2 份相同内容并排、上下也各 2 份，拖到周期处折回去就是无缝的。 */
+  grid-template-columns: repeat(14, minmax(0, 1fr));
   gap: clamp(8px, 0.9vw, 16px);
   transform: translate3d(-50%, -50%, 0);
   transform-origin: 50% 50%;
@@ -243,7 +251,7 @@ onUnmounted(() => {
 .splash-dot { opacity: .5; }
 @keyframes hint-in { from { opacity: 0; } to { opacity: 1; } }
 @media (max-width: 700px) {
-  .splash-wall { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .splash-wall { grid-template-columns: repeat(8, minmax(0, 1fr)); }
   .splash-hint { font-size: 12px; }
 }
 @media (prefers-reduced-motion: reduce) {
