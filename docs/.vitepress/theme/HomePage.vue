@@ -3,6 +3,7 @@ import { withBase } from 'vitepress'
 import { onMounted, onUnmounted, ref } from 'vue'
 import plugins from '../../data/plugins.json'
 import release from '../../data/software-release.json'
+import SplashWall from './SplashWall.vue'
 
 const active = ref(0)
 const previewPlugin = ref(0)
@@ -33,6 +34,7 @@ onUnmounted(() => observer?.disconnect())
 </script>
 
 <template>
+  <SplashWall />
   <main ref="page" class="showcase">
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy">

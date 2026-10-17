@@ -149,6 +149,15 @@ test('Dock navigation renders all destinations and exactly one current page on e
   }
 })
 
+test('opening screen shows the placeholder wall before any page content', () => {
+  const home = readFileSync(resolve(dist, 'index.html'), 'utf8')
+  const wall = home.match(/<section class="splash"[^>]*>/)
+  assert.ok(wall, 'missing opening wall')
+  assert.match(wall[0], /aria-hidden="true"/, 'the decorative wall must stay out of the accessibility tree')
+  assert.equal((home.match(/class="splash-tile"/g) || []).length, 16, 'the wall mirrors the 16 tile limit')
+  assert.ok(home.indexOf('class="splash"') < home.indexOf('class="showcase"'), 'the wall comes before the page content')
+})
+
 test('feature demonstrations and per-plugin instructions remain readable before hydration', () => {
   const home = readFileSync(resolve(dist, 'index.html'), 'utf8')
   assert.ok(home.includes('交互示意'))
