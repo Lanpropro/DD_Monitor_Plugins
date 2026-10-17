@@ -106,6 +106,14 @@ class HuyaPlatform(LiveQualityPlatform):
     follow_login_url = "https://www.huya.com/?evt_fe=login"
     follow_cookie_domain = "huya.com"
 
+    def _select_quality(self, room_id, quality, preview):
+        options = self._qualities[room_id]
+        if preview:
+            return min(options, key=lambda item: (item["rate"] == 0, item["rate"]))
+        if quality == 10000:
+            return options[0]
+        return super()._select_quality(room_id, quality, preview)
+
     def follow_rooms(self, session, cancelled) -> list:
         if cancelled():
             return []
@@ -209,7 +217,13 @@ class HuyaPlatform(LiveQualityPlatform):
                        if isinstance(item.get("iBitRate"), int) and item["iBitRate"] >= 0]
             if not options:
                 options.append({"qn": 10000, "desc": "原画", "rate": 0})
+            for option in options:
+                option["label"] = option["desc"]
+                option["restricted"] = bool(re.search(r"(?<!\d)4\s*K", option["desc"], re.I))
+                if option["restricted"]:
+                    option["desc"] += "（VIP授权未接入，暂不保证可用）"
             self._qualities[room_id] = sorted(options, key=lambda item: (
+                bool(re.search(r"(?<!\d)2\s*K", item["label"], re.I)), not item["restricted"],
                 item["rate"] == 0, item["rate"]), reverse=True)
             selected = self._select_quality(room_id, quality, preview)
             bitrate = selected["rate"]
