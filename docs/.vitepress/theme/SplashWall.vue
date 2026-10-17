@@ -54,7 +54,8 @@ function drift(now) {
 
 function magnify(clientX, clientY) {
   const element = wall.value
-  if (!element || !tileNodes.length) return
+  // 内容已经压上来时，这面墙只是背景，不再跟着鼠标放大。
+  if (navRevealed || !element || !tileNodes.length) return
   const rect = element.getBoundingClientRect()
   const px = clientX - rect.left
   const py = clientY - rect.top
@@ -110,6 +111,8 @@ function updateScroll() {
   if (reveal !== navRevealed) {
     navRevealed = reveal
     document.documentElement.classList.toggle('splash-revealed', reveal)
+    // 一进入内容层就把残留的放大收回去，滚回顶部再恢复。
+    if (reveal) resetMagnify()
   }
 }
 
@@ -131,6 +134,7 @@ function onPointerDown(event) {
 }
 
 function onPointerMove(event) {
+  if (!dragging && navRevealed) return
   pointerAt = { x: event.clientX, y: event.clientY }
   if (!pointerFrame) {
     pointerFrame = requestAnimationFrame(() => {
