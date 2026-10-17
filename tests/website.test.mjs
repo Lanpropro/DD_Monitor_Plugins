@@ -154,7 +154,8 @@ test('opening screen shows the placeholder wall before any page content', () => 
   const wall = home.match(/<section class="splash"[^>]*>/)
   assert.ok(wall, 'missing opening wall')
   assert.match(wall[0], /aria-hidden="true"/, 'the decorative wall must stay out of the accessibility tree')
-  assert.equal((home.match(/class="splash-tile"/g) || []).length, 16, 'the wall mirrors the 16 tile limit')
+  assert.equal((home.match(/class="splash-tile"/g) || []).length, 56, 'the wall is larger than the viewport so it can be dragged')
+  assert.ok(home.includes('拖动查看'), 'the opening screen must say it can be dragged')
   assert.ok(home.indexOf('class="splash"') < home.indexOf('class="showcase"'), 'the wall comes before the page content')
 })
 
