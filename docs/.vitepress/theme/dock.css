@@ -1,0 +1,47 @@
+/* Keep page controls above the floating navigation, including safe-area devices. */
+#app { padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px)); }
+html { scroll-padding-bottom: 116px; }
+.dock-nav {
+  position: fixed;
+  z-index: 40;
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 5px;
+  padding: 8px 12px;
+  max-width: calc(100% - 20px);
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 22px;
+  background: var(--vp-c-bg-elv);
+  background: color-mix(in srgb, var(--vp-c-bg-elv) 88%, transparent);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 12px 40px #0003, inset 0 1px 0 #ffffff12;
+}
+.dock-item { position: relative; width: 64px; min-width: 0; display: flex; align-items: center; flex-direction: column; gap: 4px; padding: 5px 4px 9px; border-radius: 13px; color: var(--vp-c-text-2); touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.dock-icon { display: grid; place-items: center; width: 40px; height: 34px; border-radius: 10px; background: var(--vp-c-bg-soft); transform-origin: center bottom; transition: transform 200ms var(--ease-out), background-color 160ms ease; }
+.dock-label { font-size: 12px; line-height: 1.4; font-weight: 500; white-space: nowrap; }
+.dock-item[aria-current="page"] { color: var(--vp-c-brand-1); }
+.dock-item[aria-current="page"]::after { content: ''; position: absolute; bottom: 1px; width: 4px; height: 4px; background: currentColor; border-radius: 50%; }
+.dock-item:focus-visible { outline: 2px solid var(--vp-c-brand-1); outline-offset: 3px; }
+.dock-item:active .dock-icon { transform: scale(.97); }
+@media (hover: hover) and (pointer: fine) {
+  .dock-item:hover { color: var(--vp-c-brand-1); }
+  .dock-item:hover .dock-icon { transform: translateY(-6px) scale(1.18); }
+  .dock-item:has(+ .dock-item:hover) .dock-icon,
+  .dock-item:hover + .dock-item .dock-icon { transform: translateY(-3px) scale(1.08); }
+  .dock-item:active .dock-icon { transform: translateY(-3px) scale(1.05); }
+}
+@media (max-width: 700px) {
+  .dock-nav { gap: 2px; padding: 7px 8px; border-radius: 20px; bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
+  .dock-item { width: 54px; }
+  .dock-icon { width: 36px; height: 32px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dock-icon { transition: background-color 160ms ease; }
+  .dock-nav .dock-item .dock-icon { transform: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .dock-nav { background: var(--vp-c-bg-elv); backdrop-filter: none; }
+}
+@media print { .dock-nav { display: none; } #app { padding-bottom: 0; } }

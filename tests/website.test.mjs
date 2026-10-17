@@ -128,6 +128,32 @@ test('homepage exposes software and every plugin download before JavaScript runs
   }
 })
 
+test('Dock navigation renders all destinations and exactly one current page on every route', () => {
+  const routes = ['index', 'software', 'download', 'guide', 'plugins/index', 'plugins/domestic_live', 'plugins/global_live', 'plugins/match_sync']
+  for (const route of routes) {
+    const html = readFileSync(resolve(dist, route + '.html'), 'utf8')
+    const dock = html.match(/<nav\b[^>]*class="dock-nav"[^>]*>[\s\S]*?<\/nav>/)?.[0]
+    assert.ok(dock, `missing Dock: ${route}`)
+    for (const target of ['', 'software', 'plugins/', 'download', 'guide']) assert.ok(dock.includes(`href="${base}${target}"`))
+    assert.equal((dock.match(/aria-current="page"/g) || []).length, 1, route)
+    const expected = route.startsWith('plugins/') ? 'plugins/' : route === 'index' ? '' : route
+    assert.match(dock, new RegExp(`href="${base}${expected}"[^>]*aria-current="page"`), route)
+  }
+})
+
+test('feature demonstrations and per-plugin instructions remain readable before hydration', () => {
+  const home = readFileSync(resolve(dist, 'index.html'), 'utf8')
+  assert.ok(home.includes('交互示意'))
+  assert.ok(home.includes('aria-label="主画面比例"'))
+  assert.ok(home.includes('aria-label="软件功能演示"'))
+  assert.ok(home.includes('id="plugin-demo"'))
+  for (const plugin of plugins) {
+    assert.equal(plugin.steps.length, 3)
+    assert.equal(new Set(plugin.steps).size, 3)
+  }
+  for (const step of plugins[0].steps) assert.ok(home.includes(step))
+})
+
 test('every generated internal link, anchor and local asset resolves under the Pages base', () => {
   for (const path of walk(dist).filter(p => p.endsWith('.html'))) {
     const html = readFileSync(path, 'utf8')

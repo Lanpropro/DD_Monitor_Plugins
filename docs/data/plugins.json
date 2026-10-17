@@ -22,7 +22,12 @@
     ],
     "download": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/domestic-live-v1.2/domestic_live-1.2.zip",
     "sha256": "eb61593255633eaf53aeef195472a89187d31fde7b3d01157334bb66277b2c0a",
-    "minAppVersion": "0.3"
+    "minAppVersion": "0.3",
+    "steps": [
+      "添加虎牙、斗鱼或抖音直播间",
+      "将关注卡片拖入画面墙",
+      "选择实际画质，阅读聊天"
+    ]
   },
   {
     "id": "global_live",
@@ -45,7 +50,12 @@
     ],
     "download": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/v1.1/global_live-1.1.zip",
     "sha256": "04b4fa6c24d17b44143c3b091826b01a4d68db97944c685f2690716132682094",
-    "minAppVersion": "0.3"
+    "minAppVersion": "0.3",
+    "steps": [
+      "关注 Twitch 或 YouTube 直播",
+      "拖入格子，开启自动画质",
+      "静音预览，切换主画面聊天"
+    ]
   },
   {
     "id": "match_sync",
@@ -72,6 +82,11 @@
     ],
     "download": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/match-sync-v1.2/match_sync-1.2.zip",
     "sha256": "b52b6053fbda18014a77a463306846179c1713ae9d309ceb0ae85ecddd463ef7",
-    "minAppVersion": "0.3"
+    "minAppVersion": "0.3",
+    "steps": [
+      "选择一路比赛主画面",
+      "加入二路，开启自动对齐",
+      "混合主播声音，合并弹幕"
+    ]
   }
 ]

@@ -11,12 +11,6 @@ export default defineConfig({
   themeConfig: {
     logo: '/logo.svg',
     siteTitle: 'DD 监控室 CE',
-    nav: [
-      { text: '软件介绍', link: '/software' },
-      { text: '插件', link: '/plugins/' },
-      { text: '下载', link: '/download' },
-      { text: '安装帮助', link: '/guide' }
-    ],
     sidebar: {
       '/plugins/': [{ text: '插件', items: [
         { text: '所有插件', link: '/plugins/' },
