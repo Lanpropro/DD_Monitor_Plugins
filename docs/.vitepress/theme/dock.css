@@ -59,12 +59,25 @@
 }
 @media print { .dock-nav { display: none; } }
 /* 首页开屏期间收起整条顶栏，用户往下滚之后才滑下来。 */
+html.splash-mode .VPNavBar {
+  transition: transform 460ms var(--ease-out), opacity 380ms ease;
+  will-change: transform;
+}
+/* 用位移收起而不是只改透明度：顶栏留在文档流里会盖住首屏，也会随页面滚走。 */
 html.splash-mode:not(.splash-revealed) .VPNavBar {
   transform: translateY(-100%);
   opacity: 0;
   pointer-events: none;
 }
-html.splash-mode .VPNavBar {
-  transition: transform 460ms var(--ease-out), opacity 380ms ease;
-}
 html.splash-mode.splash-boot .VPNavBar { transition: none; }
+/* 手机上开屏墙不再拦截纵向滑动，但墙仍铺满第一屏，所以一滑动就把顶栏交给用户。 */
+@media (max-width: 700px) {
+  /* 默认主题在 960px 以下把顶栏设成 relative，会随页面滚走；开屏页必须固定，
+     否则首屏藏着、滚动后又滚出视口，手机上等于没有任何导航入口。 */
+  html.splash-mode .VPNav { position: fixed; top: 0; }
+  html.splash-mode.splash-scrolled .VPNavBar {
+    transform: none;
+    opacity: 1;
+    pointer-events: auto;
+  }
+}

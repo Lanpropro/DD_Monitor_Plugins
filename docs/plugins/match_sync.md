@@ -22,6 +22,10 @@ title: 比赛二路同步
 
 ## 更新记录
 
+**1.2 · 2026-10-15**：改善缓冲与重连后的持续搜索，恢复二路模式的弹幕、静音、全屏和声音快捷键；主画面优先，利用已有缓存吸收短时波动。自动对齐需框选相同计时区域，图像匹配不读取数字语义。[当前版本发布页](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.2)
+
+**1.1 · 2026-10-09**：批量混合多路音频、优化取流解码与主路对照复用，降低界面线程开销。[1.1 发布说明](https://github.com/Lanpropro/DD_Monitor_Plugins/blob/main/RELEASE-match-sync-v1.1.md)
+
 **1.0 · 2026-10-07**：首次正式发布。包含原始画质播放、后台解码、自动对齐优化、混音和合并弹幕；横屏保留原文字按钮位置和样式，竖屏采用顶部图标入口。
 
 [完整插件 README](https://github.com/Lanpropro/DD_Monitor_Plugins/blob/main/plugins/match_sync/README.md) · [当前版本发布页](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.2)

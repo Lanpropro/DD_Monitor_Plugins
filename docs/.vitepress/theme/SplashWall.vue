@@ -13,6 +13,8 @@ let scrollProgress = 0
 let reduced = false
 let dragging = false
 let dragStart = { x: 0, y: 0, ox: 0, oy: 0 }
+// 触摸按下的起点；超过横向阈值才转为拖动，纵向手势继续滚页面。
+let pendingDrag = null
 let scrollFrame = 0
 let scrollPending = false
 let pointerFrame = 0
@@ -43,7 +45,8 @@ function applyTransform() {
 
 // 没人操作时整面墙自己缓缓游动，双频叠加让轨迹不重复。
 function drift(now) {
-  const active = !dragging && !reduced && (window.scrollY || 0) < (window.innerHeight || 1) * 0.6
+  // 开屏墙在手机上铺满第一屏，若继续游动会一直重绘，滚动后停手。
+  const active = !dragging && !reduced && !navRevealed && (window.scrollY || 0) < (window.innerHeight || 1) * 0.6
   if (active) {
     driftX = Math.sin(now / 2600) * 62 + Math.sin(now / 7100) * 22
     driftY = Math.cos(now / 3300) * 44 + Math.cos(now / 8300) * 16
@@ -107,13 +110,17 @@ function updateScroll() {
   const viewport = window.innerHeight || 1
   scrollProgress = reduced ? 0 : Math.min(1, Math.max(0, (window.scrollY || 0) / (viewport * 0.85)))
   applyTransform()
-  const reveal = (window.scrollY || 0) > Math.min(140, viewport * 0.14)
+  // 手机上首屏就是整面墙，顶栏若一直藏着就没有导航入口，所以一滑动就放出来。
+  const threshold = viewport <= 700 ? 4 : Math.min(140, viewport * 0.14)
+  const reveal = (window.scrollY || 0) > threshold
   if (reveal !== navRevealed) {
     navRevealed = reveal
     document.documentElement.classList.toggle('splash-revealed', reveal)
     // 一进入内容层就把残留的放大收回去，滚回顶部再恢复。
     if (reveal) resetMagnify()
   }
+  // 滚动量很小时只改墙的深浅，不移动、不淡出，避免手机首屏墙被压没。
+  document.documentElement.classList.toggle('splash-scrolled', (window.scrollY || 0) > 4)
 }
 
 function onScroll() {
@@ -127,6 +134,11 @@ function onScroll() {
 
 function onPointerDown(event) {
   if (event.pointerType === 'mouse' && event.button !== 0) return
+  // 触摸纵向留给滚动：按下时只记起点，判定为横向拖动后才真正接管。
+  if (event.pointerType !== 'mouse') {
+    pendingDrag = { id: event.pointerId, x: event.clientX, y: event.clientY }
+    return
+  }
   dragging = true
   dragStart = { x: event.clientX, y: event.clientY, ox: offset.x, oy: offset.y }
   section.value?.classList.add('is-dragging')
@@ -134,6 +146,16 @@ function onPointerDown(event) {
 }
 
 function onPointerMove(event) {
+  if (pendingDrag && !dragging && event.pointerId === pendingDrag.id) {
+    const dx = Math.abs(event.clientX - pendingDrag.x)
+    const dy = Math.abs(event.clientY - pendingDrag.y)
+    if (dx < 8 || dx < dy * 1.2) return
+    dragging = true
+    dragStart = { x: pendingDrag.x, y: pendingDrag.y, ox: offset.x, oy: offset.y }
+    pendingDrag = null
+    section.value?.classList.add('is-dragging')
+    wall.value?.setPointerCapture?.(event.pointerId)
+  }
   if (!dragging && navRevealed) return
   pointerAt = { x: event.clientX, y: event.clientY }
   if (!pointerFrame) {
@@ -149,6 +171,7 @@ function onPointerMove(event) {
 }
 
 function onPointerUp(event) {
+  pendingDrag = null
   dragging = false
   section.value?.classList.remove('is-dragging')
   wall.value?.releasePointerCapture?.(event.pointerId)
@@ -201,7 +224,8 @@ onUnmounted(() => {
   overflow: hidden;
   cursor: grab;
   user-select: none;
-  touch-action: none;
+  /* 手机上纵向手势交给页面滚动，否则整屏墙会吃掉进入主页的滑动；横向仍可拖动墙。 */
+  touch-action: pan-y;
   background: radial-gradient(120% 85% at 50% 0%, color-mix(in srgb, var(--vp-c-brand-1) 15%, transparent), transparent 68%);
 }
 .splash.is-dragging { cursor: grabbing; }

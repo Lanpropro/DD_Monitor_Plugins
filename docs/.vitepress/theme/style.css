@@ -114,7 +114,33 @@
 .catalog-search input { display: block; width: 100%; padding: 10px 14px; border: 1px solid var(--vp-c-divider); border-radius: 6px; margin-top: 8px; background: var(--vp-c-bg-soft); font-size: 16px; font-weight: 400; }
 input:focus, button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--vp-c-brand-1); outline-offset: 3px; }
 .result-count { color: var(--vp-c-text-2); font-size: 14px; }
-.plugin-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 18px; }
+.plugin-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 20px; }
+/* 插件目录页脱离文档三栏布局：卡片太窄时图标、版本和下载按钮都会挤在一起。 */
+.catalog-page { max-width: 1180px; margin: 0 auto; padding: 72px 32px 96px; }
+.catalog-page-head { margin-bottom: 28px; }
+.catalog-page-head h1 { font-size: clamp(30px, 3.4vw, 46px); line-height: 1.3; font-weight: 700; letter-spacing: -.03em; margin: 0 0 16px; }
+.catalog-page-lead { color: var(--vp-c-text-2); font-size: 17px; line-height: 1.85; max-width: 720px; margin: 0; }
+.catalog-page .plugin-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.catalog-page .plugin-card { display: flex; flex-direction: column; padding: 26px; background: var(--vp-c-bg-alt); transition: transform 200ms var(--ease-out), border-color 200ms ease; }
+.catalog-page .plugin-card .card-actions { margin-top: auto; padding-top: 20px; }
+.catalog-page .plugin-card .requirement { margin: 16px 0 0; }
+.catalog-page h2 { font-size: 22px; font-weight: 600; line-height: 1.45; margin: 20px 0 12px; }
+.catalog-page p { font-size: 15px; line-height: 1.8; }
+.catalog-page ul { margin: 20px 0 0; padding: 0; list-style: none; display: grid; gap: 9px; font-size: 14px; }
+.catalog-page ul li::before { content: '+'; margin-right: 10px; color: var(--vp-c-brand-1); }
+.catalog-page .result-count { margin: 22px 0 14px; }
+.catalog-page .empty-result { grid-column: 1 / -1; }
+@media (hover: hover) and (pointer: fine) {
+  .catalog-page .plugin-card:hover { transform: translateY(-4px); border-color: var(--vp-c-brand-1); }
+}
+@media (max-width: 1100px) {
+  .catalog-page .plugin-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .catalog-page { padding: 40px 22px 64px; }
+  .catalog-page .plugin-grid { grid-template-columns: 1fr; }
+  .catalog-page .plugin-card { padding: 22px; }
+}
 .plugin-card, .plugin-info { border: 1px solid var(--vp-c-divider); border-radius: 10px; background: var(--vp-c-bg-soft); padding: 24px; }
 .card-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .platform-icons { display: flex; align-items: center; gap: 12px; }

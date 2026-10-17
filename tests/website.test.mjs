@@ -160,6 +160,39 @@ test('opening screen shows the placeholder wall before any page content', () => 
   assert.ok(home.indexOf('class="splash"') < home.indexOf('class="showcase"'), 'the wall comes before the page content')
 })
 
+test('the full-screen wall leaves vertical touch gestures to page scrolling', () => {
+  const splash = read('docs/.vitepress/theme/SplashWall.vue')
+  // touch-action:none 会让手机停在开屏墙，而顶栏此时是隐藏的，等于没有导航入口。
+  assert.match(splash, /touch-action:\s*pan-y/, 'vertical swipes must scroll the page')
+  assert.ok(!/touch-action:\s*none/.test(splash), 'the wall must not swallow touch scrolling')
+  // 触摸拖动要等横向位移超过阈值才接管，否则纵向手势会被拖墙抢走。
+  assert.match(splash, /pendingDrag/, 'touch drags need a pending state')
+  assert.match(splash, /dx\s*<\s*dy/, 'a mostly vertical gesture must not become a wall drag')
+})
+
+test('the plugin catalog escapes the narrow documentation column', () => {
+  const catalogPage = read('docs/plugins/index.md')
+  assert.match(catalogPage, /layout:\s*page/, 'the catalog needs the full-width page layout')
+  const css = read('docs/.vitepress/theme/style.css')
+  assert.match(css, /\.catalog-page\s*\{[^}]*max-width:\s*\d+px/, 'the catalog needs its own width cap')
+  // 文档三栏布局下的卡片只有 335px，图标、版本和按钮会挤在一起。
+  const baseGrid = css.match(/(?:^|\n)\.plugin-grid\s*\{([^}]*)\}/)
+  assert.ok(baseGrid, 'missing the shared plugin grid')
+  assert.doesNotMatch(baseGrid[1], /repeat\(2/, 'the shared grid must not stay at the old two columns')
+  assert.match(baseGrid[1], /repeat\(3/, 'wide screens fit three cards')
+  assert.match(css, /@media \(max-width: 760px\)[^@]*\.catalog-page \.plugin-grid\s*\{[^}]*grid-template-columns:\s*1fr/,
+    'narrow screens fall back to one column')
+})
+
+test('plugin detail pages list every published version they can prove', () => {
+  for (const p of plugins) {
+    const page = read(`docs/plugins/${p.id}.md`)
+    const history = page.split('## 更新记录')[1]
+    assert.ok(history, `missing changelog: ${p.id}`)
+    assert.ok(history.includes(`**${p.version}`), `changelog must name the published version ${p.version}: ${p.id}`)
+  }
+})
+
 test('feature demonstrations and per-plugin instructions remain readable before hydration', () => {
   const home = readFileSync(resolve(dist, 'index.html'), 'utf8')
   assert.ok(home.includes('交互示意'))
