@@ -153,6 +153,9 @@ test('feature demonstrations and per-plugin instructions remain readable before 
   const home = readFileSync(resolve(dist, 'index.html'), 'utf8')
   assert.ok(home.includes('交互示意'))
   assert.ok(home.includes('aria-label="主画面比例"'))
+  // The layout demo can be driven by dragging the splitter, not only by the slider.
+  assert.ok(home.includes('role="separator"'))
+  assert.ok(home.includes('aria-label="拖动调整主画面比例"'))
   assert.ok(home.includes('aria-label="软件功能演示"'))
   assert.ok(home.includes('id="plugin-demo"'))
   for (const plugin of plugins) {
