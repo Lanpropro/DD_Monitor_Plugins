@@ -4,7 +4,7 @@ import { onMounted, onUnmounted, reactive, ref } from 'vue'
 // 固定种子：服务端和客户端生成同一份布局，水合时不会跳。
 const BASE_W = 2400
 const BASE_H = 1800
-const COLUMNS = 6
+const COLUMNS = 7
 
 function mulberry32(seed) {
   return function random() {
@@ -16,23 +16,25 @@ function mulberry32(seed) {
   }
 }
 
-// 不规则的摆放：每列起点、格子宽高、行距都不相同，整体仍是错落的画面墙。
+// 不规则的只是摆放：格子本身等尺寸、等间距，靠每列的起点与行距错开。
 const tiles = (() => {
   const random = mulberry32(20261017)
   const list = []
   const columnWidth = BASE_W / COLUMNS
+  const tileWidth = columnWidth * 0.84
+  const tileHeight = tileWidth * 0.5625
   for (let column = 0; column < COLUMNS; column += 1) {
-    let y = -random() * 240
+    // 每列用自己的行距，列内保持一致；起点上下错开，相邻列不会齐平。
+    const gap = 18 + random() * 16
+    let y = -random() * (tileHeight + gap)
     while (y < BASE_H) {
-      const width = columnWidth * (0.66 + random() * 0.28)
-      const height = width * 0.5625 * (0.86 + random() * 0.46)
       list.push({
-        left: ((column * columnWidth + random() * (columnWidth - width)) / BASE_W) * 100,
+        left: ((column * columnWidth + (columnWidth - tileWidth) / 2) / BASE_W) * 100,
         top: (y / BASE_H) * 100,
-        width: (width / BASE_W) * 100,
-        height: (height / BASE_H) * 100
+        width: (tileWidth / BASE_W) * 100,
+        height: (tileHeight / BASE_H) * 100
       })
-      y += height + 18 + random() * 56
+      y += tileHeight + gap
     }
   }
   return list
@@ -235,8 +237,9 @@ onUnmounted(() => {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: max(200vw, 1200px);
-  height: max(200vh, 1100px);
+  /* 宽高比与生成时一致，格子才是精确的 16:9，不会被拉变形。 */
+  width: max(170vw, 1240px);
+  aspect-ratio: 4 / 3;
   transform: translate3d(-50%, -50%, 0);
   transform-origin: 50% 50%;
   will-change: transform, opacity;
