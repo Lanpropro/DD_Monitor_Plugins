@@ -1,8 +1,43 @@
 <script setup>
 import { onMounted, onUnmounted, reactive, ref } from 'vue'
 
-// 56 格铺满并超出视口，拖动才有"能继续看"的空间。
-const tiles = 56
+// 固定种子：服务端和客户端生成同一份布局，水合时不会跳。
+const BASE_W = 2400
+const BASE_H = 1800
+const COLUMNS = 6
+
+function mulberry32(seed) {
+  return function random() {
+    seed |= 0
+    seed = (seed + 0x6d2b79f5) | 0
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+// 不规则的摆放：每列起点、格子宽高、行距都不相同，整体仍是错落的画面墙。
+const tiles = (() => {
+  const random = mulberry32(20261017)
+  const list = []
+  const columnWidth = BASE_W / COLUMNS
+  for (let column = 0; column < COLUMNS; column += 1) {
+    let y = -random() * 240
+    while (y < BASE_H) {
+      const width = columnWidth * (0.66 + random() * 0.28)
+      const height = width * 0.5625 * (0.86 + random() * 0.46)
+      list.push({
+        left: ((column * columnWidth + random() * (columnWidth - width)) / BASE_W) * 100,
+        top: (y / BASE_H) * 100,
+        width: (width / BASE_W) * 100,
+        height: (height / BASE_H) * 100
+      })
+      y += height + 18 + random() * 56
+    }
+  }
+  return list
+})()
+
 const section = ref(null)
 const wall = ref(null)
 const offset = reactive({ x: 0, y: 0 })
@@ -16,9 +51,14 @@ let scrollFrame = 0
 let scrollPending = false
 let pointerFrame = 0
 let pointerAt = null
+let driftFrame = 0
+let driftX = 0
+let driftY = 0
+let navRevealed = false
 
 const MAGNIFY_SCALE = 0.45
-const MAGNIFY_RADIUS_MAX = 220
+const DRIFT_X = 26
+const DRIFT_Y = 18
 
 function applyTransform() {
   const element = wall.value
@@ -26,29 +66,36 @@ function applyTransform() {
   const sink = reduced ? 0 : scrollProgress * 26
   const scale = reduced ? 1 : 1 - scrollProgress * 0.16
   element.style.transform =
-    `translate3d(calc(-50% + ${offset.x.toFixed(1)}px), calc(-50% + ${offset.y.toFixed(1)}px + ${sink.toFixed(2)}vh), 0) scale(${scale.toFixed(3)})`
+    `translate3d(calc(-50% + ${(offset.x + driftX).toFixed(1)}px), ` +
+    `calc(-50% + ${(offset.y + driftY).toFixed(1)}px + ${sink.toFixed(2)}vh), 0) scale(${scale.toFixed(3)})`
   element.style.opacity = (1 - scrollProgress * 0.72).toFixed(3)
 }
 
-// 每格按指针距离放大，越近越大，像望远镜扫过画面墙。
+// 没人操作时，墙自己缓慢游动；用正弦叠加而不是匀速，回环时不会突然跳。
+function drift(now) {
+  if (!dragging && !reduced && scrollProgress < 0.02) {
+    driftX = Math.sin(now / 5200) * DRIFT_X
+    driftY = Math.cos(now / 6800) * DRIFT_Y
+    applyTransform()
+  }
+  driftFrame = requestAnimationFrame(drift)
+}
+
 function magnify(clientX, clientY) {
   const element = wall.value
   if (!element || !tileNodes.length) return
   const rect = element.getBoundingClientRect()
   const px = clientX - rect.left
   const py = clientY - rect.top
-  const radius = Math.min(MAGNIFY_RADIUS_MAX, rect.width / 4)
+  const radius = Math.max(90, Math.min(240, rect.width / 10))
   for (const tile of tileNodes) {
     const cx = tile.offsetLeft + tile.offsetWidth / 2
     const cy = tile.offsetTop + tile.offsetHeight / 2
-    const distance = Math.hypot(px - cx, py - cy)
-    const near = Math.max(0, 1 - distance / radius)
+    const near = Math.max(0, 1 - Math.hypot(px - cx, py - cy) / radius)
     const scale = 1 + MAGNIFY_SCALE * near * near
     const next = near > 0.002 ? `scale(${scale.toFixed(3)})` : ''
-    // 只有靠近指针的那一格才亮起来，邻格只留一点缩放。
     const lit = near > 0.4
     const key = next + (lit ? '!' : '')
-    // 只在真正变化时写样式，静止的指针不会反复触发布局。
     if (tile.__scale !== key) {
       tile.__scale = key
       tile.style.transform = next
@@ -87,6 +134,12 @@ function updateScroll() {
   const viewport = window.innerHeight || 1
   scrollProgress = reduced ? 0 : Math.min(1, Math.max(0, (window.scrollY || 0) / (viewport * 0.85)))
   applyTransform()
+  // 顶栏只在用户真的往下滚之后才出现。
+  const reveal = (window.scrollY || 0) > Math.min(140, viewport * 0.14)
+  if (reveal !== navRevealed) {
+    navRevealed = reveal
+    document.documentElement.classList.toggle('splash-revealed', reveal)
+  }
 }
 
 function onScroll() {
@@ -99,7 +152,7 @@ function onScroll() {
 }
 
 function onPointerDown(event) {
-  if (event.button !== 0 && event.pointerType === 'mouse') return
+  if (event.pointerType === 'mouse' && event.button !== 0) return
   dragging = true
   dragStart = { x: event.clientX, y: event.clientY, ox: offset.x, oy: offset.y }
   section.value?.classList.add('is-dragging')
@@ -136,15 +189,21 @@ onMounted(() => {
   tileNodes = wall.value ? [...wall.value.children] : []
   measure()
   updateScroll()
+  const root = document.documentElement
+  root.classList.add('splash-mode', 'splash-boot')
+  requestAnimationFrame(() => root.classList.remove('splash-boot'))
   window.addEventListener('scroll', onScroll, { passive: true })
   window.addEventListener('resize', measure, { passive: true })
+  if (!reduced) driftFrame = requestAnimationFrame(drift)
 })
 
 onUnmounted(() => {
   cancelAnimationFrame(scrollFrame)
   cancelAnimationFrame(pointerFrame)
+  cancelAnimationFrame(driftFrame)
   window.removeEventListener('scroll', onScroll)
   window.removeEventListener('resize', measure)
+  document.documentElement.classList.remove('splash-mode', 'splash-boot', 'splash-revealed')
 })
 </script>
 
@@ -153,19 +212,18 @@ onUnmounted(() => {
     @pointerdown="onPointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp"
     @pointercancel="onPointerUp" @pointerleave="onPointerLeave">
     <div ref="wall" class="splash-wall">
-      <span v-for="n in tiles" :key="n" class="splash-tile" :style="{ '--i': (n - 1) % 12 }"></span>
+      <span v-for="(tile, index) in tiles" :key="index" class="splash-tile"
+        :style="{ left: tile.left + '%', top: tile.top + '%', width: tile.width + '%', height: tile.height + '%', '--i': index % 12 }"></span>
     </div>
-    <p class="splash-hint">拖动查看<span class="splash-dot">·</span>向下滚动</p>
+    <p class="splash-hint">拖动查看<span class="splash-dot">·</span>向下滚动进入主页</p>
   </section>
 </template>
 
 <style scoped>
 .splash {
-  position: sticky;
-  top: var(--vp-nav-height);
+  position: fixed;
+  inset: 0;
   z-index: 0;
-  height: calc(100vh - var(--vp-nav-height));
-  height: calc(100dvh - var(--vp-nav-height));
   overflow: hidden;
   cursor: grab;
   user-select: none;
@@ -177,16 +235,14 @@ onUnmounted(() => {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: max(142vw, 620px);
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: clamp(8px, 1vw, 16px);
+  width: max(200vw, 1200px);
+  height: max(200vh, 1100px);
   transform: translate3d(-50%, -50%, 0);
   transform-origin: 50% 50%;
   will-change: transform, opacity;
 }
 .splash-tile {
-  aspect-ratio: 16 / 9;
+  position: absolute;
   border-radius: 10px;
   border: 1px solid var(--vp-c-divider);
   background:
@@ -195,10 +251,10 @@ onUnmounted(() => {
   box-shadow: inset 0 1px 0 #ffffff10;
   transform-origin: 50% 50%;
   transition: transform 110ms var(--ease-out), border-color 160ms ease, box-shadow 160ms ease;
-  /* 入场位移走独立的 translate，transform 留给指针放大，两者不会互相覆盖。 */
+  /* 入场位移走独立的 translate，transform 留给指针放大。 */
   translate: 0 0;
   animation: tile-rise 760ms var(--ease-out) both;
-  animation-delay: calc(var(--i) * 45ms);
+  animation-delay: calc(var(--i) * 55ms);
 }
 @keyframes tile-rise {
   from { opacity: 0; translate: 0 26px; }
@@ -207,7 +263,7 @@ onUnmounted(() => {
 .splash-hint {
   position: absolute;
   left: 50%;
-  bottom: 5.5vh;
+  bottom: 6vh;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
@@ -217,14 +273,10 @@ onUnmounted(() => {
   font-size: 13px;
   letter-spacing: .1em;
   pointer-events: none;
-  animation: hint-in 600ms 780ms var(--ease-out) both;
+  animation: hint-in 700ms 900ms var(--ease-out) both;
 }
 .splash-dot { opacity: .5; }
 @keyframes hint-in { from { opacity: 0; } to { opacity: 1; } }
-@media (max-width: 700px) {
-  .splash-wall { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .splash-hint { font-size: 12px; }
-}
 @media (prefers-reduced-motion: reduce) {
   .splash-tile { animation: none; transition: none; }
   .splash-hint { animation: none; }

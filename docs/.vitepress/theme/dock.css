@@ -58,3 +58,13 @@
   .dock-nav { background: var(--vp-c-bg-elv); backdrop-filter: none; }
 }
 @media print { .dock-nav { display: none; } }
+/* 首页开屏期间收起整条顶栏，用户往下滚之后才滑下来。 */
+html.splash-mode:not(.splash-revealed) .VPNavBar {
+  transform: translateY(-100%);
+  opacity: 0;
+  pointer-events: none;
+}
+html.splash-mode .VPNavBar {
+  transition: transform 460ms var(--ease-out), opacity 380ms ease;
+}
+html.splash-mode.splash-boot .VPNavBar { transition: none; }
