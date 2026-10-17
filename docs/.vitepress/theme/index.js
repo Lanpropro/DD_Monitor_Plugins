@@ -11,7 +11,7 @@ import './dock.css'
 export default {
   extends: DefaultTheme,
   Layout() {
-    return h(DefaultTheme.Layout, null, { 'layout-bottom': () => h(DockNav) })
+    return h(DefaultTheme.Layout, null, { 'nav-bar-content-before': () => h(DockNav) })
   },
   enhanceApp({ app }) {
     app.component('HomePage', HomePage)

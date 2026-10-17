@@ -1,53 +1,60 @@
-/* Reserve a separate rail so the right-hand Dock never covers page content. */
-:root { --dock-rail: calc(88px + env(safe-area-inset-right, 0px)); }
-#app { padding-right: var(--dock-rail); }
+/* The capsule belongs to the header; page content keeps its full width. */
 .dock-nav {
-  position: fixed;
-  z-index: 40;
-  top: 50%;
-  right: calc(16px + env(safe-area-inset-right, 0px));
-  transform: translateY(-50%);
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  max-height: calc(100dvh - 144px);
-  overflow-x: hidden;
-  overflow-y: auto;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 4px;
+  padding: 5px;
+  margin: 0 auto 0 24px;
   border: 1px solid var(--vp-c-divider);
-  border-radius: 36px;
+  border-radius: 28px;
   background: var(--vp-c-bg-elv);
   background: color-mix(in srgb, var(--vp-c-bg-elv) 88%, transparent);
   backdrop-filter: blur(18px);
-  box-shadow: 0 8px 32px #0002, inset 0 1px 0 #ffffff12;
+  box-shadow: 0 4px 18px #0001, inset 0 1px 0 #ffffff12;
+  pointer-events: auto;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
-.dock-item { position: relative; width: 44px; min-height: 56px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 3px; border-radius: 22px; color: var(--vp-c-text-2); touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
-.dock-icon { display: grid; place-items: center; width: 36px; height: 32px; border-radius: 50%; transform-origin: right center; transition: transform 200ms var(--ease-out), background-color 160ms ease; }
-.dock-label { font-size: 11px; line-height: 1.4; font-weight: 500; white-space: nowrap; }
+.dock-nav::-webkit-scrollbar { display: none; }
+.dock-item { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 0 12px; border-radius: 22px; color: var(--vp-c-text-2); touch-action: manipulation; -webkit-tap-highlight-color: transparent; transition: background-color 160ms ease, color 160ms ease; }
+.dock-icon { display: grid; place-items: center; transition: transform 160ms var(--ease-out); }
+.dock-icon svg { width: 19px; height: 19px; }
+.dock-label { font-size: 13px; line-height: 1.4; font-weight: 500; white-space: nowrap; }
 .dock-item[aria-current="page"] { color: var(--vp-c-brand-1); background: var(--vp-c-bg-soft); }
-.dock-item[aria-current="page"]::after { content: ''; position: absolute; right: -4px; top: calc(50% - 2px); width: 4px; height: 4px; background: currentColor; border-radius: 50%; }
-.dock-item:focus-visible { outline: 2px solid var(--vp-c-brand-1); outline-offset: 3px; }
+.dock-item:focus-visible { outline: 2px solid var(--vp-c-brand-1); outline-offset: 2px; }
 .dock-item:active .dock-icon { transform: scale(.97); }
-@media (hover: hover) and (pointer: fine) and (min-width: 701px) and (min-height: 500px) {
-  .dock-nav { overflow: visible; }
-  .dock-item { min-height: 44px; }
-  .dock-icon { width: 44px; height: 44px; background: var(--vp-c-bg-soft); }
-  .dock-label { position: absolute; right: calc(100% + 20px); padding: 6px 10px; border: 1px solid var(--vp-c-divider); border-radius: 8px; background: var(--vp-c-bg-elv); color: var(--vp-c-text-1); font-size: 12px; opacity: 0; transform: translateX(4px); pointer-events: none; transition: opacity 160ms ease, transform 200ms var(--ease-out); }
-  .dock-item:hover, .dock-item:focus-visible { color: var(--vp-c-brand-1); }
-  .dock-item:hover .dock-label, .dock-item:focus-visible .dock-label { opacity: 1; transform: translateX(0); }
-  .dock-item:hover .dock-icon { transform: translateX(-3px) scale(1.1); }
+.VPNavBarSearch { flex-grow: 0; }
+@media (hover: hover) and (pointer: fine) {
+  .dock-item:hover { color: var(--vp-c-brand-1); background: var(--vp-c-bg-soft); }
+  .dock-item:hover .dock-icon { transform: translateY(-1px); }
   .dock-item:active .dock-icon { transform: scale(.97); }
 }
-@media (max-width: 700px) {
-  :root { --dock-rail: calc(64px + env(safe-area-inset-right, 0px)); }
-  .dock-nav { right: calc(6px + env(safe-area-inset-right, 0px)); padding: 5px; gap: 4px; }
+/* Keep every destination visible on a second header row when space is tight. */
+@media (max-width: 1199px) {
+  :root { --vp-nav-height: 128px; }
+  .VPNavBar .container, .VPNavBar .content-body, .VPNavBarTitle .title,
+  .VPNavBar.has-sidebar .title { height: 64px; }
+  .dock-nav { position: absolute; top: 68px; left: 50%; transform: translateX(-50%); margin: 0; max-width: calc(100vw - 24px); }
+  .VPNavBarSearch { flex-grow: 1; }
+}
+/* Narrower than a tablet the five labels no longer fit; icons keep every destination visible. */
+@media (max-width: 520px) {
+  .dock-item { padding: 0 13px; }
+  .dock-label { display: none; }
+}
+@media (max-width: 400px) {
+  .dock-nav { gap: 2px; padding: 4px; }
+  .dock-item { padding: 0 9px; gap: 3px; }
+  .dock-icon svg { width: 17px; height: 17px; }
+  .dock-label { font-size: 12px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .dock-icon { transition: background-color 160ms ease; }
-  .dock-label { transition: opacity 160ms ease; }
-  .dock-nav .dock-item .dock-icon, .dock-nav .dock-label { transform: none; }
+  .dock-icon { transition: none; }
+  .dock-nav .dock-item .dock-icon { transform: none; }
 }
 @media (prefers-reduced-transparency: reduce) {
   .dock-nav { background: var(--vp-c-bg-elv); backdrop-filter: none; }
 }
-@media print { .dock-nav { display: none; } #app { padding-right: 0; } }
+@media print { .dock-nav { display: none; } }

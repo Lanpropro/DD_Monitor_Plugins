@@ -18,7 +18,7 @@ const current = computed(() => items.find(item => item.file.endsWith('/')
 <template>
   <nav class="dock-nav" aria-label="主要导航">
     <a v-for="item in items" :key="item.link" :href="withBase(item.link)" class="dock-item"
-      :aria-current="current === item.link ? 'page' : undefined">
+      :aria-label="item.label" :aria-current="current === item.link ? 'page' : undefined">
       <span class="dock-icon"><svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path :d="item.icon" /></svg></span>
       <span class="dock-label">{{ item.label }}</span>
     </a>

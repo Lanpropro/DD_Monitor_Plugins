@@ -134,8 +134,14 @@ test('Dock navigation renders all destinations and exactly one current page on e
     const html = readFileSync(resolve(dist, route + '.html'), 'utf8')
     const dock = html.match(/<nav\b[^>]*class="dock-nav"[^>]*>[\s\S]*?<\/nav>/)?.[0]
     assert.ok(dock, `missing Dock: ${route}`)
+    const header = html.match(/<header\b[\s\S]*?<\/header>/)?.[0]
+    assert.ok(header?.includes(dock), `Dock must be inside the top header: ${route}`)
     assert.equal((dock.match(/class="dock-label"/g) || []).length, 5, `every icon needs a readable label: ${route}`)
     assert.equal((dock.match(/aria-hidden="true"/g) || []).length, 5, `decorative icons must not repeat link names: ${route}`)
+    // Narrow screens hide the labels, so each link carries the name itself.
+    const links = dock.match(/<a\b[^>]*class="dock-item"[^>]*>/g) || []
+    assert.equal(links.length, 5, `every destination needs its own link: ${route}`)
+    for (const link of links) assert.match(link, /aria-label="[^"]+"/, `dock link needs an accessible name: ${route}`)
     for (const target of ['', 'software', 'plugins/', 'download', 'guide']) assert.ok(dock.includes(`href="${base}${target}"`))
     assert.equal((dock.match(/aria-current="page"/g) || []).length, 1, route)
     const expected = route.startsWith('plugins/') ? 'plugins/' : route === 'index' ? '' : route

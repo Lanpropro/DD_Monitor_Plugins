@@ -4,7 +4,7 @@
   "type": "module",
   "engines": { "node": ">=22" },
   "scripts": {
-    "docs:dev": "vitepress docs --host 127.0.0.1 --port 5173",
+    "docs:dev": "vitepress dev docs --host 127.0.0.1 --port 5173",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs --host 127.0.0.1 --port 4173",
     "test:website": "node --test tests/website.test.mjs"
