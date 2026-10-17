@@ -134,6 +134,8 @@ test('Dock navigation renders all destinations and exactly one current page on e
     const html = readFileSync(resolve(dist, route + '.html'), 'utf8')
     const dock = html.match(/<nav\b[^>]*class="dock-nav"[^>]*>[\s\S]*?<\/nav>/)?.[0]
     assert.ok(dock, `missing Dock: ${route}`)
+    assert.equal((dock.match(/class="dock-label"/g) || []).length, 5, `every icon needs a readable label: ${route}`)
+    assert.equal((dock.match(/aria-hidden="true"/g) || []).length, 5, `decorative icons must not repeat link names: ${route}`)
     for (const target of ['', 'software', 'plugins/', 'download', 'guide']) assert.ok(dock.includes(`href="${base}${target}"`))
     assert.equal((dock.match(/aria-current="page"/g) || []).length, 1, route)
     const expected = route.startsWith('plugins/') ? 'plugins/' : route === 'index' ? '' : route

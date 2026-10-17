@@ -70,3 +70,11 @@ python tools/inspect_host_package.py "软件安装包路径.zip"
 5. 部署后实测所有页面、手机布局、截图、两插件 ZIP 和软件附件，再交付公开 URL。
 
 当前未创建部署工作流、未修改 Pages 或域名设置、未公开部署。自定义域名后续决定，首版不需要购买域名。
+
+## 2026-10-17 右侧 Dock 微调
+
+- 参考 BewlyCat 的右侧竖向胶囊、圆形图标及向左文字提示，保留原有五个导航入口和当前页标记。
+- 正文预留右侧空间；窄屏同样位于右侧并常显名称，短视口可滚动导航。
+- 构建、9 项网站回归及 diff 检查通过；浏览器检查 320/390/768/1440px 布局、下载跳转和键盘进入插件页，控制台无警告或错误。
+- 预览截图：work/website-preview/right-dock.png、right-dock-mobile.png。本轮仅本地修改。
+- 参考源码：https://github.com/keleus/BewlyCat/blob/main/src/components/Dock/Dock.vue
