@@ -219,3 +219,11 @@ python tools/inspect_host_package.py "软件安装包路径.zip"
 - 构建、37 项网站测试与 git diff --check 通过；新增可见性触发、错峰填充、动态减少运动/卸载清理、SSR 分段入口及软件配色回归。
 - 浏览器实测观看体验不同节点同时处于不同入场进度（opacity 0.74 / 0.19 / 0），未进入视口的选择器仍待显现；预设可正常打开。深浅色计算配色正确，320px 下无横向溢出，五段时间轴可读，控制台无警告或错误。
 - 效果截图：work/website-preview/software-style-viewing.png、software-style-timeline.png、software-style-mobile-light.png。本地预览 http://127.0.0.1:4174/DD_Monitor_Plugins/，未公开部署。
+
+
+## 2026-10-18 恢复深色网页层次与截图亮度
+
+- 针对用户反馈的发灰和内容/底色边界减弱，将网页深色背景从软件灰 #222428 恢复至 #101418，面板/浮层改为 #1b232b，分隔线改为 14% 白色。保留软件蓝色、按钮圆角及此前分段滚动显现；浅色主题不变。
+- 移除二路演示真实软件截图原有的 opacity:.72，恢复不透明显示，避免演示画面被整体压暗。
+- 更新配色回归，增加暗色背景亮度、面板相对亮度差、边界令牌与真实截图无减亮/滤镜规则验证。构建、38 项网站测试及 diff 检查通过。
+- 浏览器计算样式确认背景 rgb(16,20,24)、面板 rgb(27,35,43)、边框 rgba(255,255,255,.14)、截图 opacity=1；控制台无警告/错误。截图：work/website-preview/restored-dark-contrast.png。

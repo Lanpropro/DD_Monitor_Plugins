@@ -108,7 +108,7 @@ test('scroll entrances wait for visibility, stagger without flashing and cancel 
 
 test('software palette and scroll entrances cover the page beyond the facts row', () => {
   const css = read('docs/.vitepress/theme/style.css')
-  for (const token of ['--vp-c-bg: #f4f6f9', '--vp-c-bg: #222428', '--vp-c-brand-1: #007ba8', '--vp-c-brand-1: #00a1d6', '--button-radius: 17px']) assert.ok(css.includes(token), token)
+  for (const token of ['--vp-c-bg: #f4f6f9', '--vp-c-bg: #101418', '--vp-c-brand-1: #007ba8', '--vp-c-brand-1: #00a1d6', '--button-radius: 17px']) assert.ok(css.includes(token), token)
   const home = readFileSync(resolve(dist, 'index.html'), 'utf8')
   for (const className of ['hero-copy', 'hero-intro', 'demo-selector', 'demo-preview', 'plugin-demo-heading', 'sync-screen', 'sync-timeline', 'bottom-actions']) {
     assert.ok(home.match(/<[^>]+>/g).some(tag => tag.includes('data-reveal') && new RegExp('class="' + className + '(?: [^"]*)?"').test(tag)), className + ' has its own scroll entrance')
@@ -116,6 +116,24 @@ test('software palette and scroll entrances cover the page beyond the facts row'
   const timeline = read('docs/.vitepress/theme/MatchSyncTimeline.vue')
   assert.ok(timeline.includes('--sync-accent:var(--vp-c-brand-1)'))
   assert.ok(!timeline.includes('#9881ff'))
+})
+
+test('dark surfaces separate content from the page and software imagery stays at full opacity', () => {
+  const css = read('docs/.vitepress/theme/style.css')
+  const dark = css.split('.dark {')[1].split('}')[0]
+  const token = name => dark.match(new RegExp('--' + name + ': ([^;]+);'))[1]
+  const luminance = hex => {
+    const channels = hex.slice(1).match(/../g).map(part => parseInt(part, 16) / 255)
+      .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4)
+    return channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722
+  }
+  const page = luminance(token('vp-c-bg'))
+  const panel = luminance(token('vp-c-bg-soft'))
+  assert.ok(page < .01, 'the page keeps a near-black background')
+  assert.ok((panel + .05) / (page + .05) > 1.15, 'panels remain distinct from the page')
+  assert.equal(token('vp-c-divider'), 'rgba(255, 255, 255, .14)')
+  const imageRule = read('docs/.vitepress/theme/MatchSyncTimeline.vue').match(/\.sync-software \{([^}]+)\}/)[1]
+  assert.ok(!/opacity\s*:|filter\s*:/.test(imageRule), 'the real software screenshot is not dimmed or desaturated')
 })
 
 const walk = dir => readdirSync(dir, { withFileTypes: true }).flatMap(item => {

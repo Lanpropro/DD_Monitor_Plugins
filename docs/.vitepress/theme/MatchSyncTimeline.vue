@@ -98,7 +98,7 @@ onUnmounted(() => { cancelAnimationFrame(frame); observer?.disconnect(); media?.
 <style scoped>
 .match-sync-demo { --sync-accent:var(--vp-c-brand-1); min-width:0; }
 .sync-screen { position:relative; aspect-ratio:16/9; overflow:hidden; border:1px solid var(--vp-c-divider); border-radius:16px; background:#101114; }
-.sync-software { display:block; width:100%; height:100%; object-fit:contain; opacity:.72; }
+.sync-software { display:block; width:100%; height:100%; object-fit:contain; }
 .screen-caption { position:absolute; inset:0 0 auto; display:flex; justify-content:space-between; gap:12px; padding:14px 18px; color:#eef1f8; background:linear-gradient(#10131dee,transparent); font-size:12px; pointer-events:none; }
 .screen-caption > span:last-child { color:#9ed9ed; }
 .main-view-target,.main-view-outline { position:absolute; left:3%; top:12%; width:63%; height:61%; border:2px solid var(--sync-accent); border-radius:8px; background:transparent; }

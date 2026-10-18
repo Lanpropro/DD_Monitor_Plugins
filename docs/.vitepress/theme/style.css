@@ -1,5 +1,5 @@
 :root {
-  /* 与 DD Monitor CE 的 ddm/theme.py 共用配色和控件尺度。 */
+  /* 控件参考 DD Monitor CE；网页背景保留更深的层次以突出展示内容。 */
   --vp-c-bg: #f4f6f9;
   --vp-c-bg-alt: #ebeef3;
   --vp-c-bg-elv: #ffffff;
@@ -17,10 +17,10 @@
   --vp-font-family-base: 'Microsoft YaHei UI', 'Microsoft YaHei', 'Segoe UI', sans-serif;
 }
 .dark {
-  --vp-c-bg: #222428;
-  --vp-c-bg-alt: #1d2023;
-  --vp-c-bg-elv: #373a3e;
-  --vp-c-bg-soft: #303338;
+  --vp-c-bg: #101418;
+  --vp-c-bg-alt: #151b20;
+  --vp-c-bg-elv: #1b232b;
+  --vp-c-bg-soft: #1b232b;
   --vp-c-brand-1: #00a1d6;
   --vp-c-brand-2: #00a1d6;
   --vp-c-brand-3: #00a1d6;
@@ -28,8 +28,8 @@
   --vp-c-text-1: #f1f2f5;
   --vp-c-text-2: rgba(214, 218, 224, .90);
   --vp-c-text-3: rgba(184, 189, 197, .75);
-  --vp-c-divider: rgba(131, 131, 145, .16);
-  --control-hover: #3b3e42;
+  --vp-c-divider: rgba(255, 255, 255, .14);
+  --control-hover: #283440;
   --primary-text: #04161f;
 }
 .VPNavBarTitle .logo { width: 28px; height: 28px; }
