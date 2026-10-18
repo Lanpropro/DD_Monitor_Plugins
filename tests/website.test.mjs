@@ -241,37 +241,48 @@ test('every generated internal link, anchor and local asset resolves under the P
   }
 })
 
-function mountGallery({ reduced = false, intersection = true } = {}) {
+function mountGallery({ reduced = false, intersection = true, resize = true } = {}) {
   const timers = new Map(), listeners = new Map()
   const media = { matches: reduced, addEventListener() {}, removeEventListener() {} }
   const story = { offsetHeight: 1200, top: 100, getBoundingClientRect() { return { top: this.top } } }
   const pin = { offsetHeight: 600 }
+  const product = { offsetHeight: 520 }
   const doc = { hidden: false, addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name) }
-  let mount, unmount, notify, next = 0, refs = 0, disconnected = false
+  let mount, unmount, notify, measure, next = 0, refs = 0, disconnected = false, sizeDisconnected = false
   class Observer {
     constructor(callback) { notify = callback }
     observe() {}
     disconnect() { disconnected = true }
   }
+  class SizeObserver {
+    constructor(callback) { measure = callback }
+    observe() { measure() }
+    disconnect() { sizeDisconnected = true }
+  }
   const script = read('docs/.vitepress/theme/ScreenshotShowcase.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
-  const state = runInNewContext(script + '\n;({ active, progress, enhanced, paused, selectShot, togglePlayback, interact, update, preferenceChanged })', {
-    ref: value => ({ value: value === null ? (++refs === 1 ? story : pin) : value }),
+  const state = runInNewContext(script + '\n;({ active, progress, controlsReady, productHeight, enhanced, paused, selectShot, togglePlayback, interact, update, preferenceChanged })', {
+    ref: value => ({ value: value === null ? [story, pin, product][refs++] : value }),
     onMounted: fn => { mount = fn }, onUnmounted: fn => { unmount = fn },
-    window: { matchMedia: () => media, ...(intersection ? { IntersectionObserver: Observer } : {}), addEventListener() {}, removeEventListener() {} },
-    document: doc, IntersectionObserver: Observer, getComputedStyle: () => ({ top: '100px' }),
+    window: { matchMedia: () => media, ...(intersection ? { IntersectionObserver: Observer } : {}), ...(resize ? { ResizeObserver: SizeObserver } : {}), addEventListener() {}, removeEventListener() {} },
+    document: doc, IntersectionObserver: Observer, ResizeObserver: SizeObserver, getComputedStyle: () => ({ top: '100px' }),
     setTimeout: fn => { timers.set(++next, fn); return next }, clearTimeout: id => timers.delete(id),
     cancelAnimationFrame() {}, requestAnimationFrame() { return 1 }
   })
   mount()
   return { state, story, doc, media, timers, listeners, unmount,
     visible(value) { notify?.([{ isIntersecting: value }]) },
+    resizeProduct(height) { product.offsetHeight = height; measure?.() },
     tick() { const fn = timers.values().next().value; assert.ok(fn, 'expected a scheduled slide'); timers.clear(); fn() },
-    get disconnected() { return disconnected }
+    get disconnected() { return disconnected },
+    get sizeDisconnected() { return sizeDisconnected }
   }
 }
 
 test('screenshot scroll contracts the display and playback loops only while being watched', () => {
   const gallery = mountGallery()
+  assert.equal(gallery.state.productHeight.value, 520)
+  gallery.resizeProduct(680)
+  assert.equal(gallery.state.productHeight.value, 680, 'layout follows the real frame height after a ratio change')
   assert.equal(gallery.state.progress.value, 0)
   gallery.visible(true)
   assert.equal(gallery.timers.size, 0, 'no slideshow before the controls are revealed')
@@ -301,10 +312,27 @@ test('screenshot scroll contracts the display and playback loops only while bein
   assert.equal(gallery.timers.size, 0)
   assert.equal(gallery.listeners.size, 0)
   assert.ok(gallery.disconnected)
+  assert.ok(gallery.sizeDisconnected)
+})
+
+test('revealed screenshot controls stay visible during a ratio change', () => {
+  const gallery = mountGallery()
+  gallery.story.top = -500
+  gallery.state.update()
+  assert.equal(gallery.state.controlsReady.value, true)
+  gallery.state.selectShot(2)
+  gallery.resizeProduct(800)
+  gallery.story.top = -110
+  gallery.state.update()
+  assert.equal(gallery.state.controlsReady.value, true, 'resizing must not hide or disable the selected controls')
+  gallery.story.top = 100
+  gallery.state.update()
+  assert.equal(gallery.state.controlsReady.value, false, 'returning to the start restores the scroll reveal')
+  gallery.unmount()
 })
 
 test('screenshot reduced-motion and observer fallback expose manual controls without autoplay', () => {
-  for (const options of [{ reduced: true }, { intersection: false }]) {
+  for (const options of [{ reduced: true }, { intersection: false }, { resize: false }]) {
     const gallery = mountGallery(options)
     gallery.visible(true)
     assert.equal(gallery.state.enhanced.value, false)
