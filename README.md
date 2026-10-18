@@ -49,7 +49,9 @@ python tools/build_plugins.py
 python tests/check_packages.py --host ../DD_Monitor_CE
 ```
 
-输出为 `dist/domestic_live-1.2.zip` 、`dist/global_live-1.1.zip` 和 `dist/match_sync-1.1.zip`，上传到 Releases。
+输出为 `dist/domestic_live-1.2.zip`、`dist/global_live-1.1.zip`、`dist/match_sync-1.1.zip`
+和 `dist/bili_live-1.0.zip`。本分支的 bili_live 仅本地交付，配套本体分支为
+`codex/plugin-tile-extensions`；尚未上传 Releases 或加入网站下载目录。
 构建只读取 Git 跟踪文件，并将许可与来源说明放入每个安装包。
 各插件 README 中的播放、预览和弹幕集成测试在软件源码仓库执行，需先安装对应插件。
 
