@@ -224,7 +224,7 @@ test('appearance miniature and editable controls remain usable before hydration'
     assert.equal(plugin.steps.length, 3)
     assert.equal(new Set(plugin.steps).size, 3)
   }
-  for (const step of plugins[0].steps) assert.ok(home.includes(step))
+  for (const step of plugins[2].steps) assert.ok(home.includes(step))
 })
 
 test('every generated internal link, anchor and local asset resolves under the Pages base', () => {
@@ -498,7 +498,7 @@ test('preset secondary page opens inside the preview and returns focus on close 
   s.closePicker(); assert.equal(returned, 2, 'closing an already closed page must not move focus')
 })
 
-function mountPluginCarousel({ reduced = false, intersection = true } = {}) {
+function mountPluginCarousel({ reduced = false, intersection = true, initialIndex = 0 } = {}) {
   const frames = new Map(), timers = new Map(), listeners = new Map()
   let mount, unmount, notify, next = 0, disconnected = 0
   const media = { matches: reduced, addEventListener: (name, fn) => listeners.set('media:' + name, fn), removeEventListener: name => listeners.delete('media:' + name) }
@@ -509,6 +509,7 @@ function mountPluginCarousel({ reduced = false, intersection = true } = {}) {
   class SizeObserver { observe() {} disconnect() { disconnected++ } }
   const script = read('docs/.vitepress/theme/PluginCarousel.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
   const state = runInNewContext(script + '\n;({ paused, sync, normalize, measure, togglePlayback, step, onPointerEnter, onPointerLeave, onFocusIn, onFocusOut, onPointerDown, onPointerMove, onPointerUp, onClickCapture })', {
+    defineProps: () => ({ initialIndex }),
     ref: value => ({ value: value === null ? element : value }),
     onMounted: fn => { mount = fn }, onUnmounted: fn => { unmount = fn },
     window: { matchMedia: () => media, ...(intersection ? { IntersectionObserver: Observer } : {}), ResizeObserver: SizeObserver, addEventListener() {}, removeEventListener() {} },
@@ -623,9 +624,101 @@ test('plugin cards expose full-card selection and render concrete feature detail
     assert.ok(home.includes('aria-label="查看' + p.name + '的具体功能"'))
     for (const detail of p.featureDetails) assert.ok(detail.length > 20)
   }
-  for (const detail of plugins[0].featureDetails) assert.ok(panel.includes(detail))
-  assert.ok(panel.includes('plugin-feature-list'))
+  assert.ok(panel.includes(plugins[2].featureDetails[1]))
+  assert.ok(panel.includes('比赛二路同步功能动效示意'))
+  assert.ok(panel.includes('plugin-motion-demo'))
   assert.ok(panel.includes('使用流程'))
-  assert.ok(home.includes('已选中 · 功能在下方'))
+  assert.ok(!home.includes('已选中 · 功能在下方'))
+  assert.ok(!home.includes('点击查看具体功能'))
+  const selected = home.match(/<article class="[^"]*is-selected[^"]*"[\s\S]*?<\/article>/g)
+  assert.equal(selected.length, 3)
+  for (const card of selected) assert.ok(card.includes('比赛二路同步'))
+  assert.ok(home.includes('id="home-intro"'))
+  assert.ok(home.includes('aria-label="返回首页介绍"'))
   assert.ok(home.includes('aria-controls="plugin-demo"'))
+})
+
+
+test('plugin carousel initially shows the selected match-sync card', () => {
+  const page = mountPluginCarousel({ initialIndex: 2 })
+  assert.equal(page.element.scrollLeft, 1720)
+  page.unmount()
+})
+
+function mountFeatureMotion({ reduced = false, intersection = true, plugin = plugins[2] } = {}) {
+  const timers = new Map(), listeners = new Map()
+  let mount, unmount, notify, next = 0, disconnected = false
+  const media = { matches: reduced, addEventListener: (name, fn) => listeners.set('media:' + name, fn), removeEventListener: name => listeners.delete('media:' + name) }
+  const doc = { hidden: false, addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name) }
+  class Observer { constructor(fn) { notify = fn } observe() {} disconnect() { disconnected = true } }
+  const script = read('docs/.vitepress/theme/PluginFeatureMotion.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
+  const state = runInNewContext(script + '\n;({ phase, paused, playing, animating, phaseLabels, phaseDescription, screenshot, sync, selectPhase, togglePlayback, onEnter, onLeave, onFocus, onBlur })', {
+    defineProps: () => ({ plugin }), computed: fn => ({ get value() { return fn() } }), ref: value => ({ value: value === null ? {} : value }),
+    onMounted: fn => { mount = fn }, onUnmounted: fn => { unmount = fn },
+    window: { matchMedia: () => media, ...(intersection ? { IntersectionObserver: Observer } : {}) }, document: doc, IntersectionObserver: Observer,
+    setTimeout: fn => { timers.set(++next, fn); return next }, clearTimeout: id => timers.delete(id)
+  })
+  mount()
+  return { state, timers, listeners, media, doc, unmount, visible(value) { notify?.([{ isIntersecting:value }]) },
+    tick() { const [id, fn] = timers.entries().next().value; timers.delete(id); fn() }, get disconnected() { return disconnected } }
+}
+
+test('dynamic feature illustration loops through alignment, audio and chat only while watched', () => {
+  const page = mountFeatureMotion(), s = page.state
+  assert.equal(s.phaseDescription.value, plugins[2].featureDetails[1])
+  assert.equal(page.timers.size, 0)
+  page.visible(true)
+  for (const expected of [1,2,0]) { page.tick(); assert.equal(s.phase.value, expected) }
+  s.onEnter({ pointerType: 'mouse' }); assert.equal(page.timers.size, 0); assert.equal(s.animating.value, true)
+  s.onLeave(); assert.equal(page.timers.size, 1)
+  s.onFocus({ target:{ matches:() => true } }); assert.equal(page.timers.size, 0)
+  s.onBlur({ currentTarget:{ contains:() => false } }); assert.equal(page.timers.size, 1)
+  s.togglePlayback(); assert.equal(page.timers.size, 0); assert.equal(s.animating.value, false)
+  s.selectPhase(2); assert.equal(s.phaseDescription.value, plugins[2].featureDetails[2])
+  s.selectPhase(10); assert.equal(s.phase.value, 2)
+  s.togglePlayback(); page.doc.hidden = true; page.listeners.get('visibilitychange')(); assert.equal(page.timers.size, 0)
+  page.doc.hidden = false; s.sync(); assert.equal(page.timers.size, 1)
+  page.visible(false); assert.equal(page.timers.size, 0)
+  page.visible(true); page.media.matches = true; page.listeners.get('media:change')(); assert.equal(page.timers.size, 0)
+  page.unmount(); assert.equal(page.timers.size, 0); assert.equal(page.listeners.size, 0); assert.ok(page.disconnected)
+})
+
+test('feature motion degrades to manual phases and platform demos show the matching screenshot', () => {
+  for (const options of [{ reduced: true }, { intersection: false }]) {
+    const page = mountFeatureMotion(options); page.visible(true)
+    assert.equal(page.timers.size, 0); page.state.selectPhase(2); assert.equal(page.state.phase.value, 2); page.unmount()
+  }
+  for (const plugin of plugins.slice(0,2)) {
+    const page = mountFeatureMotion({ plugin }), s = page.state
+    s.selectPhase(2); assert.equal(s.screenshot.value, 'danmaku.webp'); assert.equal(s.phaseDescription.value, plugin.featureDetails[2])
+    s.selectPhase(0); assert.equal(s.screenshot.value, 'landscape.webp'); page.unmount()
+  }
+})
+
+function mountBackToIntro({ reduced = false, hasAnchor = true } = {}) {
+  let mount, unmount, focused = false
+  const listeners = new Map(), frames = new Map(), calls = []
+  const win = { scrollY: 2500, innerHeight: 1000, matchMedia: () => ({ matches: reduced }), scrollTo: value => calls.push(value),
+    addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name) }
+  const script = read('docs/.vitepress/theme/BackToIntro.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
+  const state = runInNewContext(script + '\n;({ visible, introTop, update, returnToIntro })', {
+    ref: value => ({ value }), onMounted: fn => { mount = fn }, onUnmounted: fn => { unmount = fn }, window: win,
+    document: { documentElement: {}, getElementById: id => id === 'home-intro' ? hasAnchor && { getBoundingClientRect: () => ({ top: 1000 - win.scrollY }) } : { focus(options) { focused = options.preventScroll } } },
+    getComputedStyle: () => ({ getPropertyValue: () => '64px' }), requestAnimationFrame: fn => { frames.set(1, fn); return 1 }, cancelAnimationFrame: id => frames.delete(id)
+  })
+  mount()
+  return { state, win, calls, listeners, frames, unmount, get focused() { return focused } }
+}
+
+test('return button lands at the introduction with the wall behind it, never at scroll zero', () => {
+  for (const reduced of [false,true]) {
+    const page = mountBackToIntro({ reduced }), s = page.state
+    assert.equal(s.visible.value, true); assert.equal(s.introTop(), 720)
+    s.returnToIntro(); assert.equal(page.calls[0].top, 720)
+    assert.equal(page.calls[0].behavior, reduced ? 'instant' : 'smooth'); assert.ok(page.focused)
+    assert.ok(page.calls[0].top > 140, 'the navigation remains revealed beyond the splash threshold')
+    page.win.scrollY = 720; s.update(); assert.equal(s.visible.value, false)
+    page.listeners.get('scroll')(); page.unmount(); assert.equal(page.frames.size, 0); assert.equal(page.listeners.size, 0)
+  }
+  const missing = mountBackToIntro({ hasAnchor: false }); missing.state.returnToIntro(); assert.equal(missing.calls.length, 0); assert.equal(missing.state.visible.value, false); missing.unmount()
 })

@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
 
+const props = defineProps({ initialIndex: { type: Number, default: 0 } })
 const viewport = ref(null)
 const paused = ref(false)
 let period = 0, frame = 0, last = 0, carry = 0
@@ -88,6 +89,9 @@ function onClickCapture(event) {
 onMounted(() => {
   media = window.matchMedia('(prefers-reduced-motion: reduce)')
   measure()
+  const group = viewport.value.querySelector('.carousel-group')
+  viewport.value.scrollLeft += props.initialIndex * (group.firstElementChild.offsetWidth + (parseFloat(getComputedStyle(group).columnGap) || 0))
+  normalize()
   if ('IntersectionObserver' in window) {
     observer = new IntersectionObserver(entries => { visible = entries[0].isIntersecting; sync() }, { threshold: .1 })
     observer.observe(viewport.value)
