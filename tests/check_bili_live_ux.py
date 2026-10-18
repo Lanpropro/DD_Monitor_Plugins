@@ -137,6 +137,21 @@ class PickerUXTests(unittest.TestCase):
         APP.sendEvent(self.host,QMouseEvent(QEvent.NonClientAreaMouseButtonRelease,
             QPoint(20,-15),outside,Qt.LeftButton,Qt.NoButton,Qt.NoModifier))
 
+    def test_quantity_follows_once_per_host_move_and_ignores_unrelated_moves(self):
+        self.gift.open_at(self.anchor);APP.processEvents()
+        card=self.gift._cards[0];QCursor.setPos(card.mapToGlobal(card.rect().center()));card.click()
+        quantity=self.gift.quantity_popup
+        unrelated=QWidget();unrelated.show();APP.processEvents()
+        try:
+            with patch.object(quantity,'place_at',wraps=quantity.place_at) as place:
+                unrelated.move(unrelated.pos()+QPoint(4,3));APP.processEvents()
+                self.assertEqual(place.call_count,0,'unrelated windows must not reposition gift quantities')
+                before=quantity.pos()
+                self.host.move(self.host.pos()+QPoint(20,10));APP.processEvents()
+                self.assertEqual(quantity.pos()-before,QPoint(20,10))
+                self.assertLessEqual(place.call_count,1,'one host move should not cause repeated quantity layouts')
+        finally:unrelated.close()
+
     def test_shutdown_deletes_pickers_owned_by_host_window(self):
         for popup in (EmoticonPopup(self.host),GiftPopup(self.host,cache_dir=self.temp.name)):
             popup.open_at(self.anchor);popup.shutdown()

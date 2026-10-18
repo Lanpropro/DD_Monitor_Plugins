@@ -125,4 +125,18 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(len(sent),1);self.assertEqual(failed,[])
         self.assertEqual(a.state.feedback,'');self.assertIn('refresh failed',a.state.wallet_error)
 
+    def test_success_ok_payload_refreshes_wallet_without_feedback(self):
+        from unittest.mock import Mock
+        a=self.controller();failed=[];sent=[]
+        a.failed.connect(lambda *args:failed.append(args));a.sent.connect(sent.append)
+        with patch.object(api.requests,'post',return_value=Mock(status_code=200,
+                json=lambda:{'code':0,'message':'ok','data':{}})),\
+                patch.object(api,'get_wallet',return_value=99894):
+            a.send('main:1',1)
+            settle(lambda:not self.coordinator.busy and not a.state.loading)
+        self.assertEqual(failed,[])
+        self.assertEqual(len(sent),1)
+        self.assertEqual(a.state.wallet,99894)
+        self.assertEqual(a.state.feedback,'')
+
 if __name__=='__main__':unittest.main()

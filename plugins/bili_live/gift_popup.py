@@ -293,9 +293,9 @@ class GiftPopup(AnchoredPopup):
         if self._quantity_outside is None:self._quantity_outside=now
         elif now-self._quantity_outside>=.15:q.hide()
     def eventFilter(self,watched,event):
-        if not self._event_targets_alive():return False
         handled=super().eventFilter(watched,event)
-        if self.isVisible() and event.type() in (QEvent.Move,QEvent.Resize) and self.quantity_popup.isVisible():
+        if (watched is self and event.type() in (QEvent.Move,QEvent.Resize) and
+                self._event_targets_alive() and self.isVisible() and self.quantity_popup.isVisible()):
             self.quantity_popup.place_at(self._quantity_card)
         return handled
     def hideEvent(self,event):

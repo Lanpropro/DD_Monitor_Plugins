@@ -93,7 +93,11 @@ def _reason(config, room_id):
             (special.get('special_type',0),config.get('gift_type',0),config.get('type',0)))
     except ValueError:
         return '无法识别此礼物流程'
-    if config.get('interactive_pay') or any(flow_types):
+    special_type,gift_type,kind=flow_types
+    # roomGiftList marks the ordinary fan-club light sign as special_type=3.
+    # Its default_gift/send_gift path uses the same form as ordinary paid gifts.
+    light_sign=(config.get('id',config.get('gift_id')) in (31164,34001) and special_type==3)
+    if config.get('interactive_pay') or gift_type or kind or special_type and not light_sign:
         return '暂不支持特殊礼物流程'
     bound=config.get('bind_roomid') or config.get('room_id') or 0
     if str(bound) not in ('0','',str(room_id)):return '仅限指定直播间'
@@ -244,7 +248,8 @@ def send_gift(target,item,quantity,*,cookies,wallet,still_current):
         if not isinstance(payload,dict) or type(payload.get('code')) is not int:
             raise GiftSendError('赠送结果未确认，请先检查余额与背包',uncertain=True)
         reason=payload.get('message') or payload.get('msg')
-        if payload['code']!=0 or reason not in (None,'',0,'0','success','SUCCESS'):
+        success_message=reason in (None,'',0,'0') or isinstance(reason,str) and reason.lower() in ('success','ok')
+        if payload['code']!=0 or not success_message:
             raise GiftSendError(str(reason or '服务器拒绝赠送'))
     except GiftSendError:raise
     except Exception as error:

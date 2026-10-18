@@ -7,6 +7,30 @@ from bili_live_fixtures import config,room_payload,bag_payload
 from ddm_plugin_bili_live import gift_api as api
 
 class ReadTests(unittest.TestCase):
+    def test_fan_club_light_sign_uses_ordinary_send_when_unlocked(self):
+        for gift_id in (31164,34001):
+            with self.subTest(gift_id=gift_id):
+                data=room_payload()
+                data['gift_config']['base_config']['list'].append(config(gift_id,name='粉丝团灯牌',price=100,type=0,gift_type=0))
+                data['gift_data']['room_gift_list']['gold_list']=[{'gift_id':gift_id,
+                    'special':{'special_type':3,'is_use':1},'gift_scene':{'pay_type':'send_gift'}}]
+                item=api.normalize_catalog(data,'90001').tabs[0].items[0]
+                self.assertEqual(item.disabled_reason,'')
+                api.validate_send(item,1,cookies={'SESSDATA':'fake','bili_jct':'csrf'},wallet=100)
+
+    def test_light_sign_exception_keeps_permissions_and_special_flow_restrictions(self):
+        for changes in ({'special':{'special_type':3,'is_use':0,'tips':'locked'}},
+                        {'gift_scene':{'pay_type':'buy_guard'}},{'gift_type':1},
+                        {'interactive_pay':{'id':1}},{'gift_id':999}):
+            with self.subTest(changes=changes):
+                data=room_payload()
+                data['gift_config']['base_config']['list'].append(config(31164,name='粉丝团灯牌',price=100))
+                data['gift_data']['room_gift_list']['gold_list']=[dict({
+                    'gift_id':31164,'special':{'special_type':3,'is_use':1},
+                    'gift_scene':{'pay_type':'send_gift'}},**changes)]
+                item=api.normalize_catalog(data,'90001').tabs[0].items[0]
+                self.assertTrue(item.disabled_reason)
+
     def test_references_order_room_override_and_permissions(self):
         c=api.normalize_catalog(room_payload(),'90001')
         self.assertEqual([t.title for t in c.tabs],['礼物','Fans'])
@@ -110,6 +134,16 @@ class ReadTests(unittest.TestCase):
 
 
 class SendTests(unittest.TestCase):
+    def test_zero_code_ok_is_success_and_nonzero_ok_remains_failure(self):
+        for message in ('ok','OK','Ok'):
+            with self.subTest(message=message),patch.object(api.requests,'post',return_value=Mock(
+                    status_code=200,json=lambda:{'code':0,'message':message})):
+                result=api.send_gift(self.target,self.item,1,cookies=self.cookies,wallet=9999,still_current=lambda:True)
+                self.assertEqual((result.gift_key,result.quantity),(self.item.key,1))
+        with patch.object(api.requests,'post',return_value=Mock(status_code=200,
+                json=lambda:{'code':-1,'message':'ok'})),self.assertRaises(api.GiftSendError):
+            api.send_gift(self.target,self.item,1,cookies=self.cookies,wallet=9999,still_current=lambda:True)
+
     def setUp(self):
         self.cookies={'SESSDATA':'fake','bili_jct':'csrf-token','buvid3':'device'}
         self.target=api.GiftTarget('90001',123,456)

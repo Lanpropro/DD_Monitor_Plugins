@@ -64,14 +64,18 @@ class AnchoredPopup(QWidget):
                 (self._anchor is None or isValid(self._anchor)))
 
     def eventFilter(self, watched, event):
-        if not self._event_targets_alive() or not self.isVisible(): return False
         kind = event.type()
-        owner_event = watched is self._owner or self._owner and watched is self._owner.windowHandle()
-        if owner_event and kind == QEvent.NonClientAreaMouseButtonPress and event.button() == Qt.LeftButton:
-            self._owner_dragging = True
+        if kind not in (QEvent.NonClientAreaMouseButtonPress,QEvent.NonClientAreaMouseButtonRelease,
+                        QEvent.MouseButtonPress,QEvent.MouseButtonRelease,QEvent.Move,QEvent.Resize,
+                        QEvent.KeyPress,QEvent.ApplicationDeactivate,QEvent.Hide,QEvent.Close):return False
+        if not self._event_targets_alive() or not self.isVisible(): return False
+        if kind == QEvent.NonClientAreaMouseButtonPress:
+            owner_event=watched is self._owner or self._owner and watched is self._owner.windowHandle()
+            if owner_event and event.button() == Qt.LeftButton:self._owner_dragging = True
         elif kind in (QEvent.NonClientAreaMouseButtonRelease,QEvent.MouseButtonRelease):
             self._owner_dragging = False
         elif kind in (QEvent.Move, QEvent.Resize) and self._anchor:
+            if not isinstance(watched,QWidget):return False
             widget = self._anchor
             while widget is not None:
                 if watched is widget:

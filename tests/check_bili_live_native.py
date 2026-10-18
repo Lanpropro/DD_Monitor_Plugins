@@ -11,7 +11,7 @@ from unittest.mock import patch
 from bili_live_support import HOST,ROOT
 from bili_live_fixtures import room_payload
 from PySide6.QtCore import QPoint,Qt,QEvent
-from PySide6.QtGui import QCursor,QInputMethodEvent,QMovie
+from PySide6.QtGui import QCursor,QInputMethodEvent,QMouseEvent,QMovie
 from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
 from ddm import plugins as host_api,theme
@@ -43,7 +43,7 @@ def main():
         popup_module=importlib.import_module('ddm_plugin_bili_live.gift_popup')
         workers=importlib.import_module('ddm_plugin_bili_live.workers')
         tile=Tile({'room_id':'90001','uname':'Synthetic native','live':False})
-        tile.move(100,100);tile.resize(900,500);manager.attach_tile(tile);tile.show();APP.processEvents()
+        tile.move(100,400);tile.resize(900,500);manager.attach_tile(tile);tile.show();APP.processEvents()
         composer=tile._plugin_controls.entries[0].control.widget
         video=root/'fixture.mp4'
         subprocess.run([ffmpeg_path(),'-hide_banner','-loglevel','error','-y','-f','lavfi','-i',
@@ -84,6 +84,22 @@ def main():
                         QTest.mouseClick(card,Qt.LeftButton);settle(lambda:popup.quantity_popup.isVisible())
                         quantity=popup.quantity_popup
                         assert quantity.screen().availableGeometry().contains(quantity.geometry())
+                        if width==900:
+                            title_point=QPoint(tile.x()+20,tile.y()-10)
+                            APP.sendEvent(tile,QMouseEvent(QEvent.NonClientAreaMouseButtonPress,
+                                QPoint(20,-10),title_point,Qt.LeftButton,Qt.LeftButton,Qt.NoModifier))
+                            for _ in range(24):
+                                before,quantity_before=popup.pos(),quantity.pos()
+                                anchor_before=composer.gift_button.mapToGlobal(QPoint())
+                                tile.move(tile.pos()+QPoint(2,1));APP.processEvents()
+                                delta=composer.gift_button.mapToGlobal(QPoint())-anchor_before
+                                # Native physical pixels round at fractional DPR.
+                                for label,actual in (('gift',popup.pos()-before),('quantity',quantity.pos()-quantity_before)):
+                                    error=actual-delta
+                                    assert abs(error.x())<=1 and abs(error.y())<=1,(label,actual,delta)
+                                assert popup.isVisible() and quantity.isVisible()
+                            APP.sendEvent(tile,QMouseEvent(QEvent.NonClientAreaMouseButtonRelease,
+                                QPoint(20,-10),title_point,Qt.LeftButton,Qt.NoButton,Qt.NoModifier))
                         QCursor.setPos(popup.mapToGlobal(popup.rect().center()))
                         popup.mark_sent(api.GiftResult('main:1',1,{}))
                         QCursor.setPos(QPoint(popup.x()+5,popup.y()-2));QTest.qWait(50)
@@ -98,7 +114,7 @@ def main():
                     assert not composer.busy,'IME confirmation sent text'
                     APP.sendEvent(composer.edit,QInputMethodEvent('',[]));composer.edit.clearFocus()
                     tile.setProperty('fullscreen',False);tile._layout_areas()
-                print(f'PASS: native VLC gift hit targets, dark/light 900/360/200, GIFs, gap, focus/IME; scale={tile.devicePixelRatioF()}',flush=True)
+                print(f'PASS: native VLC gift hit targets, dark/light 900/360/200, continuous owner/picker following, GIFs, gap, focus/IME; scale={tile.devicePixelRatioF()}',flush=True)
         finally:
             manager.unload();settle(lambda:not workers._active_requests)
             player.release();tile.close();tile.deleteLater();APP.sendPostedEvents(None,QEvent.DeferredDelete)
