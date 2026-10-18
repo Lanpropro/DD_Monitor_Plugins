@@ -65,7 +65,7 @@ onUnmounted(() => { cancelAnimationFrame(frame); observer?.disconnect(); media?.
 
 <template>
   <div ref="root" class="match-sync-demo" role="group" aria-label="比赛二路同步交互时间轴演示" aria-live="off" @focusin="onFocus" @focusout="onBlur">
-    <div class="sync-screen" :class="{ 'is-playing':playing }">
+    <div class="sync-screen" data-reveal :class="{ 'is-playing':playing }">
       <img class="sync-software" :src="withBase('/screenshots/landscape.webp')" alt="DD 监控室 CE 软件界面，叠加可操作的二路同步演示" width="1920" height="1080" loading="lazy" />
       <div class="screen-caption"><span>DD 监控室 CE · 比赛二路同步</span><span>交互演示</span></div>
       <button v-if="active === 0" class="main-view-target" aria-label="设为比赛主画面" @click="jump(1)"><span>点击设为主画面</span></button>
@@ -81,6 +81,7 @@ onUnmounted(() => { cancelAnimationFrame(frame); observer?.disconnect(); media?.
       <div v-if="active === 4" class="comments-card" :class="{ separated:!merged }"><div><strong>{{ merged ? '合并弹幕' : '分路弹幕' }}</strong><button :aria-pressed="merged" @click="merged = !merged">{{ merged ? '分路查看' : '合并查看' }}</button></div><p><b>主画面</b> 这波配合漂亮</p><p><b>二路 A</b> 一起看这次团战</p><p><b>二路 B</b> 比赛画面同步到达</p></div>
       <button class="screen-playback" :disabled="reduced" :aria-label="reduced ? '减少动态效果模式，使用时间轴浏览' : paused ? '播放二路同步演示' : '暂停二路同步演示'" :aria-pressed="paused" @click="togglePlayback"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path v-if="paused || reduced" d="m9 6 9 6-9 6Z" /><path v-else d="M7 6h3v12H7zm7 0h3v12h-3z" /></svg></button>
     </div>
+    <div class="sync-timeline" data-reveal>
     <div class="chapter-heading"><div><span>本段演示</span><h4>{{ chapters[active].label }}</h4></div><output aria-label="演示播放时间">{{ clock(time) }} <span>/ {{ clock(duration) }}</span></output></div>
     <div class="chapter-track">
       <button v-for="(chapter,i) in chapters" :key="chapter.label" class="chapter" :style="{ flex:chapter.end - chapter.start }" :aria-label="'跳转到' + chapter.label" :aria-pressed="active === i" @click="jump(i)">
@@ -90,30 +91,31 @@ onUnmounted(() => { cancelAnimationFrame(frame); observer?.disconnect(); media?.
       <input class="timeline-seek" type="range" min="0" :max="duration" step="0.1" :value="time" :aria-valuetext="clock(time) + '，' + chapters[active].label" aria-label="二路同步演示时间轴" @input="seek($event.target.value)" @pointerdown="hold(true)" @pointerup="hold(false)" @pointercancel="hold(false)" />
     </div>
     <p class="chapter-description">{{ chapters[active].description }}</p>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.match-sync-demo { --sync-accent:#9881ff; min-width:0; }
-.sync-screen { position:relative; aspect-ratio:16/9; overflow:hidden; border:1px solid var(--vp-c-divider); border-radius:20px; background:#0d1015; }
+.match-sync-demo { --sync-accent:var(--vp-c-brand-1); min-width:0; }
+.sync-screen { position:relative; aspect-ratio:16/9; overflow:hidden; border:1px solid var(--vp-c-divider); border-radius:16px; background:#101114; }
 .sync-software { display:block; width:100%; height:100%; object-fit:contain; opacity:.72; }
 .screen-caption { position:absolute; inset:0 0 auto; display:flex; justify-content:space-between; gap:12px; padding:14px 18px; color:#eef1f8; background:linear-gradient(#10131dee,transparent); font-size:12px; pointer-events:none; }
-.screen-caption > span:last-child { color:#c5b8ff; }
+.screen-caption > span:last-child { color:#9ed9ed; }
 .main-view-target,.main-view-outline { position:absolute; left:3%; top:12%; width:63%; height:61%; border:2px solid var(--sync-accent); border-radius:8px; background:transparent; }
 .main-view-target { cursor:pointer; color:#fff; }
-.main-view-target span { position:absolute; left:12px; top:12px; padding:7px 10px; border-radius:7px; background:#17132bdb; font-size:13px; }
+.main-view-target span { position:absolute; left:12px; top:12px; padding:7px 10px; border-radius:7px; background:#1d2023ed; font-size:13px; }
 .main-view-outline { pointer-events:none; opacity:.5; }
-.roi-target { position:absolute; left:6%; top:23%; width:24%; min-height:76px; display:grid; justify-content:center; align-content:center; gap:5px; border:2px dashed #c8baff; border-radius:7px; background:#17132bcf; color:#fff; cursor:crosshair; }
-.roi-target span { font-size:11px; color:#d9ceff; }
+.roi-target { position:absolute; left:6%; top:23%; width:24%; min-height:76px; display:grid; justify-content:center; align-content:center; gap:5px; border:2px dashed #9ed9ed; border-radius:7px; background:#1d2023ed; color:#fff; cursor:crosshair; }
+.roi-target span { font-size:11px; color:#9ed9ed; }
 .roi-target strong { font-size:24px; font-variant-numeric:tabular-nums; }
-.comparison-card { position:absolute; right:3%; top:14%; width:25%; padding:14px; border:1px solid #ffffff20; border-radius:12px; background:#111420e8; color:#bfc6d7; backdrop-filter:blur(12px); font-size:11px; }
+.comparison-card { position:absolute; right:3%; top:14%; width:25%; padding:14px; border:1px solid #ffffff20; border-radius:12px; background:#1d2023ed; color:#bfc6d7; backdrop-filter:blur(12px); font-size:11px; }
 .comparison-card > span { display:flex; justify-content:space-between; gap:8px; margin-bottom:10px; }
 .comparison-card b { color:#fff; font-weight:500; font-variant-numeric:tabular-nums; }
-.comparison-card p { margin:12px 0 8px; color:#d9ceff; font-size:12px; }
+.comparison-card p { margin:12px 0 8px; color:#9ed9ed; font-size:12px; }
 .comparison-card p.aligned { color:#7ce4cf; }
 .comparison-card > i { display:block; height:3px; overflow:hidden; border-radius:3px; background:#ffffff18; }
 .comparison-card em { display:block; height:100%; background:var(--sync-accent); transform-origin:left; }
-.mixer-card,.comments-card { position:absolute; right:4%; bottom:13%; width:35%; padding:16px; border:1px solid #ffffff20; border-radius:14px; background:#111420ed; color:#f1f2f8; backdrop-filter:blur(16px); }
+.mixer-card,.comments-card { position:absolute; right:4%; bottom:13%; width:35%; padding:16px; border:1px solid #ffffff20; border-radius:14px; background:#1d2023ed; color:#f1f2f8; backdrop-filter:blur(16px); }
 .mixer-card > strong { display:flex; justify-content:space-between; font-size:13px; }
 .mixer-card > strong span { color:#919aae; font-size:10px; font-weight:400; }
 .mixer-card label { display:block; margin-top:14px; font-size:11px; }
@@ -123,11 +125,11 @@ onUnmounted(() => { cancelAnimationFrame(frame); observer?.disconnect(); media?.
 .mix-levels i { display:block; height:3px; background:var(--sync-accent); transform-origin:left; }
 .comments-card > div { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:14px; }
 .comments-card strong { font-size:13px; }
-.comments-card button { padding:4px 7px; border-radius:5px; color:#ded5ff; background:#ffffff10; font-size:10px; }
+.comments-card button { padding:4px 7px; border-radius:5px; color:#a9e3f5; background:#ffffff10; font-size:10px; }
 .comments-card p { margin:8px 0 0; font-size:11px; }
-.comments-card p b { display:inline-block; margin-right:6px; padding:2px 5px; border-radius:4px; color:#cfbfff; background:#9981ff20; font-size:10px; }
+.comments-card p b { display:inline-block; margin-right:6px; padding:2px 5px; border-radius:4px; color:#a9e3f5; background:#00a1d629; font-size:10px; }
 .comments-card.separated p { padding:6px; border:1px solid #ffffff20; border-radius:5px; }
-.screen-playback { position:absolute; right:18px; bottom:18px; display:grid; place-items:center; width:44px; height:44px; border-radius:50%; background:#20212b9c; color:#fff; backdrop-filter:blur(12px); }
+.screen-playback { position:absolute; right:18px; bottom:18px; display:grid; place-items:center; width:44px; height:44px; border-radius:50%; background:#303338d9; color:#fff; backdrop-filter:blur(12px); }
 .screen-playback:disabled { opacity:.45; }
 .chapter-heading { display:flex; justify-content:space-between; align-items:end; gap:20px; margin:22px 0 20px; }
 .chapter-heading > div > span { color:var(--vp-c-text-2); font-size:12px; }
@@ -138,7 +140,7 @@ onUnmounted(() => { cancelAnimationFrame(frame); observer?.disconnect(); media?.
 .chapter { display:flex; min-width:0; flex-direction:column; justify-content:center; align-items:start; gap:12px; min-height:88px; padding:14px; border:1px solid var(--vp-c-divider); border-radius:12px; color:var(--vp-c-text-2); background:var(--vp-c-bg-alt); text-align:left; }
 .chapter svg { width:28px; height:22px; }
 .chapter > span { font-size:13px; font-weight:500; }
-.chapter[aria-pressed=true] { border-color:var(--sync-accent); background:color-mix(in srgb,#7454ef 24%,var(--vp-c-bg-alt)); color:var(--vp-c-text-1); }
+.chapter[aria-pressed=true] { border-color:var(--sync-accent); background:color-mix(in srgb,var(--sync-accent) 16%,var(--vp-c-bg-alt)); color:var(--vp-c-text-1); }
 .playhead-clip { position:absolute; inset:-8px 0 0; overflow:hidden; pointer-events:none; }
 .playhead-position { position:absolute; left:8px; right:8px; top:0; bottom:0; }
 .playhead-position > i { position:absolute; left:0; top:4px; bottom:0; border-left:2px solid var(--vp-c-text-1); }
@@ -146,7 +148,7 @@ onUnmounted(() => { cancelAnimationFrame(frame); observer?.disconnect(); media?.
 .timeline-seek { position:absolute; z-index:2; left:0; top:-12px; width:100%; height:24px; margin:0; opacity:0; cursor:ew-resize; }
 .chapter-track:has(.timeline-seek:focus-visible) { outline:2px solid var(--sync-accent); outline-offset:5px; border-radius:12px; }
 .chapter-description { min-height:42px; margin:18px 0 0; color:var(--vp-c-text-2); font-size:14px; line-height:1.8; }
-@media (hover:hover) and (pointer:fine) { .chapter:hover { border-color:var(--sync-accent); } .screen-playback:hover { background:#3a384cd9; } }
+@media (hover:hover) and (pointer:fine) { .chapter:hover { border-color:var(--sync-accent); } .screen-playback:hover { background:#3b3e42; } }
 @media (max-width:700px) {
   .sync-screen { aspect-ratio:4/3; border-radius:14px; }
   .sync-software { object-fit:cover; }

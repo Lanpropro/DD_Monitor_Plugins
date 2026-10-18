@@ -95,11 +95,11 @@ function onCardUp(event) {
 
 <template>
   <div ref="root" class="feature-demo" @keydown.esc="cancelCard(); closePicker()">
-    <div class="demo-selector">
+    <div class="demo-selector" data-reveal>
       <button class="preset-launcher" :aria-expanded="pickerOpen" aria-controls="mini-layout-presets" @click="openPicker($event)"><span>01</span>切换布局预设 <span aria-hidden="true">↗</span></button>
       <div class="demo-description"><h3>选个布局，把直播拖进来。</h3><p>打开布局预设，选择主次布局或平分网格。将左侧关注卡片拖到任意画面，体验软件的摆放方式。</p><p class="demo-tip">也可点选卡片，再点选画面。布局预设会在预览内打开，选好即可返回。</p></div>
     </div>
-    <div class="demo-preview">
+    <div class="demo-preview" data-reveal data-reveal-delay="120">
       <div class="demo-toolbar"><span>DD 监控室 CE</span><span>可操作缩略预览</span></div>
       <div class="software-miniature" :class="{ 'is-light': light }" role="group" aria-label="软件外观缩略预览">
         <aside v-show="!pickerOpen" class="mini-sidebar">
@@ -138,14 +138,14 @@ function onCardUp(event) {
 
 <style scoped>
 .feature-demo { display: grid; grid-template-columns: minmax(220px, .65fr) minmax(0, 1.35fr); gap: 36px; align-items: center; }
-.preset-launcher { display: flex; align-items: center; gap: 16px; width: 100%; padding: 16px; text-align: left; border: 1px solid var(--vp-c-brand-1); border-radius: 10px; color: var(--vp-c-brand-1); background: var(--vp-c-bg-soft); }
+.preset-launcher { display: flex; align-items: center; gap: 16px; width: 100%; padding: 16px; text-align: left; border: 1px solid var(--vp-c-brand-1); border-radius: 8px; color: var(--vp-c-brand-1); background: var(--vp-c-brand-soft); }
 .preset-launcher span:first-child { font-size: 12px; opacity: .65; }
 .preset-launcher span:last-child { margin-left: auto; }
 .demo-description { margin-top: 26px; }
 .demo-description h3 { font-size: 22px; font-weight: 600; margin: 0 0 12px; }
 .demo-description p { font-size: 15px; line-height: 1.85; color: var(--vp-c-text-2); }
 .demo-description .demo-tip { font-size: 13px; margin-top: 16px; }
-.demo-preview { min-width: 0; padding: 18px; border: 1px solid var(--vp-c-divider); border-radius: 14px; background: var(--vp-c-bg-alt); }
+.demo-preview { min-width: 0; padding: 18px; border: 1px solid var(--vp-c-divider); border-radius: 12px; background: var(--vp-c-bg-soft); }
 .demo-toolbar { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 14px; color: var(--vp-c-text-2); font-size: 12px; }
 .software-miniature { --mini-bg: #222428; --mini-side: #1d2023; --mini-card: #303338; --mini-text: #f1f2f5; --mini-muted: #aeb6c1; --mini-border: #414851; --mini-overlay: #17202b; display: grid; grid-template-columns: 22% minmax(0,1fr); gap: 7px; padding: 7px; position: relative; aspect-ratio: 800 / 520; border-radius: 9px; background: var(--mini-bg); color: var(--mini-text); line-height: 1.35; }
 .software-miniature.is-light { --mini-bg: #f4f6f9; --mini-side: #ebeef3; --mini-card: #fff; --mini-text: #202630; --mini-muted: #4a5565; --mini-border: #d7dde7; --mini-overlay: #f7f9fc; }

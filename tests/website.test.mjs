@@ -12,17 +12,24 @@ const dist = resolve(root, 'docs/.vitepress/dist')
 const base = '/DD_Monitor_Plugins/'
 
 // Execute the component's actual setup with browser/lifecycle boundaries mocked.
-function mountShowcase({ reduced = false, intersection = true } = {}) {
-  const media = { matches: reduced, addEventListener() {}, removeEventListener() {} }
+function mountShowcase({ reduced = false, intersection = true, delay = 0 } = {}) {
+  let preferenceChanged
+  const media = { matches: reduced, addEventListener(event, callback) { preferenceChanged = callback }, removeEventListener() {} }
   const animations = []
   const classes = new Set()
-  const target = { animate: (...args) => animations.push(args), classList: {
+  const active = []
+  const target = { dataset: { revealDelay: String(delay) }, animate: (...args) => {
+    animations.push(args)
+    const animation = { cancelled: false, cancel() { this.cancelled = true } }
+    active.push(animation)
+    return animation
+  }, classList: {
     add: name => classes.add(name), remove: name => classes.delete(name)
   } }
   const observed = new Set()
-  let notify, mount, unmount, disconnected = false
+  let notify, mount, unmount, observerOptions, disconnected = false
   class Observer {
-    constructor(callback) { notify = callback }
+    constructor(callback, options) { notify = callback; observerOptions = options }
     observe(element) { observed.add(element) }
     unobserve(element) { observed.delete(element) }
     disconnect() { disconnected = true }
@@ -39,7 +46,9 @@ function mountShowcase({ reduced = false, intersection = true } = {}) {
     IntersectionObserver: Observer
   })
   mount()
-  return { media, animations, observed, classes, unmount,
+  return { media, animations, active, observed, classes, unmount, observerOptions,
+    preferenceChanged: () => preferenceChanged?.(),
+    outside: () => notify?.([{ target, isIntersecting: false }]),
     visible: () => notify?.([{ target, isIntersecting: true }]),
     get disconnected() { return disconnected }
   }
@@ -72,6 +81,43 @@ test('scroll entrance releases its observer and respects a changed motion prefer
   assert.equal(changed.observed.size, 0)
   changed.unmount()
 })
+test('scroll entrances wait for visibility, stagger without flashing and cancel active motion', () => {
+  const page = mountShowcase({ delay: 120 })
+  page.outside()
+  assert.equal(page.animations.length, 0)
+  assert.equal(page.observerOptions.threshold, 0, 'tall previews reveal from their leading edge')
+  assert.equal(page.observerOptions.rootMargin, '0px 0px -80px 0px')
+  page.visible()
+  assert.equal(page.animations[0][1].delay, 120)
+  assert.equal(page.animations[0][1].fill, 'backwards', 'staggered content stays hidden during the delay')
+  page.media.matches = true
+  page.preferenceChanged()
+  assert.ok(page.active[0].cancelled)
+  page.unmount()
+  const pending = mountShowcase()
+  pending.media.matches = true
+  pending.preferenceChanged()
+  assert.equal(pending.classes.size, 0, 'unseen content becomes readable when motion is reduced')
+  assert.ok(pending.disconnected)
+  pending.unmount()
+  const leaving = mountShowcase()
+  leaving.visible()
+  leaving.unmount()
+  assert.ok(leaving.active[0].cancelled)
+})
+
+test('software palette and scroll entrances cover the page beyond the facts row', () => {
+  const css = read('docs/.vitepress/theme/style.css')
+  for (const token of ['--vp-c-bg: #f4f6f9', '--vp-c-bg: #222428', '--vp-c-brand-1: #007ba8', '--vp-c-brand-1: #00a1d6', '--button-radius: 17px']) assert.ok(css.includes(token), token)
+  const home = readFileSync(resolve(dist, 'index.html'), 'utf8')
+  for (const className of ['hero-copy', 'hero-intro', 'demo-selector', 'demo-preview', 'plugin-demo-heading', 'sync-screen', 'sync-timeline', 'bottom-actions']) {
+    assert.ok(home.match(/<[^>]+>/g).some(tag => tag.includes('data-reveal') && new RegExp('class="' + className + '(?: [^"]*)?"').test(tag)), className + ' has its own scroll entrance')
+  }
+  const timeline = read('docs/.vitepress/theme/MatchSyncTimeline.vue')
+  assert.ok(timeline.includes('--sync-accent:var(--vp-c-brand-1)'))
+  assert.ok(!timeline.includes('#9881ff'))
+})
+
 const walk = dir => readdirSync(dir, { withFileTypes: true }).flatMap(item => {
   const path = resolve(dir, item.name)
   return item.isDirectory() ? walk(path) : [path]

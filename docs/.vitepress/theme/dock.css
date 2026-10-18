@@ -22,12 +22,12 @@
 .dock-icon { display: grid; place-items: center; transition: transform 160ms var(--ease-out); }
 .dock-icon svg { width: 19px; height: 19px; }
 .dock-label { font-size: 13px; line-height: 1.4; font-weight: 500; white-space: nowrap; }
-.dock-item[aria-current="page"] { color: var(--vp-c-brand-1); background: var(--vp-c-bg-soft); }
+.dock-item[aria-current="page"] { color: var(--vp-c-brand-1); background: var(--vp-c-brand-soft); }
 .dock-item:focus-visible { outline: 2px solid var(--vp-c-brand-1); outline-offset: 2px; }
 .dock-item:active .dock-icon { transform: scale(.97); }
 .VPNavBarSearch { flex-grow: 0; }
 @media (hover: hover) and (pointer: fine) {
-  .dock-item:hover { color: var(--vp-c-brand-1); background: var(--vp-c-bg-soft); }
+  .dock-item:hover { color: var(--vp-c-brand-1); background: var(--vp-c-brand-soft); }
   .dock-item:hover .dock-icon { transform: translateY(-1px); }
   .dock-item:active .dock-icon { transform: scale(.97); }
 }

@@ -1,24 +1,41 @@
 :root {
-  --vp-c-brand-1: #007f9a;
-  --vp-c-brand-2: #008da8;
-  --vp-c-brand-3: #006f89;
-  --vp-font-family-base: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  /* 与 DD Monitor CE 的 ddm/theme.py 共用配色和控件尺度。 */
+  --vp-c-bg: #f4f6f9;
+  --vp-c-bg-alt: #ebeef3;
+  --vp-c-bg-elv: #ffffff;
+  --vp-c-bg-soft: #ffffff;
+  --vp-c-text-1: #202630;
+  --vp-c-text-2: #4a5565;
+  --vp-c-text-3: #5e6a7d;
+  --vp-c-divider: #d7dde7;
+  --vp-c-brand-1: #007ba8;
+  --vp-c-brand-2: #007ba8;
+  --vp-c-brand-3: #007ba8;
+  --vp-c-brand-soft: rgba(0, 123, 168, .12);
+  --control-hover: #e7eff7;
+  --primary-text: #ffffff;
+  --vp-font-family-base: 'Microsoft YaHei UI', 'Microsoft YaHei', 'Segoe UI', sans-serif;
 }
 .dark {
-  --vp-c-bg: #101418;
-  --vp-c-bg-alt: #151b20;
-  --vp-c-bg-elv: #1b232b;
-  --vp-c-bg-soft: #192128;
-  --vp-c-brand-1: #57d6ed;
-  --vp-c-brand-2: #39c7e3;
-  --vp-c-brand-3: #087e99;
-  --vp-c-text-1: #edf3f6;
-  --vp-c-text-2: #aebac5;
+  --vp-c-bg: #222428;
+  --vp-c-bg-alt: #1d2023;
+  --vp-c-bg-elv: #373a3e;
+  --vp-c-bg-soft: #303338;
+  --vp-c-brand-1: #00a1d6;
+  --vp-c-brand-2: #00a1d6;
+  --vp-c-brand-3: #00a1d6;
+  --vp-c-brand-soft: rgba(0, 161, 214, .16);
+  --vp-c-text-1: #f1f2f5;
+  --vp-c-text-2: rgba(214, 218, 224, .90);
+  --vp-c-text-3: rgba(184, 189, 197, .75);
+  --vp-c-divider: rgba(131, 131, 145, .16);
+  --control-hover: #3b3e42;
+  --primary-text: #04161f;
 }
 .VPNavBarTitle .logo { width: 28px; height: 28px; }
 body { min-width: 0; }
 /* Product showcase: readable without JavaScript or motion. */
-:root { --ease-out: cubic-bezier(0.23, 1, 0.32, 1); --button-radius: 12px; --button-surface: color-mix(in srgb, var(--vp-c-text-1) 8%, var(--vp-c-bg)); --button-surface-hover: color-mix(in srgb, var(--vp-c-text-1) 14%, var(--vp-c-bg)); }
+:root { --ease-out: cubic-bezier(0.23, 1, 0.32, 1); --button-radius: 17px; --button-surface: var(--vp-c-bg-soft); --button-surface-hover: var(--control-hover); }
 /* 开屏墙固定在视口底层，正文从第一屏下方开始滚上来。 */
 .showcase { position: relative; z-index: 1; margin-top: 100vh; margin-top: 100dvh; max-width: 1440px; margin-inline: auto; padding: 0 64px; background: var(--vp-c-bg); }
 /* 页脚同样压在开屏画面墙之上，滚动到页尾时不会被墙盖住。 */
@@ -32,11 +49,12 @@ body { min-width: 0; }
 .release-badge { display: inline-flex; align-items: center; gap: 22px; color: var(--vp-c-brand-1); font-size: 13px; padding: 5px 10px; border: 1px solid var(--vp-c-divider); border-radius: 5px; margin-bottom: 18px; }
 .hero-description { font-size: 18px; line-height: 1.85; color: var(--vp-c-text-2); max-width: 400px; margin: 0 0 26px; }
 .hero-actions, .card-actions { display: flex; gap: 12px; flex-wrap: wrap; }
-.action { display: inline-flex; justify-content: center; align-items: center; gap: 12px; padding: 12px 20px; border-radius: var(--button-radius); font-size: 15px; font-weight: 600; text-decoration: none !important; line-height: 1.5; cursor: pointer; transition: transform 160ms var(--ease-out), background-color 160ms ease, border-color 160ms ease, filter 160ms ease; }
+.action { display: inline-flex; justify-content: center; align-items: center; gap: 12px; padding: 12px 20px; border-radius: var(--button-radius); font-size: 15px; font-weight: 600; text-decoration: none !important; line-height: 1.5; cursor: pointer; transition: transform 160ms var(--ease-out), background-color 160ms ease, border-color 160ms ease, color 160ms ease; }
 .action:active { transform: scale(.97); }
-.primary { background: var(--vp-c-brand-3); color: #fff !important; border: 1px solid var(--vp-c-brand-3); box-shadow: inset 0 1px 0 #ffffff26, 0 2px 4px #00000014; }
-.primary:hover { background: #006c86; }
-.secondary { border: 1px solid transparent; background: var(--button-surface); color: var(--vp-c-text-1) !important; }
+.primary { background: var(--vp-c-brand-3); color: var(--primary-text) !important; border: 1px solid transparent; font-weight: 700; }
+.primary:hover { background: color-mix(in srgb, var(--vp-c-brand-3), white 12%); }
+.primary:active { background: color-mix(in srgb, var(--vp-c-brand-3), black 16%); }
+.secondary { border: 1px solid var(--vp-c-divider); background: var(--button-surface); color: var(--vp-c-text-1) !important; }
 .secondary:hover { border-color: var(--vp-c-brand-1); }
 .hero-note { font-size: 13px; line-height: 1.7; color: var(--vp-c-text-2); margin: 18px 0 0; }
 .hero-product { border: 1px solid var(--vp-c-divider); border-radius: 9px; overflow: hidden; box-shadow: 0 22px 50px #0003; background: var(--vp-c-bg); }
@@ -64,7 +82,7 @@ body { min-width: 0; }
 .section-description { color: var(--vp-c-text-2); font-size: 16px; margin: 0 0 14px; }
 .home-bottom p { color: var(--vp-c-text-2); font-size: 16px; line-height: 1.85; }
 .home-plugins { border-top: 1px solid var(--vp-c-divider); scroll-margin-top: 90px; }
-.home-plugin-card { position: relative; flex: 0 0 var(--plugin-card-width); width: var(--plugin-card-width); min-width: 0; display: flex; flex-direction: column; padding: 26px; border: 1px solid var(--vp-c-divider); border-radius: 14px; background: var(--vp-c-bg-alt); transition: transform 200ms var(--ease-out), border-color 200ms ease; }
+.home-plugin-card { position: relative; flex: 0 0 var(--plugin-card-width); width: var(--plugin-card-width); min-width: 0; display: flex; flex-direction: column; padding: 26px; border: 1px solid var(--vp-c-divider); border-radius: 12px; background: var(--vp-c-bg-soft); transition: transform 200ms var(--ease-out), border-color 200ms ease; }
 .plugin-category { display: block; color: var(--vp-c-text-2); font-size: 12px; margin: 20px 0 10px; }
 .home-plugin-card .platform-icons { margin: 0; }
 .home-plugin-card h3 { font-size: 22px; font-weight: 600; margin: 0 0 14px; }
@@ -75,9 +93,9 @@ body { min-width: 0; }
 .home-plugin-card h3 a { position: relative; z-index: 2; }
 .home-plugin-card .action { padding: 9px 16px; font-size: 14px; }
 .home-plugin-card .platform-tags { margin-top: 18px; }
-.plugin-demo-trigger { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 14px; background: transparent; cursor: pointer; }
+.plugin-demo-trigger { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 12px; background: transparent; cursor: pointer; }
 .plugin-demo-trigger:focus-visible { outline: 2px solid var(--vp-c-brand-1); outline-offset: -3px; }
-.home-plugin-card.is-selected { border-color: var(--vp-c-brand-1); }
+.home-plugin-card.is-selected { border-color: var(--vp-c-brand-1); background: color-mix(in srgb, var(--vp-c-brand-1) 8%, var(--vp-c-bg-soft)); }
 .plugin-demo-panel { display: grid; grid-template-columns: .7fr 1.5fr; gap: 32px; align-items: center; margin-top: 20px; padding: 26px; border: 1px solid var(--vp-c-divider); border-radius: 10px; background: var(--vp-c-bg-alt); scroll-margin-bottom: 120px; }
 .plugin-demo-panel.is-match-demo { display:block; margin-top:36px; padding:0; border:0; background:transparent; }
 .is-match-demo .plugin-demo-heading { margin-bottom:24px; }
@@ -108,8 +126,7 @@ body { min-width: 0; }
 }
 @media (hover: hover) and (pointer: fine) {
   .home-plugin-card:hover { transform: translateY(-4px); border-color: var(--vp-c-brand-1); }
-  .action:hover { filter: brightness(1.08); }
-  .secondary:hover { background: var(--button-surface-hover); border-color: transparent; }
+  .secondary:hover { background: var(--button-surface-hover); border-color: var(--vp-c-divider); }
   .action:active { transform: scale(.97); }
 }
 .catalog-controls { display: flex; flex-wrap: wrap; gap: 18px; align-items: end; margin: 28px 0 16px; }
@@ -144,7 +161,7 @@ input:focus, button:focus-visible, a:focus-visible, summary:focus-visible { outl
   .catalog-page .plugin-grid { grid-template-columns: 1fr; }
   .catalog-page .plugin-card { padding: 22px; }
 }
-.plugin-card, .plugin-info { border: 1px solid var(--vp-c-divider); border-radius: 10px; background: var(--vp-c-bg-soft); padding: 24px; }
+.plugin-card, .plugin-info { border: 1px solid var(--vp-c-divider); border-radius: 12px; background: var(--vp-c-bg-soft); padding: 24px; }
 .card-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .platform-icons { display: flex; align-items: center; gap: 12px; }
 .platform-icons img { object-fit: contain; border-radius: 5px; }

@@ -114,9 +114,9 @@ onUnmounted(() => {
 .gallery-controls { text-align: center; width: 100%; }
 .gallery-tabs { position: relative; display: inline-flex; flex-wrap: nowrap; gap: 0; padding: 4px; border-radius: 12px; background: var(--vp-c-bg-soft); border: 1px solid var(--vp-c-divider); }
 .gallery-tabs button { position: relative; z-index: 1; flex: 1 1 0; min-height: 44px; padding: 8px 18px; border: 0; border-radius: 8px; background: transparent; white-space: nowrap; color: var(--vp-c-text-2); }
-.gallery-tabs button[aria-pressed=true] { color: var(--vp-c-bg); background: transparent; }
+.gallery-tabs button[aria-pressed=true] { color: var(--vp-c-brand-1); background: transparent; }
 .layout-ratio { margin-left: 5px; opacity: .6; font-size: 12px; }
-.gallery-selection { position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc((100% - 8px) / 3); border-radius: 8px; background: var(--vp-c-text-1); transform: translateX(calc(var(--selected) * 100%)); }
+.gallery-selection { position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc((100% - 8px) / 3); border-radius: 8px; background: var(--vp-c-brand-soft); border: 1px solid var(--vp-c-brand-1); transform: translateX(calc(var(--selected) * 100%)); }
 .screenshot-source { margin: 14px 0 0; }
 .is-enhanced::after { content: ''; display: block; height: 45svh; }
 .is-enhanced .screenshot-pin { position: sticky; top: calc(var(--vp-nav-height) + 24px); }
