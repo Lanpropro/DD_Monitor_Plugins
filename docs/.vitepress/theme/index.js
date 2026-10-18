@@ -2,17 +2,14 @@ import DefaultTheme from 'vitepress/theme'
 import HomePage from './HomePage.vue'
 import PluginCatalog from './PluginCatalog.vue'
 import PluginInfo from './PluginInfo.vue'
-import DockNav from './DockNav.vue'
+import ThemeLayout from './ThemeLayout.vue'
 import FeatureDemo from './FeatureDemo.vue'
-import { h } from 'vue'
 import './style.css'
 import './dock.css'
 
 export default {
   extends: DefaultTheme,
-  Layout() {
-    return h(DefaultTheme.Layout, null, { 'nav-bar-content-before': () => h(DockNav) })
-  },
+  Layout: ThemeLayout,
   enhanceApp({ app }) {
     app.component('HomePage', HomePage)
     app.component('PluginCatalog', PluginCatalog)

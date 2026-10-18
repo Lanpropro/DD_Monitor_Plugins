@@ -16,6 +16,7 @@
   --vp-c-text-2: #aebac5;
 }
 .VPNavBarTitle .logo { width: 28px; height: 28px; }
+body { min-width: 0; }
 /* Product showcase: readable without JavaScript or motion. */
 :root { --ease-out: cubic-bezier(0.23, 1, 0.32, 1); }
 /* 开屏墙固定在视口底层，正文从第一屏下方开始滚上来。 */
@@ -38,15 +39,12 @@
 .secondary { border: 1px solid var(--vp-c-divider); background: var(--vp-c-bg-soft); color: var(--vp-c-text-1) !important; }
 .secondary:hover { border-color: var(--vp-c-brand-1); }
 .hero-note { font-size: 13px; line-height: 1.7; color: var(--vp-c-text-2); margin: 18px 0 0; }
-.hero-stage { grid-column: 1 / -1; min-width: 0; padding: 20px 22px 0; border: 1px solid var(--vp-c-divider); border-radius: 16px; background: var(--vp-c-bg-alt); }
-.stage-caption { display: flex; justify-content: space-between; gap: 12px; margin: 0 0 16px; color: var(--vp-c-text-2); font-size: 12px; letter-spacing: .04em; }
 .hero-product { border: 1px solid var(--vp-c-divider); border-radius: 9px; overflow: hidden; box-shadow: 0 22px 50px #0003; background: var(--vp-c-bg); }
 .window-label { display: flex; align-items: center; gap: 8px; padding: 10px 16px; font-size: 13px; }
 .window-mode { margin-left: auto; color: var(--vp-c-text-2); }
 .screenshot-stage { display: grid; aspect-ratio: 16 / 9; overflow: hidden; background: #090c10; }
 .hero-shot { display: block; grid-area: 1 / 1; width: 100%; height: 100%; min-height: 0; object-fit: contain; }
 .product-caption { display: flex; justify-content: space-between; gap: 18px; font-size: 13px; padding: 13px 16px; color: var(--vp-c-text-2); line-height: 1.7; }
-.product-caption a { white-space: nowrap; color: var(--vp-c-brand-1); }
 .gallery-tabs, .filters { display: flex; flex-wrap: wrap; gap: 8px; }
 .gallery-tabs { justify-content: center; padding: 20px 0 12px; }
 .gallery-tabs button, .filters button { padding: 10px 16px; border: 1px solid var(--vp-c-divider); border-radius: 6px; font-size: 14px; background: var(--vp-c-bg-soft); transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease; }
@@ -96,11 +94,8 @@
 .home-bottom .eyebrow { font-size: 13px; color: var(--vp-c-brand-1); margin: 0 0 18px; }
 .bottom-actions { display: flex; flex-direction: column; gap: 18px; align-items: start; }
 .bottom-actions > a:last-child { color: var(--vp-c-text-2); font-size: 14px; }
-@keyframes product-enter { from { opacity: .25; transform: translateY(20px); } to { opacity: 1; transform: none; } }
+.showcase .reveal-pending { opacity: 0; transform: translateY(24px); }
 @media (prefers-reduced-motion: no-preference) {
-  .hero-copy { animation: product-enter 600ms var(--ease-out) both; }
-  .hero-intro { animation: product-enter 600ms 60ms var(--ease-out) both; }
-  .hero-stage { animation: product-enter 800ms 120ms var(--ease-out) both; }
   .screenshot-enter-active, .screenshot-leave-active { transition: opacity 200ms ease; }
   .screenshot-enter-from, .screenshot-leave-to { opacity: 0; }
 }
@@ -172,9 +167,7 @@ input:focus, button:focus-visible, a:focus-visible, summary:focus-visible { outl
   .hero h1 { font-size: clamp(32px, 8.8vw, 52px); }
   .hero-intro { padding: 0; }
   .hero-description { margin-bottom: 20px; }
-  .hero-stage { padding: 12px 10px 0; border-radius: 10px; }
-  .stage-caption { font-size: 12px; margin-bottom: 10px; }
-  .stage-caption > span:first-child, .window-mode, .tab-number { display: none; }
+  .window-mode, .tab-number { display: none; }
   .window-label { padding: 8px 10px; font-size: 12px; }
   .product-caption { flex-direction: column; gap: 3px; padding: 10px; font-size: 12px; }
   .gallery-tabs { flex-wrap: nowrap; gap: 5px; padding: 14px 0 10px; }
@@ -193,6 +186,7 @@ input:focus, button:focus-visible, a:focus-visible, summary:focus-visible { outl
   .plugin-card, .plugin-info { padding: 20px; }
 }
 @media (prefers-reduced-motion: reduce) {
+  .showcase .reveal-pending { opacity: 1; transform: none; }
   .action, .home-plugin-card { transition: border-color 160ms ease, background-color 160ms ease; }
   .action:hover, .action:active, .home-plugin-card:hover { transform: none; }
 }

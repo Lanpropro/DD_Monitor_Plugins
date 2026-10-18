@@ -34,8 +34,8 @@
 /* Keep every destination visible on a second header row when space is tight. */
 @media (max-width: 1199px) {
   :root { --vp-nav-height: 128px; }
-  .VPNavBar .container, .VPNavBar .content-body, .VPNavBarTitle .title,
-  .VPNavBar.has-sidebar .title { height: 64px; }
+  .VPNavBar > .wrapper > .container, .VPNavBar .content-body, .VPNavBarTitle .title,
+  .VPNavBar .VPNavBarHamburger, .VPNavBar.has-sidebar .title { height: 64px; }
   .dock-nav { position: absolute; top: 68px; left: 50%; transform: translateX(-50%); margin: 0; max-width: calc(100vw - 24px); }
   .VPNavBarSearch { flex-grow: 1; }
 }

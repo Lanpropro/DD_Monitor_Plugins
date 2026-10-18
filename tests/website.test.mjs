@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import { resolve, relative, dirname } from 'node:path'
 import { runInNewContext } from 'node:vm'
+import { createAppearanceToggle } from '../docs/.vitepress/theme/appearance.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const read = path => readFileSync(resolve(root, path), 'utf8')
@@ -12,9 +13,12 @@ const base = '/DD_Monitor_Plugins/'
 
 // Execute the component's actual setup with browser/lifecycle boundaries mocked.
 function mountShowcase({ reduced = false, intersection = true } = {}) {
-  const media = { matches: reduced }
+  const media = { matches: reduced, addEventListener() {}, removeEventListener() {} }
   const animations = []
-  const target = { animate: (...args) => animations.push(args) }
+  const classes = new Set()
+  const target = { animate: (...args) => animations.push(args), classList: {
+    add: name => classes.add(name), remove: name => classes.delete(name)
+  } }
   const observed = new Set()
   let notify, mount, unmount, disconnected = false
   class Observer {
@@ -35,7 +39,7 @@ function mountShowcase({ reduced = false, intersection = true } = {}) {
     IntersectionObserver: Observer
   })
   mount()
-  return { media, animations, observed, unmount,
+  return { media, animations, observed, classes, unmount,
     visible: () => notify?.([{ target, isIntersecting: true }]),
     get disconnected() { return disconnected }
   }
@@ -53,7 +57,9 @@ test('reduced motion and unsupported browsers leave the static showcase usable',
 test('scroll entrance releases its observer and respects a changed motion preference', () => {
   const page = mountShowcase()
   assert.equal(page.observed.size, 1)
+  assert.ok(page.classes.has('reveal-pending'), 'content waits until it enters the viewing area')
   page.visible()
+  assert.equal(page.classes.size, 0)
   assert.equal(page.animations.length, 1)
   assert.equal(page.observed.size, 0)
   assert.equal(page.animations[0][0].at(-1).opacity, 1)
@@ -118,6 +124,9 @@ test('homepage exposes software and every plugin download before JavaScript runs
   assert.ok(home.includes('href="/DD_Monitor_Plugins/download"'))
   assert.ok(home.includes('id="plugins"'))
   assert.ok(home.includes('screenshots/landscape.webp'))
+  assert.ok(!home.includes('查看完整截图'), 'the presentation should not show a redundant screenshot link')
+  assert.ok(home.includes('aria-label="暂停截图轮播"'), 'autoplay must have a manual pause control')
+  for (const label of ['横屏观看', '弹幕布局', '竖屏布局']) assert.ok(home.includes(label))
   const release = JSON.parse(read('docs/data/software-release.json'))
   assert.ok(home.includes(release.download))
   assert.ok(home.includes(`${release.tag} 已发布`))
@@ -228,6 +237,129 @@ test('every generated internal link, anchor and local asset resolves under the P
         const targetHtml = readFileSync(target, 'utf8')
         assert.ok(targetHtml.includes(`id="${decodeURIComponent(fragment)}"`), `${relative(dist, path)}: missing anchor ${url}`)
       }
+    }
+  }
+})
+
+function mountGallery({ reduced = false, intersection = true } = {}) {
+  const timers = new Map(), listeners = new Map()
+  const media = { matches: reduced, addEventListener() {}, removeEventListener() {} }
+  const story = { offsetHeight: 1200, top: 100, getBoundingClientRect() { return { top: this.top } } }
+  const pin = { offsetHeight: 600 }
+  const doc = { hidden: false, addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name) }
+  let mount, unmount, notify, next = 0, refs = 0, disconnected = false
+  class Observer {
+    constructor(callback) { notify = callback }
+    observe() {}
+    disconnect() { disconnected = true }
+  }
+  const script = read('docs/.vitepress/theme/ScreenshotShowcase.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
+  const state = runInNewContext(script + '\n;({ active, progress, enhanced, paused, selectShot, togglePlayback, interact, update, preferenceChanged })', {
+    ref: value => ({ value: value === null ? (++refs === 1 ? story : pin) : value }),
+    onMounted: fn => { mount = fn }, onUnmounted: fn => { unmount = fn },
+    window: { matchMedia: () => media, ...(intersection ? { IntersectionObserver: Observer } : {}), addEventListener() {}, removeEventListener() {} },
+    document: doc, IntersectionObserver: Observer, getComputedStyle: () => ({ top: '100px' }),
+    setTimeout: fn => { timers.set(++next, fn); return next }, clearTimeout: id => timers.delete(id),
+    cancelAnimationFrame() {}, requestAnimationFrame() { return 1 }
+  })
+  mount()
+  return { state, story, doc, media, timers, listeners, unmount,
+    visible(value) { notify?.([{ isIntersecting: value }]) },
+    tick() { const fn = timers.values().next().value; assert.ok(fn, 'expected a scheduled slide'); timers.clear(); fn() },
+    get disconnected() { return disconnected }
+  }
+}
+
+test('screenshot scroll contracts the display and playback loops only while being watched', () => {
+  const gallery = mountGallery()
+  assert.equal(gallery.state.progress.value, 0)
+  gallery.visible(true)
+  assert.equal(gallery.timers.size, 0, 'no slideshow before the controls are revealed')
+  gallery.story.top = -500
+  gallery.state.update()
+  assert.equal(gallery.state.progress.value, 1)
+  for (const expected of [1, 2, 0]) { gallery.tick(); assert.equal(gallery.state.active.value, expected) }
+  gallery.state.togglePlayback()
+  assert.equal(gallery.timers.size, 0)
+  gallery.state.selectShot(2)
+  assert.equal(gallery.state.active.value, 2)
+  assert.equal(gallery.timers.size, 0, 'manual selection respects pause')
+  gallery.state.togglePlayback()
+  gallery.state.interact(true)
+  assert.equal(gallery.timers.size, 0, 'do not advance beneath a pointer or keyboard focus')
+  gallery.state.interact(false)
+  assert.equal(gallery.timers.size, 1)
+  gallery.doc.hidden = true
+  gallery.listeners.get('visibilitychange')()
+  assert.equal(gallery.timers.size, 0)
+  gallery.doc.hidden = false
+  gallery.visible(false)
+  assert.equal(gallery.timers.size, 0)
+  gallery.visible(true)
+  assert.equal(gallery.timers.size, 1)
+  gallery.unmount()
+  assert.equal(gallery.timers.size, 0)
+  assert.equal(gallery.listeners.size, 0)
+  assert.ok(gallery.disconnected)
+})
+
+test('screenshot reduced-motion and observer fallback expose manual controls without autoplay', () => {
+  for (const options of [{ reduced: true }, { intersection: false }]) {
+    const gallery = mountGallery(options)
+    gallery.visible(true)
+    assert.equal(gallery.state.enhanced.value, false)
+    assert.equal(gallery.state.progress.value, 1)
+    assert.equal(gallery.timers.size, 0)
+    gallery.state.selectShot(1)
+    assert.equal(gallery.state.active.value, 1)
+    gallery.unmount()
+  }
+  const gallery = mountGallery()
+  gallery.media.matches = true
+  gallery.state.preferenceChanged()
+  assert.equal(gallery.state.enhanced.value, false)
+  assert.equal(gallery.state.progress.value, 1)
+  gallery.unmount()
+})
+
+test('theme wipe originates at the button, supports rapid toggles and falls back without motion', async () => {
+  const saved = Object.fromEntries(['window', 'document', 'innerWidth', 'innerHeight'].map(key => [key, globalThis[key]]))
+  const wipes = [], bounces = []
+  let reduced = false, skipped = 0
+  const theme = { value: true }
+  globalThis.innerWidth = 1000
+  globalThis.innerHeight = 800
+  globalThis.window = { matchMedia: () => ({ matches: reduced }) }
+  globalThis.document = {
+    documentElement: { animate: (...args) => wipes.push(args) },
+    startViewTransition(update) {
+      const updateCallbackDone = Promise.resolve().then(update)
+      return { updateCallbackDone, ready: updateCallbackDone, finished: updateCallbackDone, skipTransition() { skipped++ } }
+    }
+  }
+  const event = { currentTarget: { getBoundingClientRect: () => ({ left: 900, top: 20, width: 40, height: 22 }), animate: (...args) => { bounces.push(args); return { cancel() {} } } } }
+  try {
+    const toggle = createAppearanceToggle(theme, async () => {})
+    await Promise.all([toggle(event), toggle(event), toggle(event)])
+    assert.equal(theme.value, false, 'three clicks must apply three state changes')
+    assert.ok(skipped > 0)
+    assert.equal(bounces.length, 3)
+    assert.match(wipes[0][0][0].clipPath, /0px at 920px 31px/)
+    assert.equal(wipes[0][1].pseudoElement, '::view-transition-new(root)')
+    reduced = true
+    await toggle(event)
+    assert.equal(theme.value, true)
+    assert.equal(bounces.length, 3)
+    assert.equal(wipes.length, 3)
+    reduced = false
+    delete document.startViewTransition
+    await toggle(event)
+    assert.equal(theme.value, false)
+    assert.equal(wipes.length, 3)
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete globalThis[key]
+      else globalThis[key] = value
     }
   }
 })

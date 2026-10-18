@@ -109,3 +109,13 @@ python tools/inspect_host_package.py "软件安装包路径.zip"
 
 - `plugins/match_sync/plugin.json` 仍为 1.1，但已发布安装包与软件仓库 `plugins_user/match_sync` 均为 1.2 / 1.2.8。网站展示按公开 Release 的 1.2，源码目录需要单独同步；插件仓库 README 的版本表同步前不要据其判断当前版本。
 - 开屏画面墙的 224 个格子在手机上只用 8 列，格子偏大；如需更密的效果，改 `SplashWall.vue` 的 `@media (max-width: 700px)` 列数。
+
+## 2026-10-18 主题扩散与滚动展示
+
+- 主题沿用 VitePress 的持久化状态及原有切换入口，通过 `toggle-appearance` 接入按钮中心扩散的 View Transition；按钮有轻微压缩回弹，滑块采用 motion-web 的 CSS 弹性曲线。窄屏可直接切换主题，并修正菜单按钮内部容器被顶栏高度规则误伤的问题。
+- 真实截图独立为 `ScreenshotShowcase.vue`：滚动时保持展示区域、从 100% 收拢到 82%，随后露出三种布局选项。保留原有真实截图及说明，去掉“查看完整截图”链接。
+- 三种布局每 5 秒循环一次；离开视口、后台、悬停或键盘聚焦控制区时暂停，提供独立播放/暂停按钮及手动选择。减少动态效果或缺少观察器时使用静态展示与手动切换。
+- 首页标题、功能说明、演示和插件卡片进入视口时才逐项显现；无 JavaScript 时仍保留所有正文与下载链接。
+- 参考 Screen Studio（https://screen.studio/）的演示优先与滚动分段节奏，沿用现有开屏和内容结构；没有新增运行依赖。
+- 构建、16 项网站测试与 diff 检查通过。测试覆盖三轮播状态、自动暂停、卸载清理、减少动态效果、主题扩散中心及快速连续切换。浏览器核验 320/390/1100/1280px、实际自动切换、手动选择与键盘操作，控制台无警告或错误。
+- 本次预览使用 http://127.0.0.1:4174/DD_Monitor_Plugins/，避开已有 4173 服务。截图保存在 work/website-preview/scroll-screenshot-*.png。
