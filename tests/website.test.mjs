@@ -497,3 +497,100 @@ test('preset secondary page opens inside the preview and returns focus on close 
   assert.equal(returned, 2)
   s.closePicker(); assert.equal(returned, 2, 'closing an already closed page must not move focus')
 })
+
+function mountPluginCarousel({ reduced = false, intersection = true } = {}) {
+  const frames = new Map(), timers = new Map(), listeners = new Map()
+  let mount, unmount, notify, next = 0, disconnected = 0
+  const media = { matches: reduced, addEventListener: (name, fn) => listeners.set('media:' + name, fn), removeEventListener: name => listeners.delete('media:' + name) }
+  const group = { offsetWidth: 1008, firstElementChild: { offsetWidth: 320 } }
+  const element = { scrollLeft: 0, querySelector: () => group, scrollBy({ left }) { this.scrollLeft += left }, setPointerCapture() {}, releasePointerCapture() {} }
+  const doc = { hidden: false, addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name) }
+  class Observer { constructor(fn) { notify = fn } observe() {} disconnect() { disconnected++ } }
+  class SizeObserver { observe() {} disconnect() { disconnected++ } }
+  const script = read('docs/.vitepress/theme/PluginCarousel.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
+  const state = runInNewContext(script + '\n;({ paused, sync, normalize, measure, togglePlayback, step, onPointerEnter, onPointerLeave, onFocusIn, onFocusOut, onPointerDown, onPointerMove, onPointerUp })', {
+    ref: value => ({ value: value === null ? element : value }),
+    onMounted: fn => { mount = fn }, onUnmounted: fn => { unmount = fn },
+    window: { matchMedia: () => media, ...(intersection ? { IntersectionObserver: Observer } : {}), ResizeObserver: SizeObserver, addEventListener() {}, removeEventListener() {} },
+    document: doc, IntersectionObserver: Observer, ResizeObserver: SizeObserver,
+    getComputedStyle: () => ({ columnGap: '24px' }),
+    requestAnimationFrame: fn => { frames.set(++next, fn); return next }, cancelAnimationFrame: id => frames.delete(id),
+    setTimeout: fn => { timers.set(++next, fn); return next }, clearTimeout: id => timers.delete(id)
+  })
+  mount()
+  return { state, element, group, media, doc, frames, timers, listeners, unmount,
+    visible(value) { notify?.([{ isIntersecting: value }]) },
+    frame(time) { const [id, fn] = frames.entries().next().value; frames.delete(id); fn(time) },
+    settle() { const [id, fn] = timers.entries().next().value; timers.delete(id); fn() },
+    get disconnected() { return disconnected }
+  }
+}
+
+test('plugin rail loops seamlessly and keeps its phase after resize', () => {
+  const page = mountPluginCarousel(), s = page.state, element = page.element
+  assert.equal(element.scrollLeft, 1032, 'start in the middle copy')
+  page.visible(true)
+  page.frame(100)
+  for (let time = 116; time <= 1100; time += 16) page.frame(time)
+  assert.ok(element.scrollLeft >= 1058 && element.scrollLeft <= 1061, 'automatic speed is about 28px per second')
+  element.scrollLeft = 2064 + 17; s.normalize(); assert.equal(element.scrollLeft, 1032 + 17)
+  element.scrollLeft = 1032 - 17; s.normalize(); assert.equal(element.scrollLeft, 2064 - 17)
+  element.scrollLeft = 1032 * 1.25; page.group.offsetWidth = 1200; s.measure()
+  assert.equal(element.scrollLeft, 1224 * 1.25)
+  page.unmount(); assert.equal(page.frames.size, 0); assert.equal(page.disconnected, 2)
+  assert.equal(page.listeners.size, 0)
+})
+
+test('plugin rail pauses for reading, manual navigation, background and reduced motion', () => {
+  const page = mountPluginCarousel(), s = page.state
+  page.visible(true); assert.equal(page.frames.size, 1)
+  s.onPointerEnter({ pointerType: 'mouse' }); assert.equal(page.frames.size, 0)
+  s.onPointerLeave(); assert.equal(page.frames.size, 1)
+  s.onFocusIn({ target: { matches: () => true } }); assert.equal(page.frames.size, 0)
+  s.onFocusOut({ currentTarget: { contains: () => false } }); assert.equal(page.frames.size, 1)
+  s.onFocusIn({ target: { matches: () => false } }); assert.equal(page.frames.size, 1, 'mouse focus must not trap autoplay after resume')
+  s.togglePlayback(); assert.equal(page.frames.size, 0)
+  s.togglePlayback(); assert.equal(page.frames.size, 1)
+  s.step(1); assert.equal(page.frames.size, 0); assert.equal(page.element.scrollLeft, 1376)
+  page.settle(); assert.equal(page.frames.size, 1)
+  page.doc.hidden = true; page.listeners.get('visibilitychange')(); assert.equal(page.frames.size, 0)
+  page.doc.hidden = false; s.sync(); assert.equal(page.frames.size, 1)
+  page.visible(false); assert.equal(page.frames.size, 0)
+  page.visible(true); page.media.matches = true; page.listeners.get('media:change')(); assert.equal(page.frames.size, 0)
+  s.step(-1); page.settle(); assert.equal(page.frames.size, 0, 'manual navigation remains available without autoplay')
+  page.unmount(); assert.equal(page.timers.size, 0)
+  for (const options of [{ reduced: true }, { intersection: false }]) {
+    const fallback = mountPluginCarousel(options); fallback.visible(true)
+    assert.equal(fallback.frames.size, 0); fallback.state.step(1); fallback.settle(); fallback.unmount()
+  }
+})
+
+test('plugin rail drags horizontally without hijacking links or touch page scrolling', () => {
+  const page = mountPluginCarousel(), s = page.state
+  const pointer = { pointerType: 'mouse', button: 0, pointerId: 1, clientX: 500, target: { closest: () => null } }
+  page.visible(true); s.onPointerDown(pointer); assert.equal(page.frames.size, 0)
+  s.onPointerMove({ pointerId: 1, clientX: 400 }); assert.equal(page.element.scrollLeft, 1132)
+  s.onPointerUp(pointer); assert.equal(page.frames.size, 1)
+  s.onPointerDown({ ...pointer, pointerType: 'touch' }); assert.equal(page.frames.size, 0)
+  s.onPointerUp(pointer); assert.equal(page.frames.size, 1)
+  s.onPointerDown({ ...pointer, target: { closest: () => ({}) } }); assert.equal(page.frames.size, 1)
+  page.unmount()
+})
+
+test('plugin carousel renders downloads and keeps duplicate copies out of keyboard navigation', () => {
+  const home = readFileSync(resolve(dist, 'index.html'), 'utf8')
+  assert.ok(home.includes('aria-label="插件横向循环展示"'))
+  assert.ok(home.includes('aria-label="暂停插件自动滚动"'))
+  assert.ok(home.includes('aria-label="上一个插件"'))
+  assert.ok(home.includes('aria-label="下一个插件"'))
+  assert.equal((home.match(/class="carousel-group"/g) || []).length, 3)
+  assert.equal((home.match(/class="carousel-group" aria-hidden="true"/g) || []).length, 2)
+  assert.equal((home.match(/class="home-plugin-card"/g) || []).length, 9)
+  for (const copy of home.split('<div class="carousel-group"').slice(1)) {
+    if (!copy.startsWith(' aria-hidden="true"')) continue
+    const cards = copy.match(/<article class="home-plugin-card"[\s\S]*?<\/article>/g)
+    assert.equal(cards.length, 3)
+    for (const card of cards) for (const control of card.match(/<(?:a|button)\b[^>]*>/g)) assert.ok(control.includes('tabindex="-1"'))
+  }
+  for (const p of plugins) assert.equal((home.match(new RegExp('href="' + p.download.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '"', 'g')) || []).length, 3)
+})
