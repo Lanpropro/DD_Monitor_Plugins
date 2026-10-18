@@ -78,7 +78,7 @@ onUnmounted(() => {
     :style="{ '--shot-scale': enhanced ? 1 - progress * .18 : 1, '--product-height': productHeight + 'px', '--frame-ratio': active === 2 ? 9 / 16 : 16 / 9, '--selected': active, '--controls': controlsReady || !enhanced ? 1 : Math.min(1, Math.max(0, (progress - .55) / .4)) }">
     <div ref="pin" class="screenshot-pin">
       <div class="product-wrap" :class="{ 'is-measured': enhanced && productHeight > 0 }" :style="enhanced && productHeight > 0 ? { height: productHeight * (1 - progress * .18) + 'px' } : undefined">
-      <div ref="product" class="hero-product">
+      <div ref="product" class="hero-product" :class="{ 'is-portrait': active === 2 }">
         <div class="window-label"><img :src="withBase('/logo.svg')" width="24" height="24" alt="" /><span>DD 监控室 CE</span><span class="window-mode">多画面 · 自在观看</span></div>
         <div class="screenshot-stage">
           <Transition name="screenshot">
@@ -89,7 +89,6 @@ onUnmounted(() => {
             <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path v-if="paused" d="m8 5 11 7-11 7Z" /><path v-else d="M7 5h4v14H7zm6 0h4v14h-4z" /></svg>
           </button>
         </div>
-        <div class="product-caption">{{ shots[active].caption }}</div>
       </div>
       </div>
       <div class="gallery-controls" :inert="enhanced && !controlsReady && progress < .65" @pointerenter="interact(true)" @pointerleave="interact(false)"
@@ -98,6 +97,7 @@ onUnmounted(() => {
           <span class="gallery-selection" aria-hidden="true"></span>
           <button v-for="(shot, i) in shots" :key="shot.file" :aria-pressed="active === i" @click="selectShot(i)">{{ shot.label }} <span class="layout-ratio" aria-hidden="true">{{ i === 2 ? '9:16' : '16:9' }}</span></button>
         </div>
+        <p class="product-caption gallery-caption">{{ shots[active].caption }}</p>
         <p class="screenshot-source">截图来自现有项目文档，不同版本的界面细节可能有所调整。</p>
       </div>
     </div>
@@ -105,14 +105,17 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.screenshot-story { grid-column: 1 / -1; min-width: 0; overflow-anchor: none; }
+.screenshot-story { --image-height: clamp(180px, min(42svh, calc(100svh - var(--vp-nav-height) - 210px)), 640px); grid-column: 1 / -1; min-width: 0; overflow-anchor: none; }
 .screenshot-pin { display: flex; flex-direction: column; align-items: center; gap: 24px; }
-.product-wrap { position: relative; width: min(100%, calc((100svh - var(--vp-nav-height) - 220px) * var(--frame-ratio))); }
+.product-wrap { position: relative; width: min(100%, calc(var(--image-height) * var(--frame-ratio))); }
 .product-wrap.is-measured .hero-product { position: absolute; top: 0; left: 0; }
 .hero-product { width: 100%; flex-shrink: 0; }
-.screenshot-stage { position: relative; aspect-ratio: var(--frame-ratio); }
+.window-label { height: 44px; padding: 0 12px; white-space: nowrap; }
+.is-portrait .window-mode { display: none; }
+.screenshot-stage { position: relative; height: var(--image-height); aspect-ratio: auto; }
 .gallery-playback { position: absolute; right: 12px; bottom: 12px; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; color: white; background: #101418b3; backdrop-filter: blur(12px); }
 .gallery-controls { text-align: center; width: 100%; }
+.gallery-caption { display: grid; place-items: center; justify-content: center; height: 40px; padding: 0; margin: 12px 0 0; line-height: 1.6; text-align: center; }
 .gallery-tabs { position: relative; display: inline-flex; flex-wrap: nowrap; gap: 0; padding: 4px; border-radius: 12px; background: var(--vp-c-bg-soft); border: 1px solid var(--vp-c-divider); }
 .gallery-tabs button { position: relative; z-index: 1; flex: 1 1 0; min-height: 44px; padding: 8px 18px; border: 0; border-radius: 8px; background: transparent; white-space: nowrap; color: var(--vp-c-text-2); }
 .gallery-tabs button[aria-pressed=true] { color: var(--vp-c-bg); background: transparent; }
@@ -125,7 +128,6 @@ onUnmounted(() => {
 .is-enhanced .gallery-controls { opacity: var(--controls); }
 @media (prefers-reduced-motion: no-preference) {
   .product-wrap { transition: width 400ms var(--ease-out); }
-  .screenshot-stage { transition: aspect-ratio 400ms var(--ease-out); }
   .gallery-selection { transition: transform 400ms var(--ease-out); }
 }
 @media (max-width: 700px) {

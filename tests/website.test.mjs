@@ -202,19 +202,16 @@ test('plugin detail pages list every published version they can prove', () => {
   }
 })
 
-test('real software thumbnails and per-plugin instructions remain readable before hydration', () => {
+test('appearance miniature and editable controls remain usable before hydration', () => {
   const home = readFileSync(resolve(dist, 'index.html'), 'utf8')
-  assert.ok(!home.includes('交互示意'))
-  assert.ok(!home.includes('aria-label="主画面比例"'))
-  assert.ok(home.includes('aria-label="观看体验截图"'))
-  const gallery = home.match(/<div class="feature-gallery"[\s\S]*?<\/figure>/)?.[0]
-  assert.ok(gallery)
-  assert.equal((gallery.match(/class="feature-thumbnail"/g) || []).length, 3)
-  for (const file of ['landscape.webp', 'danmaku.webp', 'portrait.webp']) {
-    assert.ok(gallery.includes(`/screenshots/${file}`), `missing real thumbnail: ${file}`)
-  }
-  assert.equal((gallery.match(/aria-pressed="true"/g) || []).length, 1)
-  assert.ok(gallery.includes('aria-controls="feature-screenshot"'))
+  assert.ok(home.includes('外观缩略预览'))
+  assert.ok(home.includes('aria-label="软件外观缩略预览"'))
+  assert.ok(home.includes('class="mini-sidebar"'))
+  assert.equal((home.match(/class="[^"]*\bmini-tile\b[^"]*"/g) || []).length, 6)
+  assert.ok(home.includes('aria-label="主画面比例"'))
+  assert.ok(home.includes('role="separator"'))
+  assert.ok(home.includes('aria-label="拖动调整主画面比例"'))
+  assert.ok(home.includes('aria-label="软件功能演示"'))
   assert.ok(home.includes('id="plugin-demo"'))
   for (const plugin of plugins) {
     assert.equal(plugin.steps.length, 3)
@@ -287,7 +284,7 @@ test('screenshot scroll contracts the display and playback loops only while bein
   const gallery = mountGallery()
   assert.equal(gallery.state.productHeight.value, 520)
   gallery.resizeProduct(680)
-  assert.equal(gallery.state.productHeight.value, 680, 'layout follows the real frame height after a ratio change')
+  assert.equal(gallery.state.productHeight.value, 680, 'layout follows the real frame height after a viewport resize')
   assert.equal(gallery.state.progress.value, 0)
   gallery.visible(true)
   assert.equal(gallery.timers.size, 0, 'no slideshow before the controls are revealed')
@@ -410,4 +407,28 @@ test('theme wipe originates at the button, supports rapid toggles and falls back
       else globalThis[key] = value
     }
   }
+})
+
+
+test('miniature layout responds to drag, slider boundaries and keyboard adjustments', () => {
+  const script = read('docs/.vitepress/theme/FeatureDemo.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
+  const state = runInNewContext(script + '\n;({ ratio, setRatio, onPointerDown, onPointerMove, onPointerUp, onGripKey })', {
+    ref: value => ({ value: value === null ? { getBoundingClientRect: () => ({ left: 100, width: 600 }) } : value })
+  })
+  const target = { setPointerCapture() {}, releasePointerCapture() {} }
+  state.onPointerDown({ currentTarget: target, pointerId: 1, clientX: 400 })
+  assert.equal(state.ratio.value, 50)
+  state.onPointerMove({ clientX: 460 })
+  assert.equal(state.ratio.value, 60)
+  state.onPointerUp({ currentTarget: target, pointerId: 1 })
+  state.onPointerMove({ clientX: 500 })
+  assert.equal(state.ratio.value, 60, 'pointer movement after release must not edit the layout')
+  state.onGripKey({ key: 'ArrowRight', shiftKey: true, preventDefault() {} })
+  assert.equal(state.ratio.value, 65)
+  state.onGripKey({ key: 'ArrowLeft', shiftKey: false, preventDefault() {} })
+  assert.equal(state.ratio.value, 64)
+  state.setRatio(100)
+  assert.equal(state.ratio.value, 68)
+  state.setRatio(-100)
+  assert.equal(state.ratio.value, 35)
 })
