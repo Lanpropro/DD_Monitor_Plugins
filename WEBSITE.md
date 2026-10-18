@@ -250,3 +250,12 @@ python tools/inspect_host_package.py "软件安装包路径.zip"
 - 构建、40 项网站测试与 diff 检查通过。更新原型配色/主按钮、保留滚动显现、移除局部竖屏图及演示尺寸边界回归。
 - 浏览器实测预设/卡片放入及混音滑块键盘操作；320px 下无横向溢出，浅色主按钮深墨底/暖白字，控制台无警告或错误。截图：work/website-preview/prototype-palette-compact-viewing.png、prototype-palette-compact-plugin.png。
 - 本地预览 http://127.0.0.1:4174/DD_Monitor_Plugins/#layout，未公开部署。
+
+
+## 2026-10-18 回退融合与缩小的演示排版
+
+- 按用户要求，仅将观看体验和插件功能演示的结构、尺寸回退至原型融合之前（98cbaff）。FeatureDemo.vue 恢复该版本，移除融合时新增的快捷布局条/缩略图列表，恢复原有说明、预设入口与可操作缩略预览。
+- 插件功能恢复原来的面板宽度和二路演示全宽纵向展示，时间轴恢复原有字体、间距与 88px 章节按钮。保留近期原型配色、全局胶囊按钮、截图选择样式及二路浮层色。
+- 观看体验区不恢复已取消的独立竖屏截图；预设二级页、8 种布局、拖放和时间轴逻辑保持。用户修改的 HomePage.vue 未改动或提交。
+- 构建、39 项网站测试及 diff 检查通过；移除已回退快捷布局的专属测试，补充融合前结构和功能入口回归。浏览器确认快捷控件为 0、二路恢复 block 全宽（1100px 视口内约 1021px）、配色仍为 #070c16；预设二级页切换四分后实际显示 4 格。
+- 截图：work/website-preview/restored-pre-fusion-demo.png；本地预览 http://127.0.0.1:4174/DD_Monitor_Plugins/。

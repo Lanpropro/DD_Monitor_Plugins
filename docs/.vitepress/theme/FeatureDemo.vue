@@ -14,7 +14,6 @@ const presets = [
   { id: '4x4', name: '十六分', rows: 4, cols: 4, cells: even(4,4) },
   { id: 'main2', name: '主画面 + 2 小', rows: 2, cols: 3, cells: [[0,0,2,2],[0,2,1,1],[1,2,1,1]] }
 ]
-const quickPresets = presets.filter(item => ['corner', '2x2', 'main2'].includes(item.id))
 const cards = [
   { id: 'a', name: '演示主播 A', image: 'landscape.webp', position: '25% 25%' },
   { id: 'b', name: '演示主播 B', image: 'danmaku.webp', position: '33% 40%' },
@@ -95,13 +94,13 @@ function onCardUp(event) {
 </script>
 
 <template>
-  <div id="layout" ref="root" class="feature-demo" @keydown.esc="cancelCard(); closePicker()">
-    <div class="demo-preview" data-reveal>
+  <div ref="root" class="feature-demo" @keydown.esc="cancelCard(); closePicker()">
+    <div class="demo-selector" data-reveal>
+      <button class="preset-launcher" :aria-expanded="pickerOpen" aria-controls="mini-layout-presets" @click="openPicker($event)"><span>01</span>切换布局预设 <span aria-hidden="true">↗</span></button>
+      <div class="demo-description"><h3>选个布局，把直播拖进来。</h3><p>打开布局预设，选择主次布局或平分网格。将左侧关注卡片拖到任意画面，体验软件的摆放方式。</p><p class="demo-tip">也可点选卡片，再点选画面。布局预设会在预览内打开，选好即可返回。</p></div>
+    </div>
+    <div class="demo-preview" data-reveal data-reveal-delay="120">
       <div class="demo-toolbar"><span>DD 监控室 CE</span><span>可操作缩略预览</span></div>
-      <div class="layout-toolbar">
-        <div class="layout-quick-tabs" role="group" aria-label="快捷切换布局"><button v-for="item in quickPresets" :key="item.id" :aria-pressed="presetId === item.id" @click="changePreset(item.id)">{{ item.name }}</button></div>
-        <span class="layout-hint">切换预设 · 拖入关注卡片</span>
-      </div>
       <div class="software-miniature" :class="{ 'is-light': light }" role="group" aria-label="软件外观缩略预览">
         <aside v-show="!pickerOpen" class="mini-sidebar">
           <div class="mini-brand" aria-hidden="true">DD监控室CE <span>«</span></div>
@@ -131,44 +130,23 @@ function onCardUp(event) {
           </button></div>
         </section>
       </div>
-      <div class="layout-caption"><span>当前布局 · {{ preset.name }}</span><button class="preset-launcher" :aria-expanded="pickerOpen" aria-controls="mini-layout-presets" @click="openPicker($event)">切换布局预设 <span aria-hidden="true">↗</span></button></div>
       <p class="demo-status" role="status">{{ status }}</p>
     </div>
-    <aside class="demo-selector" aria-label="布局参考与操作说明">
-      <div class="layout-options" data-reveal role="group" aria-label="缩略图切换布局"><button v-for="item in quickPresets" :key="item.id" :aria-pressed="presetId === item.id" @click="changePreset(item.id)">
-        <svg viewBox="0 0 90 60" aria-hidden="true"><rect v-for="(cell,j) in item.cells" :key="j" :x="cell[1] * 90 / item.cols + 2" :y="cell[0] * 60 / item.rows + 2" :width="cell[3] * 90 / item.cols - 4" :height="cell[2] * 60 / item.rows - 4" rx="2" /></svg>
-        <span><b>{{ item.name }}</b><small>{{ item.id === '2x2' ? '均分画面，一眼看全' : '主次分明，专注喜欢的直播' }}</small></span>
-      </button></div>
-      <div class="demo-description" data-reveal><h3>选个布局，<br />把直播拖进来。</h3><p>打开布局预设，选择主次布局或平分网格。将左侧关注卡片拖到任意画面，体验软件的摆放方式。</p><p class="demo-tip">也可点选卡片，再点选画面。布局预设会在预览内打开，选好即可返回。</p></div>
-    </aside>
     <Teleport to="body"><div v-if="dragged" class="card-ghost" aria-hidden="true" :style="{ left: point.x + 'px', top: point.y + 'px', ...cardStyle(dragged) }">{{ dragged.name }}</div></Teleport>
   </div>
 </template>
 
 <style scoped>
-.feature-demo { display: grid; max-width: 820px; margin-inline: auto; grid-template-columns: 220px minmax(0,1fr); gap: 24px; align-items: center; scroll-margin-top: calc(var(--vp-nav-height) + 24px); }
-.demo-preview { grid-column: 2; grid-row: 1; min-width: 0; padding: 12px; border: 1px solid var(--vp-c-divider); border-radius: 24px; background: var(--vp-c-bg-soft); box-shadow: 0 20px 48px #0002; }
-.demo-toolbar { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; color: var(--vp-c-text-2); font-size: 11px; }
-.layout-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
-.layout-quick-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
-.layout-quick-tabs button { min-height: 34px; padding: 6px 12px; border: 1px solid transparent; border-radius: 17px; color: var(--vp-c-text-2); font-size: 12px; }
-.layout-quick-tabs button[aria-pressed=true] { border-color: var(--vp-c-divider); background: var(--selected-surface); color: var(--selected-text); }
-.layout-hint { margin-left: auto; color: var(--vp-c-text-3); font-size: 11px; }
-.layout-caption { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-top: 12px; font-size: 12px; }
-.preset-launcher { display: inline-flex; align-items: center; gap: 12px; min-height: 34px; padding: 6px 12px; border: 1px solid var(--vp-c-divider); border-radius: 17px; color: var(--vp-c-brand-1); background: var(--vp-c-brand-soft); }
-.demo-selector { grid-column: 1; grid-row: 1; min-width: 0; display: grid; gap: 14px; }
-.layout-options { display: grid; gap: 6px; }
-.layout-options button { display: flex; align-items: center; gap: 12px; min-width: 0; min-height: 58px; padding: 8px 12px; text-align: left; border: 1px solid var(--vp-c-divider); border-radius: 12px; background: var(--vp-c-bg-alt); color: var(--vp-c-text-2); }
-.layout-options button[aria-pressed=true] { border-color: var(--vp-c-divider); color: var(--selected-text); background: var(--selected-surface); }
-.layout-options svg { width: 40px; height: 28px; flex-shrink: 0; fill: currentColor; }
-.layout-options b { display: block; font-size: 12px; font-weight: 600; }
-.layout-options button[aria-pressed=true] small { color: inherit; opacity: .75; }
-.layout-options small { display: block; margin-top: 4px; font-size: 10px; color: var(--vp-c-text-2); line-height: 1.5; }
-.demo-description { padding: 6px 2px 0; }
-.demo-description h3 { font-size: 20px; line-height: 1.5; font-weight: 600; margin: 0 0 10px; }
-.demo-description p { font-size: 13px; line-height: 1.85; color: var(--vp-c-text-2); }
-.demo-description .demo-tip { font-size: 12px; margin-top: 12px; color: var(--vp-c-text-3); }
-@media (hover:hover) and (pointer:fine) { .layout-quick-tabs button:hover,.layout-options button:hover,.preset-launcher:hover { background: var(--button-surface-hover); } }
+.feature-demo { display: grid; grid-template-columns: minmax(220px, .65fr) minmax(0, 1.35fr); gap: 36px; align-items: center; }
+.preset-launcher { display: flex; align-items: center; gap: 16px; width: 100%; padding: 16px; text-align: left; border: 1px solid var(--vp-c-brand-1); border-radius: 8px; color: var(--vp-c-brand-1); background: var(--vp-c-brand-soft); }
+.preset-launcher span:first-child { font-size: 12px; opacity: .65; }
+.preset-launcher span:last-child { margin-left: auto; }
+.demo-description { margin-top: 26px; }
+.demo-description h3 { font-size: 22px; font-weight: 600; margin: 0 0 12px; }
+.demo-description p { font-size: 15px; line-height: 1.85; color: var(--vp-c-text-2); }
+.demo-description .demo-tip { font-size: 13px; margin-top: 16px; }
+.demo-preview { min-width: 0; padding: 18px; border: 1px solid var(--vp-c-divider); border-radius: 12px; background: var(--vp-c-bg-soft); }
+.demo-toolbar { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 14px; color: var(--vp-c-text-2); font-size: 12px; }
 .software-miniature { --mini-bg: #222428; --mini-side: #1d2023; --mini-card: #303338; --mini-text: #f1f2f5; --mini-muted: #aeb6c1; --mini-border: #414851; --mini-overlay: #17202b; display: grid; grid-template-columns: 22% minmax(0,1fr); gap: 7px; padding: 7px; position: relative; aspect-ratio: 800 / 520; border-radius: 9px; background: var(--mini-bg); color: var(--mini-text); line-height: 1.35; }
 .software-miniature.is-light { --mini-bg: #f4f6f9; --mini-side: #ebeef3; --mini-card: #fff; --mini-text: #202630; --mini-muted: #4a5565; --mini-border: #d7dde7; --mini-overlay: #f7f9fc; }
 .mini-sidebar { display: flex; flex-direction: column; gap: 5px; min-width: 0; min-height: 0; padding: 5px; border-radius: 5px; background: var(--mini-side); font-size: clamp(7px,.75vw,10px); }
@@ -207,27 +185,12 @@ function onCardUp(event) {
 .preset-grid svg { display: block; width: 100%; height: 44px; margin-bottom: 5px; fill: currentColor; opacity: .7; }
 .demo-status { color: var(--vp-c-text-2); font-size: 12px; line-height: 1.7; }
 .demo-status { color: var(--vp-c-text-2); font-size: 12px; line-height: 1.7; }
-.demo-status { min-height: 22px; margin: 10px 0 0; }
+.demo-status { min-height: 40px; margin: 12px 0 0; }
 .card-ghost { position: fixed; z-index: 100; width: 120px; height: 76px; padding: 7px; display: flex; align-items: end; border: 1px solid #00a1d6; border-radius: 7px; background-size: 240%; color: white; text-shadow: 0 1px 4px black; transform: translate(-50%,-50%) rotate(-3deg); box-shadow: 0 16px 40px #0005; pointer-events: none; }
 .drop-flash { position: absolute; inset: -2px; border: 2px solid #00a1d6; border-radius: 6px; pointer-events: none; animation: drop-land 360ms var(--ease-out) both; }
 @keyframes drop-land { from { opacity: 1; transform: scale(.96); } to { opacity: 0; transform: scale(1.04); } }
 @media (hover:hover) and (pointer:fine) { .mini-follow:hover { border-color: #00a1d6; } .preset-grid button:hover { background: var(--mini-card); } }
-@media (max-width:900px) {
-  .feature-demo { max-width: 576px; grid-template-columns: 1fr; gap: 20px; }
-  .demo-preview,.demo-selector { grid-column: 1; grid-row: auto; }
-  .demo-selector { grid-template-columns: 1fr 1fr; align-items: start; gap: 20px; }
-  .demo-description h3 br { display: none; }
-}
-@media (max-width:600px) {
-  .demo-selector { grid-template-columns: 1fr; gap: 14px; }
-  .layout-options button { min-height: 64px; gap: 7px; padding: 7px; }
-  .layout-options svg { width: 30px; }
-  .layout-options b { font-size: 11px; }
-  .layout-options small { font-size: 9px; }
-  .demo-description { grid-column: 1 / -1; }
-  .layout-hint { margin-left: 0; }
-  .demo-toolbar { font-size: 10px; }
-}
+@media (max-width:900px) { .feature-demo { grid-template-columns: 1fr; gap: 20px; } .demo-description { margin-top: 18px; } }
 @media (max-width:480px) { .demo-preview { padding: 12px; } .software-miniature { gap: 4px; padding: 4px; } .mini-wall { gap: 4px; } .mini-sidebar { padding: 3px; gap: 3px; } .mini-controls { gap: 3px; padding: 3px; } .mini-badge { top: 2px; left: 2px; padding: 1px 2px; } .mini-brand { font-size: 6px; } .mini-tools { grid-template-columns: 1fr 18px 14px; } .mini-theme { width:18px; height:18px; font-size:13px; } .preset-grid { grid-template-columns:repeat(2,minmax(0,1fr)); padding:0; } .preset-picker { inset:4px; padding:8px; } .preset-header { gap:6px; margin-bottom:8px; flex-wrap:wrap; } .preset-header > span { display:none; } }
 @media (prefers-reduced-motion:reduce) { .drop-flash { display:none; animation:none; } .card-ghost { transform:translate(-50%,-50%); } }
 @media (max-width:480px) { .software-miniature { width:100%; min-width:0; min-height:220px; } }

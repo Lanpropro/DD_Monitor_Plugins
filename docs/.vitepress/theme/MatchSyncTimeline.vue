@@ -131,15 +131,15 @@ onUnmounted(() => { cancelAnimationFrame(frame); observer?.disconnect(); media?.
 .comments-card.separated p { padding:6px; border:1px solid #ffffff20; border-radius:5px; }
 .screen-playback { position:absolute; right:18px; bottom:18px; display:grid; place-items:center; width:44px; height:44px; border-radius:50%; background:#303338d9; color:#fff; backdrop-filter:blur(12px); }
 .screen-playback:disabled { opacity:.45; }
-.chapter-heading { display:flex; justify-content:space-between; align-items:end; gap:20px; margin:16px 0 16px; }
+.chapter-heading { display:flex; justify-content:space-between; align-items:end; gap:20px; margin:22px 0 20px; }
 .chapter-heading > div > span { color:var(--vp-c-text-2); font-size:12px; }
-.chapter-heading h4 { margin:5px 0 0; font-size:18px; font-weight:600; }
+.chapter-heading h4 { margin:5px 0 0; font-size:20px; font-weight:600; }
 .chapter-heading > output { font-size:13px; font-variant-numeric:tabular-nums; white-space:nowrap; }
 .chapter-heading output span { color:var(--vp-c-text-2); }
 .chapter-track { position:relative; display:flex; gap:6px; }
-.chapter { display:flex; min-width:0; flex-direction:column; justify-content:center; align-items:start; gap:8px; min-height:68px; padding:10px; border:1px solid var(--vp-c-divider); border-radius:12px; color:var(--vp-c-text-2); background:var(--vp-c-bg-alt); text-align:left; }
+.chapter { display:flex; min-width:0; flex-direction:column; justify-content:center; align-items:start; gap:12px; min-height:88px; padding:14px; border:1px solid var(--vp-c-divider); border-radius:12px; color:var(--vp-c-text-2); background:var(--vp-c-bg-alt); text-align:left; }
 .chapter svg { width:28px; height:22px; }
-.chapter > span { font-size:12px; font-weight:500; }
+.chapter > span { font-size:13px; font-weight:500; }
 .chapter[aria-pressed=true] { border-color:var(--sync-accent); background:color-mix(in srgb,var(--sync-accent) 16%,var(--vp-c-bg-alt)); color:var(--vp-c-text-1); }
 .playhead-clip { position:absolute; inset:-8px 0 0; overflow:hidden; pointer-events:none; }
 .playhead-position { position:absolute; left:8px; right:8px; top:0; bottom:0; }
