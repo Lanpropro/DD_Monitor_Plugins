@@ -66,4 +66,79 @@ class ReadTests(unittest.TestCase):
                 self.assertEqual(get.call_args.kwargs['cookies'],cookies)
                 self.assertEqual(get.call_args.kwargs['timeout'],10)
 
+
+class SendTests(unittest.TestCase):
+    def setUp(self):
+        self.cookies={'SESSDATA':'fake','bili_jct':'csrf-token','buvid3':'device'}
+        self.target=api.GiftTarget('90001',123,456)
+        self.item=api.normalize_catalog(room_payload(),'90001').tabs[0].items[1]
+
+    def test_prepare_target_distinguishes_sender_and_anchor(self):
+        with patch.object(api,'resolve_room',return_value=('90001',456)),patch.object(api.requests,'get',return_value=Mock(status_code=200,json=lambda:{'code':0,'data':{'mid':123}})) as get:
+            self.assertEqual(api.prepare_target('213',cookies=self.cookies),self.target)
+        self.assertEqual(get.call_args.kwargs['cookies'],self.cookies)
+
+    def test_form_uses_sender_anchor_real_room_and_csrf(self):
+        import json,threading,requests
+        from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+        from urllib.parse import parse_qs
+        received=[]
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(s):
+                received.append((s.path,dict(s.headers),parse_qs(s.rfile.read(int(s.headers['Content-Length'])).decode())))
+                body=b'{"code":0,"data":{}}'
+                s.send_response(200);s.send_header('Content-Length',str(len(body)));s.end_headers();s.wfile.write(body)
+            def log_message(*a):pass
+        server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
+        thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        transport=requests.Session();transport.trust_env=False
+        def post(url,**kw):
+            self.assertEqual(url,'https://api.live.bilibili.com/xlive/revenue/v1/gift/sendGold')
+            self.assertFalse(kw['allow_redirects']);self.assertEqual(kw['timeout'],10)
+            return transport.post(f'http://127.0.0.1:{server.server_port}/gift/sendGold',**kw)
+        try:
+            with patch.object(api.requests,'post',side_effect=post):
+                api.send_gift(self.target,self.item,10,cookies=self.cookies,wallet=99999,still_current=lambda:True)
+        finally:
+            transport.close();server.shutdown();server.server_close();thread.join(2)
+        self.assertEqual(len(received),1)
+        _,headers,form=received[0]
+        for field,value in {'uid':'123','ruid':'456','biz_id':'90001','gift_id':'1','gift_num':'10','price':'105','csrf':'csrf-token','csrf_token':'csrf-token','coin_type':'gold','bag_id':'0'}.items():
+            self.assertEqual(form[field],[value])
+        self.assertEqual(headers['Origin'],'https://live.bilibili.com')
+        self.assertEqual(headers['Referer'],'https://live.bilibili.com/90001')
+
+    def test_bag_uses_selected_batch_without_paid_fallback(self):
+        from dataclasses import replace
+        item=api.normalize_bag(bag_payload(),None,'90001',now=100).items[1]
+        item=replace(item,expires_at=int(time.time())+100)
+        with patch.object(api.requests,'post',return_value=Mock(status_code=200,json=lambda:{'code':0})) as post:
+            api.send_gift(self.target,item,1,cookies=self.cookies,wallet=None,still_current=lambda:True)
+        self.assertEqual(post.call_count,1)
+        self.assertEqual(post.call_args.args[0],'https://api.live.bilibili.com/xlive/revenue/v1/gift/sendBag')
+        self.assertEqual(post.call_args.kwargs['data']['bag_id'],702)
+
+    def test_invalid_quantity_funds_credentials_or_special_never_post(self):
+        from dataclasses import replace
+        with patch.object(api.requests,'post') as post:
+            for item,count,wallet,cookies,current in ((self.item,0,9999,self.cookies,True),
+                (self.item,1,None,self.cookies,True),(self.item,100,1,self.cookies,True),
+                (self.item,1,9999,{},True),(replace(self.item,disabled_reason='locked'),1,9999,self.cookies,True),
+                (replace(self.item,source='unsupported'),1,9999,self.cookies,True),
+                (self.item,1,9999,self.cookies,False),(self.item,1.5,9999,self.cookies,True)):
+                with self.assertRaises(api.GiftSendError):
+                    api.send_gift(self.target,item,count,cookies=cookies,wallet=wallet,still_current=lambda:current)
+        post.assert_not_called()
+
+    def test_timeout_disconnect_and_bad_success_json_never_retry(self):
+        import requests
+        for error in (requests.Timeout(),requests.ConnectionError()):
+            with patch.object(api.requests,'post',side_effect=error) as post,self.assertRaises(api.GiftSendError) as caught:
+                api.send_gift(self.target,self.item,1,cookies=self.cookies,wallet=9999,still_current=lambda:True)
+            self.assertTrue(caught.exception.uncertain);self.assertEqual(post.call_count,1)
+        for payload,uncertain in (([],True),({'code':0,'message':'f'},False),({'code':-101,'message':'no'},False)):
+            with patch.object(api.requests,'post',return_value=Mock(status_code=200,json=lambda:payload)) as post,self.assertRaises(api.GiftSendError) as caught:
+                api.send_gift(self.target,self.item,1,cookies=self.cookies,wallet=9999,still_current=lambda:True)
+            self.assertEqual(caught.exception.uncertain,uncertain);self.assertEqual(post.call_count,1)
+
 if __name__=='__main__':unittest.main()

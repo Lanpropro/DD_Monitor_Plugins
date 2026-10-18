@@ -186,3 +186,59 @@ def get_wallet(*, cookies):
 def get_bag(room_id, catalog, *, cookies):
     return normalize_bag(_read('/xlive/web-room/v1/gift/bag_list',cookies,room_id=str(room_id)),
         catalog,room_id,now=int(time.time()))
+
+def prepare_target(room_id, *, cookies):
+    if not cookies.get('SESSDATA') or not cookies.get('bili_jct'):
+        raise GiftSendError('请重新登录 B 站后赠送礼物')
+    real_id, anchor=resolve_room(room_id,cookies=cookies)
+    response=requests.get('https://api.bilibili.com/x/web-interface/nav',headers=HEADERS,cookies=dict(cookies),timeout=10)
+    data=api_result(response).get('data') or {}
+    uid=_integer(data.get('mid'),0)
+    if uid<=0:raise GiftSendError('无法确认当前账号')
+    return GiftTarget(real_id,uid,anchor)
+
+def validate_send(item, quantity, *, cookies, wallet):
+    if not cookies.get('SESSDATA') or not cookies.get('bili_jct'):
+        raise GiftSendError('请重新登录 B 站后赠送礼物')
+    if type(quantity) is not int or quantity<=0 or quantity>item.max_count:
+        raise GiftSendError('赠送数量超出限制')
+    if not item.allow_custom and quantity not in item.counts:
+        raise GiftSendError('此礼物不支持该数量')
+    if item.disabled_reason or item.source not in ('gold','bag'):
+        raise GiftSendError(item.disabled_reason or '暂不支持此礼物流程')
+    if item.gift_id<=0 or item.price<0:raise GiftSendError('礼物资料无效')
+    if item.source=='bag':
+        if item.bag_id<=0 or quantity>item.stock:raise GiftSendError('该背包批次库存不足')
+        if item.expires_at and item.expires_at<=int(time.time()):raise GiftSendError('礼物已过期')
+    elif type(wallet) is not int or wallet<item.price*quantity:
+        raise GiftSendError('余额未知，请刷新' if wallet is None else '电池余额不足')
+
+def send_gift(target,item,quantity,*,cookies,wallet,still_current):
+    validate_send(item,quantity,cookies=cookies,wallet=wallet)
+    if (not str(target.room_id).isdigit() or int(target.room_id)<=0 or target.uid<=0 or target.ruid<=0):
+        raise GiftSendError('房间或账号信息无效')
+    form={'uid':target.uid,'ruid':target.ruid,'biz_id':target.room_id,'gift_id':item.gift_id,
+        'gift_num':quantity,'price':item.price,'platform':'pc','biz_code':'live',
+        'send_ruid':0,'storm_beat_id':0,'csrf':cookies['bili_jct'],'csrf_token':cookies['bili_jct']}
+    if item.source=='bag':
+        endpoint=BAG_ENDPOINT;form['bag_id']=item.bag_id
+    else:
+        endpoint=GOLD_ENDPOINT;form.update(coin_type='gold',bag_id=0,rnd=int(time.time()),visit_id='')
+    if not still_current():raise GiftSendError('房间或账号已改变，已取消赠送')
+    # Exactly one form request; redirects and library-level retries stay disabled.
+    try:
+        response=requests.post(endpoint,data=form,cookies=dict(cookies),headers={**HEADERS,
+            'Origin':'https://live.bilibili.com','Referer':f'https://live.bilibili.com/{target.room_id}'},
+            timeout=10,allow_redirects=False)
+        if not 200<=response.status_code<300:
+            raise GiftSendError('赠送结果未确认，请先检查余额与背包',uncertain=True)
+        payload=response.json()
+        if not isinstance(payload,dict) or type(payload.get('code')) is not int:
+            raise GiftSendError('赠送结果未确认，请先检查余额与背包',uncertain=True)
+        reason=payload.get('message') or payload.get('msg')
+        if payload['code']!=0 or reason not in (None,'',0,'0','success','SUCCESS'):
+            raise GiftSendError(str(reason or '服务器拒绝赠送'))
+    except GiftSendError:raise
+    except Exception as error:
+        raise GiftSendError('赠送结果未确认，请先检查余额与背包，不要重复点击',uncertain=True) from error
+    return GiftResult(item.key,quantity,MappingProxyType(deepcopy(payload)))
