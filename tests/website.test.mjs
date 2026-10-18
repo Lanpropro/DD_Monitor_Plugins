@@ -508,7 +508,7 @@ function mountPluginCarousel({ reduced = false, intersection = true } = {}) {
   class Observer { constructor(fn) { notify = fn } observe() {} disconnect() { disconnected++ } }
   class SizeObserver { observe() {} disconnect() { disconnected++ } }
   const script = read('docs/.vitepress/theme/PluginCarousel.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
-  const state = runInNewContext(script + '\n;({ paused, sync, normalize, measure, togglePlayback, step, onPointerEnter, onPointerLeave, onFocusIn, onFocusOut, onPointerDown, onPointerMove, onPointerUp })', {
+  const state = runInNewContext(script + '\n;({ paused, sync, normalize, measure, togglePlayback, step, onPointerEnter, onPointerLeave, onFocusIn, onFocusOut, onPointerDown, onPointerMove, onPointerUp, onClickCapture })', {
     ref: value => ({ value: value === null ? element : value }),
     onMounted: fn => { mount = fn }, onUnmounted: fn => { unmount = fn },
     window: { matchMedia: () => media, ...(intersection ? { IntersectionObserver: Observer } : {}), ResizeObserver: SizeObserver, addEventListener() {}, removeEventListener() {} },
@@ -585,12 +585,47 @@ test('plugin carousel renders downloads and keeps duplicate copies out of keyboa
   assert.ok(home.includes('aria-label="下一个插件"'))
   assert.equal((home.match(/class="carousel-group"/g) || []).length, 3)
   assert.equal((home.match(/class="carousel-group" aria-hidden="true"/g) || []).length, 2)
-  assert.equal((home.match(/class="home-plugin-card"/g) || []).length, 9)
+  assert.equal((home.match(/class="[^"]*\bhome-plugin-card\b[^"]*"/g) || []).length, 9)
   for (const copy of home.split('<div class="carousel-group"').slice(1)) {
     if (!copy.startsWith(' aria-hidden="true"')) continue
-    const cards = copy.match(/<article class="home-plugin-card"[\s\S]*?<\/article>/g)
+    const cards = copy.match(/<article class="[^"]*\bhome-plugin-card\b[^"]*"[\s\S]*?<\/article>/g)
     assert.equal(cards.length, 3)
     for (const card of cards) for (const control of card.match(/<(?:a|button)\b[^>]*>/g)) assert.ok(control.includes('tabindex="-1"'))
   }
   for (const p of plugins) assert.equal((home.match(new RegExp('href="' + p.download.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '"', 'g')) || []).length, 3)
+})
+
+
+test('dragging the full-card selection button does not activate a plugin', () => {
+  const page = mountPluginCarousel(), s = page.state
+  const event = { pointerType: 'mouse', button: 0, pointerId: 1, clientX: 500, target: { closest: selector => {
+    assert.equal(selector, 'a,button:not(.plugin-demo-trigger)')
+    return null
+  } } }
+  let prevented = 0, stopped = 0
+  const click = { preventDefault() { prevented++ }, stopPropagation() { stopped++ } }
+  s.onPointerDown(event); s.onPointerMove({ pointerId: 1, clientX: 400 }); s.onPointerUp(event)
+  s.onClickCapture(click)
+  assert.equal(prevented, 1); assert.equal(stopped, 1)
+  s.onPointerDown(event); s.onPointerUp(event); s.onClickCapture(click)
+  assert.equal(prevented, 1, 'a tap or click must reach the actual selection button')
+  s.onClickCapture(click); assert.equal(prevented, 1, 'keyboard activation must remain available')
+  s.onPointerDown(event); s.onPointerMove({ pointerId: 1, clientX: 400 }); s.onPointerUp({ ...event, type: 'pointercancel' })
+  s.onClickCapture(click); assert.equal(prevented, 1, 'a canceled gesture must not block the next keyboard activation')
+  page.unmount()
+})
+
+test('plugin cards expose full-card selection and render concrete feature details below', () => {
+  const home = readFileSync(resolve(dist, 'index.html'), 'utf8')
+  const panel = home.split('id="plugin-demo"')[1].split('plugin-compatibility')[0]
+  for (const p of plugins) {
+    assert.equal(p.featureDetails.length, p.features.length)
+    assert.ok(home.includes('aria-label="查看' + p.name + '的具体功能"'))
+    for (const detail of p.featureDetails) assert.ok(detail.length > 20)
+  }
+  for (const detail of plugins[0].featureDetails) assert.ok(panel.includes(detail))
+  assert.ok(panel.includes('plugin-feature-list'))
+  assert.ok(panel.includes('使用流程'))
+  assert.ok(home.includes('已选中 · 功能在下方'))
+  assert.ok(home.includes('aria-controls="plugin-demo"'))
 })

@@ -71,18 +71,18 @@ onUnmounted(() => { observer?.disconnect(); motion?.removeEventListener('change'
 
     <section id="plugins" class="home-section home-plugins" aria-labelledby="plugins-title">
       <div class="section-heading" data-reveal><div><p class="eyebrow">02 / 插件扩展</p><h2 id="plugins-title">让直播墙，多一点可能。</h2></div><a :href="withBase('/plugins/')">全部插件与安装说明 ↗</a></div>
-      <PluginCarousel v-slot="{ duplicate }" data-reveal><article v-for="(plugin, i) in plugins" :key="plugin.id" class="home-plugin-card">
+      <PluginCarousel v-slot="{ duplicate }" data-reveal><article v-for="(plugin, i) in plugins" :key="plugin.id" class="home-plugin-card" :class="{ 'is-selected': previewPlugin === i }">
         <div class="card-top"><div class="platform-icons"><img v-for="(icon, j) in plugin.icons" :key="icon" :src="withBase('/platforms/' + icon)" :alt="plugin.platforms[j]" width="32" height="32" loading="lazy" /></div><span class="version">v{{ plugin.version }}</span></div>
         <span class="plugin-category">0{{ i + 1 }} / {{ plugin.category }}</span>
         <h3><a :tabindex="duplicate ? -1 : undefined" :href="withBase('/plugins/' + plugin.id)">{{ plugin.name }}</a></h3><p>{{ plugin.description }}</p>
         <div class="platform-tags"><span v-for="platform in plugin.platforms" :key="platform">{{ platform }}</span></div>
         <ul><li v-for="feature in plugin.features" :key="feature">{{ feature }}</li></ul>
-        <button :tabindex="duplicate ? -1 : undefined" class="plugin-demo-trigger" :aria-pressed="previewPlugin === i" aria-controls="plugin-demo" @click="previewPlugin = i">查看功能流程 <span aria-hidden="true">↗</span></button>
+        <button :tabindex="duplicate ? -1 : undefined" class="plugin-demo-trigger" :aria-pressed="previewPlugin === i" aria-controls="plugin-demo" :aria-label="'查看' + plugin.name + '的具体功能'" @click="previewPlugin = i"><span>{{ previewPlugin === i ? '已选中 · 功能在下方' : '点击查看具体功能' }}</span><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path v-if="previewPlugin === i" d="m5 12 4 4L19 6" /><path v-else d="m9 5 7 7-7 7" /></svg></button>
         <div class="card-actions"><a :tabindex="duplicate ? -1 : undefined" class="action primary" :href="plugin.download">下载 ZIP</a><a :tabindex="duplicate ? -1 : undefined" class="detail-link" :href="withBase('/plugins/' + plugin.id)">查看详情 ↗</a></div>
       </article></PluginCarousel>
       <div id="plugin-demo" class="plugin-demo-panel" data-reveal aria-live="polite">
-        <div class="plugin-demo-heading"><p class="eyebrow">使用流程</p><h3>{{ plugins[previewPlugin].name }}</h3><a :href="withBase('/plugins/' + plugins[previewPlugin].id)">阅读完整说明 ↗</a></div>
-        <ol class="plugin-flow"><li v-for="(step, i) in plugins[previewPlugin].steps" :key="step"><span>0{{ i + 1 }}</span><p>{{ step }}</p></li></ol>
+        <div class="plugin-demo-heading"><p class="eyebrow">插件功能</p><h3>{{ plugins[previewPlugin].name }}</h3><p class="plugin-detail-description">{{ plugins[previewPlugin].description }}</p><a :href="withBase('/plugins/' + plugins[previewPlugin].id)">阅读完整说明 ↗</a></div>
+        <div class="plugin-demo-content"><ul class="plugin-feature-list"><li v-for="(feature, i) in plugins[previewPlugin].features" :key="feature"><h4>{{ feature }}</h4><p>{{ plugins[previewPlugin].featureDetails[i] }}</p></li></ul><p class="plugin-flow-title">使用流程</p><ol class="plugin-flow"><li v-for="(step, i) in plugins[previewPlugin].steps" :key="step"><span>0{{ i + 1 }}</span><p>{{ step }}</p></li></ol></div>
       </div>
       <p class="plugin-compatibility">插件独立下载、独立启用。安装前请查看<a :href="withBase('/download#插件兼容性')">软件版本与兼容要求</a>。</p>
     </section>
