@@ -155,3 +155,13 @@ python tools/inspect_host_package.py "软件安装包路径.zip"
 - 参考 React Bits Pixel Swap（https://www.reactbits.dev/animations/pixel-swap）与 21st 组件展示（https://21st.dev/community/components），用 Vue/CSS 独立实现 500ms 像素揭示与 360ms 放入描边反馈；没有引入 React 组件或新增依赖。减少动态效果时禁用这两处动效。
 - 构建、22 项网站测试与 diff 检查通过。新增布局网格不重叠、全部预设应用、卡片保留/替换/清空、点击和拖放/取消/外部放下、像素揭示与减少动态效果回归。浏览器实测真实鼠标拖入、键盘放入、主题切换、布局预设、竖屏完整滚动与 320px 手机；控制台无警告或错误。
 - 本地预览：http://127.0.0.1:4174/DD_Monitor_Plugins/。截图：work/website-preview/presets-and-drag.png、left-gallery-portrait.png。尚未公开部署。
+
+
+## 2026-10-18 恢复原截图展示与预览内布局预设页
+
+- 按用户指定，仅将 ScreenshotShowcase.vue 恢复为 cd9311d 版本，已逐字节比对：三种真实截图、下方横向分段栏、原有滚动缩放和自动轮播。没有回退其余页面与卡片互动。
+- 观看体验移除主画面比例滑块、分隔条及相关提示。布局预设改为缩略预览内部的二级页面，外部入口和软件内按钮均可打开；不再在预览下方单独摆放。
+- 预设页保留八种可用布局，应用后返回直播墙并保留卡片；支持返回按钮、Esc 和焦点回到打开入口。手机预设页在预览内部滚动，不撑高页面。
+- 构建、21 项网站回归和 diff 检查通过。新增预设页位置、无比例控件、打开/应用/返回焦点验证；更新原截图滚动起点测试，移除已回退的像素效果测试。
+- 浏览器实测桌面打开/应用/返回/Esc，预设页打开与应用后的预览高度均约 535px；320px 手机页面无横向溢出，可滚动选择十六分布局。截图三模式切换正常，控制台无警告或错误。
+- 本地预览仍为 http://127.0.0.1:4174/DD_Monitor_Plugins/；截图保存在 work/website-preview/preset-secondary-page.png、restored-three-layouts.png。未公开部署。

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { withBase } from 'vitepress'
 
 // Preset cells mirror ddm/layouts.py: [row, column, rowSpan, columnSpan].
@@ -21,41 +21,36 @@ const cards = [
 ]
 const presetId = ref('corner')
 const preset = computed(() => presets.find(item => item.id === presetId.value))
-const ratio = ref(62)
 const light = ref(false)
 const pickerOpen = ref(false)
 const slots = ref(Array(16).fill(null))
 const selected = ref(null)
 const root = ref(null)
-const wall = ref(null)
 const dragged = ref(null)
 const over = ref(-1)
 const point = ref({ x: 0, y: 0 })
 const landed = ref(-1)
 const placement = ref(0)
 const status = ref('把关注卡片拖入画面，或先选择卡片再点击画面。')
-let dragging = false
 let cardStart = null
+let pickerTrigger = null
 const columns = computed(() => ['corner', 'main2'].includes(presetId.value)
-  ? `${ratio.value / 2}fr ${ratio.value / 2}fr ${100 - ratio.value}fr`
+  ? '31fr 31fr 38fr'
   : `repeat(${preset.value.cols}, minmax(0, 1fr))`)
 function cardStyle(card) {
   return { backgroundImage: `url(${withBase('/screenshots/' + card.image)})`, backgroundPosition: card.position }
 }
 function cellStyle(cell) { return { gridArea: `${cell[0] + 1} / ${cell[1] + 1} / span ${cell[2]} / span ${cell[3]}` } }
-function setRatio(value) { ratio.value = Math.min(68, Math.max(35, Math.round(value))) }
-function fromPointer(clientX) {
-  const rect = wall.value?.getBoundingClientRect()
-  if (rect?.width) setRatio((clientX - rect.left) / rect.width * 100)
+function openPicker(event) {
+  pickerTrigger = event.currentTarget
+  cancelCard()
+  pickerOpen.value = true
+  nextTick(() => root.value?.querySelector('.preset-back')?.focus())
 }
-function onPointerDown(event) { dragging = true; event.currentTarget.setPointerCapture?.(event.pointerId); fromPointer(event.clientX) }
-function onPointerMove(event) { if (dragging) fromPointer(event.clientX) }
-function onPointerUp(event) { dragging = false; event.currentTarget.releasePointerCapture?.(event.pointerId) }
-function onGripKey(event) {
-  if (event.key === 'ArrowLeft') setRatio(ratio.value - (event.shiftKey ? 5 : 1))
-  else if (event.key === 'ArrowRight') setRatio(ratio.value + (event.shiftKey ? 5 : 1))
-  else return
-  event.preventDefault()
+function closePicker() {
+  if (!pickerOpen.value) return
+  pickerOpen.value = false
+  nextTick(() => pickerTrigger?.focus())
 }
 function selectCard(id) { selected.value = id; status.value = `已选择${cards.find(card => card.id === id).name}，点击目标画面放入。` }
 function placeCard(index, id = selected.value) {
@@ -73,7 +68,7 @@ function changePreset(id) {
   if (!presets.some(item => item.id === id)) return
   cancelCard()
   presetId.value = id
-  pickerOpen.value = false
+  closePicker()
   status.value = `已切换为${preset.value.name}，已放入的卡片保留。`
 }
 function onCardDown(event, card) {
@@ -99,15 +94,15 @@ function onCardUp(event) {
 </script>
 
 <template>
-  <div ref="root" class="feature-demo" @keydown.esc="cancelCard(); pickerOpen = false">
+  <div ref="root" class="feature-demo" @keydown.esc="cancelCard(); closePicker()">
     <div class="demo-selector">
-      <button class="preset-launcher" :aria-expanded="pickerOpen" aria-controls="mini-layout-presets" @click="pickerOpen = !pickerOpen"><span>01</span>切换布局预设 <span aria-hidden="true">↗</span></button>
-      <div class="demo-description"><h3>选个布局，把直播拖进来。</h3><p>打开布局预设，选择主次布局或平分网格。将左侧关注卡片拖到任意画面，体验软件的摆放方式。</p><p class="demo-tip">也可点选卡片，再点选画面；比例支持拖动分隔条和下方滑块调整。</p></div>
+      <button class="preset-launcher" :aria-expanded="pickerOpen" aria-controls="mini-layout-presets" @click="openPicker($event)"><span>01</span>切换布局预设 <span aria-hidden="true">↗</span></button>
+      <div class="demo-description"><h3>选个布局，把直播拖进来。</h3><p>打开布局预设，选择主次布局或平分网格。将左侧关注卡片拖到任意画面，体验软件的摆放方式。</p><p class="demo-tip">也可点选卡片，再点选画面。布局预设会在预览内打开，选好即可返回。</p></div>
     </div>
     <div class="demo-preview">
       <div class="demo-toolbar"><span>DD 监控室 CE</span><span>可操作缩略预览</span></div>
       <div class="software-miniature" :class="{ 'is-light': light }" role="group" aria-label="软件外观缩略预览">
-        <aside class="mini-sidebar">
+        <aside v-show="!pickerOpen" class="mini-sidebar">
           <div class="mini-brand" aria-hidden="true">DD监控室CE <span>«</span></div>
           <div class="mini-tools"><span aria-hidden="true">排序</span><button class="mini-theme" :aria-label="light ? '预览切换为深色' : '预览切换为浅色'" :aria-pressed="light" @click="light = !light"><span aria-hidden="true">◐</span></button><span aria-hidden="true">↻</span></div>
           <div class="mini-folder">关注 · {{ cards.length }}</div>
@@ -115,9 +110,9 @@ function onCardUp(event) {
             @pointerdown="onCardDown($event, card)" @pointermove="onCardMove" @pointerup="onCardUp" @pointercancel="cancelCard" @click="$event.detail === 0 && selectCard(card.id)">
             <span class="mini-card-image" :style="cardStyle(card)"></span><span>{{ card.name }}</span>
           </button>
-          <div class="mini-actions"><button :aria-expanded="pickerOpen" aria-controls="mini-layout-presets" @click="pickerOpen = !pickerOpen">布局预设</button></div>
+          <div class="mini-actions"><button :aria-expanded="pickerOpen" aria-controls="mini-layout-presets" @click="openPicker($event)">布局预设</button></div>
         </aside>
-        <div ref="wall" class="mini-wall" :style="{ gridTemplateColumns: columns, gridTemplateRows: `repeat(${preset.rows}, minmax(0, 1fr))` }">
+        <div v-show="!pickerOpen" class="mini-wall" :style="{ gridTemplateColumns: columns, gridTemplateRows: `repeat(${preset.rows}, minmax(0, 1fr))` }">
           <div v-for="(cell, i) in preset.cells" :key="i" class="mini-tile" :class="{ 'is-over': over === i }" :style="cellStyle(cell)" :data-mini-slot="i">
             <button class="tile-target" :style="slots[i] ? cardStyle(slots[i]) : undefined" :aria-label="`第 ${i + 1} 个画面，${slots[i]?.name || '空位'}${selected ? '，放入所选卡片' : ''}`" @click="placeCard(i)">
               <span class="mini-badge" aria-hidden="true"><b>{{ slots[i] ? '演示' : '空位' }}</b> · {{ slots[i]?.name || '画面 ' + (i + 1) }}</span>
@@ -125,19 +120,16 @@ function onCardUp(event) {
             </button>
             <button v-if="slots[i]" class="mini-clear" :aria-label="`清空第 ${i + 1} 个画面`" @click="clearSlot(i)">×</button>
             <div class="mini-controls" aria-hidden="true"><span>Ⅱ</span><span>♪</span><i></i><span v-if="i === 0">40</span><span>⛶</span></div>
-            <span v-if="i === 0 && ['corner','main2'].includes(presetId)" class="demo-grip" role="separator" aria-orientation="vertical" aria-label="拖动调整主画面比例" :aria-valuenow="ratio" aria-valuemin="35" aria-valuemax="68" tabindex="0"
-              @pointerdown="onPointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp" @pointercancel="onPointerUp" @keydown="onGripKey"></span>
             <span v-if="landed === i" :key="placement" class="drop-flash" aria-hidden="true" @animationend="landed = -1"></span>
           </div>
         </div>
+        <section v-show="pickerOpen" id="mini-layout-presets" class="preset-picker" aria-label="布局预设页面">
+          <div class="preset-header"><button class="preset-back" @click="closePicker">← 返回预览</button><h4>布局预设</h4><span>{{ preset.name }}</span></div>
+          <div class="preset-grid" role="group" aria-label="布局预设选项"><button v-for="item in presets" :key="item.id" :aria-pressed="presetId === item.id" @click="changePreset(item.id)">
+            <svg viewBox="0 0 90 60" aria-hidden="true"><rect v-for="(cell, j) in item.cells" :key="j" :x="cell[1] * 90 / item.cols + 2" :y="cell[0] * 60 / item.rows + 2" :width="cell[3] * 90 / item.cols - 4" :height="cell[2] * 60 / item.rows - 4" rx="2" /></svg><span>{{ item.name }}</span>
+          </button></div>
+        </section>
       </div>
-      <details id="mini-layout-presets" class="preset-picker" :open="pickerOpen" @toggle="pickerOpen = $event.target.open">
-        <summary>布局预设 <span>{{ preset.name }}</span></summary>
-        <div class="preset-grid" role="group" aria-label="布局预设选项"><button v-for="item in presets" :key="item.id" :aria-pressed="presetId === item.id" @click="changePreset(item.id)">
-          <svg viewBox="0 0 90 60" aria-hidden="true"><rect v-for="(cell, j) in item.cells" :key="j" :x="cell[1] * 90 / item.cols + 2" :y="cell[0] * 60 / item.rows + 2" :width="cell[3] * 90 / item.cols - 4" :height="cell[2] * 60 / item.rows - 4" rx="2" /></svg><span>{{ item.name }}</span>
-        </button></div>
-      </details>
-      <div class="demo-controls"><label v-if="['corner','main2'].includes(presetId)" class="ratio-control">主画面比例 <input v-model.number="ratio" type="range" min="35" max="68" aria-label="主画面比例" /><output>{{ ratio }}%</output></label><span v-else class="layout-note">{{ preset.name }} · {{ preset.cells.length }} 个画面</span></div>
       <p class="demo-status" role="status">{{ status }}</p>
     </div>
     <Teleport to="body"><div v-if="dragged" class="card-ghost" aria-hidden="true" :style="{ left: point.x + 'px', top: point.y + 'px', ...cardStyle(dragged) }">{{ dragged.name }}</div></Teleport>
@@ -155,7 +147,7 @@ function onCardUp(event) {
 .demo-description .demo-tip { font-size: 13px; margin-top: 16px; }
 .demo-preview { min-width: 0; padding: 18px; border: 1px solid var(--vp-c-divider); border-radius: 14px; background: var(--vp-c-bg-alt); }
 .demo-toolbar { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 14px; color: var(--vp-c-text-2); font-size: 12px; }
-.software-miniature { --mini-bg: #222428; --mini-side: #1d2023; --mini-card: #303338; --mini-text: #f1f2f5; --mini-muted: #aeb6c1; --mini-border: #414851; --mini-overlay: #17202b; display: grid; grid-template-columns: 22% minmax(0,1fr); gap: 7px; padding: 7px; aspect-ratio: 800 / 520; border-radius: 9px; background: var(--mini-bg); color: var(--mini-text); line-height: 1.35; }
+.software-miniature { --mini-bg: #222428; --mini-side: #1d2023; --mini-card: #303338; --mini-text: #f1f2f5; --mini-muted: #aeb6c1; --mini-border: #414851; --mini-overlay: #17202b; display: grid; grid-template-columns: 22% minmax(0,1fr); gap: 7px; padding: 7px; position: relative; aspect-ratio: 800 / 520; border-radius: 9px; background: var(--mini-bg); color: var(--mini-text); line-height: 1.35; }
 .software-miniature.is-light { --mini-bg: #f4f6f9; --mini-side: #ebeef3; --mini-card: #fff; --mini-text: #202630; --mini-muted: #4a5565; --mini-border: #d7dde7; --mini-overlay: #f7f9fc; }
 .mini-sidebar { display: flex; flex-direction: column; gap: 5px; min-width: 0; min-height: 0; padding: 5px; border-radius: 5px; background: var(--mini-side); font-size: clamp(7px,.75vw,10px); }
 .mini-brand { display: flex; justify-content: space-between; font-weight: 600; white-space: nowrap; }
@@ -182,27 +174,24 @@ function onCardUp(event) {
 .mini-controls i { flex: 1; height: 2px; background: var(--mini-border); }
 .mini-clear { position: absolute; right: 2px; top: 2px; width: 22px; height: 22px; color: #fff; background: #101418c9; border-radius: 50%; }
 .mini-tile.is-over { outline: 2px solid #00a1d6; outline-offset: 1px; }
-.demo-grip { position: absolute; top: 0; bottom: 0; right: -6px; width: 12px; z-index: 2; cursor: col-resize; touch-action: none; }
-.demo-grip::after { content: ''; position: absolute; inset: 15% 4px; border-radius: 4px; background: #00a1d6; opacity: .65; }
-.preset-picker { margin-top: 14px; border: 1px solid var(--vp-c-divider); border-radius: 8px; }
-.preset-picker summary { padding: 10px 12px; cursor: pointer; font-size: 13px; }
-.preset-picker summary span { float: right; color: var(--vp-c-text-2); font-size: 12px; }
+.preset-picker { position: absolute; inset: 7px; overflow: auto; border-radius: 6px; padding: 12px; background: var(--mini-side); color: var(--mini-text); }
+.preset-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.preset-header h4 { font-size: 14px; font-weight: 600; }
+.preset-header > span { margin-left: auto; font-size: 10px; color: var(--mini-muted); }
+.preset-back { min-height: 32px; padding: 4px 8px; border: 1px solid var(--mini-border); border-radius: 5px; font-size: 11px; }
 .preset-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 6px; padding: 4px 10px 10px; }
-.preset-grid button { min-width: 0; padding: 7px; border: 1px solid var(--vp-c-divider); border-radius: 6px; font-size: 10px; }
+.preset-grid button { min-width: 0; padding: 7px; border: 1px solid var(--mini-border); border-radius: 6px; font-size: 10px; }
 .preset-grid button[aria-pressed=true] { border-color: var(--vp-c-brand-1); color: var(--vp-c-brand-1); }
 .preset-grid svg { display: block; width: 100%; height: 44px; margin-bottom: 5px; fill: currentColor; opacity: .7; }
-.demo-controls { min-height: 60px; padding-top: 14px; display: flex; align-items: center; }
-.ratio-control { display: flex; align-items: center; gap: 12px; width: 100%; font-size: 13px; }
-.ratio-control input { min-width: 0; flex: 1; accent-color: var(--vp-c-brand-1); }
-.ratio-control output { min-width: 32px; font-variant-numeric: tabular-nums; }
-.layout-note,.demo-status { color: var(--vp-c-text-2); font-size: 12px; line-height: 1.7; }
+.demo-status { color: var(--vp-c-text-2); font-size: 12px; line-height: 1.7; }
+.demo-status { color: var(--vp-c-text-2); font-size: 12px; line-height: 1.7; }
 .demo-status { min-height: 40px; margin: 12px 0 0; }
 .card-ghost { position: fixed; z-index: 100; width: 120px; height: 76px; padding: 7px; display: flex; align-items: end; border: 1px solid #00a1d6; border-radius: 7px; background-size: 240%; color: white; text-shadow: 0 1px 4px black; transform: translate(-50%,-50%) rotate(-3deg); box-shadow: 0 16px 40px #0005; pointer-events: none; }
 .drop-flash { position: absolute; inset: -2px; border: 2px solid #00a1d6; border-radius: 6px; pointer-events: none; animation: drop-land 360ms var(--ease-out) both; }
 @keyframes drop-land { from { opacity: 1; transform: scale(.96); } to { opacity: 0; transform: scale(1.04); } }
-@media (hover:hover) and (pointer:fine) { .mini-follow:hover { border-color: #00a1d6; } .preset-grid button:hover { background: var(--vp-c-bg-soft); } }
+@media (hover:hover) and (pointer:fine) { .mini-follow:hover { border-color: #00a1d6; } .preset-grid button:hover { background: var(--mini-card); } }
 @media (max-width:900px) { .feature-demo { grid-template-columns: 1fr; gap: 20px; } .demo-description { margin-top: 18px; } }
-@media (max-width:480px) { .demo-preview { padding: 12px; } .software-miniature { gap: 4px; padding: 4px; } .mini-wall { gap: 4px; } .mini-sidebar { padding: 3px; gap: 3px; } .mini-controls { gap: 3px; padding: 3px; } .mini-badge { top: 2px; left: 2px; padding: 1px 2px; } .mini-brand { font-size: 6px; } .mini-tools { grid-template-columns: 1fr 18px 14px; } .mini-theme { width:18px; height:18px; font-size:13px; } .ratio-control { font-size:12px; gap:8px; } .preset-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:480px) { .demo-preview { padding: 12px; } .software-miniature { gap: 4px; padding: 4px; } .mini-wall { gap: 4px; } .mini-sidebar { padding: 3px; gap: 3px; } .mini-controls { gap: 3px; padding: 3px; } .mini-badge { top: 2px; left: 2px; padding: 1px 2px; } .mini-brand { font-size: 6px; } .mini-tools { grid-template-columns: 1fr 18px 14px; } .mini-theme { width:18px; height:18px; font-size:13px; } .preset-grid { grid-template-columns:repeat(2,minmax(0,1fr)); padding:0; } .preset-picker { inset:4px; padding:8px; } .preset-header { gap:6px; margin-bottom:8px; flex-wrap:wrap; } .preset-header > span { display:none; } }
 @media (prefers-reduced-motion:reduce) { .drop-flash { display:none; animation:none; } .card-ghost { transform:translate(-50%,-50%); } }
 @media (max-width:480px) { .software-miniature { width:100%; min-width:0; min-height:220px; } }
 </style>

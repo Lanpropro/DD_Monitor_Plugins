@@ -208,9 +208,13 @@ test('appearance miniature and editable controls remain usable before hydration'
   assert.ok(home.includes('aria-label="软件外观缩略预览"'))
   assert.ok(home.includes('class="mini-sidebar"'))
   assert.equal((home.match(/class="[^"]*\bmini-tile\b[^"]*"/g) || []).length, 6)
-  assert.ok(home.includes('aria-label="主画面比例"'))
-  assert.ok(home.includes('role="separator"'))
-  assert.ok(home.includes('aria-label="拖动调整主画面比例"'))
+  assert.ok(!home.includes('aria-label="主画面比例"'))
+  assert.ok(!home.includes('role="separator"'))
+  assert.ok(!home.includes('比例支持拖动'))
+  assert.ok(home.includes('aria-label="布局预设页面"'))
+  const miniature = home.match(/<div class="software-miniature[\s\S]*?<p class="demo-status"/)?.[0]
+  assert.ok(miniature?.includes('id="mini-layout-presets"'), 'the preset page belongs inside the software preview')
+  assert.ok(!home.includes('<details id="mini-layout-presets"'))
   assert.ok(home.includes('切换布局预设'))
   assert.ok(home.includes('aria-controls="mini-layout-presets"'))
   assert.ok(home.includes('aria-label="选择演示主播 A"'))
@@ -265,7 +269,7 @@ function mountGallery({ reduced = false, intersection = true, resize = true } = 
     disconnect() { sizeDisconnected = true }
   }
   const script = read('docs/.vitepress/theme/ScreenshotShowcase.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
-  const state = runInNewContext(script + '\n;({ active, progress, controlsReady, productHeight, enhanced, paused, revealing, selectShot, togglePlayback, interact, update, preferenceChanged })', {
+  const state = runInNewContext(script + '\n;({ active, progress, controlsReady, productHeight, enhanced, paused, selectShot, togglePlayback, interact, update, preferenceChanged })', {
     ref: value => ({ value: value === null ? [story, pin, product][refs++] : value }),
     onMounted: fn => { mount = fn }, onUnmounted: fn => { unmount = fn },
     window: { innerHeight: 800, matchMedia: () => media, ...(intersection ? { IntersectionObserver: Observer } : {}), ...(resize ? { ResizeObserver: SizeObserver } : {}), addEventListener() {}, removeEventListener() {} },
@@ -320,22 +324,18 @@ test('screenshot scroll contracts the display and playback loops only while bein
   assert.ok(gallery.sizeDisconnected)
 })
 
-test('screenshot contraction starts when the frame center reaches the viewport center', () => {
+test('restored screenshot contraction starts at the original sticky offset', () => {
   const gallery = mountGallery()
-  // 800px viewport, 520px frame: its center reaches 400px at a 140px top.
+  // Original gallery uses the sticky top (100px), with a 420px scroll range.
   gallery.story.top = 160
   gallery.state.update()
   assert.equal(gallery.state.progress.value, 0)
-  gallery.story.top = 140
+  gallery.story.top = 100
   gallery.state.update()
   assert.equal(gallery.state.progress.value, 0)
-  gallery.story.top = 98
+  gallery.story.top = 58
   gallery.state.update()
   assert.ok(Math.abs(gallery.state.progress.value - .1) < .001)
-  gallery.state.selectShot(2)
-  gallery.resizeProduct(1039)
-  gallery.state.update()
-  assert.ok(Math.abs(gallery.state.progress.value - .1) < .001, 'portrait expansion must not change the center trigger')
   gallery.unmount()
 })
 
@@ -417,39 +417,16 @@ test('theme wipe originates at the button, supports rapid toggles and falls back
 })
 
 
-test('miniature layout responds to drag, slider boundaries and keyboard adjustments', () => {
-  const script = read('docs/.vitepress/theme/FeatureDemo.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
-  const state = runInNewContext(script + '\n;({ ratio, setRatio, onPointerDown, onPointerMove, onPointerUp, onGripKey })', {
-    computed: fn => ({ get value() { return fn() } }),
-    ref: value => ({ value: value === null ? { getBoundingClientRect: () => ({ left: 100, width: 600 }) } : value })
-  })
-  const target = { setPointerCapture() {}, releasePointerCapture() {} }
-  state.onPointerDown({ currentTarget: target, pointerId: 1, clientX: 400 })
-  assert.equal(state.ratio.value, 50)
-  state.onPointerMove({ clientX: 460 })
-  assert.equal(state.ratio.value, 60)
-  state.onPointerUp({ currentTarget: target, pointerId: 1 })
-  state.onPointerMove({ clientX: 500 })
-  assert.equal(state.ratio.value, 60, 'pointer movement after release must not edit the layout')
-  state.onGripKey({ key: 'ArrowRight', shiftKey: true, preventDefault() {} })
-  assert.equal(state.ratio.value, 65)
-  state.onGripKey({ key: 'ArrowLeft', shiftKey: false, preventDefault() {} })
-  assert.equal(state.ratio.value, 64)
-  state.setRatio(100)
-  assert.equal(state.ratio.value, 68)
-  state.setRatio(-100)
-  assert.equal(state.ratio.value, 35)
-})
-
 function mountMiniature() {
-  let target = null, nullRefs = 0
+  let target = null, nullRefs = 0, backFocus = 0
   const script = read('docs/.vitepress/theme/FeatureDemo.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
-  const state = runInNewContext(script + '\n;({ presets, preset, presetId, columns, slots, cards, selected, dragged, over, light, pickerOpen, selectCard, placeCard, clearSlot, changePreset, onCardDown, onCardMove, onCardUp, cancelCard })', {
+  const state = runInNewContext(script + '\n;({ presets, preset, presetId, columns, slots, cards, selected, dragged, over, light, pickerOpen, selectCard, placeCard, clearSlot, changePreset, onCardDown, onCardMove, onCardUp, cancelCard, openPicker, closePicker })', {
     computed: fn => ({ get value() { return fn() } }),
-    ref: value => ({ value: value === null && [1, 2].includes(nullRefs++) ? { contains: element => element.inside } : value }),
+    nextTick: fn => fn(),
+    ref: value => ({ value: value === null && nullRefs++ === 1 ? { contains: element => element.inside, querySelector: () => ({ focus() { backFocus++ } }) } : value }),
     document: { elementFromPoint: () => ({ closest: () => target }) }
   })
-  return { state, hit(index, inside = true) { target = index === null ? null : { dataset: { miniSlot: String(index) }, inside } } }
+  return { state, get backFocus() { return backFocus }, hit(index, inside = true) { target = index === null ? null : { dataset: { miniSlot: String(index) }, inside } } }
 }
 
 test('all software presets apply, preserve assigned cards and reject hidden targets', () => {
@@ -503,12 +480,20 @@ test('follow cards support pointer dragging, tap placement, cancellation and out
   assert.equal(s.dragged.value, null)
 })
 
-test('pixel reveal only starts on a changed screenshot and respects reduced motion', () => {
-  const gallery = mountGallery()
-  gallery.state.selectShot(0); assert.equal(gallery.state.revealing.value, false)
-  gallery.state.selectShot(1); assert.equal(gallery.state.revealing.value, true)
-  gallery.media.matches = true; gallery.state.preferenceChanged()
-  assert.equal(gallery.state.revealing.value, false)
-  gallery.state.selectShot(2); assert.equal(gallery.state.revealing.value, false)
-  gallery.unmount()
+test('preset secondary page opens inside the preview and returns focus on close or apply', () => {
+  const page = mountMiniature(), s = page.state
+  let returned = 0
+  const trigger = { currentTarget: { focus() { returned++ } } }
+  s.selectCard('a'); s.placeCard(0)
+  s.openPicker(trigger)
+  assert.equal(s.pickerOpen.value, true)
+  assert.equal(page.backFocus, 1)
+  s.changePreset('2x2')
+  assert.equal(s.pickerOpen.value, false)
+  assert.equal(returned, 1)
+  assert.equal(s.slots.value[0].id, 'a')
+  s.openPicker(trigger); s.closePicker()
+  assert.equal(s.pickerOpen.value, false)
+  assert.equal(returned, 2)
+  s.closePicker(); assert.equal(returned, 2, 'closing an already closed page must not move focus')
 })
