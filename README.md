@@ -7,9 +7,9 @@
 
 | 插件 | ID | 版本 | 支持平台 |
 | --- | --- | --- | --- |
-| [国内直播平台](plugins/domestic_live/README.md) | `domestic_live` | 1.2 | 提供虎牙、斗鱼、抖音的主播，直播流解析 |
-| [海外直播平台](plugins/global_live/README.md) | `global_live` | 1.1 | 提供Twitch、YouTube平台的主播，直播流解析 |
-| [比赛二路同步](plugins/match_sync/README.md) | `match_sync` | 1.2 | 提供保持单一直播流情况下的多路混音，合并弹幕观看 |
+| [国内直播平台](plugins/domestic_live/README.md) | `domestic_live` | 1.3 | 提供虎牙、斗鱼、抖音的主播，直播流解析 |
+| [海外直播平台](plugins/global_live/README.md) | `global_live` | 1.2 | 提供Twitch、YouTube平台的主播，直播流解析 |
+| [比赛二路同步](plugins/match_sync/README.md) | `match_sync` | 1.2.1 | 提供保持单一直播流情况下的多路混音，合并弹幕观看 |
 
 ## 安装
 
@@ -29,7 +29,8 @@ ZIP 内必须只有插件 ID 对应的顶层文件夹。GitHub 自动生成的 S
 当前软件公开仓库的 `main` 尚未同步该开发基线；安装前请确认使用配套更新的软件。
 软件显示的 `v0.2` 名称不足以判断是否包含这些接口。
 
-插件通过软件提供的 `ddm.plugins` 平台接口、VLC 播放器、FFmpeg 转流、预览和弹幕模块运行。
+插件通过软件提供的 `ddm.plugins` 平台接口、播放器、FFmpeg、预览和弹幕模块运行。
+比赛二路 1.2.1 自带 PCM 声道处理，兼容现有 VLC 主程序和 [libmpv 迁移 PR #13](https://github.com/Lanpropro/DD_Monitor_CE/pull/13)，不要求宿主保留旧音频辅助函数。
 海外自动画质需要软件提供 HLS 下载监测与自动画质控制；建议使用软件最新版本。
 源码运行时，在软件仓库安装其 `requirements.txt`，其中固定 `streamlink==8.6.1`。
 便携版使用软件随附的依赖。直播平台请求使用软件当前网络及代理配置。
@@ -48,7 +49,7 @@ python tools/build_plugins.py
 python tests/check_packages.py --host ../DD_Monitor_CE
 ```
 
-输出为 `dist/domestic_live-1.2.zip` 、`dist/global_live-1.1.zip` 和 `dist/match_sync-1.1.zip`，上传到 Releases。
+输出为 `dist/domestic_live-1.2.zip` 、`dist/global_live-1.1.zip` 和 `dist/match_sync-1.2.1.zip`，上传到 Releases。
 构建只读取 Git 跟踪文件，并将许可与来源说明放入每个安装包。
 各插件 README 中的播放、预览和弹幕集成测试在软件源码仓库执行，需先安装对应插件。
 

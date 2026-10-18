@@ -51,7 +51,10 @@ def main():
                 grid = settings.general_page.layout().itemAt(1).layout()
                 row = grid.getItemPosition(grid.indexOf(check))[0]
                 alert_row = grid.getItemPosition(grid.indexOf(settings.general_page._checks["live_alert"]))[0]
-                decode_row = grid.getItemPosition(grid.indexOf(settings.general_page.decode_mode))[0]
+                control = getattr(settings.general_page, "codec_button", None)
+                if control is None:
+                    control = settings.general_page.decode_mode
+                decode_row = grid.getItemPosition(grid.indexOf(control))[0]
                 assert alert_row < row < decode_row, "Logo switch is not below live alert"
                 check.setChecked(False)
         if len(loaded) == 2:

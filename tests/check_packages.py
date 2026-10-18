@@ -46,7 +46,15 @@ def main():
                         assert archive.read(name) == source.read_bytes()
             assert manager.install_zip(str(path)) == plugin_id
         assert not manager.plugins  # 安装阶段不执行插件代码
-        manager.load()
+        from ddm import audio_output
+        host_routing = getattr(audio_output, "route_pcm_s16_stereo", None)
+        if host_routing is not None:
+            delattr(audio_output, "route_pcm_s16_stereo")
+        try:
+            manager.load()
+        finally:
+            if host_routing is not None:
+                audio_output.route_pcm_s16_stereo = host_routing
         assert len(manager.plugins) == 3 and not manager.skipped
         assert all(plugin.version == versions[plugin.context.name] for plugin in manager.plugins)
         assert set(manager.platforms) == {"huya", "douyu", "douyin", "twitch", "youtube"}
