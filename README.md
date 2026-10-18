@@ -7,8 +7,8 @@
 
 | 插件 | ID | 版本 | 支持平台 |
 | --- | --- | --- | --- |
-| [国内直播平台](plugins/domestic_live/README.md) | `domestic_live` | 1.2 | 提供虎牙、斗鱼、抖音的主播，直播流解析 |
-| [海外直播平台](plugins/global_live/README.md) | `global_live` | 1.1 | 提供Twitch、YouTube平台的主播，直播流解析 |
+| [国内直播平台](plugins/domestic_live/README.md) | `domestic_live` | 1.3 | 提供虎牙、斗鱼、抖音的主播，直播流解析 |
+| [海外直播平台](plugins/global_live/README.md) | `global_live` | 1.2 | 提供Twitch、YouTube平台的主播，直播流解析 |
 | [比赛二路同步](plugins/match_sync/README.md) | `match_sync` | 1.2.1 | 提供保持单一直播流情况下的多路混音，合并弹幕观看 |
 
 ## 安装

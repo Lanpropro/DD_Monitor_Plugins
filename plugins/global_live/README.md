@@ -1,8 +1,16 @@
 # Twitch 与 YouTube
 
 一个独立插件提供两个平台的公开直播，与“国内直播平台”分别启用。
-从本仓库 Releases 下载 `global_live-1.1.zip`，在软件“设置 → 插件”中导入。
+从本仓库 Releases 下载 `global_live-1.2.zip`，在软件“设置 → 插件”中导入。
 在设置 → 插件中启用 **Twitch 与 YouTube**，按提示重启后，通过添加直播间输入官方链接。
+
+## v1.2 直播源格式
+
+配套本体可严格选择 H.264 或 HEVC。Twitch 使用固定版 Streamlink 的 `supported-codecs=h264/h265` 请求相应格式；
+Twitch / YouTube 均只选择 HLS CODECS 明确为 `avc1` / `avc3` 或 `hvc1` / `hev1` 的视频条目。
+是否存在 HEVC 取决于平台和当前直播响应；缺少可识别的目标格式时明确报告不可用，交由本体回退 H.264。
+未知编码和 AV1 不作为候选，网络失败不会伪装成格式不支持。AV1 偏好由本体映射为 HEVC → H.264。
+旧本体仍默认选择 H.264，保留原画质 ID、自动模式和低画质预览。
 
 ## 使用
 

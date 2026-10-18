@@ -1,6 +1,7 @@
 """国内公开直播流：虎牙、斗鱼、抖音关注卡片与 VLC 格子内播放。"""
 import base64
 from html import unescape
+from io import BytesIO
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,7 @@ from streamlink.plugins.huya import Huya
 from streamlink.plugins.douyu import Douyu
 from streamlink.plugins.douyin import Douyin
 from streamlink.stream.http import HTTPStream
+from streamlink.stream.hls import parse_m3u8
 
 from PySide6.QtCore import QEvent, QObject
 from PySide6.QtWidgets import QApplication, QCheckBox, QLabel
@@ -25,6 +27,130 @@ from PySide6.QtWidgets import QApplication, QCheckBox, QLabel
 from ddm.dialogs import SettingsDialog
 from ddm import plugins as api
 from ddm.live_danmaku import tars_bytes, tars_fields, tars_int
+
+
+def flv_video_codec(chunks):
+    data = bytearray()
+    offset = None
+    deadline = time.monotonic() + 6
+    for chunk in chunks:
+        if time.monotonic() > deadline:
+            raise TimeoutError("直播编码确认超时")
+        data.extend(chunk)
+        if len(data) > 262144:
+            return ""
+        if offset is None:
+            if len(data) < 13:
+                continue
+            if data[:3] != b"FLV" or data[3] != 1:
+                return ""
+            offset = int.from_bytes(data[5:9], "big") + 4
+            if offset < 13 or offset > 262144:
+                return ""
+        while len(data) >= offset + 11:
+            size = int.from_bytes(data[offset + 1:offset + 4], "big")
+            end = offset + 11 + size
+            if size > 262144 or len(data) < end + 4:
+                break
+            if data[offset] == 9 and size:
+                payload = data[offset + 11:end]
+                if payload[0] & 0x80:
+                    return {b"hvc1": "hevc", b"hev1": "hevc", b"avc1": "avc", b"av01": "av1"}.get(bytes(payload[1:5]), "unknown")
+                return "avc" if payload[0] & 15 == 7 else "unknown"
+            offset = end + 4
+    return ""
+
+
+class StreamCodecProbe:
+    def __init__(self, session, headers):
+        self.session = session
+        self.headers = headers
+        self.deadline = time.monotonic() + 12
+        self.remaining = 524288
+        self.requests_left = 8
+
+    def _read(self, url, limit=131072, *, inspect_flv=False):
+        remaining_time = self.deadline - time.monotonic()
+        if remaining_time <= 0:
+            raise requests.Timeout("直播编码确认超时")
+        if self.requests_left <= 0 or self.remaining <= 0:
+            raise ValueError("直播编码确认已达到读取上限")
+        self.requests_left -= 1
+        limit = min(limit, self.remaining)
+        data = bytearray()
+        with self.session.http.get(url, headers=self.headers, stream=True,
+                timeout=(min(3, remaining_time), min(3, remaining_time))) as response:
+            response.raise_for_status()
+            for chunk in response.iter_content(4096):
+                if time.monotonic() > self.deadline:
+                    raise requests.Timeout("直播编码确认超时")
+                part = chunk[:limit - len(data)]
+                data.extend(part)
+                self.remaining -= len(part)
+                if len(data) == limit:
+                    break
+                if inspect_flv and data[:3] == b"FLV" and flv_video_codec([data]):
+                    break
+            return response.url, bytes(data)
+
+    def resolve(self, url, codec, depth=0):
+        if depth > 2:
+            return None
+        url, data = self._read(url, inspect_flv=True)
+        if data.startswith(b"FLV"):
+            return (url, codec) if flv_video_codec([data]) == codec else None
+        if not data.startswith(b"#EXTM3U") or len(data) >= 131072:
+            return None
+        playlist = parse_m3u8(data.decode("utf-8-sig"), base_uri=url)
+        if playlist.is_master:
+            variants = sorted(playlist.playlists, key=lambda item: item.stream_info.bandwidth or 0, reverse=True)
+            error = None
+            for variant in variants[:3]:
+                if any(item.type == "AUDIO" and item.uri for item in variant.media):
+                    continue
+                tokens = {value.lower().split(".", 1)[0] for value in variant.stream_info.codecs}
+                video = tokens.intersection(("avc1", "avc3", "hvc1", "hev1", "av01", "vp09", "vp9"))
+                allowed = {"avc1", "avc3"} if codec == "avc" else {"hvc1", "hev1"}
+                if video:
+                    if video.intersection(allowed) and not video.difference(allowed):
+                        return variant.uri, codec
+                    continue
+                try:
+                    selected = self.resolve(variant.uri, codec, depth + 1)
+                    if selected:
+                        return selected
+                except (requests.RequestException, PluginError) as failure:
+                    error = failure
+            if error is not None:
+                raise error
+            return None
+        segment = next(iter(playlist.segments), None)
+        if segment is None or segment.byterange or (segment.key and segment.key.method != "NONE"):
+            return None
+        init = b""
+        if segment.map:
+            if segment.map.byterange or (segment.map.key and segment.map.key.method != "NONE"):
+                return None
+            _init_url, init = self._read(segment.map.uri)
+        _segment_url, media = self._read(segment.uri, 262144)
+        return (url, codec) if self._media_codec(init + media) == codec else None
+
+    @staticmethod
+    def _media_codec(data):
+        import av
+        from av.error import FFmpegError
+        media_format = "mp4" if data[4:8] in (b"ftyp", b"styp", b"moov", b"moof") else "mpegts"
+        try:
+            with av.open(BytesIO(data), format=media_format, options={
+                    "probesize": "262144", "analyzeduration": "1000000", "max_probe_packets": "32"}) as container:
+                codecs = {stream.codec_context.name for stream in container.streams.video}
+                if codecs == {"h264"}:
+                    return "avc"
+                if codecs == {"hevc"}:
+                    return "hevc"
+        except FFmpegError:
+            pass
+        return ""
 
 
 def huya_string(tag, value):
@@ -77,6 +203,13 @@ def huya_follow_request(session, method, uid, target):
 class LiveQualityPlatform(api.Platform):
     def __init__(self):
         self._qualities = {}                  # 只保存档位元数据，不保存带签名的地址
+
+    def play_url_for_codec(self, room_id, quality=250, *, codec):
+        if codec not in ("avc", "hevc"):
+            raise api.StreamCodecUnavailable(f"{self.label} 不支持请求的直播编码")
+        if codec != "avc":
+            raise api.StreamCodecUnavailable(f"{self.label} 当前公开解析器未提供可验证的 HEVC 线路")
+        return (*self.play_url(room_id, quality), "avc")
 
     def room_quality_options(self, room_id: str) -> list[dict]:
         return [{key: value for key, value in item.items() if key in ("qn", "desc", "label")} for item in
@@ -389,7 +522,7 @@ class NumericLivePlatform(LiveQualityPlatform):
             raise RuntimeError(f"{self.label}状态获取失败")
         return result
 
-    def play_url(self, room_id: str, quality: int = 250, *, preview=False) -> tuple:
+    def play_url(self, room_id: str, quality: int = 250, *, preview=False, _codec=None) -> tuple:
         session = Streamlink({"http-timeout": 8})
         try:
             streams = self._streams(session, room_id, quality, preview=preview)
@@ -406,15 +539,32 @@ class NumericLivePlatform(LiveQualityPlatform):
                 return url, qn, self.kind, headers
             candidates = [stream] + [item for item in streams.values() if item is not stream
                                      and getattr(item, "ddm_quality", 10000) == qn]
-            for candidate in candidates:
+            probe = StreamCodecProbe(session, headers) if _codec is not None else None
+            network_error = None
+            for candidate in candidates[:3] if probe else candidates:
                 try:
+                    if probe:
+                        selected = probe.resolve(candidate.to_url(), _codec)
+                        if selected:
+                            selected_url, actual_codec = selected
+                            return selected_url, qn, self.kind, headers, actual_codec
+                        continue
                     with session.http.get(candidate.to_url(), headers=headers, stream=True, timeout=(4, 6)) as response:
                         response.raise_for_status()
                         prefix = next(response.iter_content(7), b"")
                         if prefix[:3] == b"FLV" or prefix == b"#EXTM3U":
                             return response.url, qn, self.kind, headers
-                except (requests.RequestException, PluginError):
+                except (requests.RequestException, PluginError) as error:
+                    network_error = error
                     continue  # 抖音部分房间拒绝 FLV，同画质 HLS 仍可用。
+                except ValueError:
+                    if probe is None:
+                        raise
+                    continue
+            if _codec is not None:
+                if network_error is not None:
+                    raise network_error
+                raise api.StreamCodecUnavailable(f"{self.label} 未提供可识别的 {_codec.upper()} 视频流")
             raise RuntimeError(f"{self.label}直播线路暂不可用，请重试")
         except RuntimeError:
             raise
@@ -1040,6 +1190,11 @@ class DouyinPlatform(NumericLivePlatform):
                 raise ValueError("Missing room status")
             return info
         raise ValueError("Missing public room data")
+
+    def play_url_for_codec(self, room_id, quality=250, *, codec):
+        if codec not in ("avc", "hevc"):
+            raise api.StreamCodecUnavailable(f"{self.label} 不支持请求的直播编码")
+        return self.play_url(room_id, quality, _codec=codec)
 
     def _streams(self, session, room_id, quality=250, *, preview=False):
         room = self.room_data(room_id, session)["room"]

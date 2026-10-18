@@ -67,6 +67,7 @@ class LiveYouTube(YouTube):
 
 
 class PublicLivePlatform(api.Platform):
+    parser: type[Twitch] | type[YouTube]
     playback_mode = "stream"
     hosts = ()
 
@@ -100,7 +101,8 @@ class PublicLivePlatform(api.Platform):
             raise RuntimeError(f"{self.label} 状态获取失败")
         return result
 
-    def _quality_streams(self, streams):
+    def _quality_streams(self, streams, codec="avc"):
+        prefixes = {"avc": ("avc1", "avc3"), "hevc": ("hvc1", "hev1")}[codec]
         options = []
         for name, stream in streams.items():
             if name in ("best", "worst") or not isinstance(stream, HLSStream):
@@ -109,7 +111,9 @@ class PublicLivePlatform(api.Platform):
             playlist = next((item for item in master.playlists if item.uri == stream.to_url()), None) if master else None
             info = playlist.stream_info if playlist else None
             resolution = info.resolution if info else None
-            if not resolution or not any(codec.startswith(("avc1", "avc3")) for codec in info.codecs):
+            codecs = {value.lower().split(".", 1)[0] for value in info.codecs} if info else set()
+            video_codecs = codecs.intersection(("avc1", "avc3", "hvc1", "hev1", "av01", "vp09", "vp9"))
+            if not resolution or not video_codecs.intersection(prefixes) or video_codecs.difference(prefixes):
                 continue
             width, height = resolution.width, resolution.height
             fps = info.framerate or 0
@@ -122,20 +126,34 @@ class PublicLivePlatform(api.Platform):
         return options
 
     def play_url(self, room_id, quality=10000, *, preview=False):
+        return self._play_url(room_id, quality, codec="avc", preview=preview)[:4]
+
+    def play_url_for_codec(self, room_id, quality=10000, *, codec):
+        if codec not in ("avc", "hevc"):
+            raise api.StreamCodecUnavailable(f"{self.label} 不支持请求的直播编码")
+        return self._play_url(room_id, quality, codec=codec)
+
+    def _play_url(self, room_id, quality, *, codec, preview=False):
         canonical = self.normalize(room_id)
         session = Streamlink({"http-timeout": 8, "webbrowser": False})
         session.http.request = partial(session.http.request, retries=2)
         try:
-            parser = self.parser(session, self.room_url(canonical))
+            if self.kind == "twitch":
+                parser = self.parser(session, self.room_url(canonical),
+                                     options={"supported-codecs": ["h265" if codec == "hevc" else "h264"]})
+            else:
+                parser = self.parser(session, self.room_url(canonical))
             streams = parser.streams()
-            options = self._quality_streams(streams)
+            options = self._quality_streams(streams, codec)
             if not options:
-                raise RuntimeError("没有可用的公开 H.264 直播流")
+                raise getattr(api, "StreamCodecUnavailable", RuntimeError)(f"没有可识别的 {codec.upper()} HLS 直播流")
             self._qualities[canonical] = options
             selected = options[-1] if preview or quality == AUTO_QUALITY else next(
                 (item for item in options if item["qn"] == quality), options[0])
             url = streams[selected["key"]].to_url()
-            return url, selected["qn"], self.kind, {"User-Agent": USER_AGENT, "Referer": self.origin}
+            return url, selected["qn"], self.kind, {"User-Agent": USER_AGENT, "Referer": self.origin}, codec
+        except getattr(api, "StreamCodecUnavailable", RuntimeError):
+            raise
         except Exception as error:  # noqa: BLE001
             raise RuntimeError(f"{self.label} 直播取流失败，请稍后重试") from error
         finally:
