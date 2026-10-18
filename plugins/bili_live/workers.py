@@ -1,14 +1,19 @@
 """Bounded request lifetime independent of transient popup/tile widgets."""
 import threading
 import requests
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, Signal, Qt
 from . import bili_api
 
 _active_requests = set()
 
 def start_worker(worker, priority=QThread.InheritPriority):
     _active_requests.add(worker)
-    worker.finished.connect(lambda: _active_requests.discard(worker))
+    def retire():
+        # finished precedes native thread_local destruction. Join before
+        # dropping our last reference or allowing QApplication to shut down.
+        worker.wait()
+        _active_requests.discard(worker)
+    worker.finished.connect(retire, Qt.QueuedConnection)
     worker.finished.connect(worker.deleteLater)
     worker.start(priority)
 

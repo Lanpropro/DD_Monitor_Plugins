@@ -1,14 +1,18 @@
 """send2 emoticon tabs, permission-aware picker and lazy images."""
 import requests
+import hashlib
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QIcon, QPainter, QPainterPath, QPen, QPixmap, QRegion
+from PySide6.QtGui import QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap, QRegion
 from PySide6.QtWidgets import (
     QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton,
     QScrollArea, QSizePolicy, QStyle, QStyleOptionTab, QStylePainter, QTabBar, QToolButton,
     QVBoxLayout, QWidget, QWidgetAction,
 )
 
-from ddm import images, theme
+from pathlib import Path
+from ddm import config, theme
+from .gift_media import _fetch
+from .popup import AnchoredPopup, picker_style
 from .workers import start_worker as _start
 
 def _style_button(button):
@@ -48,9 +52,17 @@ class EmoticonButton(QPushButton):
             painter.drawEllipse(QPointF(x, -2.3), .9, .9)
 
 
+def _load_image(url, subdir):
+    legacy = Path(config.REPO) / 'cache' / subdir / (hashlib.md5(url.encode('utf-8')).hexdigest()+'.png')
+    if legacy.is_file():
+        image = QImage(str(legacy))
+        if not image.isNull():return image
+    return QImage(_fetch(url, Path(config.REPO) / 'cache' / subdir))
+
+
 class _EmoticonImageLoader(QThread):
-    """当前表情包串行读图；避免头像加载器的八路并发与音频回调争用。"""
-    loaded = Signal(int, str, QPixmap)
+    """Bounded QThreads decode QImage; QPixmap stays on the GUI thread."""
+    loaded = Signal(int, str, QImage)
 
     def __init__(self, generation, urls):
         super().__init__()
@@ -60,14 +72,16 @@ class _EmoticonImageLoader(QThread):
         for url in self.urls:
             if self.isInterruptionRequested():
                 break
-            pixmap = images.load_pixmap(url, "bili_live/emoticons")
+            try:
+                pixmap = _load_image(url, "bili_live/emoticons")
+            except Exception:
+                continue
             if self.isInterruptionRequested():
                 break
             if pixmap is not None and not pixmap.isNull():
                 # 图标按 32 逻辑像素显示，保留 2x 分辨率，避免缓存整张原图。
                 pixmap = pixmap.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 self.loaded.emit(self.generation, url, pixmap)
-            self.msleep(4)
 
 
 class EmoticonTabs(QTabBar):
@@ -108,14 +122,14 @@ class EmoticonTabs(QTabBar):
                            QIcon.On if index == selected else QIcon.Off)
 
 
-class EmoticonPopup(QMenu):
+class EmoticonPopup(AnchoredPopup):
     selected = Signal(int, dict)
     retryRequested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("EmoticonPopup")
-        self.setStyleSheet(f"""
+        self.setStyleSheet(picker_style() + f"""
             #EmoticonButton {{border: 1px solid transparent; border-radius: {theme.RADIUS_SM}px;
                 color: {theme.TEXT1}; font-size: 11px; padding: 1px;}}
             #EmoticonButton:hover, #EmoticonButton:focus {{background: {theme.CONTENT_HOVER};
@@ -162,15 +176,15 @@ class EmoticonPopup(QMenu):
         self._covers = {}
         self._pixmaps = {}
         self._generation = 0
-        self._image_loader = None
+        self._image_workers = set()
         self._pending_urls = {}
         self._build_timer = QTimer(self)
         self._build_timer.setInterval(8)
         self._build_timer.timeout.connect(self._build_batch)
         self._clear_body()
-        action = QWidgetAction(self)
-        action.setDefaultWidget(holder)
-        self.addAction(action)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(6,6,6,6)
+        outer.addWidget(holder)
         self._holder = holder
         self._holder.setFixedSize(340, 300)
 
@@ -191,8 +205,8 @@ class EmoticonPopup(QMenu):
         self._generation += 1
         self._pending_urls.clear()
         self._requested_urls = set()
-        if self._image_loader is not None:
-            self._image_loader.requestInterruption()
+        for loader in self._image_workers:
+            loader.requestInterruption()
 
     def _clear_packages(self):
         self._clear_body()
@@ -286,28 +300,29 @@ class EmoticonPopup(QMenu):
         self._start_images()
 
     def _start_images(self):
-        if not self.isVisible() or self._image_loader is not None or not self._pending_urls:
+        if not self.isVisible() or not self._pending_urls:
             return
         urls = [url for url in self._pending_urls if url in self._images]
         if not urls:
             if self._next_emote < len(self._emotes):
                 return  # 等下一批当前包按钮提供 URL，不让导航封面抢在前面。
-            urls = list(self._pending_urls)[:1]
-        for url in urls:
+            urls = list(self._pending_urls)
+        for url in urls[:max(0,4-len(self._image_workers))]:
             del self._pending_urls[url]
-        loader = _EmoticonImageLoader(self._generation, urls)
-        self._image_loader = loader
-        loader.loaded.connect(self._image_loaded)
-        loader.finished.connect(self._images_finished)
-        _start(loader, QThread.LowPriority)
+            loader = _EmoticonImageLoader(self._generation, [url])
+            self._image_workers.add(loader)
+            loader.loaded.connect(self._image_loaded)
+            loader.finished.connect(self._images_finished)
+            _start(loader, QThread.LowPriority)
 
     def _images_finished(self):
-        self._image_loader = None
+        self._image_workers.discard(self.sender())
         self._start_images()
 
     def _image_loaded(self, generation, url, pixmap):
         if generation != self._generation:
             return
+        pixmap = QPixmap.fromImage(pixmap)
         self._pixmaps[url] = pixmap
         for index in self._covers.get(url, []):
             self.tabs.setTabIcon(index, QIcon(pixmap))
@@ -344,9 +359,4 @@ class EmoticonPopup(QMenu):
         screen = button.screen().availableGeometry()
         self._holder.setFixedSize(min(340, screen.width() - 16), min(300, screen.height() - 16))
         self.adjustSize()
-        anchor = button.mapToGlobal(QPoint(button.width(), 0))
-        x = max(screen.left(), min(anchor.x() - self.width(), screen.right() - self.width() + 1))
-        y = anchor.y() - self.height() - 6
-        if y < screen.top():
-            y = button.mapToGlobal(button.rect().bottomLeft()).y() + 6
-        self.popup(QPoint(x, max(screen.top(), min(y, screen.bottom() - self.height() + 1))))
+        super().open_at(button)

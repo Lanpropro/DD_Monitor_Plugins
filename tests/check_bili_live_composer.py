@@ -12,10 +12,11 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bili_live_support import session
 from PySide6.QtCore import QEvent, Qt
-from PySide6.QtGui import QInputMethodEvent, QKeyEvent, QPixmap, QColor
+from PySide6.QtGui import QInputMethodEvent, QKeyEvent, QImage, QColor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLineEdit, QToolButton
-from ddm import images, theme
+from ddm import theme
+from ddm_plugin_bili_live import emoticons as image_api
 from bili_live_support import bili, session
 APP = QApplication.instance() or QApplication([])
 
@@ -188,9 +189,9 @@ class ComposerTests(unittest.TestCase):
 
     def test_popup_renders_packages_permissions_empty_error_and_real_selection(self):
         packs = [{'pkg_type': 3, 'pkg_name': '小表情', 'emoticons': [{'emoji': '[doge]', 'perm': 1, 'url': 'https://example.com/emote.png'}]}, {'pkg_type': 2, 'pkg_name': '主播表情', 'emoticons': [{'emoji': '锁定', 'perm': 0, 'emoticon_unique': 'room_101_4', 'unlock_show_text': '粉丝团'}]}]
-        pixmap = QPixmap(32, 32)
+        pixmap = QImage(32, 32, QImage.Format_ARGB32)
         pixmap.fill(QColor('#00a1d6'))
-        with patch.object(bili, 'get_emoticons', return_value=packs), patch.object(images, 'load_pixmap', return_value=pixmap):
+        with patch.object(bili, 'get_emoticons', return_value=packs), patch.object(image_api, '_load_image', return_value=pixmap):
             self.composer.emote_button.click()
             popup = self.composer.popup
             settle(lambda: any((b.text() == '[doge]' for b in popup.findChildren(QToolButton))))

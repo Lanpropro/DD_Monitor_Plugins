@@ -11,10 +11,10 @@ os.environ['DDM_NO_SAVE'] = '1'
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bili_live_support import session
 from PySide6.QtCore import QEvent, QTimer, Qt
-from PySide6.QtGui import QColor, QPixmap
+from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QTabBar, QToolButton
-from ddm import images
+from ddm_plugin_bili_live import emoticons as image_api
 from ddm_plugin_bili_live.composer import EmoticonPopup, _active_requests
 APP = QApplication.instance() or QApplication([])
 
@@ -39,7 +39,7 @@ class EmoticonTabTests(unittest.TestCase):
         self.popup = EmoticonPopup()
         self.popup.show()
         APP.processEvents()
-        self.pixmap = QPixmap(32, 32)
+        self.pixmap = QImage(32, 32, QImage.Format_ARGB32)
         self.pixmap.fill(QColor('#00a1d6'))
         self.release = threading.Event()
         self.calls = []
@@ -61,7 +61,7 @@ class EmoticonTabTests(unittest.TestCase):
         return self.pixmap
 
     def test_only_selected_package_is_built_and_downloaded(self):
-        with patch.object(images, 'load_pixmap', side_effect=self.load):
+        with patch.object(image_api, '_load_image', side_effect=self.load):
             self.popup.set_packages([package('小表情'), package('主播表情', kind=2), package('未知', kind=8)])
             tabs = self.popup.findChild(QTabBar)
             self.assertIsNotNone(tabs, '每个支持的表情包应有独立 Tab')
@@ -76,6 +76,22 @@ class EmoticonTabTests(unittest.TestCase):
             settle(lambda: {b.text() for b in buttons(self.popup)} == {'[小表情-0]', '[小表情-1]'})
             self.assertEqual(len(self.calls), 4, '访问过的 Tab 应复用已加载图标')
             self.assertTrue(all((subdir == 'bili_live/emoticons' for _, subdir in self.calls)))
+
+    def test_one_slow_image_does_not_block_other_visible_icons(self):
+        started = threading.Event()
+        def load(url, subdir):
+            if url.endswith('-0.png'):
+                started.set();self.release.wait(2)
+            return self.pixmap
+        with patch.object(image_api, '_load_image', side_effect=load):
+            self.popup.set_packages([package('并发', 8)])
+            settle(started.is_set)
+            try:
+                settle(lambda: len(buttons(self.popup)) == 8 and
+                       not buttons(self.popup)[1].icon().isNull(), seconds=.7)
+                self.assertTrue(buttons(self.popup)[0].icon().isNull())
+            finally:self.release.set()
+            settle(lambda:not _active_requests)
 
     def test_large_package_yields_between_batches(self):
         pack = package('大表情包', 600)
@@ -107,7 +123,7 @@ class EmoticonTabTests(unittest.TestCase):
         def sizes():
             APP.processEvents()
             return [(self.popup.tabs.tabRect(i).width(), self.popup.tabs.tabRect(i).height()) for i in range(self.popup.tabs.count())]
-        with patch.object(images, 'load_pixmap', side_effect=load):
+        with patch.object(image_api, '_load_image', side_effect=load):
             self.popup.set_packages(packs)
             before = sizes()
             self.assertEqual(len(set(before)), 1, '包名长度不应改变分类按钮的尺寸')
@@ -142,11 +158,11 @@ class EmoticonTabTests(unittest.TestCase):
         for index, (width, height) in enumerate(((48, 48), (64, 32), (32, 64))):
             pack = package(f'封面{index}', 0, 2)
             pack['current_cover'] = f'https://example.invalid/centered-{index}.png'
-            pixmap = QPixmap(width, height)
+            pixmap = QImage(width, height, QImage.Format_ARGB32)
             pixmap.fill(marker)
             covers[pack['current_cover']] = pixmap
             packs.append(pack)
-        with patch.object(images, 'load_pixmap', side_effect=lambda url, subdir: covers[url]):
+        with patch.object(image_api, '_load_image', side_effect=lambda url, subdir: covers[url]):
             self.popup.set_packages(packs)
             settle(lambda: all((not self.popup.tabs.tabIcon(i).isNull() for i in range(3))))
             for selected in (0, 2):
@@ -167,7 +183,7 @@ class EmoticonTabTests(unittest.TestCase):
         packs = [package(f'分类{index}', 0, 2) for index in range(20)]
         for pack in packs:
             pack['current_cover'] = 'https://example.invalid/overflow-cover.png'
-        with patch.object(images, 'load_pixmap', return_value=self.pixmap):
+        with patch.object(image_api, '_load_image', return_value=self.pixmap):
             self.popup.set_packages(packs)
             settle(lambda: all((not self.popup.tabs.tabIcon(i).isNull() for i in range(20))))
             for selected in (0, 19):
@@ -191,7 +207,7 @@ class EmoticonTabTests(unittest.TestCase):
         def load(url, subdir):
             self.release.wait(2)
             return self.load(url, subdir)
-        with patch.object(images, 'load_pixmap', side_effect=load):
+        with patch.object(image_api, '_load_image', side_effect=load):
             self.popup.set_packages(packs)
             self.assertEqual([self.popup.tabs.tabText(i) for i in range(4)], ['表情', '通用表情', '主播表情', '装扮表情'], '先显示包名，再逐张替换封面')
             self.assertTrue(all((self.popup.tabs.tabIcon(i).isNull() for i in range(4))))
@@ -216,7 +232,7 @@ class EmoticonTabTests(unittest.TestCase):
         packs = [package(name, 0, 2) for name in ('缺失', '非法', '失败')]
         packs[1]['current_cover'] = {'url': 'https://example.invalid/not-a-string.png'}
         packs[2]['current_cover'] = 'https://example.invalid/failed-cover.png'
-        with patch.object(images, 'load_pixmap', return_value=None):
+        with patch.object(image_api, '_load_image', return_value=None):
             self.popup.set_packages(packs)
             settle(lambda: not _active_requests)
             self.assertEqual([self.popup.tabs.tabText(i) for i in range(3)], ['缺失', '非法', '失败'])
@@ -226,7 +242,7 @@ class EmoticonTabTests(unittest.TestCase):
         first, second = (package('第一包', 2, 2), package('第二包', 2, 5))
         for pack in (first, second):
             pack['current_cover'] = 'https://example.invalid/shared-cover.png'
-        with patch.object(images, 'load_pixmap', side_effect=self.load):
+        with patch.object(image_api, '_load_image', side_effect=self.load):
             self.popup.set_packages([package('emoji', 0), first, second])
             settle(lambda: not _active_requests)
             self.assertTrue(all((not self.popup.tabs.tabIcon(i).isNull() for i in (1, 2))))
@@ -236,7 +252,7 @@ class EmoticonTabTests(unittest.TestCase):
     def test_hidden_catalog_defers_cover_download_until_reopen(self):
         pack = package('后台目录', 0, 2)
         pack['current_cover'] = 'https://example.invalid/hidden-cover.png'
-        with patch.object(images, 'load_pixmap', side_effect=self.load):
+        with patch.object(image_api, '_load_image', side_effect=self.load):
             self.popup.hide()
             self.popup.set_packages([pack])
             QTest.qWait(30)
@@ -257,7 +273,7 @@ class EmoticonTabTests(unittest.TestCase):
                 self.release.wait(2)
                 return self.pixmap
             return None
-        with patch.object(images, 'load_pixmap', side_effect=load):
+        with patch.object(image_api, '_load_image', side_effect=load):
             self.popup.set_packages([first])
             settle(lambda: bool(self.calls))
             self.popup.set_loading()
@@ -280,7 +296,7 @@ class EmoticonTabTests(unittest.TestCase):
             if 'slow-cover' in url:
                 self.release.wait(2)
             return self.pixmap
-        with patch.object(images, 'load_pixmap', side_effect=load):
+        with patch.object(image_api, '_load_image', side_effect=load):
             self.popup.set_packages([first, second, third])
             settle(lambda: bool(self.calls))
             self.assertEqual(self.calls[0][0], 'https://example.invalid/emoji-0.png', '未选中包的封面不能挡住当前包的图片')
@@ -288,7 +304,7 @@ class EmoticonTabTests(unittest.TestCase):
             self.release.set()
             settle(lambda: not _active_requests)
 
-    def test_tab_change_cancels_old_downloads_without_parallel_workers(self):
+    def test_tab_change_cancels_queued_downloads_with_bounded_parallelism(self):
         active = peak = 0
 
         def slow_load(url, subdir):
@@ -301,7 +317,7 @@ class EmoticonTabTests(unittest.TestCase):
             with self.lock:
                 active -= 1
             return self.pixmap
-        with patch.object(images, 'load_pixmap', side_effect=slow_load):
+        with patch.object(image_api, '_load_image', side_effect=slow_load):
             self.popup.set_packages([package('旧包', 20), package('新包', 3)])
             settle(lambda: bool(self.calls))
             tabs = self.popup.findChild(QTabBar)
@@ -311,11 +327,11 @@ class EmoticonTabTests(unittest.TestCase):
             self.release.set()
             settle(lambda: all((not b.icon().isNull() for b in buttons(self.popup))))
             settle(lambda: not _active_requests)
-            self.assertEqual(peak, 1, '表情下载不能同时争用多个工作线程')
-            self.assertEqual(sum(('旧包' in url for url, _ in self.calls)), 1, '切 Tab 后应取消旧包未开始的图片')
+            self.assertLessEqual(peak, 4, '表情下载不能无限创建工作线程')
+            self.assertLessEqual(sum(('旧包' in url for url, _ in self.calls)), 4, '切 Tab 后应取消旧包未开始的图片')
 
     def test_hiding_pauses_build_and_images_until_reopen(self):
-        with patch.object(images, 'load_pixmap', side_effect=self.load):
+        with patch.object(image_api, '_load_image', side_effect=self.load):
             self.popup.set_packages([package('暂停', 70)])
             self.popup.hide()
             QTest.qWait(80)
@@ -331,7 +347,7 @@ class EmoticonTabTests(unittest.TestCase):
         locked['emoticons'][0].update(perm=0, unlock_show_text='粉丝团')
         selected = []
         self.popup.selected.connect(lambda kind, emote: selected.append((kind, emote['emoji'])))
-        with patch.object(images, 'load_pixmap', side_effect=self.load):
+        with patch.object(image_api, '_load_image', side_effect=self.load):
             self.popup.set_packages([small, locked, package('空包', 0)])
             tabs = self.popup.findChild(QTabBar)
             self.assertIsNotNone(tabs, '表情包应按 Tab 呈现')
@@ -356,17 +372,18 @@ class EmoticonTabTests(unittest.TestCase):
                 self.calls.append((url, subdir))
             self.release.wait(2)
             return self.pixmap
-        with patch.object(images, 'load_pixmap', side_effect=slow_load):
+        with patch.object(image_api, '_load_image', side_effect=slow_load):
             self.popup.set_packages([package('重开', 3)])
             settle(lambda: bool(self.calls))
             self.popup.hide()
             self.release.set()
             settle(lambda: not _active_requests)
-            self.assertEqual(len(self.calls), 1, '关闭菜单后不能继续读取剩余图片')
+            self.assertLessEqual(len(self.calls), 3, '关闭菜单后不能继续读取剩余图片')
+            before = len(self.calls)
             self.popup.show()
             settle(lambda: len(buttons(self.popup)) == 3 and all((not b.icon().isNull() for b in buttons(self.popup))))
             settle(lambda: not _active_requests)
-            self.assertEqual(len(self.calls), 4, '重开后应重新排队被中断的三张图片')
+            self.assertEqual(len(self.calls), before+3, '重开后应重新排队被中断的三张图片')
 
     def test_refresh_ignores_old_image_result_and_hidden_catalog_stays_idle(self):
         started = threading.Event()
@@ -375,7 +392,7 @@ class EmoticonTabTests(unittest.TestCase):
             started.set()
             self.release.wait(2)
             return self.pixmap
-        with patch.object(images, 'load_pixmap', side_effect=slow_load):
+        with patch.object(image_api, '_load_image', side_effect=slow_load):
             self.popup.set_packages([package('旧目录', 10)])
             settle(started.is_set)
             self.popup.set_loading()
@@ -384,7 +401,7 @@ class EmoticonTabTests(unittest.TestCase):
             self.release.set()
             settle(lambda: not _active_requests)
             self.assertEqual(buttons(self.popup), [], '窗口隐藏时返回的目录应延迟构建')
-        with patch.object(images, 'load_pixmap', return_value=None):
+        with patch.object(image_api, '_load_image', return_value=None):
             self.popup.show()
             settle(lambda: len(buttons(self.popup)) == 1)
             self.assertEqual(buttons(self.popup)[0].text(), '[新目录-0]')

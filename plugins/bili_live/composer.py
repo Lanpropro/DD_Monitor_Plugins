@@ -145,7 +145,7 @@ class DanmakuComposer(QWidget):
         self._packages = self._catalog_key = None
         self.feedback.hide()
         if self.popup:
-            self.popup.hide()
+            self.popup.shutdown()
         self.setEnabled(False)
 
     @property

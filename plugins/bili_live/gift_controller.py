@@ -190,11 +190,11 @@ class GiftController(QObject):
         if self._closed or token[0]!=id(self) or token[1]!=self._serial:return
         self._send=None
         if result is not None:
-            self._update(feedback='赠送成功');self.sent.emit(result)
+            self._update(feedback='');self.sent.emit(result)
         elif error is not None:
             message=request_message(error,sending=True)
             self._update(feedback=message);self.failed.emit(message,bool(getattr(error,'uncertain',False)))
-        else:self._update(feedback='已取消赠送')
+        else:self._update(feedback='')
 
     def shutdown(self):
         if self._closed:return

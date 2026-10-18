@@ -123,6 +123,6 @@ class ControllerTests(unittest.TestCase):
         with patch.object(api,'send_gift',return_value=api.GiftResult('main:1',1,{})),patch.object(api,'get_wallet',side_effect=ValueError('refresh failed')):
             a.send('main:1',1);settle(lambda:not self.coordinator.busy and not a.state.loading)
         self.assertEqual(len(sent),1);self.assertEqual(failed,[])
-        self.assertIn('成功',a.state.feedback);self.assertIn('refresh failed',a.state.wallet_error)
+        self.assertEqual(a.state.feedback,'');self.assertIn('refresh failed',a.state.wallet_error)
 
 if __name__=='__main__':unittest.main()

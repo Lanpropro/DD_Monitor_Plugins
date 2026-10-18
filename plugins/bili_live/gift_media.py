@@ -12,7 +12,7 @@ from PySide6.QtGui import QImage,QMovie,QPixmap
 from PySide6.QtWidgets import QLabel
 from .workers import Request,start_worker
 
-_downloads=threading.BoundedSemaphore(2)
+_downloads=threading.BoundedSemaphore(4)
 _MAX_BYTES=8*1024*1024
 
 def _fetch(url,cache_dir):
@@ -22,6 +22,7 @@ def _fetch(url,cache_dir):
     target=Path(cache_dir)/(hashlib.sha256(url.encode()).hexdigest()+'.image')
     if target.is_file() and not QImage(str(target)).isNull():return str(target)
     with _downloads:
+        if target.is_file() and not QImage(str(target)).isNull():return str(target)
         response=requests.get(url,timeout=10)
         response.raise_for_status()
         data=response.content
@@ -68,7 +69,7 @@ class GiftMediaLoader(QObject):
 
     def _pump(self):
         if self._closed:return
-        while self._pending and len(self._running)<2:
+        while self._pending and len(self._running)<4:
             url=self._pending.popleft();context=(self._serial,self._generation,url)
             worker=Request(context,lambda c,u=url:_fetch(u,self.cache_dir),cookies={},account_generation=0)
             self._running[worker]=context
@@ -94,14 +95,17 @@ class GiftMediaLoader(QObject):
 class GiftImageLabel(QLabel):
     def __init__(self,parent=None):
         super().__init__(parent)
-        self.movie=None;self._playing=True
+        self.movie=None;self._playing=True;self._path=''
         self.setAlignment(Qt.AlignCenter)
         self.setFixedSize(40,40)
 
     def set_file(self,path):
+        if path==self._path:return
+        self._path=path
         if self.movie:
             self.movie.stop();self.movie.setFileName('');self.movie.deleteLater();self.movie=None
         self.clear()
+        if not path:return
         movie=QMovie(path,parent=self)
         if movie.isValid() and movie.frameCount()>1:
             movie.setCacheMode(QMovie.CacheAll);movie.setScaledSize(QSize(40,40))

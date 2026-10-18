@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 from bili_live_support import bili
 from bili_live_fixtures import room_payload
-from PySide6.QtCore import QPoint,Qt
+from PySide6.QtCore import QEvent,QPoint,Qt
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import QApplication,QPushButton
 from PySide6.QtTest import QTest
@@ -40,6 +40,7 @@ class PopupTests(unittest.TestCase):
         self.outside=QPoint(self.popup.geometry().right()+100,self.popup.geometry().bottom()+100)
     def tearDown(self):
         self.popup.shutdown();self.popup.deleteLater();self.button.close()
+        APP.sendPostedEvents(None,QEvent.DeferredDelete)
         APP.processEvents();self.no_media.stop();self.temp.cleanup()
     def card(self,key):return next(c for c in self.popup.findChildren(GiftCard) if c.item.key==key)
     def point(self,p):
@@ -80,7 +81,9 @@ class PopupTests(unittest.TestCase):
         self.popup.set_state(replace(self.state,feedback='failed'))
         self.point(self.outside);QTest.qWait(220);self.assertTrue(self.popup.isVisible())
         self.popup.mark_sent(GiftResult('single',1,{}));settle(lambda:not self.popup.isVisible())
-        self.popup.open_at(self.button);self.point(self.outside);QTest.qWait(220)
+        self.popup.open_at(self.button)
+        self.point(self.outside)
+        QTest.qWait(220)
         self.assertTrue(self.popup.isVisible())
     def test_quantity_gap_transition_and_hidden_completion(self):
         self.card('main:1').click();q=self.popup.quantity_popup

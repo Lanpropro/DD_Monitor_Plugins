@@ -11,7 +11,7 @@ from unittest.mock import patch
 from bili_live_support import HOST,ROOT,session,bili
 from bili_live_fixtures import room_payload
 import shiboken6
-from PySide6.QtCore import QEvent,Qt
+from PySide6.QtCore import QEvent,Qt,qInstallMessageHandler
 from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
 from ddm import plugins as host_api,theme
@@ -28,6 +28,8 @@ def settle(predicate):
 
 class IntegrationTests(unittest.TestCase):
     def setUp(self):
+        self.qt_warnings=[]
+        self.previous_handler=qInstallMessageHandler(lambda kind,ctx,msg:self.qt_warnings.append(msg))
         self.temp=tempfile.TemporaryDirectory()
         self.directory=Path(self.temp.name)/'plugins';self.directory.mkdir()
         installer=host_api.PluginManager(plugins_dir=str(self.directory),enabled=[])
@@ -63,6 +65,10 @@ class IntegrationTests(unittest.TestCase):
         for p in reversed(self.reads):p.stop()
         for p in reversed(self.patches):p.stop()
         self.temp.cleanup()
+        qInstallMessageHandler(self.previous_handler)
+        relevant=[m for m in self.qt_warnings if any(x in m for x in (
+            'No file name specified','must be a top level window','QThreadStorage:'))]
+        self.assertEqual(relevant,[],'Qt warnings during installed plugin lifecycle')
     def composer(self,tile=None):
         tile=tile or self.window.wall.tiles[0]
         return next(e.control.widget for e in tile._plugin_controls.entries if e.owner=='bili_live')

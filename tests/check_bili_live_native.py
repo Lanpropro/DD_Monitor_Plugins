@@ -81,7 +81,7 @@ def main():
                         settle(lambda:any(c.image.movie for c in popup._cards))
                         assert popup.screen().availableGeometry().contains(popup.geometry())
                         card=next(c for c in popup._cards if c.item.key=='main:1')
-                        QTest.mouseMove(card,card.rect().center());settle(lambda:popup.quantity_popup.isVisible())
+                        QTest.mouseClick(card,Qt.LeftButton);settle(lambda:popup.quantity_popup.isVisible())
                         quantity=popup.quantity_popup
                         assert quantity.screen().availableGeometry().contains(quantity.geometry())
                         QCursor.setPos(popup.mapToGlobal(popup.rect().center()))

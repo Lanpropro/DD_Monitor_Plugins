@@ -5,6 +5,8 @@ from ddm import plugins as api
 
 __path__ = [os.path.dirname(__file__)]
 __package__ = __name__
+if __spec__ is not None:
+    __spec__.submodule_search_locations = __path__
 
 class BiliLive(api.Plugin):
     def on_load(self, context):
