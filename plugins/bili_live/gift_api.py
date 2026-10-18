@@ -88,8 +88,12 @@ def _reason(config, room_id):
     if config.get('perm',1) != 1 or config.get('is_use',1) != 1:return '当前账号没有赠送权限'
     scene=config.get('gift_scene') or {}
     if not isinstance(scene,dict) or scene.get('pay_type','send_gift') != 'send_gift':return '暂不支持此购买流程'
-    if (config.get('interactive_pay') or _integer(special.get('special_type',0),0) or
-            _integer(config.get('gift_type',0),0) or _integer(config.get('type',0),0)):
+    try:
+        flow_types=tuple(_integer(value) for value in
+            (special.get('special_type',0),config.get('gift_type',0),config.get('type',0)))
+    except ValueError:
+        return '无法识别此礼物流程'
+    if config.get('interactive_pay') or any(flow_types):
         return '暂不支持特殊礼物流程'
     bound=config.get('bind_roomid') or config.get('room_id') or 0
     if str(bound) not in ('0','',str(room_id)):return '仅限指定直播间'
@@ -117,10 +121,14 @@ def _item(config, key, room_id, max_count, *, source='gold', bag_id=0, stock=0, 
     if source=='bag':
         if bag_id<=0 or stock<=0:reason=reason or '背包库存不足'
         if expires_at and expires_at<=now:reason=reason or '礼物已过期'
-    if not counts and maximum>0:counts=[1]
+    custom=config.get('diy_count_map') in (1,True)
+    # A single remaining bag item is explicitly supported. Ordinary purchases
+    # must retain the server's quantity permissions, even when none fit.
+    if not counts and maximum>0 and (custom or source=='bag' and stock==1):counts=[1]
+    if not counts:reason=reason or '当前没有可用赠送数量'
     return GiftItem(key,source,gift_id,str(config.get('name') or f'礼物 {gift_id}'),max(0,price),
         _url(config.get('gif')),_url(config.get('img_basic')) or _url(config.get('img_dynamic')),
-        tuple(counts),maximum,config.get('diy_count_map') in (1,True) and maximum>1,reason,
+        tuple(counts),maximum,custom and maximum>1,reason,
         bag_id,stock,expires_at)
 
 def normalize_catalog(data, room_id):

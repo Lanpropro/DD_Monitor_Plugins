@@ -67,7 +67,7 @@ class GiftController(QObject):
         self.state=GiftPanelState(sending=coordinator.busy)
         self._room='';self._snapshot=None;self._serial=0;self._closed=False
         self._reads={};self._send=None;self._catalog=None;self._active=False
-        self._read_id=0
+        self._read_id=0;self._revision=coordinator.revision;self._bag_valid=False
         coordinator.busyChanged.connect(self._busy)
         coordinator.invalidated.connect(self._invalidate)
         coordinator.completed.connect(self._submission_done)
@@ -86,7 +86,7 @@ class GiftController(QObject):
         for worker in tuple(self._reads.values()):worker.cancel()
         self._reads.clear()
         if self._send:self._send.cancel()
-        self._catalog=None
+        self._catalog=None;self._bag_valid=False
         self.state=GiftPanelState(sending=self.coordinator.busy)
         self.stateChanged.emit(self.state)
 
@@ -101,7 +101,7 @@ class GiftController(QObject):
         kinds=[]
         if force or self._catalog is None:kinds.append('catalog')
         if force or self.state.wallet is None:kinds.append('wallet')
-        if force or not any(t.key=='bag' for t in self.state.tabs):kinds.append('bag')
+        if force or not self._bag_valid:kinds.append('bag')
         self._load_kinds(kinds)
 
     def _load_kinds(self,kinds):
@@ -110,7 +110,7 @@ class GiftController(QObject):
             snapshot=self._snapshot;room=self._room;catalog=self._catalog
             if not snapshot:continue
             self._read_id+=1
-            context=(self._serial,kind,self.coordinator.revision,self._read_id)
+            context=(self._serial,kind,self._revision,self._read_id)
             if kind=='catalog':operation=lambda c,r=room:api.get_catalog(r,cookies=c)
             elif kind=='wallet':operation=lambda c:api.get_wallet(cookies=c)
             else:operation=lambda c,r=room,cat=catalog:api.get_bag(r,cat,cookies=c)
@@ -125,7 +125,7 @@ class GiftController(QObject):
         serial,kind,revision,ident=context
         worker=self._reads.get(kind)
         return (not self._closed and serial==self._serial and worker is not None and worker.context==context
-                and (kind=='catalog' or revision==self.coordinator.revision))
+                and (kind=='catalog' or revision==self._revision))
 
     @Slot(object,object)
     def _read_done(self,context,result):
@@ -135,7 +135,9 @@ class GiftController(QObject):
         if kind=='catalog':
             self._catalog=result
             changes['tabs']=result.tabs+tuple(t for t in self.state.tabs if t.key=='bag')
-        elif kind=='bag':changes['tabs']=tuple(t for t in self.state.tabs if t.key!='bag')+(result,)
+        elif kind=='bag':
+            self._bag_valid=True
+            changes['tabs']=tuple(t for t in self.state.tabs if t.key!='bag')+(result,)
         else:changes['wallet']=result
         self._update(**changes)
 
@@ -173,6 +175,9 @@ class GiftController(QObject):
         if self._closed:return
         # A completion from an earlier account cannot mutate the new account.
         if not self._snapshot or token[2]!=self._snapshot.generation:return
+        # Revisions affect only this account context; another account's late POST
+        # must not discard valid reads that are already in progress here.
+        self._revision=revision;self._bag_valid=False
         for kind in ('wallet','bag'):
             worker=self._reads.pop(kind,None)
             if worker:worker.cancel()

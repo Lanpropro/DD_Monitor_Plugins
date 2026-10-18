@@ -50,7 +50,17 @@ class GiftMediaLoader(QObject):
     def request(self,urls,generation):
         if self._closed:return
         self.cancel();self._generation=generation
-        self._pending=deque(dict.fromkeys(urls));self._pump()
+        self.enqueue(urls,generation)
+
+    def enqueue(self,urls,generation):
+        """Append fallbacks without canceling this view's other visible images."""
+        if self._closed or generation!=self._generation:return
+        scheduled=set(self._pending)
+        scheduled.update(context[2] for context in self._running.values() if context[0]==self._serial)
+        for url in urls:
+            if url not in scheduled:
+                self._pending.append(url);scheduled.add(url)
+        self._pump()
 
     def cancel(self):
         self._serial+=1;self._pending.clear()

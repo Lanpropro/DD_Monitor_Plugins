@@ -5,7 +5,7 @@ import time
 import unittest
 from unittest.mock import patch
 from bili_live_support import session
-from bili_live_fixtures import room_payload
+from bili_live_fixtures import room_payload,bag_payload
 from PySide6.QtCore import QCoreApplication, QEvent
 from ddm_plugin_bili_live import gift_api as api
 from ddm_plugin_bili_live.gift_controller import GiftController, GiftCoordinator
@@ -87,6 +87,37 @@ class ControllerTests(unittest.TestCase):
             release.set();settle(lambda:not _active_requests)
         self.assertIsNone(b.state.wallet)
         self.assertEqual(next(t for t in b.state.tabs if t.key=='bag').items,())
+    def test_hidden_panel_reopens_with_refreshed_bag(self):
+        a,b=self.controller(),self.controller()
+        b.set_active(False)
+        with patch.object(api,'send_gift',return_value=api.GiftResult('main:1',1,{})):
+            a.send('main:1',1);settle(lambda:not self.coordinator.busy)
+            settle(lambda:not _active_requests)
+        bag=api.normalize_bag(bag_payload(),self.catalog,'90001',now=100)
+        with patch.object(api,'get_bag',return_value=bag):
+            b.load();settle(lambda:not b.state.loading)
+        refreshed=next(t for t in b.state.tabs if t.key=='bag')
+        self.assertEqual([(i.bag_id,i.stock) for i in refreshed.items],[(701,10),(702,2)])
+
+    def test_old_account_completion_preserves_new_account_reads(self):
+        a=self.controller();entered,release,send=self.barrier()
+        wallet_entered,bag_entered,read_release=threading.Event(),threading.Event(),threading.Event()
+        self.releases.append(read_release)
+        bag=api.normalize_bag(bag_payload(),self.catalog,'90001',now=100)
+        def wallet(**kw):wallet_entered.set();read_release.wait(3);return 4321
+        def inventory(*args,**kw):bag_entered.set();read_release.wait(3);return bag
+        with patch.object(api,'send_gift',side_effect=send):
+            a.send('main:1',1);settle(entered.is_set)
+            session.set_login_cookies('new','csrf-new')
+            a.set_context('90001',session.snapshot())
+            with patch.object(api,'get_wallet',side_effect=wallet),patch.object(api,'get_bag',side_effect=inventory):
+                a.load();settle(lambda:wallet_entered.is_set() and bag_entered.is_set())
+                release.set();settle(lambda:not self.coordinator.busy)
+                read_release.set();settle(lambda:not _active_requests)
+        self.assertEqual(a.state.loading,frozenset())
+        self.assertEqual(a.state.wallet,4321)
+        self.assertEqual([(i.bag_id,i.stock) for t in a.state.tabs if t.key=='bag' for i in t.items],[(701,10),(702,2)])
+
     def test_success_then_refresh_failure_stays_success(self):
         a=self.controller();sent=[];failed=[];a.sent.connect(sent.append);a.failed.connect(lambda *x:failed.append(x))
         with patch.object(api,'send_gift',return_value=api.GiftResult('main:1',1,{})),patch.object(api,'get_wallet',side_effect=ValueError('refresh failed')):

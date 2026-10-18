@@ -28,6 +28,48 @@ class ReadTests(unittest.TestCase):
         self.assertEqual(item.gif_url,'')
         self.assertEqual(item.image_url,'https://example.invalid/gift.png')
 
+    def test_explicit_unavailable_counts_never_create_single_send(self):
+        for counts in ([{'num':10}],[],[{'num':'invalid'}]):
+            with self.subTest(counts=counts):
+                data=room_payload()
+                data['gift_config']['room_config']=[config(1,count_map=counts,max_send_limit=5,diy_count_map=0)]
+                item=api.normalize_catalog(data,'90001').tabs[0].items[1]
+                self.assertEqual(item.counts,())
+                self.assertTrue(item.disabled_reason)
+                with patch.object(api.requests,'post') as post,self.assertRaises(api.GiftSendError):
+                    api.send_gift(api.GiftTarget('90001',123,456),item,1,
+                        cookies={'SESSDATA':'fake','bili_jct':'csrf'},wallet=99999,still_current=lambda:True)
+                post.assert_not_called()
+
+    def test_permitted_custom_counts_and_single_bag_stock_remain_sendable(self):
+        data=room_payload()
+        data['gift_config']['room_config']=[config(1,count_map=[{'num':10}],max_send_limit=5,diy_count_map=1)]
+        item=api.normalize_catalog(data,'90001').tabs[0].items[1]
+        self.assertTrue(item.allow_custom)
+        api.validate_send(item,1,cookies={'SESSDATA':'fake','bili_jct':'csrf'},wallet=99999)
+        data=bag_payload()
+        data['list']=[{'gift_id':1,'gift_num':1,'bag_id':701,'expire_at':0}]
+        data['gift_config']=[config(1,count_map=[{'num':10}],diy_count_map=0)]
+        item=api.normalize_bag(data,None,'90001',now=100).items[0]
+        self.assertEqual(item.counts,(1,))
+        self.assertFalse(item.disabled_reason)
+        api.validate_send(item,1,cookies={'SESSDATA':'fake','bili_jct':'csrf'},wallet=None)
+
+    def test_unknown_flow_types_never_post(self):
+        for field in ('special_type','gift_type','type'):
+            for value in ('unknown-flow',{},[],None,True,1.5):
+                with self.subTest(field=field,value=value):
+                    data=room_payload()
+                    reference=data['gift_data']['room_gift_list']['gold_list'][0]
+                    if field=='special_type':reference['special'][field]=value
+                    else:reference[field]=value
+                    item=api.normalize_catalog(data,'90001').tabs[0].items[1]
+                    self.assertTrue(item.disabled_reason)
+                    with patch.object(api.requests,'post') as post,self.assertRaises(api.GiftSendError):
+                        api.send_gift(api.GiftTarget('90001',123,456),item,1,
+                            cookies={'SESSDATA':'fake','bili_jct':'csrf'},wallet=99999,still_current=lambda:True)
+                    post.assert_not_called()
+
     def test_integer_battery_and_unknown_wallet(self):
         self.assertEqual(api.format_battery(5200),'52')
         self.assertEqual(api.format_battery(105),'1.05')

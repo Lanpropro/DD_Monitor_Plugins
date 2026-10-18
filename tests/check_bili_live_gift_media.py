@@ -1,4 +1,5 @@
 """Raw GIF animation, bounded unauthenticated media and atomic cache publication."""
+from dataclasses import replace
 import base64
 from pathlib import Path
 import tempfile
@@ -7,6 +8,10 @@ import time
 import unittest
 from unittest.mock import Mock,patch
 from bili_live_support import bili
+from bili_live_fixtures import room_payload
+from ddm_plugin_bili_live.gift_api import normalize_catalog,GiftTab
+from ddm_plugin_bili_live.gift_controller import GiftPanelState
+from ddm_plugin_bili_live.gift_popup import GiftPopup,GiftButton
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QMovie
 from ddm_plugin_bili_live.gift_media import GiftImageLabel,GiftMediaLoader
@@ -57,6 +62,34 @@ class MediaTests(unittest.TestCase):
             settle(lambda:any(x[0]==3 for x in loaded));self.assertEqual(len(calls),before)
             self.assertEqual(Path(loaded[-1][2]).read_bytes(),GIF)
             loader.shutdown();settle(lambda:not _active_requests)
+
+    def test_failed_gif_fallback_preserves_other_visible_images(self):
+        other_entered,release,fallback_requested=threading.Event(),threading.Event(),threading.Event()
+        def get(url,**kw):
+            if url.endswith('/0.gif'):
+                other_entered.wait(2)
+                raise ValueError('broken first GIF')
+            if url.endswith('/1.gif'):
+                other_entered.set();release.wait(3)
+            if url.endswith('/0.png'):fallback_requested.set()
+            return Mock(content=GIF,headers={},status_code=200)
+        item=normalize_catalog(room_payload(),'90001').tabs[0].items[1]
+        items=tuple(replace(item,key=f'gift:{n}',gif_url=f'https://example.invalid/{n}.gif',
+            image_url=f'https://example.invalid/{n}.png') for n in range(5))
+        with tempfile.TemporaryDirectory() as root,patch('ddm_plugin_bili_live.gift_media.requests.get',side_effect=get):
+            button=GiftButton();button.move(300,400);button.show()
+            popup=GiftPopup(cache_dir=root)
+            try:
+                popup.set_state(GiftPanelState(tabs=(GiftTab('main','礼物',items),),wallet=99999))
+                popup.open_at(button)
+                settle(fallback_requested.is_set)
+                release.set();settle(lambda:not _active_requests)
+                images=popup.findChildren(GiftImageLabel)
+                self.assertEqual(len(images),5)
+                self.assertTrue(all(image.movie is not None or not image.pixmap().isNull() for image in images))
+            finally:
+                release.set();popup.shutdown();settle(lambda:not _active_requests)
+                popup.deleteLater();button.close();APP.processEvents()
 
     def test_invalid_or_incomplete_download_is_not_published(self):
         with tempfile.TemporaryDirectory() as root,patch('ddm_plugin_bili_live.gift_media.requests.get',return_value=Mock(content=b'partial',headers={'Content-Length':'900'},status_code=200)):

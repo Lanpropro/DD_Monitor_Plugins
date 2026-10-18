@@ -209,7 +209,7 @@ class GiftPopup(QWidget):
             fallback=card.item.image_url
             if fallback and fallback!=url:
                 self._media_urls.setdefault(fallback,[]).append(card);fallbacks.append(fallback)
-        if fallbacks:self.media.request(tuple(dict.fromkeys(fallbacks)),generation)
+        if fallbacks:self.media.enqueue(fallbacks,generation)
     def open_at(self,button):
         if self._closed:return
         if self.isVisible():self.hide();return
