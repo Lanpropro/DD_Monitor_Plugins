@@ -2,6 +2,7 @@
 from PySide6.QtCore import QEvent, QPoint, QRectF, Qt
 from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import QApplication, QWidget
+from shiboken6 import isValid
 from ddm import theme
 
 
@@ -55,8 +56,15 @@ class AnchoredPopup(QWidget):
         QApplication.instance().removeEventFilter(self)
         self.deleteLater()
 
+    def _event_targets_alive(self):
+        # QWidget destruction emits application events before Qt has removed
+        # every filter. Cyclic GC can also clear the Python state first.
+        return (isValid(self) and '_owner' in self.__dict__ and
+                (self._owner is None or isValid(self._owner)) and
+                (self._anchor is None or isValid(self._anchor)))
+
     def eventFilter(self, watched, event):
-        if not self.isVisible(): return False
+        if not self._event_targets_alive() or not self.isVisible(): return False
         kind = event.type()
         owner_event = watched is self._owner or self._owner and watched is self._owner.windowHandle()
         if owner_event and kind == QEvent.NonClientAreaMouseButtonPress and event.button() == Qt.LeftButton:

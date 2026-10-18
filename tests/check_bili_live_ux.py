@@ -1,5 +1,6 @@
 """Regression coverage for anchored pickers, quantities, loading and Qt warnings."""
 from dataclasses import replace
+import gc
 import tempfile
 import sys
 import threading
@@ -141,6 +142,41 @@ class PickerUXTests(unittest.TestCase):
             popup.open_at(self.anchor);popup.shutdown()
             APP.sendPostedEvents(None,QEvent.DeferredDelete)
             self.assertFalse(shiboken6.isValid(popup),'removed tile left a popup owned by MainWindow')
+
+    def test_owner_destruction_without_shutdown_has_no_stale_event_callbacks(self):
+        for picker in (EmoticonPopup, GiftPopup):
+            with self.subTest(picker=picker.__name__):
+                owner = QWidget()
+                anchor = QPushButton('open', owner)
+                popup = picker(owner)
+                owner.show()
+                popup.open_at(anchor)
+                APP.processEvents()
+                errors = []
+                with patch.object(sys, 'excepthook', side_effect=lambda *args: errors.append(str(args[1]))):
+                    try:
+                        shiboken6.delete(owner)
+                    except RuntimeError as error:
+                        errors.append(str(error))
+                    APP.processEvents()
+                self.assertFalse(shiboken6.isValid(popup))
+                self.assertEqual(errors, [], 'application filter reached a deleted picker or owner')
+
+    def test_garbage_collected_pickers_do_not_receive_stale_application_events(self):
+        errors = []
+        def orphan_picker():
+            owner = QWidget()
+            anchor = QPushButton('open', owner)
+            popup = EmoticonPopup(owner)
+            popup.open_at(anchor)
+            popup.close()
+            owner.close()
+        with patch.object(sys, 'excepthook', side_effect=lambda *args: errors.append(str(args[1]))):
+            for _ in range(10):
+                orphan_picker()
+                gc.collect()
+                APP.processEvents()
+        self.assertEqual(errors, [], 'GC cleared a picker before its application filter was removed')
 
     def test_quantity_actions_keep_usable_height_in_application_theme(self):
         previous=APP.styleSheet()
