@@ -202,14 +202,19 @@ test('plugin detail pages list every published version they can prove', () => {
   }
 })
 
-test('feature demonstrations and per-plugin instructions remain readable before hydration', () => {
+test('real software thumbnails and per-plugin instructions remain readable before hydration', () => {
   const home = readFileSync(resolve(dist, 'index.html'), 'utf8')
-  assert.ok(home.includes('交互示意'))
-  assert.ok(home.includes('aria-label="主画面比例"'))
-  // The layout demo can be driven by dragging the splitter, not only by the slider.
-  assert.ok(home.includes('role="separator"'))
-  assert.ok(home.includes('aria-label="拖动调整主画面比例"'))
-  assert.ok(home.includes('aria-label="软件功能演示"'))
+  assert.ok(!home.includes('交互示意'))
+  assert.ok(!home.includes('aria-label="主画面比例"'))
+  assert.ok(home.includes('aria-label="观看体验截图"'))
+  const gallery = home.match(/<div class="feature-gallery"[\s\S]*?<\/figure>/)?.[0]
+  assert.ok(gallery)
+  assert.equal((gallery.match(/class="feature-thumbnail"/g) || []).length, 3)
+  for (const file of ['landscape.webp', 'danmaku.webp', 'portrait.webp']) {
+    assert.ok(gallery.includes(`/screenshots/${file}`), `missing real thumbnail: ${file}`)
+  }
+  assert.equal((gallery.match(/aria-pressed="true"/g) || []).length, 1)
+  assert.ok(gallery.includes('aria-controls="feature-screenshot"'))
   assert.ok(home.includes('id="plugin-demo"'))
   for (const plugin of plugins) {
     assert.equal(plugin.steps.length, 3)
@@ -244,7 +249,7 @@ test('every generated internal link, anchor and local asset resolves under the P
 function mountGallery({ reduced = false, intersection = true, resize = true } = {}) {
   const timers = new Map(), listeners = new Map()
   const media = { matches: reduced, addEventListener() {}, removeEventListener() {} }
-  const story = { offsetHeight: 1200, top: 100, getBoundingClientRect() { return { top: this.top } } }
+  const story = { offsetHeight: 1200, top: 140, getBoundingClientRect() { return { top: this.top } } }
   const pin = { offsetHeight: 600 }
   const product = { offsetHeight: 520 }
   const doc = { hidden: false, addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name) }
@@ -263,7 +268,7 @@ function mountGallery({ reduced = false, intersection = true, resize = true } = 
   const state = runInNewContext(script + '\n;({ active, progress, controlsReady, productHeight, enhanced, paused, selectShot, togglePlayback, interact, update, preferenceChanged })', {
     ref: value => ({ value: value === null ? [story, pin, product][refs++] : value }),
     onMounted: fn => { mount = fn }, onUnmounted: fn => { unmount = fn },
-    window: { matchMedia: () => media, ...(intersection ? { IntersectionObserver: Observer } : {}), ...(resize ? { ResizeObserver: SizeObserver } : {}), addEventListener() {}, removeEventListener() {} },
+    window: { innerHeight: 800, matchMedia: () => media, ...(intersection ? { IntersectionObserver: Observer } : {}), ...(resize ? { ResizeObserver: SizeObserver } : {}), addEventListener() {}, removeEventListener() {} },
     document: doc, IntersectionObserver: Observer, ResizeObserver: SizeObserver, getComputedStyle: () => ({ top: '100px' }),
     setTimeout: fn => { timers.set(++next, fn); return next }, clearTimeout: id => timers.delete(id),
     cancelAnimationFrame() {}, requestAnimationFrame() { return 1 }
@@ -313,6 +318,21 @@ test('screenshot scroll contracts the display and playback loops only while bein
   assert.equal(gallery.listeners.size, 0)
   assert.ok(gallery.disconnected)
   assert.ok(gallery.sizeDisconnected)
+})
+
+test('screenshot contraction starts when the frame center reaches the viewport center', () => {
+  const gallery = mountGallery()
+  // 800px viewport, 520px frame: its center reaches 400px at a 140px top.
+  gallery.story.top = 160
+  gallery.state.update()
+  assert.equal(gallery.state.progress.value, 0)
+  gallery.story.top = 140
+  gallery.state.update()
+  assert.equal(gallery.state.progress.value, 0)
+  gallery.story.top = 98
+  gallery.state.update()
+  assert.ok(Math.abs(gallery.state.progress.value - .1) < .001)
+  gallery.unmount()
 })
 
 test('revealed screenshot controls stay visible during a ratio change', () => {

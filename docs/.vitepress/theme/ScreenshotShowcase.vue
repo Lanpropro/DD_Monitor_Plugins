@@ -31,8 +31,9 @@ function update() {
   frame = 0
   if (!enhanced.value || !story.value || !pin.value) return
   const top = parseFloat(getComputedStyle(pin.value).top) || 0
+  const centerStart = Math.max(top, (window.innerHeight - productHeight.value) / 2)
   const range = story.value.offsetHeight - pin.value.offsetHeight
-  progress.value = Math.min(1, Math.max(0, (top - story.value.getBoundingClientRect().top) / Math.max(1, range * .7)))
+  progress.value = Math.min(1, Math.max(0, (centerStart - story.value.getBoundingClientRect().top) / Math.max(1, range * .7)))
   if (progress.value >= .95) controlsReady.value = true
   else if (progress.value <= .15) controlsReady.value = false
   schedule()
@@ -74,7 +75,7 @@ onUnmounted(() => {
 
 <template>
   <section ref="story" class="screenshot-story" :class="{ 'is-enhanced': enhanced }" aria-label="真实软件截图"
-    :style="{ '--shot-scale': enhanced ? 1 - progress * .18 : 1, '--frame-ratio': active === 2 ? 9 / 16 : 16 / 9, '--selected': active, '--controls': controlsReady || !enhanced ? 1 : Math.min(1, Math.max(0, (progress - .55) / .4)) }">
+    :style="{ '--shot-scale': enhanced ? 1 - progress * .18 : 1, '--product-height': productHeight + 'px', '--frame-ratio': active === 2 ? 9 / 16 : 16 / 9, '--selected': active, '--controls': controlsReady || !enhanced ? 1 : Math.min(1, Math.max(0, (progress - .55) / .4)) }">
     <div ref="pin" class="screenshot-pin">
       <div class="product-wrap" :class="{ 'is-measured': enhanced && productHeight > 0 }" :style="enhanced && productHeight > 0 ? { height: productHeight * (1 - progress * .18) + 'px' } : undefined">
       <div ref="product" class="hero-product">
@@ -119,7 +120,7 @@ onUnmounted(() => {
 .gallery-selection { position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc((100% - 8px) / 3); border-radius: 8px; background: var(--vp-c-text-1); transform: translateX(calc(var(--selected) * 100%)); }
 .screenshot-source { margin: 14px 0 0; }
 .is-enhanced::after { content: ''; display: block; height: 45svh; }
-.is-enhanced .screenshot-pin { position: sticky; top: calc(var(--vp-nav-height) + 24px); }
+.is-enhanced .screenshot-pin { position: sticky; top: min(calc(var(--vp-nav-height) + 24px), max(var(--vp-nav-height), calc((100svh - var(--product-height)) / 2))); }
 .is-enhanced .hero-product { transform: scale(var(--shot-scale)); transform-origin: top center; }
 .is-enhanced .gallery-controls { opacity: var(--controls); }
 @media (prefers-reduced-motion: no-preference) {
