@@ -135,10 +135,6 @@ function onCardUp(event) {
       <p class="demo-status" role="status">{{ status }}</p>
     </div>
     <aside class="demo-selector" aria-label="布局参考与操作说明">
-      <figure class="layout-portrait" data-reveal data-reveal-delay="120">
-        <figcaption><span>竖屏布局</span><span>真实软件截图</span></figcaption>
-        <img :src="withBase('/screenshots/portrait.webp')" alt="DD 监控室 CE 竖屏布局完整截图" width="480" height="768" loading="lazy" />
-      </figure>
       <div class="layout-options" data-reveal role="group" aria-label="缩略图切换布局"><button v-for="item in quickPresets" :key="item.id" :aria-pressed="presetId === item.id" @click="changePreset(item.id)">
         <svg viewBox="0 0 90 60" aria-hidden="true"><rect v-for="(cell,j) in item.cells" :key="j" :x="cell[1] * 90 / item.cols + 2" :y="cell[0] * 60 / item.rows + 2" :width="cell[3] * 90 / item.cols - 4" :height="cell[2] * 60 / item.rows - 4" rx="2" /></svg>
         <span><b>{{ item.name }}</b><small>{{ item.id === '2x2' ? '均分画面，一眼看全' : '主次分明，专注喜欢的直播' }}</small></span>
@@ -150,26 +146,23 @@ function onCardUp(event) {
 </template>
 
 <style scoped>
-.feature-demo { display: grid; grid-template-columns: minmax(0,1fr) 260px; gap: 24px; align-items: start; scroll-margin-top: calc(var(--vp-nav-height) + 24px); }
-.demo-preview { min-width: 0; padding: 16px; border: 1px solid var(--vp-c-divider); border-radius: 24px; background: var(--vp-c-bg-soft); box-shadow: 0 20px 48px #0002; }
-.demo-toolbar { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 16px; color: var(--vp-c-text-2); font-size: 12px; }
-.layout-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 14px; }
+.feature-demo { display: grid; max-width: 820px; margin-inline: auto; grid-template-columns: 220px minmax(0,1fr); gap: 24px; align-items: center; scroll-margin-top: calc(var(--vp-nav-height) + 24px); }
+.demo-preview { grid-column: 2; grid-row: 1; min-width: 0; padding: 12px; border: 1px solid var(--vp-c-divider); border-radius: 24px; background: var(--vp-c-bg-soft); box-shadow: 0 20px 48px #0002; }
+.demo-toolbar { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; color: var(--vp-c-text-2); font-size: 11px; }
+.layout-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
 .layout-quick-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
 .layout-quick-tabs button { min-height: 34px; padding: 6px 12px; border: 1px solid transparent; border-radius: 17px; color: var(--vp-c-text-2); font-size: 12px; }
-.layout-quick-tabs button[aria-pressed=true] { border-color: var(--vp-c-brand-1); background: var(--vp-c-brand-soft); color: var(--vp-c-brand-1); }
+.layout-quick-tabs button[aria-pressed=true] { border-color: var(--vp-c-divider); background: var(--selected-surface); color: var(--selected-text); }
 .layout-hint { margin-left: auto; color: var(--vp-c-text-3); font-size: 11px; }
 .layout-caption { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-top: 12px; font-size: 12px; }
 .preset-launcher { display: inline-flex; align-items: center; gap: 12px; min-height: 34px; padding: 6px 12px; border: 1px solid var(--vp-c-divider); border-radius: 17px; color: var(--vp-c-brand-1); background: var(--vp-c-brand-soft); }
-.demo-selector { min-width: 0; display: grid; gap: 14px; }
-.layout-portrait { margin: 0; padding: 10px; border: 1px solid var(--vp-c-divider); border-radius: 20px; background: var(--vp-c-bg-soft); }
-.layout-portrait figcaption { display: flex; justify-content: space-between; gap: 8px; margin: 2px 2px 10px; font-size: 11px; color: var(--vp-c-text-2); }
-.layout-portrait figcaption span:last-child { color: var(--vp-c-brand-1); font-size: 10px; }
-.layout-portrait img { display: block; width: 100%; height: 232px; object-fit: contain; border-radius: 12px; background: #101114; }
+.demo-selector { grid-column: 1; grid-row: 1; min-width: 0; display: grid; gap: 14px; }
 .layout-options { display: grid; gap: 6px; }
 .layout-options button { display: flex; align-items: center; gap: 12px; min-width: 0; min-height: 58px; padding: 8px 12px; text-align: left; border: 1px solid var(--vp-c-divider); border-radius: 12px; background: var(--vp-c-bg-alt); color: var(--vp-c-text-2); }
-.layout-options button[aria-pressed=true] { border-color: var(--vp-c-brand-1); color: var(--vp-c-brand-1); background: var(--vp-c-brand-soft); }
+.layout-options button[aria-pressed=true] { border-color: var(--vp-c-divider); color: var(--selected-text); background: var(--selected-surface); }
 .layout-options svg { width: 40px; height: 28px; flex-shrink: 0; fill: currentColor; }
 .layout-options b { display: block; font-size: 12px; font-weight: 600; }
+.layout-options button[aria-pressed=true] small { color: inherit; opacity: .75; }
 .layout-options small { display: block; margin-top: 4px; font-size: 10px; color: var(--vp-c-text-2); line-height: 1.5; }
 .demo-description { padding: 6px 2px 0; }
 .demo-description h3 { font-size: 20px; line-height: 1.5; font-weight: 600; margin: 0 0 10px; }
@@ -214,24 +207,19 @@ function onCardUp(event) {
 .preset-grid svg { display: block; width: 100%; height: 44px; margin-bottom: 5px; fill: currentColor; opacity: .7; }
 .demo-status { color: var(--vp-c-text-2); font-size: 12px; line-height: 1.7; }
 .demo-status { color: var(--vp-c-text-2); font-size: 12px; line-height: 1.7; }
-.demo-status { min-height: 40px; margin: 12px 0 0; }
+.demo-status { min-height: 22px; margin: 10px 0 0; }
 .card-ghost { position: fixed; z-index: 100; width: 120px; height: 76px; padding: 7px; display: flex; align-items: end; border: 1px solid #00a1d6; border-radius: 7px; background-size: 240%; color: white; text-shadow: 0 1px 4px black; transform: translate(-50%,-50%) rotate(-3deg); box-shadow: 0 16px 40px #0005; pointer-events: none; }
 .drop-flash { position: absolute; inset: -2px; border: 2px solid #00a1d6; border-radius: 6px; pointer-events: none; animation: drop-land 360ms var(--ease-out) both; }
 @keyframes drop-land { from { opacity: 1; transform: scale(.96); } to { opacity: 0; transform: scale(1.04); } }
 @media (hover:hover) and (pointer:fine) { .mini-follow:hover { border-color: #00a1d6; } .preset-grid button:hover { background: var(--mini-card); } }
 @media (max-width:900px) {
-  .feature-demo { grid-template-columns: 1fr; gap: 20px; }
-  .demo-selector { grid-template-columns: minmax(0,.7fr) minmax(0,1fr); align-items: start; gap: 16px; }
-  .layout-portrait { grid-row: span 2; }
-  .layout-portrait img { height: 260px; }
+  .feature-demo { max-width: 576px; grid-template-columns: 1fr; gap: 20px; }
+  .demo-preview,.demo-selector { grid-column: 1; grid-row: auto; }
+  .demo-selector { grid-template-columns: 1fr 1fr; align-items: start; gap: 20px; }
   .demo-description h3 br { display: none; }
 }
 @media (max-width:600px) {
-  .demo-selector { grid-template-columns: minmax(0,.65fr) minmax(0,1fr); gap: 12px; }
-  .layout-portrait { grid-row: auto; padding: 7px; border-radius: 14px; }
-  .layout-portrait img { height: 176px; border-radius: 8px; }
-  .layout-portrait figcaption { font-size: 10px; margin: 2px 0 7px; }
-  .layout-portrait figcaption span:last-child { display: none; }
+  .demo-selector { grid-template-columns: 1fr; gap: 14px; }
   .layout-options button { min-height: 64px; gap: 7px; padding: 7px; }
   .layout-options svg { width: 30px; }
   .layout-options b { font-size: 11px; }

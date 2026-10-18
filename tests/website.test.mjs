@@ -106,11 +106,11 @@ test('scroll entrances wait for visibility, stagger without flashing and cancel 
   assert.ok(leaving.active[0].cancelled)
 })
 
-test('software palette and scroll entrances cover the page beyond the facts row', () => {
+test('prototype palette and scroll entrances cover the page beyond the facts row', () => {
   const css = read('docs/.vitepress/theme/style.css')
-  for (const token of ['--vp-c-bg: #f4f6f9', '--vp-c-bg: #101418', '--vp-c-brand-1: #007ba8', '--vp-c-brand-1: #00a1d6', '--button-radius: 17px']) assert.ok(css.includes(token), token)
+  for (const token of ['--vp-c-bg: #f5f2ea', '--vp-c-bg: #070c16', '--vp-c-brand-1: #087a9e', '--vp-c-brand-1: #5cd6ff', '--button-primary-bg: #f5f2ea', '--button-radius: 999px']) assert.ok(css.includes(token), token)
   const home = readFileSync(resolve(dist, 'index.html'), 'utf8')
-  for (const className of ['hero-copy', 'hero-intro', 'demo-preview', 'layout-portrait', 'layout-options', 'demo-description', 'plugin-demo-heading', 'sync-screen', 'sync-timeline', 'bottom-actions']) {
+  for (const className of ['hero-copy', 'hero-intro', 'demo-preview', 'layout-options', 'demo-description', 'plugin-demo-heading', 'sync-screen', 'sync-timeline', 'bottom-actions']) {
     assert.ok(home.match(/<[^>]+>/g).some(tag => tag.includes('data-reveal') && new RegExp('class="' + className + '(?: [^"]*)?"').test(tag)), className + ' has its own scroll entrance')
   }
   const timeline = read('docs/.vitepress/theme/MatchSyncTimeline.vue')
@@ -537,14 +537,17 @@ test('prototype layout shortcuts share software presets and preserve placed card
   assert.ok(!s.quickPresets.some(item => item.id === s.presetId.value), 'a full-picker selection does not falsely select a shortcut')
 })
 
-test('prototype composition keeps the interactive wall first and the full portrait reference beside it', () => {
+test('compact composition preserves controls while removing only the viewing portrait reference', () => {
   const home = readFileSync(resolve(dist, 'index.html'), 'utf8')
   const layout = home.split('id="layout"')[1].split('id="plugins"')[0]
   assert.ok(layout.indexOf('class="demo-preview"') < layout.indexOf('class="demo-selector"'))
   for (const name of ['快捷切换布局', '缩略图切换布局', '软件外观缩略预览', '布局预设页面']) assert.ok(layout.includes('aria-label="' + name + '"'))
   assert.equal((layout.match(/aria-pressed="true"/g) || []).length, 3, 'top shortcut, side shortcut and secondary picker agree on the initial preset')
-  assert.ok(layout.includes('alt="DD 监控室 CE 竖屏布局完整截图"'))
-  assert.ok(layout.includes('screenshots/portrait.webp'))
+  assert.ok(!layout.includes('class="layout-portrait"'))
+  assert.ok(!layout.includes('alt="DD 监控室 CE 竖屏布局完整截图"'))
+  assert.ok(home.includes('竖屏布局'), 'the top screenshot showcase retains its portrait mode')
+  assert.ok(read('docs/.vitepress/theme/FeatureDemo.vue').includes('max-width: 820px'))
+  assert.ok(read('docs/.vitepress/theme/style.css').includes('max-width: 880px'))
   assert.ok(layout.includes('aria-controls="mini-layout-presets"'))
 })
 
