@@ -31,24 +31,42 @@ def main():
     try:
         with patch.object(module, 'Streamlink', return_value=session), \
                 patch.object(session.http, 'get', return_value=page), \
+                patch.object(platform, '_authorize_4k', return_value='1') as authorize, \
+                patch.object(platform, '_account_stream_params', return_value={}) as account_params, \
                 patch.object(module.Huya, '_get_stream_params', return_value={}) as params:
             for quality, preview, rate in ((10000, False, 14000), (250, False, 14000), (1020000, False, 20000),
                                            (1014000, False, 14000), (10000, True, 500)):
                 stream = platform._streams('huya:vctcn', quality, preview=preview)[2]['al_source']
-                assert params.call_args.args[-1] == rate
+                if rate == 20000:
+                    assert account_params.call_args.args[3] == rate
+                    authorize.assert_called_once()
+                else:
+                    assert params.call_args.args[-1] == rate
                 assert stream.ddm_quality == 1000000 + rate
             options = platform.room_quality_options('huya:vctcn')
             assert [x['label'] for x in options] == ['2K', '蓝光4M', '流畅', '4K']
             four_k = next(x for x in options if x['qn'] == 1020000)
-            assert 'VIP授权未接入' in four_k['desc'] and '暂不保证可用' in four_k['desc']
+            assert '需对应 VIP 权益' in four_k['desc'] and '待实测' in four_k['desc']
             from PySide6.QtWidgets import QApplication
             from ddm.widgets import Tile
             app = QApplication.instance() or QApplication([])
             tile = Tile({'room_id': 'huya:vctcn', 'live': False})
             tile.set_quality_options(options)
-            assert any('VIP授权未接入' in label for label, _qn in tile._quality_choices())
+            assert any('需对应 VIP 权益' in label for label, _qn in tile._quality_choices())
             assert tile._quality_name(1020000, short=True) == '4K'
             tile.close()
+            params.reset_mock()
+            account_params.reset_mock()
+            authorize.side_effect = module.api.LoginRequiredError('expired login')
+            try:
+                platform._streams('huya:vctcn', 1020000)
+            except module.api.LoginRequiredError:
+                pass
+            else:
+                raise AssertionError('Expired login must preserve the host login notification')
+            params.assert_not_called()
+            account_params.assert_not_called()
+            authorize.side_effect = None
             data['vMultiStreamInfo'] = [x for x in data['vMultiStreamInfo'] if x['sDisplayName'] != '2K']
             page.text = 'var hyPlayerConfig = {stream:' + json.dumps(data) + '};</script>'
             platform._streams('huya:no2k', 10000)

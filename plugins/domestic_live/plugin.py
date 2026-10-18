@@ -1,5 +1,6 @@
 """国内公开直播流：虎牙、斗鱼、抖音关注卡片与 VLC 格子内播放。"""
 import base64
+import hashlib
 from html import unescape
 import json
 import os
@@ -45,33 +46,42 @@ def huya_user(session, uid):
     return user, base
 
 
-def huya_follow_request(session, method, uid, target):
-    """官网 huyauserui 的只读 WUP 请求，复用本体已验证的 TARS 编解码。"""
-    user, base = huya_user(session, uid)
-    request = b"\x0a" + b"\x0a" + user + b"\x0b" + tars_int(1, int(target)) + b"\x0b"
+def huya_wup_request(session, servant, method, uid, request):
+    """官网只读 WUP 请求，登录凭证只发送到虎牙官方接口。"""
+    _user, base = huya_user(session, uid)
     values = b"\x08" + tars_int(0, 1) + huya_string(0, "tReq") + tars_bytes(1, request)
     body = (tars_int(1, 3) + tars_int(2, 0) + tars_int(3, 0) + tars_int(4, 1) +
-            huya_string(5, "huyauserui") + huya_string(6, method) + tars_bytes(7, values) +
+            huya_string(5, servant) + huya_string(6, method) + tars_bytes(7, values) +
             tars_int(8, 8000) + b"\x98\x0c\xa8\x0c")
-    with session.post("https://cdnws.api.huya.com/",
-            params={"baseinfo": base64.b64encode(base).decode("ascii")},
-            data=struct.pack(">I", len(body) + 4) + body,
-            headers={"Content-Type": "application/octet-stream", "Referer": "https://www.huya.com/"},
-            timeout=(4, 8)) as response:
-        response.raise_for_status()
-        data = response.content
+    try:
+        with session.post("https://cdnws.api.huya.com/",
+                params={"baseinfo": base64.b64encode(base).decode("ascii")},
+                data=struct.pack(">I", len(body) + 4) + body,
+                headers={"Content-Type": "application/octet-stream", "Referer": "https://www.huya.com/"},
+                timeout=(4, 8)) as response:
+            response.raise_for_status()
+            data = response.content
+    except requests.RequestException:
+        # requests 的异常 URL 含 baseinfo，不能将其中的账号凭证带入日志或提示。
+        raise RuntimeError("虎牙官方接口请求失败，请稍后重试") from None
     if len(data) < 4 or len(data) > 4 * 1024 * 1024 or struct.unpack(">I", data[:4])[0] != len(data):
-        raise RuntimeError("虎牙关注数据格式异常，请稍后重试")
+        raise RuntimeError("虎牙接口数据格式异常，请稍后重试")
     envelope = tars_fields(data[4:])
     if envelope.get(1) != 3 or envelope.get(6) != method:
-        raise RuntimeError("虎牙关注响应不匹配，请稍后重试")
+        raise RuntimeError("虎牙接口响应不匹配，请稍后重试")
     entries = tars_fields(envelope.get(7, b""))[0]
     values = dict(zip(entries[::2], entries[1::2]))
     if "" in values and tars_fields(values[""]).get(0, -1) != 0:
-        raise RuntimeError("虎牙关注读取失败，请重新登录后重试")
+        raise RuntimeError("虎牙接口拒绝请求，请重新登录后重试")
     if "tRsp" not in values:
-        raise RuntimeError("虎牙关注响应缺少列表数据，请稍后重试")
+        raise RuntimeError("虎牙接口响应缺少数据，请稍后重试")
     return tars_fields(values["tRsp"])[0]
+
+
+def huya_follow_request(session, method, uid, target):
+    user, _base = huya_user(session, uid)
+    request = b"\x0a\x0a" + user + b"\x0b" + tars_int(1, int(target)) + b"\x0b"
+    return huya_wup_request(session, "huyauserui", method, uid, request)
 
 
 class LiveQualityPlatform(api.Platform):
@@ -105,6 +115,76 @@ class HuyaPlatform(LiveQualityPlatform):
     account_cookie_domain = "huya.com"
     follow_login_url = "https://www.huya.com/?evt_fe=login"
     follow_cookie_domain = "huya.com"
+
+    def _playback_cookies(self):
+        jar = requests.cookies.RequestsCookieJar()
+        if os.environ.get("DDM_NO_SAVE") == "1":
+            return jar
+        try:
+            from ddm.account_store import AccountStore
+        except ImportError:
+            return jar
+        from PySide6.QtCore import QByteArray
+        from PySide6.QtNetwork import QNetworkCookie
+        context = getattr(self, "_context", None)
+        window = context.window if context else None
+        session = getattr(window, "_platform_login_sessions", {}).get("huya")
+        cookies = session["cookies"] if session is not None else AccountStore("huya").load()
+        for raw in cookies:
+            for cookie in QNetworkCookie.parseCookies(QByteArray(raw.encode("utf-8"))):
+                domain = cookie.domain().lstrip(".").lower()
+                if domain != "huya.com" and not domain.endswith(".huya.com"):
+                    continue
+                expiry = None if cookie.isSessionCookie() else cookie.expirationDate().toSecsSinceEpoch()
+                if expiry is not None and expiry <= time.time():
+                    continue
+                jar.set(bytes(cookie.name()).decode("utf-8"), bytes(cookie.value()).decode("utf-8"),
+                        domain=cookie.domain(), path=cookie.path() or "/", expires=expiry,
+                        secure=cookie.isSecure())
+        return jar
+
+    def _authorize_4k(self, session, data, rate):
+        try:
+            uid = self.account_info(session, lambda: False)["uid"]
+        except RuntimeError as error:
+            raise getattr(api, "LoginRequiredError", RuntimeError)(
+                "虎牙 4K 需要有效登录，请重新登录具备对应 VIP 权益的账号") from error
+        pid = int(data["data"][0]["gameLiveInfo"]["uid"])
+        user, _base = huya_user(session, uid)
+        request = b"\x0a\x0a" + user + b"\x0b" + tars_int(1, pid) + b"\x0b"
+        vip = huya_wup_request(session, "wupui", "getPlatformVIPUserInfo", uid, request)
+        # 与官网 isPlatformVip 一致：账号有效会员，并且该房间开放会员权益。
+        if vip.get(0) != 1 or vip.get(3) != 1:
+            raise RuntimeError("虎牙账号没有该直播间的 4K VIP 权益，请选择 2K 或更低画质")
+        tiers = huya_wup_request(session, "huyaliveui", "getLivingMultiStreamInfo", uid, request)
+        tier = next((item for item in tiers.get(1, []) if item.get(1) == rate), None)
+        if tier is None or not (tier.get(5) == 1 or tier.get(6) == 5):
+            raise RuntimeError("虎牙官方未授权所选 4K 档位，请选择其他画质")
+        return uid
+
+    @staticmethod
+    def _account_stream_params(session, uid, info, bitrate, parser):
+        user, _base = huya_user(session, uid)
+        request = (b"\x0a" + huya_string(0, info["sFlvUrl"]) + huya_string(1, info["sStreamName"]) +
+                   tars_int(2, 0) + b"\x3a" + user + b"\x0b" + tars_int(4, 66) + b"\x0b")
+        token = huya_wup_request(session, "liveui", "getCdnTokenInfoEx", uid, request)
+        params = dict(parse_qsl(unescape(token.get(0, ""))))
+        # 官网 rotUid 保留高 32 位，只对低 32 位左旋 8 位；不能沿用匿名随机 UID。
+        uid = int(uid)
+        low = uid & 0xFFFFFFFF
+        converted = (uid & ~0xFFFFFFFF) | ((low << 8 | low >> 24) & 0xFFFFFFFF)
+        timestamp = int(time.time() * 1000)
+        seqid = uid + timestamp
+        template = base64.b64decode(unquote(params.pop("fm")), validate=True).decode("utf-8")
+        if not all(value in template for value in ("$0", "$1", "$2", "$3")):
+            raise RuntimeError("虎牙授权签名格式异常，请稍后重试")
+        digest = hashlib.md5(f"{seqid}|{params['ctype']}|100".encode()).hexdigest()
+        signed = template.replace("$0", str(converted)).replace("$1", info["sStreamName"])
+        signed = signed.replace("$2", digest).replace("$3", params["wsTime"])
+        params.update(parser._CONSTANTS)
+        params.update(wsSecret=hashlib.md5(signed.encode()).hexdigest(), seqid=seqid, u=converted,
+                      sdk_sid=timestamp, ratio=bitrate)
+        return params
 
     def _select_quality(self, room_id, quality, preview):
         options = self._qualities[room_id]
@@ -198,6 +278,7 @@ class HuyaPlatform(LiveQualityPlatform):
         session = Streamlink({"http-timeout": 8})
         parser = Huya(session, self.room_url(room_id))
         try:
+            session.http.cookies.update(self._playback_cookies())
             page = session.http.get(parser.url).text
             config = re.search(r"\bvar\s+hyPlayerConfig\s*=\s*\{", page)
             if config is None:
@@ -221,28 +302,35 @@ class HuyaPlatform(LiveQualityPlatform):
                 option["label"] = option["desc"]
                 option["restricted"] = bool(re.search(r"(?<!\d)4\s*K", option["desc"], re.I))
                 if option["restricted"]:
-                    option["desc"] += "（VIP授权未接入，暂不保证可用）"
+                    option["desc"] += "（需对应 VIP 权益，授权播放待实测）"
             self._qualities[room_id] = sorted(options, key=lambda item: (
                 bool(re.search(r"(?<!\d)2\s*K", item["label"], re.I)), not item["restricted"],
                 item["rate"] == 0, item["rate"]), reverse=True)
             selected = self._select_quality(room_id, quality, preview)
             bitrate = selected["rate"]
+            uid = self._authorize_4k(session.http, data, bitrate) if selected["restricted"] else None
             streams = {}
             for info in data.get("data", [{}])[0].get("gameStreamInfoList", []):
-                # 使用网页明确提供的 HLS 线路；签名参数仍交给固定版本的 Streamlink。
+                # 复用官网 HLS 线路；会员 4K 用账号令牌，其余档位沿用公开取流。
                 base = info.get("sHlsUrl")
                 if not base:
                     continue
                 name = info["sStreamName"]
-                qs = dict(parse_qsl(unescape(info["sHlsAntiCode"])))
-                params = parser._get_stream_params(qs.get("fm", ""), qs.get("fs", ""),
-                    qs.get("ctype", "huya_live"), qs.get("wsTime", ""), name, bitrate)
+                if uid is not None:
+                    params = self._account_stream_params(session.http, uid, info, bitrate, parser)
+                else:
+                    qs = dict(parse_qsl(unescape(info["sHlsAntiCode"])))
+                    params = parser._get_stream_params(qs.get("fm", ""), qs.get("fs", ""),
+                        qs.get("ctype", "huya_live"), qs.get("wsTime", ""), name, bitrate)
                 url = f"{base}/{name}.{info['sHlsUrlSuffix']}"
                 if url.startswith("//"):
                     url = "https:" + url
                 stream = HTTPStream(session, url, params=params)
                 stream.ddm_quality = selected["qn"]
                 streams[f"{info['sCdnType'].lower()}_source"] = stream
+        except RuntimeError:
+            session.http.close()
+            raise
         except Exception as error:  # noqa: BLE001
             session.http.close()
             raise RuntimeError("虎牙房间获取失败，请稍后重试") from error
@@ -306,6 +394,23 @@ class HuyaPlatform(LiveQualityPlatform):
             raise RuntimeError("虎牙状态获取失败")
         return result
 
+    @staticmethod
+    def _verify_4k(url, headers):
+        import av
+
+        options = {"headers": "".join(f"{key}: {value}\r\n" for key, value in headers.items())}
+        try:
+            with av.open(url, options=options, timeout=(4, 6)) as container:
+                # 不只检查 HLS 返回 200，避免把低清回退误报为 4K。
+                for index, packet in enumerate(container.demux(video=0)):
+                    for frame in packet.decode():
+                        return frame.width >= 3840 and frame.height >= 2160
+                    if index >= 90:
+                        break
+        except (av.FFmpegError, ValueError):
+            pass
+        return False
+
     def play_url(self, room_id: str, quality: int = 250, *, preview=False) -> tuple:
         session, _parser, streams = self._streams(room_id, quality, preview=preview)
         try:
@@ -330,10 +435,14 @@ class HuyaPlatform(LiveQualityPlatform):
                         if next(response.iter_content(7), b"") != b"#EXTM3U":
                             continue
                         qn = getattr(stream, "ddm_quality", 10000)
+                        restricted = any(item["qn"] == qn and item.get("restricted") for item in
+                                         self._qualities.get(room_id, []))
+                        if restricted and not self._verify_4k(response.url, headers):
+                            continue
                         return response.url, qn if isinstance(qn, int) else 10000, "huya", headers
                 except requests.RequestException:
                     continue
-            raise RuntimeError("虎牙直播线路暂不可用，请重试")
+            raise RuntimeError("虎牙所选画质未能获取可播放视频，请重试或手动选择其他画质")
         finally:
             session.http.close()
 
@@ -1176,7 +1285,9 @@ class PlatformLogoControl(QObject):
 
 class LivePlatformsPlugin(api.Plugin):
     def on_load(self, context: api.PluginContext) -> None:
-        context.register_platform(HuyaPlatform())
+        huya = HuyaPlatform()
+        huya._context = context
+        context.register_platform(huya)
         douyu = DouyuPlatform()
         douyu._context = context
         context.register_platform(douyu)
