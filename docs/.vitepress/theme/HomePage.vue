@@ -64,7 +64,7 @@ onUnmounted(() => { observer?.disconnect(); motion?.removeEventListener('change'
     <div class="facts" data-reveal><div><strong>16<span> 路</span></strong><span>最多同时管理直播</span></div><div><strong>横屏 / 竖屏</strong><span>一套适合你的布局</span></div><div><strong>独立控制</strong><span>音量、静音与画质</span></div><div><strong>{{ plugins.length }} 款插件</strong><span>扩展平台与观看方式</span></div></div>
 
     <section class="home-section viewing-section">
-      <div class="section-heading" data-reveal><div><p class="eyebrow">01 / 观看体验</p><h2>把直播墙，<br />调成你的样子。</h2></div><div><p class="section-description">布局比例、深浅外观与观看组合</p><a :href="withBase('/software')">了解全部软件功能 ↗</a></div></div>
+      <div class="section-heading" data-reveal><div><p class="eyebrow">01 / 观看体验</p><h2>把直播墙，<br />调成你的样子。</h2></div><div><p class="section-description">切换布局预设 · 拖入关注卡片</p><a :href="withBase('/software')">了解全部软件功能 ↗</a></div></div>
       <div data-reveal><FeatureDemo /></div>
     </section>
 

@@ -204,14 +204,17 @@ test('plugin detail pages list every published version they can prove', () => {
 
 test('appearance miniature and editable controls remain usable before hydration', () => {
   const home = readFileSync(resolve(dist, 'index.html'), 'utf8')
-  assert.ok(home.includes('外观缩略预览'))
+  assert.ok(home.includes('可操作缩略预览'))
   assert.ok(home.includes('aria-label="软件外观缩略预览"'))
   assert.ok(home.includes('class="mini-sidebar"'))
   assert.equal((home.match(/class="[^"]*\bmini-tile\b[^"]*"/g) || []).length, 6)
   assert.ok(home.includes('aria-label="主画面比例"'))
   assert.ok(home.includes('role="separator"'))
   assert.ok(home.includes('aria-label="拖动调整主画面比例"'))
-  assert.ok(home.includes('aria-label="软件功能演示"'))
+  assert.ok(home.includes('切换布局预设'))
+  assert.ok(home.includes('aria-controls="mini-layout-presets"'))
+  assert.ok(home.includes('aria-label="选择演示主播 A"'))
+  assert.ok(!home.includes('观看组合'))
   assert.ok(home.includes('id="plugin-demo"'))
   for (const plugin of plugins) {
     assert.equal(plugin.steps.length, 3)
@@ -262,7 +265,7 @@ function mountGallery({ reduced = false, intersection = true, resize = true } = 
     disconnect() { sizeDisconnected = true }
   }
   const script = read('docs/.vitepress/theme/ScreenshotShowcase.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
-  const state = runInNewContext(script + '\n;({ active, progress, controlsReady, productHeight, enhanced, paused, selectShot, togglePlayback, interact, update, preferenceChanged })', {
+  const state = runInNewContext(script + '\n;({ active, progress, controlsReady, productHeight, enhanced, paused, revealing, selectShot, togglePlayback, interact, update, preferenceChanged })', {
     ref: value => ({ value: value === null ? [story, pin, product][refs++] : value }),
     onMounted: fn => { mount = fn }, onUnmounted: fn => { unmount = fn },
     window: { innerHeight: 800, matchMedia: () => media, ...(intersection ? { IntersectionObserver: Observer } : {}), ...(resize ? { ResizeObserver: SizeObserver } : {}), addEventListener() {}, removeEventListener() {} },
@@ -329,6 +332,10 @@ test('screenshot contraction starts when the frame center reaches the viewport c
   gallery.story.top = 98
   gallery.state.update()
   assert.ok(Math.abs(gallery.state.progress.value - .1) < .001)
+  gallery.state.selectShot(2)
+  gallery.resizeProduct(1039)
+  gallery.state.update()
+  assert.ok(Math.abs(gallery.state.progress.value - .1) < .001, 'portrait expansion must not change the center trigger')
   gallery.unmount()
 })
 
@@ -413,6 +420,7 @@ test('theme wipe originates at the button, supports rapid toggles and falls back
 test('miniature layout responds to drag, slider boundaries and keyboard adjustments', () => {
   const script = read('docs/.vitepress/theme/FeatureDemo.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
   const state = runInNewContext(script + '\n;({ ratio, setRatio, onPointerDown, onPointerMove, onPointerUp, onGripKey })', {
+    computed: fn => ({ get value() { return fn() } }),
     ref: value => ({ value: value === null ? { getBoundingClientRect: () => ({ left: 100, width: 600 }) } : value })
   })
   const target = { setPointerCapture() {}, releasePointerCapture() {} }
@@ -431,4 +439,76 @@ test('miniature layout responds to drag, slider boundaries and keyboard adjustme
   assert.equal(state.ratio.value, 68)
   state.setRatio(-100)
   assert.equal(state.ratio.value, 35)
+})
+
+function mountMiniature() {
+  let target = null, nullRefs = 0
+  const script = read('docs/.vitepress/theme/FeatureDemo.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
+  const state = runInNewContext(script + '\n;({ presets, preset, presetId, columns, slots, cards, selected, dragged, over, light, pickerOpen, selectCard, placeCard, clearSlot, changePreset, onCardDown, onCardMove, onCardUp, cancelCard })', {
+    computed: fn => ({ get value() { return fn() } }),
+    ref: value => ({ value: value === null && [1, 2].includes(nullRefs++) ? { contains: element => element.inside } : value }),
+    document: { elementFromPoint: () => ({ closest: () => target }) }
+  })
+  return { state, hit(index, inside = true) { target = index === null ? null : { dataset: { miniSlot: String(index) }, inside } } }
+}
+
+test('all software presets apply, preserve assigned cards and reject hidden targets', () => {
+  const { state: s } = mountMiniature()
+  assert.equal(s.presets.length, 8)
+  s.selectCard('a'); s.placeCard(0)
+  assert.equal(s.slots.value[0].id, 'a')
+  assert.equal(s.selected.value, null)
+  for (const preset of s.presets) {
+    s.pickerOpen.value = true
+    s.changePreset(preset.id)
+    assert.equal(s.pickerOpen.value, false)
+    assert.equal(s.preset.value.id, preset.id)
+    const occupied = new Set()
+    for (const [row, col, rows, cols] of preset.cells) {
+      assert.ok(row + rows <= preset.rows && col + cols <= preset.cols)
+      for (let r = row; r < row + rows; r++) for (let c = col; c < col + cols; c++) {
+        assert.ok(!occupied.has(`${r}:${c}`), 'preset cells cannot overlap')
+        occupied.add(`${r}:${c}`)
+      }
+    }
+    assert.equal(occupied.size, preset.rows * preset.cols)
+    assert.equal(s.slots.value[0].id, 'a')
+  }
+  s.changePreset('1x1'); s.placeCard(5, 'b')
+  assert.equal(s.slots.value[5], null)
+  s.placeCard(0, 'b'); assert.equal(s.slots.value[0].id, 'b')
+  s.clearSlot(0); assert.equal(s.slots.value[0], null)
+  s.changePreset('unknown'); assert.equal(s.presetId.value, '1x1')
+})
+
+test('follow cards support pointer dragging, tap placement, cancellation and outside drops', () => {
+  const { state: s, hit } = mountMiniature()
+  const event = (x, y) => ({ pointerType: 'mouse', button: 0, pointerId: 1, clientX: x, clientY: y, currentTarget: { setPointerCapture() {}, releasePointerCapture() {} } })
+  s.onCardDown(event(10,10), s.cards[0]); s.onCardMove(event(12,12))
+  assert.equal(s.dragged.value, null, 'small movement remains a tap')
+  s.onCardUp(event(12,12)); assert.equal(s.selected.value, 'a')
+  s.placeCard(0); assert.equal(s.slots.value[0].id, 'a')
+  s.onCardDown(event(10,10), s.cards[1]); hit(2)
+  s.onCardMove(event(90,90)); assert.equal(s.over.value, 2)
+  s.onCardUp(event(90,90)); assert.equal(s.slots.value[2].id, 'b')
+  assert.equal(s.dragged.value, null)
+  for (const destination of [[null, true], [3, false]]) {
+    s.onCardDown(event(10,10), s.cards[2]); hit(...destination)
+    s.onCardMove(event(90,90)); assert.equal(s.over.value, -1)
+    s.onCardUp(event(90,90)); assert.equal(s.slots.value[3], null)
+  }
+  s.onCardDown(event(10,10), s.cards[2]); hit(1); s.onCardMove(event(90,90))
+  s.cancelCard(); s.onCardUp(event(90,90))
+  assert.equal(s.slots.value[1], null)
+  assert.equal(s.dragged.value, null)
+})
+
+test('pixel reveal only starts on a changed screenshot and respects reduced motion', () => {
+  const gallery = mountGallery()
+  gallery.state.selectShot(0); assert.equal(gallery.state.revealing.value, false)
+  gallery.state.selectShot(1); assert.equal(gallery.state.revealing.value, true)
+  gallery.media.matches = true; gallery.state.preferenceChanged()
+  assert.equal(gallery.state.revealing.value, false)
+  gallery.state.selectShot(2); assert.equal(gallery.state.revealing.value, false)
+  gallery.unmount()
 })

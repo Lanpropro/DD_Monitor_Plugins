@@ -144,3 +144,14 @@ python tools/inspect_host_package.py "软件安装包路径.zip"
 - 桌面直接坐标点击竖屏前后，滚动位置均为约 1526.857px、切换条顶部均为约 522.857px、画框高度均为约 346.977px、展示段高度均为约 919px。测量保存在 work/website-preview/vertical-stability.json。
 - 构建、19 项回归及 diff 检查通过；浏览器验证滑块、分隔条键盘调整、深浅色、六路平分，以及 390/320px 窄屏，无横向溢出或控制台警告/错误。
 - 效果截图：work/website-preview/appearance-miniature-interactive.png、stable-portrait.png。预览仍为 http://127.0.0.1:4174/DD_Monitor_Plugins/。
+
+
+## 2026-10-18 左侧截图导航、可用布局预设与轻量动效
+
+- 截图切换改为左侧竖向分段栏；竖屏恢复最大 560px 的自然比例展示，可通过页面滚动查看完整内容，不再沿用上一节固定小高度的方案。截图仍在画面中心到达视口中心时开始缩小，竖屏尺寸变化不改写该触发基准。
+- 外观缩略预览增加软件已有的 8 种布局预设，打开面板后可直接应用；切换布局保留已放入的演示卡片。保留主画面比例滑块、分隔条与预览内部主题按钮，修正按钮居中。
+- 关注卡片支持 Pointer Events 拖入画面、点选后放入、键盘选择/放入和清空；拖入过程显示浮动缩略图和目标边框，取消或放到预览外不改变画面。素材裁自现有软件截图，仅用于操作演示，不是实时直播。
+- 外部操作仅保留「切换布局预设」，移除「切换主题」「观看组合」。手机预览设定最小高度以保留关注缩略图，320px 检查无横向溢出。
+- 参考 React Bits Pixel Swap（https://www.reactbits.dev/animations/pixel-swap）与 21st 组件展示（https://21st.dev/community/components），用 Vue/CSS 独立实现 500ms 像素揭示与 360ms 放入描边反馈；没有引入 React 组件或新增依赖。减少动态效果时禁用这两处动效。
+- 构建、22 项网站测试与 diff 检查通过。新增布局网格不重叠、全部预设应用、卡片保留/替换/清空、点击和拖放/取消/外部放下、像素揭示与减少动态效果回归。浏览器实测真实鼠标拖入、键盘放入、主题切换、布局预设、竖屏完整滚动与 320px 手机；控制台无警告或错误。
+- 本地预览：http://127.0.0.1:4174/DD_Monitor_Plugins/。截图：work/website-preview/presets-and-drag.png、left-gallery-portrait.png。尚未公开部署。
