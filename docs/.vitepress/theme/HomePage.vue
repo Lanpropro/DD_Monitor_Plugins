@@ -8,6 +8,7 @@ import ScreenshotShowcase from './ScreenshotShowcase.vue'
 import PluginCarousel from './PluginCarousel.vue'
 import PluginFeatureMotion from './PluginFeatureMotion.vue'
 import BackToIntro from './BackToIntro.vue'
+import MatchSyncTimeline from './MatchSyncTimeline.vue'
 
 const previewPlugin = ref(2)
 const page = ref(null)
@@ -82,9 +83,9 @@ onUnmounted(() => { observer?.disconnect(); motion?.removeEventListener('change'
         <button :tabindex="duplicate ? -1 : undefined" class="plugin-demo-trigger" :aria-pressed="previewPlugin === i" aria-controls="plugin-demo" :aria-label="'查看' + plugin.name + '的具体功能'" @click="previewPlugin = i"></button>
         <div class="card-actions"><a :tabindex="duplicate ? -1 : undefined" class="action primary" :href="plugin.download">下载 ZIP</a><a :tabindex="duplicate ? -1 : undefined" class="detail-link" :href="withBase('/plugins/' + plugin.id)">查看详情 ↗</a></div>
       </article></PluginCarousel>
-      <div id="plugin-demo" class="plugin-demo-panel" data-reveal aria-live="polite">
-        <div class="plugin-demo-heading"><p class="eyebrow">插件功能</p><h3>{{ plugins[previewPlugin].name }}</h3><p class="plugin-detail-description">{{ plugins[previewPlugin].description }}</p><a :href="withBase('/plugins/' + plugins[previewPlugin].id)">阅读完整说明 ↗</a></div>
-        <div class="plugin-demo-content"><PluginFeatureMotion :key="plugins[previewPlugin].id" :plugin="plugins[previewPlugin]" /><p class="plugin-flow-title">使用流程</p><ol class="plugin-flow"><li v-for="(step, i) in plugins[previewPlugin].steps" :key="step"><span>0{{ i + 1 }}</span><p>{{ step }}</p></li></ol></div>
+      <div id="plugin-demo" class="plugin-demo-panel" :class="{ 'is-match-demo': plugins[previewPlugin].id === 'match_sync' }" data-reveal>
+        <div class="plugin-demo-heading" aria-live="polite"><p class="eyebrow">插件功能</p><h3>{{ plugins[previewPlugin].name }}</h3><p class="plugin-detail-description">{{ plugins[previewPlugin].description }}</p><a :href="withBase('/plugins/' + plugins[previewPlugin].id)">阅读完整说明 ↗</a></div>
+        <div class="plugin-demo-content"><MatchSyncTimeline v-if="plugins[previewPlugin].id === 'match_sync'" /><PluginFeatureMotion v-else :key="plugins[previewPlugin].id" :plugin="plugins[previewPlugin]" /><template v-if="plugins[previewPlugin].id !== 'match_sync'"><p class="plugin-flow-title">使用流程</p><ol class="plugin-flow"><li v-for="(step, i) in plugins[previewPlugin].steps" :key="step"><span>0{{ i + 1 }}</span><p>{{ step }}</p></li></ol></template></div>
       </div>
       <p class="plugin-compatibility">插件独立下载、独立启用。安装前请查看<a :href="withBase('/download#插件兼容性')">软件版本与兼容要求</a>。</p>
     </section>

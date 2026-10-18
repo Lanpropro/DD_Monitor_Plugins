@@ -79,6 +79,10 @@ body { min-width: 0; }
 .plugin-demo-trigger:focus-visible { outline: 2px solid var(--vp-c-brand-1); outline-offset: -3px; }
 .home-plugin-card.is-selected { border-color: var(--vp-c-brand-1); }
 .plugin-demo-panel { display: grid; grid-template-columns: .7fr 1.5fr; gap: 32px; align-items: center; margin-top: 20px; padding: 26px; border: 1px solid var(--vp-c-divider); border-radius: 10px; background: var(--vp-c-bg-alt); scroll-margin-bottom: 120px; }
+.plugin-demo-panel.is-match-demo { display:block; margin-top:36px; padding:0; border:0; background:transparent; }
+.is-match-demo .plugin-demo-heading { margin-bottom:24px; }
+.is-match-demo .plugin-demo-heading h3 { font-size:28px; }
+.is-match-demo .plugin-detail-description { max-width:640px; }
 .plugin-demo-heading .eyebrow { margin-bottom: 10px; font-size: 12px; }
 .plugin-demo-heading h3 { font-size: 20px; font-weight: 600; margin-bottom: 12px; }
 .plugin-demo-heading a { color: var(--vp-c-brand-1); font-size: 13px; }

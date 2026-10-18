@@ -224,7 +224,7 @@ test('appearance miniature and editable controls remain usable before hydration'
     assert.equal(plugin.steps.length, 3)
     assert.equal(new Set(plugin.steps).size, 3)
   }
-  for (const step of plugins[2].steps) assert.ok(home.includes(step))
+  for (const chapter of ['选择主画面','框选计时区域','自动对齐','混合解说','合并弹幕']) assert.ok(home.includes(chapter))
 })
 
 test('every generated internal link, anchor and local asset resolves under the Pages base', () => {
@@ -624,10 +624,11 @@ test('plugin cards expose full-card selection and render concrete feature detail
     assert.ok(home.includes('aria-label="查看' + p.name + '的具体功能"'))
     for (const detail of p.featureDetails) assert.ok(detail.length > 20)
   }
-  assert.ok(panel.includes(plugins[2].featureDetails[1]))
-  assert.ok(panel.includes('比赛二路同步功能动效示意'))
-  assert.ok(panel.includes('plugin-motion-demo'))
-  assert.ok(panel.includes('使用流程'))
+  assert.ok(panel.includes('比赛二路同步交互时间轴演示'))
+  assert.ok(panel.includes('match-sync-demo'))
+  assert.ok(panel.includes('aria-label="二路同步演示时间轴"'))
+  assert.ok(panel.includes('aria-label="设为比赛主画面"'))
+  assert.ok(panel.includes('跳转到合并弹幕'))
   assert.ok(!home.includes('已选中 · 功能在下方'))
   assert.ok(!home.includes('点击查看具体功能'))
   const selected = home.match(/<article class="[^"]*is-selected[^"]*"[\s\S]*?<\/article>/g)
@@ -645,14 +646,14 @@ test('plugin carousel initially shows the selected match-sync card', () => {
   page.unmount()
 })
 
-function mountFeatureMotion({ reduced = false, intersection = true, plugin = plugins[2] } = {}) {
+function mountFeatureMotion({ reduced = false, intersection = true, plugin = plugins[0] } = {}) {
   const timers = new Map(), listeners = new Map()
   let mount, unmount, notify, next = 0, disconnected = false
   const media = { matches: reduced, addEventListener: (name, fn) => listeners.set('media:' + name, fn), removeEventListener: name => listeners.delete('media:' + name) }
   const doc = { hidden: false, addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name) }
   class Observer { constructor(fn) { notify = fn } observe() {} disconnect() { disconnected = true } }
   const script = read('docs/.vitepress/theme/PluginFeatureMotion.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
-  const state = runInNewContext(script + '\n;({ phase, paused, playing, animating, phaseLabels, phaseDescription, screenshot, sync, selectPhase, togglePlayback, onEnter, onLeave, onFocus, onBlur })', {
+  const state = runInNewContext(script + '\n;({ phase, paused, playing, phaseLabels, phaseDescription, screenshot, sync, selectPhase, togglePlayback, onEnter, onLeave, onFocus, onBlur })', {
     defineProps: () => ({ plugin }), computed: fn => ({ get value() { return fn() } }), ref: value => ({ value: value === null ? {} : value }),
     onMounted: fn => { mount = fn }, onUnmounted: fn => { unmount = fn },
     window: { matchMedia: () => media, ...(intersection ? { IntersectionObserver: Observer } : {}) }, document: doc, IntersectionObserver: Observer,
@@ -663,18 +664,18 @@ function mountFeatureMotion({ reduced = false, intersection = true, plugin = plu
     tick() { const [id, fn] = timers.entries().next().value; timers.delete(id); fn() }, get disconnected() { return disconnected } }
 }
 
-test('dynamic feature illustration loops through alignment, audio and chat only while watched', () => {
+test('platform feature illustration loops through quality, preview and chat only while watched', () => {
   const page = mountFeatureMotion(), s = page.state
-  assert.equal(s.phaseDescription.value, plugins[2].featureDetails[1])
+  assert.equal(s.phaseDescription.value, plugins[0].featureDetails[0])
   assert.equal(page.timers.size, 0)
   page.visible(true)
   for (const expected of [1,2,0]) { page.tick(); assert.equal(s.phase.value, expected) }
-  s.onEnter({ pointerType: 'mouse' }); assert.equal(page.timers.size, 0); assert.equal(s.animating.value, true)
+  s.onEnter({ pointerType: 'mouse' }); assert.equal(page.timers.size, 0)
   s.onLeave(); assert.equal(page.timers.size, 1)
   s.onFocus({ target:{ matches:() => true } }); assert.equal(page.timers.size, 0)
   s.onBlur({ currentTarget:{ contains:() => false } }); assert.equal(page.timers.size, 1)
-  s.togglePlayback(); assert.equal(page.timers.size, 0); assert.equal(s.animating.value, false)
-  s.selectPhase(2); assert.equal(s.phaseDescription.value, plugins[2].featureDetails[2])
+  s.togglePlayback(); assert.equal(page.timers.size, 0)
+  s.selectPhase(2); assert.equal(s.phaseDescription.value, plugins[0].featureDetails[2])
   s.selectPhase(10); assert.equal(s.phase.value, 2)
   s.togglePlayback(); page.doc.hidden = true; page.listeners.get('visibilitychange')(); assert.equal(page.timers.size, 0)
   page.doc.hidden = false; s.sync(); assert.equal(page.timers.size, 1)
@@ -721,4 +722,79 @@ test('return button lands at the introduction with the wall behind it, never at 
     page.listeners.get('scroll')(); page.unmount(); assert.equal(page.frames.size, 0); assert.equal(page.listeners.size, 0)
   }
   const missing = mountBackToIntro({ hasAnchor: false }); missing.state.returnToIntro(); assert.equal(missing.calls.length, 0); assert.equal(missing.state.visible.value, false); missing.unmount()
+})
+
+
+function mountMatchTimeline({ reduced = false, intersection = true } = {}) {
+  const frames = new Map(), listeners = new Map()
+  let mount, unmount, notify, next = 0, disconnected = false
+  const media = { matches:reduced, addEventListener:(name,fn) => listeners.set('media:' + name,fn), removeEventListener:name => listeners.delete('media:' + name) }
+  const doc = { hidden:false, addEventListener:(name,fn) => listeners.set(name,fn), removeEventListener:name => listeners.delete(name) }
+  class Observer { constructor(fn) { notify = fn } observe() {} disconnect() { disconnected = true } }
+  const script = read('docs/.vitepress/theme/MatchSyncTimeline.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
+  const state = runInNewContext(script + '\n;({ chapters, duration, time, active, alignment, delay, paused, reduced, playing, mainVolume, secondaryVolume, merged, clock, sync, seek, jump, togglePlayback, hold, onFocus, onBlur })', {
+    computed:fn => ({ get value() { return fn() } }), ref:value => ({ value:value === null ? {} : value }),
+    onMounted:fn => { mount = fn }, onUnmounted:fn => { unmount = fn }, window:{ matchMedia:() => media, ...(intersection ? { IntersectionObserver:Observer } : {}) }, document:doc, IntersectionObserver:Observer,
+    requestAnimationFrame:fn => { frames.set(++next,fn); return next }, cancelAnimationFrame:id => frames.delete(id)
+  })
+  mount()
+  return { state, frames, listeners, media, doc, unmount, visible(value) { notify?.([{ isIntersecting:value }]) },
+    frame(now) { const [id,fn] = frames.entries().next().value; frames.delete(id); fn(now) }, get disconnected() { return disconnected } }
+}
+
+test('match-sync timeline chapters and scrubbing control one continuous playhead', () => {
+  const page = mountMatchTimeline(), s = page.state
+  assert.equal(s.duration,22)
+  assert.equal(s.chapters.length,5)
+  for (const [time,index] of [[0,0],[3.9,0],[4,1],[8,2],[12.9,2],[13,3],[17,4],[22,4]]) {
+    s.seek(time); assert.equal(s.active.value,index)
+  }
+  s.seek(10.5); assert.equal(s.alignment.value,.5); assert.equal(s.delay.value,1.6)
+  s.seek(13); assert.equal(s.alignment.value,1); assert.equal(s.delay.value,0)
+  s.seek(-100); assert.equal(s.time.value,0)
+  s.seek(100); assert.equal(s.time.value,22)
+  s.jump(3); assert.equal(s.time.value,13)
+  s.jump(99); assert.equal(s.time.value,13)
+  assert.equal(s.clock(9),'0:09'); assert.equal(s.clock(728),'12:08')
+  assert.equal(s.mainVolume.value,70); assert.equal(s.secondaryVolume.value,40); assert.equal(s.merged.value,true)
+  page.unmount()
+})
+
+test('match-sync playback advances by time, loops and pauses while seeking or in background', () => {
+  const page = mountMatchTimeline(), s = page.state
+  assert.equal(page.frames.size,0); page.visible(true); assert.equal(page.frames.size,1)
+  page.frame(100); page.frame(200); assert.ok(Math.abs(s.time.value - .1) < .001)
+  s.hold(true); assert.equal(page.frames.size,0); s.seek(10.5); assert.equal(s.time.value,10.5)
+  s.hold(false); assert.equal(page.frames.size,1)
+  s.onFocus({ target:{ matches:() => true } }); assert.equal(page.frames.size,0)
+  s.onBlur({ currentTarget:{ contains:() => false } }); assert.equal(page.frames.size,1)
+  s.onFocus({ target:{ matches:() => false } }); assert.equal(page.frames.size,1, 'play button keyboard focus must not prevent playback')
+  s.togglePlayback(); assert.equal(page.frames.size,0)
+  s.seek(22); s.togglePlayback(); assert.equal(s.time.value,0)
+  s.seek(21.95); page.frame(1000); page.frame(1100); assert.ok(s.time.value < .1)
+  page.doc.hidden = true; page.listeners.get('visibilitychange')(); assert.equal(page.frames.size,0)
+  page.doc.hidden = false; s.sync(); assert.equal(page.frames.size,1)
+  page.visible(false); assert.equal(page.frames.size,0)
+  page.visible(true); page.media.matches = true; page.listeners.get('media:change')(); assert.equal(page.frames.size,0)
+  page.unmount(); assert.equal(page.frames.size,0); assert.equal(page.listeners.size,0); assert.ok(page.disconnected)
+})
+
+test('match-sync reduced-motion and observer fallback preserve manual chapter navigation', () => {
+  for (const options of [{ reduced:true }, { intersection:false }]) {
+    const page = mountMatchTimeline(options), s = page.state
+    page.visible(true); assert.equal(page.frames.size,0)
+    s.jump(4); assert.equal(s.time.value,17); assert.equal(s.active.value,4)
+    s.seek(9); assert.equal(s.active.value,2); s.togglePlayback(); assert.equal(page.frames.size,0)
+    page.unmount()
+  }
+})
+
+test('built match-sync showcase exposes five chapters, a native scrubber and interactive canvas', () => {
+  const home = readFileSync(resolve(dist,'index.html'),'utf8')
+  for (const label of ['选择主画面','框选计时区域','自动对齐','混合解说','合并弹幕']) assert.ok(home.includes('aria-label="跳转到' + label + '"'))
+  assert.match(home, /class="timeline-seek"[^>]*type="range"[^>]*max="22"/)
+  assert.ok(home.includes('class="playhead-clip"'))
+  assert.ok(home.includes('aria-label="设为比赛主画面"'))
+  assert.ok(home.includes('aria-label="暂停二路同步演示"'))
+  assert.ok(home.includes('交互演示'))
 })
