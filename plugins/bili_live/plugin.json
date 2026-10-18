@@ -1,0 +1,6 @@
+{
+  "id": "bili_live",
+  "name": "B站直播互动",
+  "version": "1.0",
+  "description": "逐格发送弹幕、表情与直播礼物；使用本体登录。"
+}
