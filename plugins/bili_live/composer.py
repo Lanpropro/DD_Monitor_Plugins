@@ -11,6 +11,8 @@ from PySide6.QtWidgets import (
 from ddm import theme
 from . import bili_api as bili
 from .emoticons import EmoticonButton, EmoticonPopup, _style_button
+from .gift_popup import GiftButton, GiftPopup
+from .gift_controller import GiftController, GiftCoordinator
 from .workers import Request, start_worker, request_message, _active_requests, wait_for_requests
 
 class DanmakuEdit(QLineEdit):
@@ -45,8 +47,10 @@ class DanmakuComposer(QWidget):
     deviceCookieReady = Signal()
     HEIGHT = 28
 
-    def __init__(self, session, parent=None):
+    def __init__(self, session, parent=None, *, coordinator=None):
         super().__init__(parent)
+        self.coordinator = coordinator if coordinator is not None else GiftCoordinator(self)
+        self.gift_controller = self.gift_popup = None
         self.session = session
         self._requests = set()
         self.session.changed.connect(self._session_changed)
@@ -89,6 +93,9 @@ class DanmakuComposer(QWidget):
         self.emote_button.setFixedSize(28, 28)
         self.emote_button.clicked.connect(self.open_emoticons)
         row.addWidget(self.emote_button)
+        self.gift_button = GiftButton()
+        self.gift_button.clicked.connect(self.open_gifts)
+        row.addWidget(self.gift_button)
         self.send_button = QPushButton("发送")
         self.send_button.setFixedSize(44, 28)
         self.send_button.clicked.connect(self.send_text)
@@ -108,9 +115,13 @@ class DanmakuComposer(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         # 小格保留输入和表情入口，回车仍可发送，不为单独按钮挤掉输入空间。
-        self.send_button.setVisible(self.width() >= 144)
+        self.send_button.setVisible(self.width() >= 176)
 
     def hideEvent(self, event):
+        if self.gift_popup:
+            self.gift_popup.hide()
+        if self.gift_controller:
+            self.gift_controller.set_active(False)
         self.feedback.hide()
         if self.popup:
             self.popup.hide()
@@ -121,7 +132,13 @@ class DanmakuComposer(QWidget):
         return self._pending is not None
 
     def shutdown(self):
+        if self._closing:
+            return
         self._closing = True
+        if self.gift_popup:
+            self.gift_popup.shutdown()
+        if self.gift_controller:
+            self.gift_controller.shutdown()
         self._cancel_requests()
         self._generation += 1
         self._pending = self._catalog_pending = None
@@ -143,6 +160,10 @@ class DanmakuComposer(QWidget):
         cookies = self._cookies()
         identity = self._auth_identity(cookies)
         if identity != self._auth:
+            if self.gift_popup:
+                self.gift_popup.hide()
+            if self.gift_controller:
+                self.gift_controller.set_context(self._room_id, self.session.snapshot())
             self._cancel_requests()
             self._auth = identity
             self._generation += 1
@@ -158,6 +179,10 @@ class DanmakuComposer(QWidget):
     def set_room(self, room_id):
         room_id = str(room_id or "")
         if room_id != self._room_id:
+            if self.gift_popup:
+                self.gift_popup.hide()
+            if self.gift_controller:
+                self.gift_controller.set_context(room_id, self.session.snapshot())
             self._cancel_requests()
             self._generation += 1
             self._room_id = room_id
@@ -259,6 +284,8 @@ class DanmakuComposer(QWidget):
         self.edit.setFocus(Qt.OtherFocusReason)
 
     def open_emoticons(self, _checked=False):
+        if self.gift_popup:
+            self.gift_popup.hide()
         cookies = self.sync_credentials()
         self.feedback.hide()
         if self._closing or not self.supported:
@@ -333,4 +360,37 @@ class DanmakuComposer(QWidget):
 
     def interaction_active(self):
         return (self.edit.hasFocus() or self.edit._composing or
-                bool(self.popup and self.popup.isVisible()))
+                bool(self.popup and self.popup.isVisible()) or
+                bool(self.gift_popup and self.gift_popup.interaction_active()))
+
+    def open_gifts(self, _checked=False):
+        cookies=self.sync_credentials()
+        if self._closing or not self.supported:
+            return
+        if not cookies.get('SESSDATA') or not cookies.get('bili_jct'):
+            self._feedback('请先登录 B 站' if not cookies.get('SESSDATA') else '登录缺少 bili_jct，请重新登录')
+            return
+        self.feedback.hide()
+        if self.popup:
+            self.popup.hide()
+        if self.gift_controller is None:
+            self.gift_controller=GiftController(self.session,self.coordinator,self)
+            self.gift_popup=GiftPopup(self)
+            self.gift_controller.stateChanged.connect(self.gift_popup.set_state)
+            self.gift_controller.sent.connect(self.gift_popup.mark_sent)
+            self.gift_popup.sendRequested.connect(self.gift_controller.send)
+            self.gift_popup.refreshRequested.connect(self._refresh_gifts)
+            self.gift_popup.closed.connect(self._gifts_closed)
+        self.gift_controller.set_context(self._room_id,self.session.snapshot())
+        self.gift_popup.set_state(self.gift_controller.state)
+        self.gift_popup.open_at(self.gift_button)
+        if self.gift_popup.isVisible():
+            self.gift_controller.load()
+
+    def _refresh_gifts(self):
+        if self.gift_controller:
+            self.gift_controller.load(force=True)
+
+    def _gifts_closed(self):
+        if self.gift_controller:
+            self.gift_controller.set_active(False)

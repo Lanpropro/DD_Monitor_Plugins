@@ -14,6 +14,8 @@ class BiliLive(api.Plugin):
         from .session import BiliSession
         self.context = context
         self.session = BiliSession(context)
+        from .gift_controller import GiftCoordinator
+        self.coordinator = GiftCoordinator()
         self.controls = weakref.WeakSet()
         context.register_tile_control('interaction', self._make_control, priority=100)
 
@@ -27,7 +29,7 @@ class BiliLive(api.Plugin):
                 return self.widget.interaction_active()
             def shutdown(self):
                 self.widget.shutdown()
-        control = BiliControl(DanmakuComposer(self.session, context.parent), minimum_width=90, preferred_width=240)
+        control = BiliControl(DanmakuComposer(self.session, context.parent, coordinator=self.coordinator), minimum_width=90, preferred_width=240)
         self.controls.add(control)
         return control
 
