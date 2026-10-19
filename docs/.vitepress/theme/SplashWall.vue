@@ -5,12 +5,26 @@ import { onMounted, onUnmounted, reactive, ref } from 'vue'
 // 标准画面墙：等尺寸格子铺成 2×2 的重复块，拖动按周期取模，四向都接得上。
 const TILE_COUNT = 56
 const REPEATS = 4
-// 只替换一组 3×3 占位格；测试素材只有九张，不复制到其他格子。
-const IMAGE_TILES = new Map([
+const TOTAL_TILES = TILE_COUNT * REPEATS
+const COLUMNS = 14
+const REPEAT_COLUMNS = COLUMNS / 2
+const REPEAT_ROWS = TILE_COUNT / REPEAT_COLUMNS
+// 先标记一组 3×3 测试格，再映射到四面重复墙的对应位置。
+const BASE_IMAGE_TILES = new Map([
   [90, 1], [91, 2], [92, 3],
   [104, 4], [105, 5], [106, 6],
   [118, 7], [119, 8], [120, 9]
 ])
+const IMAGE_TILES = new Map()
+for (const [tile, image] of BASE_IMAGE_TILES) {
+  for (let row = 0; row < 2; row += 1) {
+    for (let column = 0; column < 2; column += 1) {
+      const offset = row * REPEAT_ROWS * COLUMNS + column * REPEAT_COLUMNS
+      const repeated = (tile - 1 + offset) % TOTAL_TILES + 1
+      IMAGE_TILES.set(repeated, image)
+    }
+  }
+}
 const base = withBase('/')
 const section = ref(null)
 const wall = ref(null)
@@ -55,14 +69,13 @@ function applyTransform() {
   element.style.opacity = (1 - scrollProgress * 0.72).toFixed(3)
 }
 
-// 没人操作时沿整块重复区域的边缘缓慢绕行，一圈经过全部 56 个不重复格子。
+// 没人操作时整面墙自己缓缓游动，双频叠加让轨迹不重复。
 function drift(now) {
   // 开屏墙在手机上铺满第一屏，若继续游动会一直重绘，滚动后停手。
   const active = !dragging && !reduced && !navRevealed && (window.scrollY || 0) < (window.innerHeight || 1) * 0.6
   if (active) {
-    const angle = (now / 1000) * (Math.PI * 2 / 48)
-    driftX = Math.cos(angle) * period.x / 2
-    driftY = Math.sin(angle) * period.y / 2
+    driftX = Math.sin(now / 2600) * 62 + Math.sin(now / 7100) * 22
+    driftY = Math.cos(now / 3300) * 44 + Math.cos(now / 8300) * 16
     applyTransform()
   }
   driftFrame = requestAnimationFrame(drift)

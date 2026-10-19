@@ -241,9 +241,9 @@ test('opening screen shows nine recorded tiles in the placeholder wall before an
   assert.equal(wallTiles, 224, 'the wall repeats its 56 tiles twice per axis so it wraps without a seam')
   for (let index = 1; index <= 9; index++) {
     const file = String(index).padStart(2, '0') + '.webp'
-    assert.equal((home.match(new RegExp(`${base}wall/${file}`, 'g')) || []).length, 1, `missing ${file}`)
+    assert.equal((home.match(new RegExp(`${base}wall/${file}`, 'g')) || []).length, 4, `${file} must appear in all four repeated wall quadrants`)
   }
-  assert.equal((home.match(/\/wall\/\d{2}\.webp/g) || []).length, 9, 'only the nine supplied recordings replace placeholders')
+  assert.equal((home.match(/\/wall\/\d{2}\.webp/g) || []).length, 36, 'only the nine supplied recordings replace placeholders')
   assert.ok(home.includes('拖动查看'), 'the opening screen must say it can be dragged')
   assert.ok(home.indexOf('class="splash"') < home.indexOf('class="showcase"'), 'the wall comes before the page content')
 })
@@ -258,11 +258,10 @@ test('the full-screen wall leaves vertical touch gestures to page scrolling', ()
   assert.match(splash, /dx\s*<\s*dy/, 'a mostly vertical gesture must not become a wall drag')
 })
 
-test('idle drift orbits the full wall period so every unique tile comes into view', () => {
+test('idle drift keeps the original compact orbit speed and amplitude', () => {
   const splash = read('docs/.vitepress/theme/SplashWall.vue')
-  assert.match(splash, /const angle = \(now \/ 1000\) \* \(Math\.PI \* 2 \/ 48\)/, 'one orbit should take 48 seconds')
-  assert.match(splash, /driftX = Math\.cos\(angle\) \* period\.x \/ 2/, 'horizontal radius must span half the repeat period')
-  assert.match(splash, /driftY = Math\.sin\(angle\) \* period\.y \/ 2/, 'vertical radius must span half the repeat period')
+  assert.match(splash, /driftX = Math\.sin\(now \/ 2600\) \* 62 \+ Math\.sin\(now \/ 7100\) \* 22/, 'horizontal drift must keep the original speed')
+  assert.match(splash, /driftY = Math\.cos\(now \/ 3300\) \* 44 \+ Math\.cos\(now \/ 8300\) \* 16/, 'vertical drift must keep the original speed')
 })
 
 test('the plugin catalog escapes the narrow documentation column', () => {
