@@ -443,6 +443,18 @@ test('the sticky screenshot and facts stay vertically centered with compact cont
   gallery.unmount()
 })
 
+test('the facts row enters with the later part of the screenshot scroll', () => {
+  const source = read('docs/.vitepress/theme/ScreenshotShowcase.vue')
+  const home = read('docs/.vitepress/theme/HomePage.vue')
+  assert.match(source, /'--facts': controlsReady \|\| !enhanced \? 1 : Math\.min\(1, Math\.max\(0, \(progress - \.62\) \/ \.32\)\)/,
+    'the facts row starts after the screenshot controls')
+  const rule = source.match(/:slotted\(\.facts\) \{([^}]+)\}/)[1]
+  assert.match(rule, /opacity:\s*var\(--facts\)/, 'the row fades in with scroll progress')
+  assert.match(rule, /translateY\(calc\(\(1 - var\(--facts\)\) \* 18px\)\)/, 'the row rises into place')
+  assert.ok(!home.includes('<div class="facts"><div data-reveal'),
+    'the generic entrance does not compete with the scroll-linked row')
+})
+
 test('revealed screenshot controls stay visible during a ratio change', () => {
   const gallery = mountGallery()
   gallery.story.top = -500

@@ -74,7 +74,7 @@ onUnmounted(() => {
 
 <template>
   <section ref="story" class="screenshot-story" :class="{ 'is-enhanced': enhanced }" aria-label="真实软件截图"
-    :style="{ '--shot-scale': enhanced ? 1 - progress * .18 : 1, '--frame-ratio': active === 2 ? 9 / 16 : 16 / 9, '--selected': active, '--controls': controlsReady || !enhanced ? 1 : Math.min(1, Math.max(0, (progress - .55) / .4)) }">
+    :style="{ '--shot-scale': enhanced ? 1 - progress * .18 : 1, '--frame-ratio': active === 2 ? 9 / 16 : 16 / 9, '--selected': active, '--controls': controlsReady || !enhanced ? 1 : Math.min(1, Math.max(0, (progress - .55) / .4)), '--facts': controlsReady || !enhanced ? 1 : Math.min(1, Math.max(0, (progress - .62) / .32)) }">
     <div ref="pin" class="screenshot-pin">
       <div class="product-wrap" :class="{ 'is-measured': enhanced && productHeight > 0 }" :style="enhanced && productHeight > 0 ? { height: productHeight * (1 - progress * .18) + 'px' } : undefined">
       <div ref="product" class="hero-product">
@@ -127,6 +127,7 @@ onUnmounted(() => {
 .is-enhanced .screenshot-pin > .showcase-details { align-self: stretch; }
 .is-enhanced .hero-product { transform: scale(var(--shot-scale)); transform-origin: top center; }
 .is-enhanced .gallery-controls { opacity: var(--controls); }
+.is-enhanced :slotted(.facts) { opacity: var(--facts); transform: translateY(calc((1 - var(--facts)) * 18px)); }
 @media (prefers-reduced-motion: no-preference) {
   .product-wrap { transition: width 400ms var(--ease-out); }
   .screenshot-stage { transition: aspect-ratio 400ms var(--ease-out); }

@@ -75,7 +75,7 @@ onUnmounted(() => {
         <p class="hero-note">Windows 10 / 11 · 免费开源 · B 站原生支持</p>
       </div>
       <ScreenshotShowcase>
-        <div class="facts"><div data-reveal><strong>16<span> 路</span></strong><span>最多同时管理直播</span></div><div data-reveal data-reveal-delay="80"><strong>横屏 / 竖屏</strong><span>一套适合你的布局</span></div><div data-reveal data-reveal-delay="160"><strong>独立控制</strong><span>音量、静音与画质</span></div><div data-reveal data-reveal-delay="240"><strong>{{ plugins.length }} 款插件</strong><span>扩展平台与观看方式</span></div></div>
+        <div class="facts"><div><strong>16<span> 路</span></strong><span>最多同时管理直播</span></div><div><strong>横屏 / 竖屏</strong><span>一套适合你的布局</span></div><div><strong>独立控制</strong><span>音量、静音与画质</span></div><div><strong>{{ plugins.length }} 款插件</strong><span>扩展平台与观看方式</span></div></div>
       </ScreenshotShowcase>
     </section>
 
