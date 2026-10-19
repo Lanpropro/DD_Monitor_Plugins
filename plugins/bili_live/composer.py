@@ -171,7 +171,7 @@ class DanmakuComposer(QWidget):
             self._packages = self._catalog_key = None
             self._feedback("")
             if self.popup:
-                self.popup.set_loading()
+                self.popup.set_loading(clear=True)
                 self.popup.hide()
             self._update_buttons()
         return cookies
@@ -191,6 +191,7 @@ class DanmakuComposer(QWidget):
             self.edit.clear()
             self._feedback("")
             if self.popup:
+                self.popup.set_loading(clear=True)
                 self.popup.hide()
         self.setVisible(self.supported)
         self._update_buttons()
@@ -283,7 +284,7 @@ class DanmakuComposer(QWidget):
             self._send(str(emote["emoticon_unique"]), 1)
         self.edit.setFocus(Qt.OtherFocusReason)
 
-    def open_emoticons(self, _checked=False):
+    def open_emoticons(self, _checked=False,*,force=False):
         if self.gift_popup:
             self.gift_popup.hide()
         cookies = self.sync_credentials()
@@ -299,7 +300,7 @@ class DanmakuComposer(QWidget):
             self.popup.retryRequested.connect(self._reload_emoticons)
         self.popup.open_at(self.emote_button)
         context = self._context()
-        if self._catalog_key == context and self._packages is not None:
+        if not force and self._catalog_key == context and self._packages is not None:
             return
         if self._catalog_pending == context:
             return
@@ -318,8 +319,7 @@ class DanmakuComposer(QWidget):
             self.choose_emoticon(kind, emote)
 
     def _reload_emoticons(self):
-        self._catalog_key = None
-        self.open_emoticons()
+        self.open_emoticons(force=True)
 
     def _emoticons_loaded(self, context, packages):
         self.deviceCookieReady.emit()

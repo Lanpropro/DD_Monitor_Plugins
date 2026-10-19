@@ -6,6 +6,45 @@ from shiboken6 import isValid
 from ddm import theme
 
 
+class RefreshSpinner(QWidget):
+    """Small shared refresh indicator; hidden pickers do not animate."""
+    def __init__(self,parent=None):
+        super().__init__(parent)
+        self.setFixedSize(16,16)
+        self.setAccessibleName('正在刷新')
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        policy=self.sizePolicy();policy.setRetainSizeWhenHidden(True);self.setSizePolicy(policy)
+        self._busy=False;self._angle=0
+        self._timer=QTimer(self);self._timer.setInterval(40)
+        self._timer.timeout.connect(self._advance)
+        self.hide()
+
+    def set_busy(self,busy):
+        self._busy=bool(busy)
+        self.setVisible(self._busy)
+        if self._busy and self.isVisible():self._timer.start()
+        else:self._timer.stop()
+
+    def _advance(self):
+        self._angle=(self._angle-30)%360
+        self.update()
+
+    def paintEvent(self,event):
+        painter=QPainter(self);painter.setRenderHint(QPainter.Antialiasing)
+        rect=QRectF(self.rect()).adjusted(2,2,-2,-2)
+        painter.setPen(QPen(theme.qcolor(theme.BORDER),1.6));painter.drawEllipse(rect)
+        painter.setPen(QPen(theme.qcolor(theme.ACCENT),1.6,Qt.SolidLine,Qt.RoundCap))
+        painter.drawArc(rect,self._angle*16,100*16)
+
+    def showEvent(self,event):
+        super().showEvent(event)
+        if self._busy:self._timer.start()
+
+    def hideEvent(self,event):
+        self._timer.stop()
+        super().hideEvent(event)
+
+
 class AnchoredPopup(QWidget):
     def __init__(self, parent=None):
         # Native tool windows belong to a top-level owner, never a tile's

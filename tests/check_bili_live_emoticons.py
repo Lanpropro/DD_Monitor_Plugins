@@ -35,6 +35,33 @@ def buttons(popup):
 
 class EmoticonTabTests(unittest.TestCase):
 
+    def test_refresh_retains_loaded_icons_selection_and_scroll_until_result(self):
+        with patch.object(image_api,'_load_image',side_effect=self.load):
+            packs=[package('第一包'),package('保留',80)]
+            self.popup.set_packages(packs);self.popup.tabs.setCurrentIndex(1)
+            settle(lambda:len(buttons(self.popup))==80 and all(not b.icon().isNull() for b in buttons(self.popup)))
+            settle(lambda:not _active_requests)
+            bar=self.popup.scroll.verticalScrollBar();bar.setValue(150)
+            APP.processEvents();before=bar.value();body=self.popup.scroll.widget();first=buttons(self.popup)[0]
+            self.popup.set_loading();APP.processEvents()
+            self.assertIs(self.popup.scroll.widget(),body)
+            self.assertIs(buttons(self.popup)[0],first)
+            self.assertFalse(first.icon().isNull())
+            self.assertEqual(self.popup.tabs.currentIndex(),1)
+            self.assertEqual(bar.value(),before)
+            self.assertTrue(self.popup.refresh_spinner.isVisible())
+            self.assertNotIn('正在加载',self.popup.status.text())
+            self.popup.set_error('刷新超时')
+            self.assertFalse(self.popup.refresh_spinner.isVisible())
+            self.assertIs(self.popup.scroll.widget(),body)
+            self.assertEqual(bar.value(),before)
+            self.popup.set_loading();self.popup.set_packages(packs);APP.processEvents()
+            self.assertFalse(self.popup.refresh_spinner.isVisible())
+            self.assertIs(self.popup.scroll.widget(),body,'unchanged refresh must not rebuild retrieved icons')
+            self.assertEqual(self.popup.tabs.currentIndex(),1)
+            self.assertEqual(bar.value(),before)
+
+
     def setUp(self):
         self.popup = EmoticonPopup()
         self.popup.show()

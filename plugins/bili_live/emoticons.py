@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 from pathlib import Path
 from ddm import config, theme
 from .gift_media import _fetch
-from .popup import AnchoredPopup, picker_style
+from .popup import AnchoredPopup, RefreshSpinner, picker_style
 from .workers import start_worker as _start
 
 def _style_button(button):
@@ -146,9 +146,13 @@ class EmoticonPopup(AnchoredPopup):
         layout = QVBoxLayout(holder)
         layout.setContentsMargins(8, 8, 8, 8)
         header = QHBoxLayout()
-        self.status = QLabel("正在加载表情…")
+        self.status = QLabel()
         self.status.setWordWrap(True)
+        policy=self.status.sizePolicy();policy.setRetainSizeWhenHidden(True);self.status.setSizePolicy(policy)
         header.addWidget(self.status, 1)
+        self.status.hide()
+        self.refresh_spinner=RefreshSpinner()
+        header.addWidget(self.refresh_spinner,0,Qt.AlignVCenter)
         self.retry_button = QPushButton("重试")
         _style_button(self.retry_button)
         self.retry_button.setFixedSize(48, theme.TILE_CONTROL_HEIGHT)
@@ -219,15 +223,17 @@ class EmoticonPopup(AnchoredPopup):
         self.tabs.blockSignals(False)
         self.tabs.hide()
 
-    def set_loading(self):
-        self._clear_packages()
-        self.status.setText("正在加载表情…")
-        self.status.show()
+    def set_loading(self,*,clear=False):
+        if clear:self._clear_packages()
+        self.status.clear()
+        self.status.hide()
+        self.refresh_spinner.set_busy(True)
         self.retry_button.setText("刷新")
         self.retry_button.setEnabled(False)
         self.retry_button.show()
 
     def set_error(self, message):
+        self.refresh_spinner.set_busy(False)
         self.status.setText(message)
         self.status.show()
         self.retry_button.setText("重试")
@@ -235,11 +241,17 @@ class EmoticonPopup(AnchoredPopup):
         self.retry_button.show()
 
     def set_packages(self, packages):
-        self._clear_packages()
+        packages=[p for p in packages if p.get("pkg_type") in (1,2,3,5)]
+        self.refresh_spinner.set_busy(False)
         self.retry_button.setText("刷新")
         self.retry_button.setEnabled(True)
         self.retry_button.show()
-        self._packages = [p for p in packages if p.get("pkg_type") in (1, 2, 3, 5)]
+        if packages and packages==self._packages:
+            self.status.setText("表情" if self._emotes else "暂无可用表情")
+            self.status.show()
+            return
+        self._clear_packages()
+        self._packages = packages
         self.tabs.blockSignals(True)
         for package in self._packages:
             name = str(package.get("pkg_name") or "表情")

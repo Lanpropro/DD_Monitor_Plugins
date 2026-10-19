@@ -11,7 +11,7 @@ from .emoticons import _style_button
 from .gift_api import format_battery
 from .gift_controller import GiftPanelState
 from .gift_media import GiftMediaLoader,GiftImageLabel
-from .popup import AnchoredPopup,picker_style
+from .popup import AnchoredPopup,RefreshSpinner,picker_style
 
 def _quantity_valid(item,count,wallet):
     return (type(count) is int and 0<count<=item.max_count and
@@ -125,6 +125,8 @@ class GiftPopup(AnchoredPopup):
         self.wallet_label.setMinimumWidth(0)
         self.wallet_label.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred)
         self.wallet_label.setMaximumHeight(theme.TILE_CONTROL_HEIGHT*3)
+        self.refresh_spinner=RefreshSpinner()
+        header.addWidget(self.refresh_spinner,0,Qt.AlignVCenter)
         self.refresh_button=QPushButton('刷新');_style_button(self.refresh_button)
         self.refresh_button.setFixedSize(48,theme.TILE_CONTROL_HEIGHT)
         self.refresh_button.clicked.connect(self.refreshRequested);header.addWidget(self.refresh_button)
@@ -158,10 +160,10 @@ class GiftPopup(AnchoredPopup):
         feedback='正在赠送…' if state.sending else state.feedback
         self.wallet_label.setText(wallet+('　'+feedback if feedback else ''))
         self.wallet_label.setToolTip(feedback)
+        self.refresh_spinner.set_busy(bool(state.loading))
+        self.refresh_button.setEnabled(not state.loading)
         errors=[x for x in (state.catalog_error,state.wallet_error,state.bag_error) if x]
-        status=list(errors)
-        if state.loading:status.append('正在加载：'+ '、'.join({'catalog':'礼物','wallet':'余额','bag':'背包'}[x] for x in sorted(state.loading)))
-        self.status.setText('；'.join(x for x in status if x))
+        self.status.setText('；'.join(errors))
         self.status.setVisible(bool(self.status.text()))
         if state.tabs!=self._tabs:
             previous=next((t for t in self._tabs if t.key==self._selected),None)

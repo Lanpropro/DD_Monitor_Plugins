@@ -160,6 +160,36 @@ class PickerUXTests(unittest.TestCase):
         self.gift.set_state(replace(self.state,feedback='网络失败'))
         self.assertIn('网络失败',self.gift.wallet_label.text())
 
+    def test_both_refresh_spinners_animate_beside_buttons_and_pause_while_hidden(self):
+        self.emote.set_packages([])
+        for popup,button in ((self.emote,self.emote.retry_button),(self.gift,self.gift.refresh_button)):
+            with self.subTest(popup=type(popup).__name__):
+                popup.open_at(self.anchor);APP.processEvents()
+                if popup is self.emote:popup.set_loading()
+                else:popup.set_state(replace(self.state,loading=frozenset(('catalog','wallet','bag'))))
+                APP.processEvents()
+                spinner=popup.refresh_spinner
+                self.assertTrue(spinner.isVisible())
+                self.assertLessEqual(spinner.width(),18)
+                self.assertLessEqual(spinner.geometry().right(),button.geometry().left())
+                self.assertLessEqual(button.geometry().left()-spinner.geometry().right(),8,
+                    'spinner must stay directly beside refresh even when the status label is hidden')
+                self.assertLessEqual(abs(spinner.geometry().center().y()-button.geometry().center().y()),1)
+                first=spinner.grab().toImage();QTest.qWait(90)
+                self.assertNotEqual(first,spinner.grab().toImage(),'refresh indicator must visibly animate')
+                self.assertFalse(button.isEnabled())
+                if popup is self.gift:
+                    self.assertTrue(popup.status.isHidden())
+                    self.assertNotIn('正在加载',popup.status.text())
+                popup.hide();self.assertFalse(spinner._timer.isActive())
+                popup.open_at(self.anchor);APP.processEvents()
+                self.assertTrue(spinner.isVisible());self.assertTrue(spinner._timer.isActive())
+                if popup is self.emote:popup.set_error('网络失败')
+                else:popup.set_state(replace(self.state,catalog_error='网络失败'))
+                self.assertFalse(spinner.isVisible());self.assertFalse(spinner._timer.isActive())
+                self.assertIn('网络失败',popup.status.text());self.assertTrue(button.isEnabled())
+                popup.hide()
+
     def test_empty_gift_image_never_opens_a_file(self):
         warnings=[];previous=qInstallMessageHandler(lambda kind,ctx,msg:warnings.append(msg))
         try:

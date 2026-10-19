@@ -31,6 +31,36 @@ def settle(predicate, seconds=3):
 
 class ComposerTests(unittest.TestCase):
 
+    def test_pending_refresh_keeps_same_room_emoticons_usable_but_context_change_clears_them(self):
+        packs=[{'pkg_type':3,'pkg_name':'保留','emoticons':[{'emoji':'[保留]','perm':1}]}]
+        with patch.object(bili,'get_emoticons',return_value=packs):
+            self.composer.open_emoticons()
+            settle(lambda:len(self.composer.popup.scroll.findChildren(QToolButton))==1)
+        popup=self.composer.popup;body=popup.scroll.widget()
+        entered,release=threading.Event(),threading.Event()
+        def load(*args,**kwargs):
+            entered.set();release.wait(3)
+            raise ValueError('refresh failed')
+        try:
+            with patch.object(bili,'get_emoticons',side_effect=load):
+                popup.retry_button.click();settle(entered.is_set)
+                self.assertIs(popup.scroll.widget(),body)
+                self.assertEqual(self.composer._catalog_key,self.composer._context())
+                self.assertTrue(popup.refresh_spinner.isVisible())
+                popup.scroll.findChildren(QToolButton)[0].click()
+                self.assertEqual(self.composer.edit.text(),'[保留]')
+                self.composer.open_emoticons()
+                self.assertTrue(popup.refresh_spinner.isVisible())
+                release.set();settle(lambda:self.composer._catalog_pending is None)
+                self.assertIs(popup.scroll.widget(),body)
+                self.assertIn('refresh failed',popup.status.text())
+                self.assertFalse(popup.refresh_spinner.isVisible())
+                self.composer.set_room('202')
+                self.assertEqual(popup.scroll.findChildren(QToolButton),[])
+                self.assertEqual(popup.tabs.count(),0)
+        finally:release.set()
+
+
     def setUp(self):
         self.assertIsNotNone(importlib.util.find_spec('ddm_plugin_bili_live.composer'), '缺少独立的弹幕输入控件')
         from ddm_plugin_bili_live.composer import DanmakuComposer
