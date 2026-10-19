@@ -3,10 +3,33 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 from bili_live_support import bili
-from bili_live_fixtures import config,room_payload,bag_payload
+from bili_live_fixtures import config,room_payload,bag_payload,guard_payload
 from ddm_plugin_bili_live import gift_api as api
 
 class ReadTests(unittest.TestCase):
+    def test_direct_guard_and_unlocked_attire_use_their_server_payment_scene(self):
+        for scene in ('guard_gift','guard_attire'):
+            with self.subTest(scene=scene):
+                item=api.normalize_catalog(guard_payload(scene=scene),'90001').tabs[0].items[0]
+                self.assertEqual(item.disabled_reason,'')
+                api.validate_send(item,1,cookies={'SESSDATA':'fake','bili_jct':'csrf'},wallet=19998000)
+        locked=api.normalize_catalog(guard_payload(scene='guard_attire',unlocked=False),'90001').tabs[0].items[0]
+        self.assertEqual(locked.disabled_reason,'请先开通大航海')
+
+    def test_descriptive_paid_gift_rule_does_not_disable_an_ordinary_gift(self):
+        data=room_payload();data['gift_config']['room_config'][0]['rule']='展示礼物特效'
+        self.assertEqual(api.normalize_catalog(data,'90001').tabs[0].items[1].disabled_reason,'')
+
+    def test_unimplemented_interactive_scenes_stay_visible_without_posting(self):
+        for scene in ('guard_blind_box','blind_box','unknown'):
+            with self.subTest(scene=scene):
+                item=api.normalize_catalog(guard_payload(scene=scene),'90001').tabs[0].items[0]
+                self.assertIn(scene,item.disabled_reason)
+                with patch.object(api.requests,'post') as post,self.assertRaises(api.GiftSendError):
+                    api.send_gift(api.GiftTarget('90001',123,456),item,1,
+                        cookies={'SESSDATA':'fake','bili_jct':'csrf'},wallet=19998000,still_current=lambda:True)
+                post.assert_not_called()
+
     def test_fan_club_light_sign_uses_ordinary_send_when_unlocked(self):
         for gift_id in (31164,34001):
             with self.subTest(gift_id=gift_id):
@@ -134,6 +157,48 @@ class ReadTests(unittest.TestCase):
 
 
 class SendTests(unittest.TestCase):
+    def test_guard_payment_posts_one_interactive_form_with_original_scene(self):
+        import json
+        for scene in ('guard_gift','guard_attire'):
+            with self.subTest(scene=scene):
+                item=api.normalize_catalog(guard_payload(scene=scene),'90001').tabs[0].items[0]
+                with patch.object(api.requests,'get',return_value=Mock(status_code=200,
+                        json=lambda:{'code':0,'data':{'addr':'203.0.113.1'}})) as get,patch.object(
+                        api.requests,'post',return_value=Mock(status_code=200,json=lambda:{'code':0,'message':'ok'})) as post:
+                    api.send_gift(self.target,item,1,cookies=self.cookies,wallet=19998000,still_current=lambda:True)
+                self.assertEqual(post.call_count,1)
+                self.assertEqual(post.call_args.args[0],api.BASE+'/xlive/revenue/v2/interactive_pay/send')
+                form=post.call_args.kwargs['data']
+                self.assertEqual(json.loads(form['gift_scene']),{'scene':scene,'pay_type':'interactive_pay','hide_price':False})
+                for key,value in {'context_id':'90001','room_id':'90001','receiver_uid':456,'anchor_id':456,
+                        'uid':123,'gift_id':item.gift_id,'gift_num':1,'price':item.price,
+                        'context_type':1,'remote_ip':'203.0.113.1','csrf':'csrf-token','csrf_token':'csrf-token'}.items():
+                    self.assertEqual(form[key],value)
+                self.assertNotIn('bag_id',form);self.assertNotIn('coin_type',form)
+                self.assertFalse(post.call_args.kwargs['allow_redirects'])
+                self.assertEqual(get.call_args.kwargs['cookies'],self.cookies)
+
+    def test_guard_context_change_during_ip_read_cancels_before_post(self):
+        item=api.normalize_catalog(guard_payload(),'90001').tabs[0].items[0]
+        current=[True]
+        def read(*args,**kwargs):
+            current[0]=False
+            return Mock(status_code=200,json=lambda:{'code':0,'data':{'addr':''}})
+        with patch.object(api.requests,'get',side_effect=read) as get,patch.object(api.requests,'post') as post:
+            with self.assertRaises(api.GiftSendError):
+                api.send_gift(self.target,item,1,cookies=self.cookies,wallet=19998000,still_current=lambda:current[0])
+            self.assertEqual(get.call_count,1);post.assert_not_called()
+
+    def test_guard_timeout_never_retries_or_falls_back_to_gold(self):
+        item=api.normalize_catalog(guard_payload(),'90001').tabs[0].items[0]
+        with patch.object(api.requests,'get',return_value=Mock(status_code=200,
+                json=lambda:{'code':0,'data':{'addr':''}})),patch.object(api.requests,'post',side_effect=api.requests.Timeout()) as post:
+            with self.assertRaises(api.GiftSendError) as caught:
+                api.send_gift(self.target,item,1,cookies=self.cookies,wallet=19998000,still_current=lambda:True)
+            self.assertTrue(caught.exception.uncertain)
+            self.assertEqual(post.call_count,1)
+            self.assertEqual(post.call_args.args[0],api.BASE+'/xlive/revenue/v2/interactive_pay/send')
+
     def test_zero_code_ok_is_success_and_nonzero_ok_remains_failure(self):
         for message in ('ok','OK','Ok'):
             with self.subTest(message=message),patch.object(api.requests,'post',return_value=Mock(

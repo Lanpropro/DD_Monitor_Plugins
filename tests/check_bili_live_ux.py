@@ -10,7 +10,7 @@ import shiboken6
 from unittest.mock import patch
 from bili_live_support import bili
 from bili_live_fixtures import room_payload
-from PySide6.QtCore import QEvent, QPoint, Qt, qInstallMessageHandler
+from PySide6.QtCore import QEvent, QObject, QPoint, Qt, qInstallMessageHandler
 from PySide6.QtGui import QCursor, QImage, QColor, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton, QVBoxLayout, QWidget
@@ -48,9 +48,9 @@ class PickerUXTests(unittest.TestCase):
         self.gift.set_state(self.state)
 
     def tearDown(self):
-        self.gift.shutdown(); self.emote.hide(); self.host.close()
+        self.gift.shutdown(); self.emote.shutdown(); self.host.close()
         settle(lambda: not _active_requests)
-        self.gift.deleteLater(); self.emote.deleteLater(); self.host.deleteLater()
+        self.host.deleteLater()
         APP.sendPostedEvents(None,QEvent.DeferredDelete)
         self.media.stop(); self.temp.cleanup()
 
@@ -74,6 +74,60 @@ class PickerUXTests(unittest.TestCase):
                 self.assertFalse(popup.isVisible())
             self.assertEqual(len(clicked),2)
         finally: other.close()
+
+    def test_layout_transaction_places_both_pickers_only_at_final_anchor_position(self):
+        class Moves(QObject):
+            def __init__(self):super().__init__();self.positions=[]
+            def eventFilter(self,watched,event):
+                if event.type()==QEvent.Move:self.positions.append(watched.pos())
+                return False
+        for popup in (self.emote,self.gift):
+            with self.subTest(popup=type(popup).__name__):
+                popup.open_at(self.anchor);APP.processEvents()
+                before=popup.pos();anchor_before=self.anchor.pos()
+                observed=Moves();popup.installEventFilter(observed)
+                try:
+                    self.anchor.move(anchor_before+QPoint(80,0))
+                    self.anchor.move(anchor_before+QPoint(20,0))
+                    self.assertEqual(observed.positions,[],
+                        'a picker exposed intermediate positions from one host layout transaction')
+                    APP.processEvents()
+                    self.assertEqual(popup.pos()-before,QPoint(20,0))
+                    self.assertEqual(len(observed.positions),1)
+                finally:
+                    popup.removeEventFilter(observed);popup.hide()
+                    self.anchor.move(anchor_before);APP.processEvents()
+
+    def test_wallet_and_other_tab_refresh_keep_selected_cards_and_scroll_position(self):
+        items=tuple(replace(self.item,key=f'long:{i}',name=f'Gift {i}',counts=(1,),allow_custom=False) for i in range(80))
+        main=GiftTab('main','礼物',items)
+        bag=GiftTab('bag','背包',(replace(self.item,key='bag:1',source='bag',bag_id=1,stock=5),))
+        state=replace(self.state,tabs=(main,bag))
+        self.gift.set_state(state);self.gift.open_at(self.anchor);APP.processEvents()
+        bar=self.gift.scroll.verticalScrollBar()
+        settle(lambda:bar.maximum()>300)
+        bar.setValue(150);APP.processEvents();before=bar.value()
+        first=self.gift._cards[0]
+        self.gift.set_state(replace(state,sending=True,feedback='正在赠送…'))
+        self.gift.set_state(replace(state,wallet=None,tabs=(main,GiftTab('bag','背包',()))))
+        APP.processEvents()
+        self.assertIs(self.gift._cards[0],first,'refreshing a different tab rebuilt the selected gift grid')
+        self.assertEqual(bar.value(),before)
+        self.gift.set_state(replace(state,wallet=99894,tabs=(main,replace(bag,items=()))))
+        APP.processEvents()
+        self.assertEqual(bar.value(),before)
+
+    def test_focused_gift_send_does_not_scroll_to_bottom_when_cards_are_disabled(self):
+        items=tuple(replace(self.item,key=f'single:{i}',name=f'Gift {i}',counts=(1,),allow_custom=False) for i in range(80))
+        state=replace(self.state,tabs=(GiftTab('main','礼物',items),))
+        self.gift.set_state(state);self.gift.open_at(self.anchor);APP.processEvents()
+        settle(lambda:self.gift.scroll.verticalScrollBar().maximum()>300)
+        card=self.gift._cards[0];card.setFocus();QTest.mouseClick(card,Qt.LeftButton)
+        before=self.gift.scroll.verticalScrollBar().value()
+        self.gift.set_state(replace(state,sending=True,feedback='正在赠送…'));APP.processEvents()
+        self.gift.set_state(replace(state,wallet=99894));APP.processEvents()
+        self.assertEqual(self.gift.scroll.verticalScrollBar().value(),before,
+            'a completed send moved the gift list away from the clicked gift')
 
     def test_catalog_arriving_after_bag_selects_gifts_and_hides_empty_status(self):
         self.gift.set_state(replace(self.state,tabs=(GiftTab('bag','背包',()),)))
@@ -117,8 +171,11 @@ class PickerUXTests(unittest.TestCase):
     def test_shutdown_cancels_layout_callbacks_before_native_widget_destruction(self):
         errors=[]
         popup=GiftPopup(self.host,cache_dir=self.temp.name)
-        with patch.object(sys,'excepthook',side_effect=lambda *x:errors.append(x)):
+        with patch.object(sys,'excepthook',side_effect=lambda *x:errors.append(x)),patch.object(popup.media,'request'):
             popup.set_state(self.state)
+            popup.open_at(self.anchor);APP.processEvents()
+            self.anchor.move(self.anchor.pos()+QPoint(3,0))
+            self.assertTrue(popup._placement_timer.isActive())
             popup.shutdown();popup.deleteLater()
             APP.sendPostedEvents(None,QEvent.DeferredDelete);APP.processEvents()
         self.assertEqual(errors,[],'queued image layout callback reached a deleted popup')
@@ -141,7 +198,11 @@ class PickerUXTests(unittest.TestCase):
         self.gift.open_at(self.anchor);APP.processEvents()
         card=self.gift._cards[0];QCursor.setPos(card.mapToGlobal(card.rect().center()));card.click()
         quantity=self.gift.quantity_popup
-        unrelated=QWidget();unrelated.show();APP.processEvents()
+        unrelated=QWidget()
+        screen=self.anchor.screen().availableGeometry()
+        unrelated.setGeometry(screen.right()-70,screen.bottom()-70,50,50)
+        unrelated.show();APP.processEvents()
+        QCursor.setPos(quantity.mapToGlobal(quantity.rect().center()))
         try:
             with patch.object(quantity,'place_at',wraps=quantity.place_at) as place:
                 unrelated.move(unrelated.pos()+QPoint(4,3));APP.processEvents()

@@ -1,6 +1,7 @@
 """Immutable gift models, conservative room/bag normalization and HTTP reads."""
 from copy import deepcopy
 from dataclasses import dataclass
+import json
 import time
 from types import MappingProxyType
 import requests
@@ -9,6 +10,8 @@ from .bili_api import HEADERS, api_result, resolve_room
 BASE = 'https://api.live.bilibili.com'
 GOLD_ENDPOINT = BASE + '/xlive/revenue/v1/gift/sendGold'
 BAG_ENDPOINT = BASE + '/xlive/revenue/v1/gift/sendBag'
+INTERACTIVE_ENDPOINT = BASE + '/xlive/revenue/v2/interactive_pay/send'
+DIRECT_INTERACTIVE_SCENES = ('guard_gift','guard_attire')
 
 @dataclass(frozen=True)
 class GiftItem:
@@ -26,6 +29,12 @@ class GiftItem:
     bag_id: int = 0
     stock: int = 0
     expires_at: int = 0
+    pay_type: str = 'send_gift'
+    gift_scene: str = ''
+
+    @property
+    def payment_scene(self):
+        return json.loads(self.gift_scene).get('scene','') if self.gift_scene else ''
 
 @dataclass(frozen=True)
 class GiftTab:
@@ -81,13 +90,17 @@ def _configs(value):
 def _url(value):
     return value if isinstance(value,str) and value.startswith(('https://','http://')) else ''
 
-def _reason(config, room_id):
+def _reason(config, room_id, source):
     special=config.get('special') or {}
     if not isinstance(special,dict):return '未知礼物权限'
     if special.get('is_use',1) != 1:return str(special.get('tips') or '当前账号尚未解锁')
     if config.get('perm',1) != 1 or config.get('is_use',1) != 1:return '当前账号没有赠送权限'
     scene=config.get('gift_scene') or {}
-    if not isinstance(scene,dict) or scene.get('pay_type','send_gift') != 'send_gift':return '暂不支持此购买流程'
+    if not isinstance(scene,dict):return '无法识别此礼物流程'
+    interactive=scene.get('pay_type')=='interactive_pay' and scene.get('scene') in DIRECT_INTERACTIVE_SCENES
+    if scene.get('pay_type','send_gift')!='send_gift' and not interactive:
+        return '暂不支持此购买流程'+(f"（{scene['scene']}）" if scene.get('scene') else '')
+    if interactive and source=='bag':return '此礼物需要电池购买'
     try:
         flow_types=tuple(_integer(value) for value in
             (special.get('special_type',0),config.get('gift_type',0),config.get('type',0)))
@@ -97,12 +110,13 @@ def _reason(config, room_id):
     # roomGiftList marks the ordinary fan-club light sign as special_type=3.
     # Its default_gift/send_gift path uses the same form as ordinary paid gifts.
     light_sign=(config.get('id',config.get('gift_id')) in (31164,34001) and special_type==3)
-    if config.get('interactive_pay') or gift_type or kind or special_type and not light_sign:
+    attire=interactive and scene['scene']=='guard_attire' and special_type==15
+    if config.get('interactive_pay') or gift_type or kind or special_type and not (light_sign or attire):
         return '暂不支持特殊礼物流程'
     bound=config.get('bind_roomid') or config.get('room_id') or 0
     if str(bound) not in ('0','',str(room_id)):return '仅限指定直播间'
     rule=config.get('rule')
-    if rule not in (None,'',0,{},[]):return '未知背包使用规则'
+    if source=='bag' and rule not in (None,'',0,{},[]):return '未知背包使用规则'
     return ''
 
 def _item(config, key, room_id, max_count, *, source='gold', bag_id=0, stock=0, expires_at=0, now=0):
@@ -117,7 +131,7 @@ def _item(config, key, room_id, max_count, *, source='gold', bag_id=0, stock=0, 
     for value in values if isinstance(values,list) else []:
         count=_integer(value.get('num') if isinstance(value,dict) else value,0)
         if 0<count<=maximum and count not in counts:counts.append(count)
-    reason=_reason(config,room_id)
+    reason=_reason(config,room_id,source)
     price=_integer(config.get('price'),-1)
     if not reason and (gift_id<=0 or price<0):reason='礼物资料不完整'
     if source=='gold' and config.get('coin_type')!='gold':
@@ -130,10 +144,13 @@ def _item(config, key, room_id, max_count, *, source='gold', bag_id=0, stock=0, 
     # must retain the server's quantity permissions, even when none fit.
     if not counts and maximum>0 and (custom or source=='bag' and stock==1):counts=[1]
     if not counts:reason=reason or '当前没有可用赠送数量'
+    scene=config.get('gift_scene')
     return GiftItem(key,source,gift_id,str(config.get('name') or f'礼物 {gift_id}'),max(0,price),
         _url(config.get('gif')),_url(config.get('img_basic')) or _url(config.get('img_dynamic')),
         tuple(counts),maximum,custom and maximum>1,reason,
-        bag_id,stock,expires_at)
+        bag_id,stock,expires_at,
+        scene.get('pay_type','send_gift') if isinstance(scene,dict) else 'send_gift',
+        json.dumps(scene,ensure_ascii=False,separators=(',',':')) if isinstance(scene,dict) else '')
 
 def normalize_catalog(data, room_id):
     if not isinstance(data,dict) or not isinstance(data.get('gift_data'),dict) or not isinstance(data.get('gift_config'),dict):
@@ -218,6 +235,10 @@ def validate_send(item, quantity, *, cookies, wallet):
         raise GiftSendError('此礼物不支持该数量')
     if item.disabled_reason or item.source not in ('gold','bag'):
         raise GiftSendError(item.disabled_reason or '暂不支持此礼物流程')
+    if item.pay_type not in ('send_gift','interactive_pay'):
+        raise GiftSendError('暂不支持此购买流程')
+    if item.pay_type=='interactive_pay' and (item.source!='gold' or item.payment_scene not in DIRECT_INTERACTIVE_SCENES):
+        raise GiftSendError('暂不支持此礼物流程')
     if item.gift_id<=0 or item.price<0:raise GiftSendError('礼物资料无效')
     if item.source=='bag':
         if item.bag_id<=0 or quantity>item.stock:raise GiftSendError('该背包批次库存不足')
@@ -229,13 +250,22 @@ def send_gift(target,item,quantity,*,cookies,wallet,still_current):
     validate_send(item,quantity,cookies=cookies,wallet=wallet)
     if (not str(target.room_id).isdigit() or int(target.room_id)<=0 or target.uid<=0 or target.ruid<=0):
         raise GiftSendError('房间或账号信息无效')
-    form={'uid':target.uid,'ruid':target.ruid,'biz_id':target.room_id,'gift_id':item.gift_id,
-        'gift_num':quantity,'price':item.price,'platform':'pc','biz_code':'live',
-        'send_ruid':0,'storm_beat_id':0,'csrf':cookies['bili_jct'],'csrf_token':cookies['bili_jct']}
-    if item.source=='bag':
-        endpoint=BAG_ENDPOINT;form['bag_id']=item.bag_id
+    if not still_current():raise GiftSendError('房间或账号已改变，已取消赠送')
+    form={'uid':target.uid,'gift_id':item.gift_id,'gift_num':quantity,'price':item.price,
+        'platform':'pc','csrf':cookies['bili_jct'],'csrf_token':cookies['bili_jct']}
+    if item.pay_type=='interactive_pay':
+        # The official guard gift/attire sender uses this route, not sendGold.
+        ip=_read('/xlive/web-room/v1/index/getIpInfo',cookies).get('addr') or ''
+        if not isinstance(ip,str):raise GiftSendError('无法确认赠送网络信息')
+        endpoint=INTERACTIVE_ENDPOINT
+        form.update(gift_scene=item.gift_scene,context_id=target.room_id,room_id=target.room_id,
+            receiver_uid=target.ruid,anchor_id=target.ruid,context_type=1,remote_ip=ip,web_location='444.8')
     else:
-        endpoint=GOLD_ENDPOINT;form.update(coin_type='gold',bag_id=0,rnd=int(time.time()),visit_id='')
+        form.update(ruid=target.ruid,biz_id=target.room_id,biz_code='live',send_ruid=0,storm_beat_id=0)
+        if item.source=='bag':
+            endpoint=BAG_ENDPOINT;form['bag_id']=item.bag_id
+        else:
+            endpoint=GOLD_ENDPOINT;form.update(coin_type='gold',bag_id=0,rnd=int(time.time()),visit_id='')
     if not still_current():raise GiftSendError('房间或账号已改变，已取消赠送')
     # Exactly one form request; redirects and library-level retries stay disabled.
     try:

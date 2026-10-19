@@ -11,7 +11,8 @@ from unittest.mock import patch
 from bili_live_support import HOST,ROOT,session,bili
 from bili_live_fixtures import room_payload
 import shiboken6
-from PySide6.QtCore import QEvent,Qt,qInstallMessageHandler
+from PySide6.QtCore import QEvent,QPoint,Qt,qInstallMessageHandler
+from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
 from ddm import plugins as host_api,theme
@@ -41,6 +42,7 @@ class IntegrationTests(unittest.TestCase):
             patch.object(MainWindow,'sync_danmaku'),patch.object(MainWindow,'stop_danmaku')]
         for p in self.patches:p.start()
         self.window=self.new_window(['bili_live'])
+        self._window_closed=False
         self.window.resize(1000,600);self.window.show();APP.processEvents()
         self.entry=next(p for p in self.window.plugins.plugins if p.context.name=='bili_live')
         self.api=importlib.import_module('ddm_plugin_bili_live.gift_api')
@@ -61,7 +63,8 @@ class IntegrationTests(unittest.TestCase):
                 'sessdata':'fake','bili_jct':'fake-csrf','buvid3':'device-test','plugins_enabled':enabled,
                 'settings':{'auto_update':False}})
     def tearDown(self):
-        self.window.close();APP.processEvents();APP.sendPostedEvents(None,QEvent.DeferredDelete)
+        if not self._window_closed:self.window.close()
+        APP.processEvents();APP.sendPostedEvents(None,QEvent.DeferredDelete)
         for p in reversed(self.reads):p.stop()
         for p in reversed(self.patches):p.stop()
         self.temp.cleanup()
@@ -88,6 +91,31 @@ class IntegrationTests(unittest.TestCase):
             composer.open_emoticons();settle(lambda:composer.popup is not None)
             self.assertFalse(composer.gift_popup.isVisible())
             composer.open_gifts();self.assertFalse(composer.popup.isVisible())
+    def test_rapid_pointer_sweeps_across_tiles_keep_both_pickers_at_their_anchors(self):
+        self.window.wall.set_layout('2x2')
+        tiles=self.window.wall.tiles
+        for index,tile in enumerate(tiles):tile.set_room({'room_id':str(90001+index),'uname':f'Tile {index}'})
+        composer=self.composer(tiles[0])
+        composer.open_gifts();settle(lambda:not composer.gift_controller.state.loading)
+        composer.gift_popup.hide()
+        with patch.object(self.emotes,'get_emoticons',return_value=[]):
+            composer.open_emoticons();settle(lambda:composer.popup is not None)
+        composer.popup.hide()
+        for popup,button in ((composer.gift_popup,composer.gift_button),(composer.popup,composer.emote_button)):
+            tiles[0].set_controls_visible(True);popup.open_at(button);APP.processEvents()
+            for step in range(36):
+                target=tiles[step%len(tiles)]
+                QCursor.setPos(target.mapToGlobal(target.rect().center()))
+                APP.processEvents()
+                target.set_controls_visible(True)
+                QCursor.setPos(popup.mapToGlobal(popup.rect().center()))
+                APP.processEvents();QTest.qWait(2)
+                anchor=button.mapToGlobal(QPoint(button.width()//2,0))
+                screen=button.screen().availableGeometry()
+                expected=max(screen.left(),min(anchor.x()-popup.width()//2,screen.right()-popup.width()+1))
+                self.assertLessEqual(abs(popup.x()-expected),1,(type(popup).__name__,step,popup.x(),expected))
+                self.assertTrue(popup.isVisible())
+            popup.hide()
     def test_existing_new_empty_room_swap_and_fullscreen_same_control(self):
         tile=self.window.wall.tiles[0];composer=self.composer(tile)
         self.window.wall.set_layout('2x2');empty=next(t for t in self.window.wall.tiles if not t.room.get('room_id'));self.assertFalse(self.composer(empty).isVisible())
@@ -138,6 +166,8 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue(not shiboken6.isValid(a.gift_popup) or not a.gift_popup.isVisible())
     def test_disabled_removed_restart_has_no_ui(self):
         self.window.close();APP.processEvents()
+        # Do not unload it again after new_window replaces its module namespace.
+        self._window_closed=True
         other=self.new_window([])
         try:self.assertEqual(other.wall.tiles[0]._plugin_controls.entries,[])
         finally:other.close()

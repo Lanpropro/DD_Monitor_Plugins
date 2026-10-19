@@ -1,5 +1,5 @@
 """Shared rounded, non-grabbing pickers anchored to a host widget."""
-from PySide6.QtCore import QEvent, QPoint, QRectF, Qt
+from PySide6.QtCore import QEvent, QPoint, QRectF, Qt, QTimer
 from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import QApplication, QWidget
 from shiboken6 import isValid
@@ -16,6 +16,9 @@ class AnchoredPopup(QWidget):
         self._anchor = None
         self._owner = None
         self._owner_dragging = False
+        self._placement_timer = QTimer(self)
+        self._placement_timer.setSingleShot(True)
+        self._placement_timer.timeout.connect(self._place_after_layout)
         QApplication.instance().installEventFilter(self)
 
     def paintEvent(self, event):
@@ -27,6 +30,7 @@ class AnchoredPopup(QWidget):
                                 theme.RADIUS_MD, theme.RADIUS_MD)
 
     def place_at(self, anchor):
+        self._placement_timer.stop()
         self._anchor = anchor
         self._owner = anchor.window()
         if self.parentWidget() is not self._owner:
@@ -42,6 +46,15 @@ class AnchoredPopup(QWidget):
         self.move(max(screen.left(), min(x, screen.right()-self.width()+1)),
                   max(screen.top(), min(y, screen.bottom()-self.height()+1)))
 
+    def _schedule_placement(self):
+        # A layout can move/resize several ancestors before the button reaches
+        # its final position. Expose only the settled native window position.
+        if not self._placement_timer.isActive():self._placement_timer.start(0)
+
+    def _place_after_layout(self):
+        if self._event_targets_alive() and self.isVisible() and self._anchor:
+            self.place_at(self._anchor)
+
     def open_at(self, button):
         self._owner_dragging = False
         self.place_at(button)
@@ -52,6 +65,7 @@ class AnchoredPopup(QWidget):
         return self.geometry().contains(point)
 
     def shutdown(self):
+        self._placement_timer.stop()
         self.hide()
         QApplication.instance().removeEventFilter(self)
         self.deleteLater()
@@ -79,7 +93,9 @@ class AnchoredPopup(QWidget):
             widget = self._anchor
             while widget is not None:
                 if watched is widget:
-                    self.place_at(self._anchor)
+                    if watched is self._owner and kind==QEvent.Move:
+                        self.place_at(self._anchor)
+                    else:self._schedule_placement()
                     break
                 widget = widget.parentWidget()
         elif kind == QEvent.MouseButtonPress:
@@ -94,6 +110,10 @@ class AnchoredPopup(QWidget):
             self.hide()
         # Outside clicks continue to the host, including its native title bar.
         return False
+
+    def hideEvent(self,event):
+        self._placement_timer.stop()
+        super().hideEvent(event)
 
 
 def picker_style():

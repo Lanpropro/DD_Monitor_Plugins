@@ -6,10 +6,10 @@ import time
 import unittest
 from unittest.mock import patch
 from bili_live_support import bili
-from bili_live_fixtures import room_payload
-from PySide6.QtCore import QEvent,QPoint,Qt
+from bili_live_fixtures import room_payload,guard_payload
+from PySide6.QtCore import QEvent,QPoint,Qt,QTimer
 from PySide6.QtGui import QCursor
-from PySide6.QtWidgets import QApplication,QPushButton
+from PySide6.QtWidgets import QApplication,QPushButton,QMessageBox
 from PySide6.QtTest import QTest
 from ddm_plugin_bili_live.gift_api import normalize_catalog,GiftTab,GiftResult
 from ddm_plugin_bili_live.gift_controller import GiftPanelState
@@ -25,6 +25,46 @@ def settle(predicate,seconds=2):
     raise AssertionError('popup state not reached')
 
 class PopupTests(unittest.TestCase):
+    def test_guard_gift_confirms_price_and_terms_before_emitting_send(self):
+        item=normalize_catalog(guard_payload(),'90001').tabs[0].items[0]
+        self.popup.set_state(replace(self.state,tabs=(GiftTab('main','礼物',(item,)),),wallet=19998000))
+        card=self.popup._cards[0]
+        self.assertTrue(card.isEnabled())
+        with patch.object(QMessageBox,'exec',return_value=QMessageBox.Cancel):card.click()
+        self.assertEqual(self.sent,[])
+        seen=[]
+        def accept(dialog):
+            seen.append(dialog.text()+dialog.informativeText())
+            return QMessageBox.Ok
+        with patch.object(QMessageBox,'exec',new=accept):card.click()
+        self.assertEqual(self.sent,[(item.key,1)])
+        self.assertIn('舰长一号',seen[0]);self.assertIn('1980',seen[0])
+        self.assertIn('service-agreement',seen[0]);self.assertIn('live-protocol',seen[0]);self.assertIn('lp-protocol',seen[0])
+
+    def test_guard_confirmation_cannot_send_after_context_reset(self):
+        item=normalize_catalog(guard_payload(),'90001').tabs[0].items[0]
+        self.popup.set_state(replace(self.state,tabs=(GiftTab('main','礼物',(item,)),),wallet=19998000))
+        self.assertTrue(self.popup._cards[0].isEnabled())
+        def reset(dialog):
+            self.popup.set_state(GiftPanelState())
+            return QMessageBox.Ok
+        with patch.object(QMessageBox,'exec',new=reset):self.popup._cards[0].click()
+        self.assertEqual(self.popup.state.tabs,())
+        self.assertEqual(self.sent,[])
+
+    def test_real_guard_dialog_click_keeps_picker_open_and_emits_once(self):
+        item=normalize_catalog(guard_payload(),'90001').tabs[0].items[0]
+        self.popup.set_state(replace(self.state,tabs=(GiftTab('main','礼物',(item,)),),wallet=19998000))
+        observed=[]
+        def accept():
+            dialog=APP.activeModalWidget()
+            observed.append(isinstance(dialog,QMessageBox))
+            if dialog:QTest.mouseClick(dialog.button(QMessageBox.Ok),Qt.LeftButton)
+        QTimer.singleShot(20,accept)
+        self.popup._cards[0].click()
+        self.assertEqual(observed,[True]);self.assertTrue(self.popup.isVisible())
+        self.assertEqual(self.sent,[(item.key,1)])
+
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()
         self.button=GiftButton();self.button.move(300,400);self.button.show()

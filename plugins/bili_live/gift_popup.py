@@ -1,10 +1,11 @@
 """Gift browsing and quantities; HTTP and account state stay in controllers."""
 from pathlib import Path
+from html import escape
 import time
 from PySide6.QtCore import QEvent,QPoint,QRect,QSize,Qt,QTimer,Signal
 from PySide6.QtGui import QCursor,QPainter,QPen
-from PySide6.QtWidgets import (QApplication,QGridLayout,QHBoxLayout,QLabel,QLineEdit,
-    QPushButton,QScrollArea,QSizePolicy,QTabBar,QVBoxLayout,QWidget)
+from PySide6.QtWidgets import (QGridLayout,QHBoxLayout,QLabel,QLineEdit,
+    QMessageBox,QPushButton,QScrollArea,QSizePolicy,QTabBar,QVBoxLayout,QWidget)
 from ddm import config,theme
 from .emoticons import _style_button
 from .gift_api import format_battery
@@ -112,9 +113,10 @@ class GiftPopup(AnchoredPopup):
         self.state=GiftPanelState();self._tabs=();self._cards=[];self._selected=''
         self._armed=False;self._closed=False;self._anchor=None;self._outside_since=None
         self._quantity_card=None;self._quantity_outside=None;self._user_tab=False
+        self._agreement=None
         self._generation=0;self._media_urls={};self._loaded={};self.columns=5
         self.quantity_popup=GiftQuantityPopup(self)
-        self.quantity_popup.sendRequested.connect(self.sendRequested)
+        self.quantity_popup.sendRequested.connect(self._request_send)
         self.media=GiftMediaLoader(cache_dir or Path(config.REPO)/'cache/bili_live/gifts',self)
         self.media.loaded.connect(self._media_loaded);self.media.failed.connect(self._media_failed)
         row=QVBoxLayout(self);row.setContentsMargins(10,10,10,10);row.setSpacing(5)
@@ -144,6 +146,13 @@ class GiftPopup(AnchoredPopup):
         self.quantity_popup.setStyleSheet(picker_style())
     def set_state(self,state):
         if self._closed:return
+        # Windows can retain a card as this tool window's remembered focus
+        # while QApplication.focusWidget() still points at the host window.
+        focused=self.focusWidget()
+        if state.sending and focused is not None and self.body.isAncestorOf(focused):
+            # Disabling the focused gift otherwise walks through every card;
+            # QScrollArea keeps revealing each next focus target to the bottom.
+            self.scroll.setFocus(Qt.OtherFocusReason)
         self.state=state
         wallet='剩余电池：'+('未知' if state.wallet is None else format_battery(state.wallet))
         feedback='正在赠送…' if state.sending else state.feedback
@@ -155,12 +164,16 @@ class GiftPopup(AnchoredPopup):
         self.status.setText('；'.join(x for x in status if x))
         self.status.setVisible(bool(self.status.text()))
         if state.tabs!=self._tabs:
+            previous=next((t for t in self._tabs if t.key==self._selected),None)
             self._tabs=state.tabs;self.tabs.blockSignals(True)
             while self.tabs.count():self.tabs.removeTab(0)
             for tab in state.tabs:self.tabs.addTab(tab.title)
             preferred=self._selected if self._user_tab else next((t.key for t in state.tabs if t.key!='bag'),'bag')
             selected=next((i for i,t in enumerate(state.tabs) if t.key==preferred),0)
-            self.tabs.setCurrentIndex(selected);self.tabs.blockSignals(False);self._select(selected)
+            self.tabs.setCurrentIndex(selected);self.tabs.blockSignals(False)
+            current=state.tabs[selected] if 0<=selected<len(state.tabs) else None
+            if previous is None or current is None or (previous.key,previous.items)!=(current.key,current.items):
+                self._select(selected)
         for card in self._cards:
             valid=not card.item.disabled_reason and card.item.source in ('gold','bag')
             card.setEnabled(valid and not state.sending and (card.item.source=='bag' or state.wallet is not None))
@@ -199,8 +212,31 @@ class GiftPopup(AnchoredPopup):
         if (item.counts==(1,) and not item.allow_custom or
                 self.quantity_popup.isVisible() and self._quantity_card is card):
             self.quantity_popup.hide()
-            if _quantity_valid(item,1,self.state.wallet):self.sendRequested.emit(item.key,1)
+            if _quantity_valid(item,1,self.state.wallet):self._request_send(item.key,1)
         else:self._quantity(card)
+
+    def _request_send(self,key,count):
+        state=self.state
+        item=next((i for t in state.tabs for i in t.items if i.key==key),None)
+        if self._closed or state.sending or not item or not _quantity_valid(item,count,state.wallet):return
+        if item.pay_type=='interactive_pay' and item.payment_scene=='guard_gift':
+            dialog=QMessageBox(QMessageBox.Question,'确认投喂',
+                f'{escape(item.name)} × {count}，共 {format_battery(item.price*count)} 电池',
+                QMessageBox.Ok|QMessageBox.Cancel,self)
+            dialog.setTextFormat(Qt.RichText)
+            base='https://live.bilibili.com/p/html/live-app-help/index.html#/'
+            dialog.setInformativeText('这是大航海开通类礼物。投喂即同意<br>'+ '、'.join(
+                f'<a href="{base}{url}">《{title}》</a>' for url,title in (
+                    ('service-agreement','大航海服务协议'),('live-protocol','哔哩哔哩直播服务协议'),('lp-protocol','电池用户协议'))))
+            dialog.button(QMessageBox.Ok).setText('同意并投喂')
+            dialog.button(QMessageBox.Cancel).setText('取消')
+            dialog.setDefaultButton(QMessageBox.Cancel)
+            self._agreement=dialog
+            try:accepted=dialog.exec()==QMessageBox.Ok
+            finally:self._agreement=None;dialog.deleteLater()
+            # The nested dialog can outlive a room/account change or shutdown.
+            if not accepted or self._closed or self.state is not state:return
+        self.sendRequested.emit(key,count)
 
     def _inspect(self,card):
         if self.quantity_popup.isVisible() and card is not self._quantity_card:
@@ -267,8 +303,10 @@ class GiftPopup(AnchoredPopup):
         if not self.state.sending and not self._inside(QCursor.pos()):self.hide()
     def _inside(self,point):
         return (self.geometry().contains(point) or
+            self._agreement is not None and self._agreement.geometry().contains(point) or
             self.quantity_popup.isVisible() and self.quantity_popup.geometry().contains(point))
     def _check_pointer(self):
+        if self._agreement is not None:return
         if self._owner_dragging:
             self._outside_since=self._quantity_outside=None;return
         self._check_quantity_pointer()
@@ -309,6 +347,7 @@ class GiftPopup(AnchoredPopup):
     def interaction_active(self):return self.isVisible() or self.quantity_popup.isVisible()
     def shutdown(self):
         if self._closed:return
+        if self._agreement is not None:self._agreement.reject()
         self.hide();self._closed=True;self._media_timer.stop();self.media.shutdown()
         for card in self._cards:card.image.set_file('')
         self.quantity_popup.shutdown();super().shutdown()
