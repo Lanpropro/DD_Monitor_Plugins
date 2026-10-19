@@ -1,9 +1,17 @@
 <script setup>
+import { withBase } from 'vitepress'
 import { onMounted, onUnmounted, reactive, ref } from 'vue'
 
 // 标准画面墙：等尺寸格子铺成 2×2 的重复块，拖动按周期取模，四向都接得上。
 const TILE_COUNT = 56
 const REPEATS = 4
+// 只替换一组 3×3 占位格；测试素材只有九张，不复制到其他格子。
+const IMAGE_TILES = new Map([
+  [90, 1], [91, 2], [92, 3],
+  [104, 4], [105, 5], [106, 6],
+  [118, 7], [119, 8], [120, 9]
+])
+const base = withBase('/')
 const section = ref(null)
 const wall = ref(null)
 const offset = reactive({ x: 0, y: 0 })
@@ -30,6 +38,10 @@ const MAGNIFY_SCALE = 0.45
 function wrap(value, p) {
   if (!p) return value
   return (((value + p / 2) % p) + p) % p - p / 2
+}
+
+function tileImage(n) {
+  return IMAGE_TILES.get(n)
 }
 
 function applyTransform() {
@@ -210,7 +222,10 @@ onUnmounted(() => {
     @pointerdown="onPointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp"
     @pointercancel="onPointerUp" @pointerleave="onPointerLeave">
     <div ref="wall" class="splash-wall">
-      <span v-for="n in TILE_COUNT * REPEATS" :key="n" class="splash-tile" :style="{ '--i': (n - 1) % 14 }"></span>
+      <span v-for="n in TILE_COUNT * REPEATS" :key="n" class="splash-tile" :style="{ '--i': (n - 1) % 14 }">
+        <img v-if="tileImage(n)" :src="`${base}wall/${String(tileImage(n)).padStart(2, '0')}.webp`"
+          :alt="''" width="1280" height="720" draggable="false" />
+      </span>
     </div>
     <p class="splash-hint">拖动查看<span class="splash-dot">·</span>向下滚动进入主页</p>
   </section>
@@ -244,6 +259,7 @@ onUnmounted(() => {
 }
 .splash-tile {
   aspect-ratio: 16 / 9;
+  overflow: hidden;
   border-radius: 10px;
   border: 1px solid var(--vp-c-divider);
   background:
@@ -256,6 +272,13 @@ onUnmounted(() => {
   translate: 0 0;
   animation: tile-rise 760ms var(--ease-out) both;
   animation-delay: calc(var(--i) * 55ms);
+}
+.splash-tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
 }
 @keyframes tile-rise {
   from { opacity: 0; translate: 0 26px; }
