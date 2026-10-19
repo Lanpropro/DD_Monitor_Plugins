@@ -37,6 +37,8 @@ YouTube 已结束的直播可保留关注，但不会将录像当作正在直播
 
 ## 开发与打包
 
+分支、PR、提交整理和验证流程见[开发与贡献指南](CONTRIBUTING.md)。
+
 目录 `plugins/<ID>/` 包含 `plugin.json`、`plugin.py`、README 和所需资源。
 清单 `id` 必须与目录名一致，版本填写在各插件的 `plugin.json` 中。
 
