@@ -6,48 +6,47 @@ title: 下载与兼容性
 
 ## Windows 便携版
 
-目前公开发布版本为 **v0.2**，支持 Windows 10 / 11 64 位。下载 ZIP、完整解压后启动程序，不需要另外安装 Python 或 VLC。
+支持 Windows 10 / 11 64 位。下载 EXE 便携包、完整解压后启动，无需另外安装 Python 或 VLC。
 
 <div class="card-actions">
-  <a class="action primary" href="https://github.com/Lanpropro/DD_Monitor_CE/releases/download/v0.2/DDMonitorCE-v0.2-exe.zip">下载 v0.2 便携版</a>
-  <a class="action secondary" href="https://github.com/Lanpropro/DD_Monitor_CE/releases/tag/v0.2">查看发布说明</a>
+  <a class="action primary" href="https://github.com/Lanpropro/DD_Monitor_CE/releases/download/v0.4/DDMonitorCE-v0.4-exe.zip">下载 v0.4 便携版</a>
+  <a class="action secondary" href="https://github.com/Lanpropro/DD_Monitor_CE/releases/tag/v0.4">查看 v0.4 发布说明</a>
 </div>
 
-安装包：`DDMonitorCE-v0.2-exe.zip` · 约 316 MiB · 附件更新于 2026-10-01。
-
-发布说明已提示 v0.2 仍有待修复问题。这里提供现有公开包，后续版本与修复进度以发布页为准。[安装与启动帮助](/guide#启动软件)。
+当前版本 **v0.4**，发布于 2026-10-16。上方按钮直接下载官方 `DDMonitorCE-v0.4-exe.zip`。GitHub 自动生成的 Source code 是源码，不是便携程序。
 
 <details><summary>核对安装包 SHA256</summary>
-<code class="checksum">a3b423be41e50ac66db9c9d898cad56601bcd36edcb2fc01a0740b293e54bc36</code>
+<code class="checksum">453718d02cf46b59ed44ce6ee9f3511e499ec55f46fbc265219bcb6aadb7cd17</code>
 </details>
+
+解压后启动 `DD监控室CE.exe`，保留随包目录。[安装与启动帮助](/guide#启动软件)。
 
 ## 插件兼容性
 
-::: warning 两个 1.0 插件需要配套软件
-公开 **v0.2 EXE 安装包缺少插件所需模块**，请不要把它当作两个 1.0 插件的已确认配套版本。
+建议先将软件升级到最新公开版，再安装插件。当前插件清单要求至少 v0.3；不同插件还依赖配套软件提供的具体功能与运行库。
+
+| 插件 | 下载版本 | 使用要求 |
+| --- | --- | --- |
+| [国内直播平台](/plugins/domestic_live) | 1.2 | 国内平台取流、画质与弹幕接口，FFmpeg |
+| [海外直播平台](/plugins/global_live) | 1.1 | 海外平台取流、自动画质、聊天接口，FFmpeg |
+| [比赛二路同步](/plugins/match_sync) | 1.2 | 比赛同步接口、PyAV、NumPy、FFmpeg |
+
+v0.4 在现有插件商店与软件更新功能上，增加深浅色主题、图片／视频背景、可调布局和直播间组合。旧 v0.2 用户首次需手动升级软件，之后可使用配套版本提供的更新功能。新插件依赖的后续改进，以对应插件发布页的要求为准。
+
+::: warning 旧 v0.2 的兼容限制
+此前核实的 v0.2 EXE 附件缺少 `ddm.live_danmaku`、`ddm.global_danmaku`、`ddm.auto_quality` 等模块，不能只替换插件 ZIP 来补齐。请先升级软件。
 :::
-
-国内直播平台与 Twitch / YouTube 插件依赖软件的直播平台扩展、画质、预览与聊天接口，要求源码基线 `4bf84bc` 或之后。
-
-截至 2026-10-03，公开软件 `main` 已核实为 `9f007e8`，包含所需接口。已有源码运行环境的用户，可使用此基线或之后的源码并安装仓库的 `requirements.txt`。便携版用户建议等待经过兼容验证的配套安装包，再安装这两个插件。
-
-| 软件来源 | 插件兼容状态 |
-| --- | --- |
-| 公开 main 源码（已核实 `9f007e8`） | 包含所需接口，需按源码说明准备运行依赖 |
-| 公开 v0.2 EXE 附件（2026-10-01 更新） | 缺少所需模块，不作为 1.0 插件的配套版本 |
-
-本次只读检查了与公开附件 SHA256 一致的安装包：内嵌模块和包内文件缺少 `ddm.live_danmaku`、`ddm.global_danmaku`、`ddm.auto_quality`。这些分别由国内／海外插件的聊天与自动画质功能依赖，因此当前附件不能作为两个插件的完整配套版本。
-
-版本名称不能代替构建验证；v0.2 的源码标签也不代表后来替换的 EXE 附件内容。
-
-## 从源码运行
-
-需要 Python 3.10+、VLC 3.x 运行库及 FFmpeg。软件仓库的安装说明是完整操作入口，插件不需要你重新开发或打包。
-
-[打开软件源码与安装说明](https://github.com/Lanpropro/DD_Monitor_CE#快速开始)
 
 ## 插件下载
 
-[浏览插件列表](/plugins/)并按平台选择。各插件 ZIP 独立发布，主下载固定为 1.0；不要使用整个仓库的 Source code ZIP 代替插件包。
+[浏览全部插件](/plugins/)，选择需要的平台或比赛同步功能。每个插件有独立版本、固定下载链接与 SHA256 校验值，不要求所有插件同时更新。
 
-GitHub 附件的下载速度取决于网络环境。下载异常时先打开发布页重试，勿使用来源不明的重打包文件。
+下载后在「设置 → 插件」导入 ZIP、勾选启用并保存重启。[查看安装与升级帮助](/guide#安装插件)。
+
+## 从源码运行
+
+需要 Python 3.10+、VLC 运行库、FFmpeg，以及当前软件仓库 `requirements.txt` 中的依赖。比赛同步还需要 PyAV 与 NumPy。
+
+[打开软件源码与完整安装说明](https://github.com/Lanpropro/DD_Monitor_CE#快速开始)
+
+GitHub 附件下载速度取决于网络环境。下载异常时打开官方发布页重试，避免使用来源不明的重打包文件。

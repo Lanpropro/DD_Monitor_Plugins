@@ -1,46 +1,108 @@
 <script setup>
 import { withBase } from 'vitepress'
-import { ref } from 'vue'
-const active = ref(0)
-const shots = [
-  { file: 'landscape.webp', label: '横屏 · 大带小', caption: '主画面与多路小画面，在一面直播墙里观看。' },
-  { file: 'danmaku.webp', label: '横屏 · 弹幕布局', caption: '关注列表、主画面与独立弹幕区，集中在同一个窗口。' },
-  { file: 'portrait.webp', label: '竖屏布局', caption: '顶部关注栏与纵向画面墙，适合竖屏显示器。' }
-]
+import { onMounted, onUnmounted, ref } from 'vue'
+import plugins from '../../data/plugins.json'
+import release from '../../data/software-release.json'
+import SplashWall from './SplashWall.vue'
+import ScreenshotShowcase from './ScreenshotShowcase.vue'
+import PluginCarousel from './PluginCarousel.vue'
+import PluginFeatureMotion from './PluginFeatureMotion.vue'
+import BackToIntro from './BackToIntro.vue'
+import MatchSyncTimeline from './MatchSyncTimeline.vue'
+
+const previewPlugin = ref(2)
+const page = ref(null)
+let observer
+let motion
+const pending = new Set()
+const running = new Set()
+function showRemaining() {
+  if (!motion.matches) return
+  for (const target of pending) target.classList.remove('reveal-pending')
+  pending.clear()
+  for (const animation of running) animation.cancel()
+  running.clear()
+  observer?.disconnect()
+}
+
+onMounted(() => {
+  motion = window.matchMedia('(prefers-reduced-motion: reduce)')
+  if (motion.matches || !('IntersectionObserver' in window)) return
+  observer = new IntersectionObserver(entries => {
+    for (const { target, isIntersecting } of entries) {
+      if (!isIntersecting) continue
+      target.classList.remove('reveal-pending')
+      pending.delete(target)
+      if (!motion.matches) {
+        const animation = target.animate([
+          { opacity: 0, transform: 'translateY(24px)' },
+          { opacity: 1, transform: 'translateY(0)' }
+        ], { duration: 650, delay: Number(target.dataset.revealDelay || 0), fill: 'backwards', easing: 'cubic-bezier(0.23, 1, 0.32, 1)' })
+        running.add(animation)
+        animation.onfinish = () => running.delete(animation)
+      }
+      observer.unobserve(target)
+    }
+  }, { threshold: 0, rootMargin: '0px 0px -80px 0px' })
+  page.value.querySelectorAll('[data-reveal]').forEach(element => {
+    element.classList.add('reveal-pending')
+    pending.add(element)
+    observer.observe(element)
+  })
+  motion.addEventListener('change', showRemaining)
+})
+onUnmounted(() => {
+  observer?.disconnect()
+  for (const animation of running) animation.cancel()
+  running.clear()
+  motion?.removeEventListener('change', showRemaining)
+})
 </script>
 
 <template>
-  <main class="showcase">
-    <section class="hero">
-      <div class="hero-copy">
-        <p class="eyebrow">WINDOWS 10 / 11 · 开源直播观看工具</p>
-        <h1>喜欢的直播，<br /><span>放在同一屏。</span></h1>
-        <p class="hero-description">DD 监控室 CE 将多个直播间集中到一面画面墙。切换横竖屏布局，独立控制每一路声音，让观看跟着你的习惯走。</p>
-        <div class="hero-actions"><a class="action primary" :href="withBase('/download')">下载软件</a>
-          <a class="action secondary" :href="withBase('/plugins/')">浏览插件</a></div>
-        <p class="hero-note">B 站由软件本体支持 · 更多平台通过独立插件扩展</p>
+  <SplashWall />
+  <main id="home-intro" ref="page" class="showcase">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy" data-reveal>
+        <p class="eyebrow">DD MONITOR CE <span>/</span> 为多路直播而生</p>
+        <h1 id="hero-title" tabindex="-1">喜欢的直播，<br /><span>在同一屏相遇。</span></h1>
       </div>
-      <div class="hero-product"><div class="window-label"><img :src="withBase('/logo.svg')" width="24" height="24" alt="" /><span>DD 监控室 CE</span><span class="window-mode">多画面观看</span></div>
-        <img class="hero-shot" :src="withBase('/screenshots/landscape.webp')" width="1920" height="1080" alt="DD 监控室 CE 横屏直播墙，包含一个主画面和多个小画面" fetchpriority="high" />
-        <div class="product-caption">真实软件截图 <span>横屏 · 大带小布局</span></div>
+      <div class="hero-intro" data-reveal data-reveal-delay="120">
+        <a class="release-badge" :href="release.release">{{ release.tag }} 已发布 <span aria-hidden="true">↗</span></a>
+        <p class="hero-description">把直播、声音和弹幕放进一面画面墙。横屏、竖屏、跨平台，按你的方式观看。</p>
+        <div class="hero-actions"><a class="action primary" :href="release.download">下载 DD 监控室 CE <span aria-hidden="true">↗</span></a>
+          <a class="action secondary" href="#plugins">探索插件</a></div>
+        <p class="hero-note">Windows 10 / 11 · 免费开源 · B 站原生支持</p>
       </div>
+      <ScreenshotShowcase />
     </section>
 
-    <div class="facts"><div><strong>16 路</strong><span>最多同时管理</span></div><div><strong>横屏 / 竖屏</strong><span>按观看方式切换布局</span></div><div><strong>逐路控制</strong><span>音量、静音与画质</span></div><div><strong>独立插件</strong><span>按平台选择扩展</span></div></div>
+    <div class="facts"><div data-reveal><strong>16<span> 路</span></strong><span>最多同时管理直播</span></div><div data-reveal data-reveal-delay="80"><strong>横屏 / 竖屏</strong><span>一套适合你的布局</span></div><div data-reveal data-reveal-delay="160"><strong>独立控制</strong><span>音量、静音与画质</span></div><div data-reveal data-reveal-delay="240"><strong>{{ plugins.length }} 款插件</strong><span>扩展平台与观看方式</span></div></div>
 
-    <section class="home-section">
-      <div class="section-heading"><div><p class="eyebrow">观看与管理</p><h2>少切窗口，多看直播。</h2></div><a :href="withBase('/software')">了解软件功能</a></div>
-      <div class="feature-grid"><article><span class="feature-number">01</span><h3>你的直播墙</h3><p>从关注列表拖入直播间，选择平分或大带小布局。主画面、小画面和弹幕，各有位置。</p></article><article><span class="feature-number">02</span><h3>声音各自掌握</h3><p>每个格子独立设置音量、静音和画质。需要专心看一路时，留下这一路的声音。</p></article><article><span class="feature-number">03</span><h3>关注不必反复找</h3><p>管理关注、置顶与排序，刷新开播状态。鼠标停留在已开播卡片上，可静音预览。</p></article></div>
+    <section class="home-section viewing-section">
+      <div class="section-heading"><div data-reveal><p class="eyebrow">01 / 观看体验</p><h2>把直播墙，<br />调成你的样子。</h2></div><div data-reveal data-reveal-delay="120"><p class="section-description">切换布局预设 · 拖入关注卡片</p><a :href="withBase('/software')">了解全部软件功能 ↗</a></div></div>
+      <FeatureDemo />
     </section>
 
-    <section class="home-section gallery-section">
-      <div class="section-heading"><div><p class="eyebrow">真实界面</p><h2>选一套适合你的布局。</h2></div><span class="muted">现有项目文档截图</span></div>
-      <div class="gallery-tabs" role="group" aria-label="截图布局"><button v-for="(shot, i) in shots" :key="shot.file" :aria-pressed="active === i" @click="active = i">{{ shot.label }}</button></div>
-      <figure class="gallery"><a :href="withBase('/screenshots/' + shots[active].file)" target="_blank" rel="noopener" aria-label="在新标签页查看完整截图"><img :class="{ portrait: active === 2 }" :src="withBase('/screenshots/' + shots[active].file)" :alt="shots[active].caption" loading="lazy" /></a><figcaption>{{ shots[active].caption }} <span>点击查看完整截图</span></figcaption></figure>
+    <section id="plugins" class="home-section home-plugins" aria-labelledby="plugins-title">
+      <div class="section-heading"><div data-reveal><p class="eyebrow">02 / 插件扩展</p><h2 id="plugins-title">让直播墙，多一点可能。</h2></div><a data-reveal data-reveal-delay="120" :href="withBase('/plugins/')">全部插件与安装说明 ↗</a></div>
+      <PluginCarousel :initial-index="2" v-slot="{ duplicate }" data-reveal><article v-for="(plugin, i) in plugins" :key="plugin.id" class="home-plugin-card" :class="{ 'is-selected': previewPlugin === i }">
+        <div class="card-top"><div class="platform-icons"><img v-for="(icon, j) in plugin.icons" :key="icon" :src="withBase('/platforms/' + icon)" :alt="plugin.platforms[j]" width="32" height="32" loading="lazy" /></div><span class="version">v{{ plugin.version }}</span></div>
+        <span class="plugin-category">0{{ i + 1 }} / {{ plugin.category }}</span>
+        <h3><a :tabindex="duplicate ? -1 : undefined" :href="withBase('/plugins/' + plugin.id)">{{ plugin.name }}</a></h3><p>{{ plugin.description }}</p>
+        <div class="platform-tags"><span v-for="platform in plugin.platforms" :key="platform">{{ platform }}</span></div>
+        <ul><li v-for="feature in plugin.features" :key="feature">{{ feature }}</li></ul>
+        <button :tabindex="duplicate ? -1 : undefined" class="plugin-demo-trigger" :aria-pressed="previewPlugin === i" aria-controls="plugin-demo" :aria-label="'查看' + plugin.name + '的具体功能'" @click="previewPlugin = i"></button>
+        <div class="card-actions"><a :tabindex="duplicate ? -1 : undefined" class="action primary" :href="plugin.download">下载 ZIP</a><a :tabindex="duplicate ? -1 : undefined" class="detail-link" :href="withBase('/plugins/' + plugin.id)">查看详情 ↗</a></div>
+      </article></PluginCarousel>
+      <div id="plugin-demo" class="plugin-demo-panel" :class="{ 'is-match-demo': plugins[previewPlugin].id === 'match_sync' }">
+        <div class="plugin-demo-heading" data-reveal aria-live="polite"><p class="eyebrow">插件功能</p><h3>{{ plugins[previewPlugin].name }}</h3><p class="plugin-detail-description">{{ plugins[previewPlugin].description }}</p><a :href="withBase('/plugins/' + plugins[previewPlugin].id)">阅读完整说明 ↗</a></div>
+        <div class="plugin-demo-content"><MatchSyncTimeline v-if="plugins[previewPlugin].id === 'match_sync'" /><PluginFeatureMotion data-reveal v-else :key="plugins[previewPlugin].id" :plugin="plugins[previewPlugin]" /><template v-if="plugins[previewPlugin].id !== 'match_sync'"><p class="plugin-flow-title">使用流程</p><ol class="plugin-flow"><li v-for="(step, i) in plugins[previewPlugin].steps" :key="step"><span>0{{ i + 1 }}</span><p>{{ step }}</p></li></ol></template></div>
+      </div>
+      <p class="plugin-compatibility">插件独立下载、独立启用。安装前请查看<a :href="withBase('/download#插件兼容性')">软件版本与兼容要求</a>。</p>
     </section>
 
-    <section class="home-section extension-section"><div><p class="eyebrow">插件扩展</p><h2>一面墙，更多平台。</h2><p>国内直播与海外直播分别启用。关注、拖入格子播放、画质选择、静音预览与聊天弹幕，沿用软件的观看方式。</p><a class="action primary" :href="withBase('/plugins/')">查看 1.0 插件</a><p class="hero-note">插件需配套更新的软件，安装前请查看兼容说明。</p></div><div class="extension-list"><a :href="withBase('/plugins/domestic_live')"><span class="extension-index">01</span><div><h3>国内直播平台</h3><p>虎牙 / 斗鱼 / 抖音</p></div><span class="version">v1.0</span></a><a :href="withBase('/plugins/global_live')"><span class="extension-index">02</span><div><h3>Twitch 与 YouTube</h3><p>Twitch / YouTube · 支持自动画质</p></div><span class="version">v1.0</span></a></div></section>
-
-    <section class="home-bottom"><div><h2>从一个直播间开始。</h2><p>下载、解压、启动，再把关注拖进画面墙。</p></div><a class="action secondary" :href="withBase('/guide')">阅读安装帮助</a></section>
+    <section class="home-bottom"><div data-reveal><p class="eyebrow">准备好你的下一场直播</p><h2>打开软件，<br />把喜欢的直播拖进来。</h2><p>下载 Windows 便携版，完整解压后即可开始。</p></div><div class="bottom-actions" data-reveal data-reveal-delay="120"><a class="action primary" :href="withBase('/download')">获取软件 <span aria-hidden="true">↗</span></a><a :href="withBase('/guide')">第一次使用？阅读安装帮助</a></div></section>
   </main>
+  <BackToIntro />
 </template>

@@ -11,17 +11,11 @@ export default defineConfig({
   themeConfig: {
     logo: '/logo.svg',
     siteTitle: 'DD 监控室 CE',
-    nav: [
-      { text: '软件介绍', link: '/software' },
-      { text: '插件', link: '/plugins/' },
-      { text: '下载', link: '/download' },
-      { text: '安装帮助', link: '/guide' }
-    ],
     sidebar: {
       '/plugins/': [{ text: '插件', items: [
         { text: '所有插件', link: '/plugins/' },
         { text: '国内直播平台', link: '/plugins/domestic_live' },
-        { text: 'Twitch 与 YouTube', link: '/plugins/global_live' },
+        { text: '海外直播平台', link: '/plugins/global_live' },
         { text: '比赛二路同步', link: '/plugins/match_sync' },
         { text: '安装与升级', link: '/guide' }
       ] }]

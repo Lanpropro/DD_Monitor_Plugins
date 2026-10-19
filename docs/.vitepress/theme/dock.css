@@ -1,0 +1,83 @@
+/* The capsule belongs to the header; page content keeps its full width. */
+.dock-nav {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 4px;
+  padding: 5px;
+  margin: 0 auto 0 24px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 28px;
+  background: var(--vp-c-bg-elv);
+  background: color-mix(in srgb, var(--vp-c-bg-elv) 88%, transparent);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 4px 18px #0001, inset 0 1px 0 #ffffff12;
+  pointer-events: auto;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.dock-nav::-webkit-scrollbar { display: none; }
+.dock-item { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 0 12px; border-radius: 22px; color: var(--vp-c-text-2); touch-action: manipulation; -webkit-tap-highlight-color: transparent; transition: background-color 160ms ease, color 160ms ease; }
+.dock-icon { display: grid; place-items: center; transition: transform 160ms var(--ease-out); }
+.dock-icon svg { width: 19px; height: 19px; }
+.dock-label { font-size: 13px; line-height: 1.4; font-weight: 500; white-space: nowrap; }
+.dock-item[aria-current="page"] { color: var(--vp-c-brand-1); background: var(--vp-c-brand-soft); }
+.dock-item:focus-visible { outline: 2px solid var(--vp-c-brand-1); outline-offset: 2px; }
+.dock-item:active .dock-icon { transform: scale(.97); }
+.VPNavBarSearch { flex-grow: 0; }
+@media (hover: hover) and (pointer: fine) {
+  .dock-item:hover { color: var(--vp-c-brand-1); background: var(--vp-c-brand-soft); }
+  .dock-item:hover .dock-icon { transform: translateY(-1px); }
+  .dock-item:active .dock-icon { transform: scale(.97); }
+}
+/* Keep every destination visible on a second header row when space is tight. */
+@media (max-width: 1199px) {
+  :root { --vp-nav-height: 128px; }
+  .VPNavBar > .wrapper > .container, .VPNavBar .content-body, .VPNavBarTitle .title,
+  .VPNavBar .VPNavBarHamburger, .VPNavBar.has-sidebar .title { height: 64px; }
+  .dock-nav { position: absolute; top: 68px; left: 50%; transform: translateX(-50%); margin: 0; max-width: calc(100vw - 24px); }
+  .VPNavBarSearch { flex-grow: 1; }
+}
+/* Narrower than a tablet the five labels no longer fit; icons keep every destination visible. */
+@media (max-width: 520px) {
+  .dock-item { padding: 0 13px; }
+  .dock-label { display: none; }
+}
+@media (max-width: 400px) {
+  .dock-nav { gap: 2px; padding: 4px; }
+  .dock-item { padding: 0 9px; gap: 3px; }
+  .dock-icon svg { width: 17px; height: 17px; }
+  .dock-label { font-size: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dock-icon { transition: none; }
+  .dock-nav .dock-item .dock-icon { transform: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .dock-nav { background: var(--vp-c-bg-elv); backdrop-filter: none; }
+}
+@media print { .dock-nav { display: none; } }
+/* 首页开屏期间收起整条顶栏，用户往下滚之后才滑下来。 */
+html.splash-mode .VPNavBar {
+  transition: transform 460ms var(--ease-out), opacity 380ms ease;
+  will-change: transform;
+}
+/* 用位移收起而不是只改透明度：顶栏留在文档流里会盖住首屏，也会随页面滚走。 */
+html.splash-mode:not(.splash-revealed) .VPNavBar {
+  transform: translateY(-100%);
+  opacity: 0;
+  pointer-events: none;
+}
+html.splash-mode.splash-boot .VPNavBar { transition: none; }
+/* 手机上开屏墙不再拦截纵向滑动，但墙仍铺满第一屏，所以一滑动就把顶栏交给用户。 */
+@media (max-width: 700px) {
+  /* 默认主题在 960px 以下把顶栏设成 relative，会随页面滚走；开屏页必须固定，
+     否则首屏藏着、滚动后又滚出视口，手机上等于没有任何导航入口。 */
+  html.splash-mode .VPNav { position: fixed; top: 0; }
+  html.splash-mode.splash-scrolled .VPNavBar {
+    transform: none;
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
