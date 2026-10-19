@@ -98,6 +98,71 @@ class PickerUXTests(unittest.TestCase):
                     popup.removeEventFilter(observed);popup.hide()
                     self.anchor.move(anchor_before);APP.processEvents()
 
+
+    def test_owner_move_burst_exposes_only_latest_picker_and_quantity_positions(self):
+        class Moves(QObject):
+            def __init__(self):super().__init__();self.positions=[]
+            def eventFilter(self,watched,event):
+                if event.type()==QEvent.Move:self.positions.append(watched.pos())
+                return False
+        for popup in (self.emote,self.gift):
+            with self.subTest(popup=type(popup).__name__):
+                popup.open_at(self.anchor);APP.processEvents()
+                if popup is self.gift:
+                    card=popup._cards[0];QCursor.setPos(card.mapToGlobal(card.rect().center()))
+                    card.click();APP.processEvents()
+                followers=[popup]+([popup.quantity_popup] if popup is self.gift else [])
+                initial=[f.pos() for f in followers];observers=[]
+                for f in followers:
+                    observer=Moves();f.installEventFilter(observer);observers.append(observer)
+                host_before=self.host.pos()
+                try:
+                    # A high-rate drag can deliver multiple owner moves before
+                    # one event-loop turn can paint the resulting windows.
+                    for step in range(1,41):self.host.move(host_before+QPoint(step,step//2))
+                    for observer in observers:
+                        self.assertEqual(observer.positions,[],
+                            'queued drag samples exposed obsolete native popup positions')
+                    APP.processEvents()
+                    for f,before,observer in zip(followers,initial,observers):
+                        self.assertLessEqual(len(observer.positions),1,
+                            'one event-loop turn moved a follower more than once')
+                        error=(f.pos()-before)-QPoint(40,20)
+                        self.assertLessEqual(abs(error.x()),1);self.assertLessEqual(abs(error.y()),1)
+                        self.assertTrue(f.isVisible())
+                finally:
+                    for f,observer in zip(followers,observers):f.removeEventFilter(observer)
+                    popup.hide();self.host.move(host_before);APP.processEvents()
+
+
+    @unittest.skipUnless(APP.platformName()=='windows','native message dispatch requires Windows Qt')
+    def test_owner_follow_does_not_wait_for_qt_timers_in_native_move_loop(self):
+        import ctypes
+        from ctypes import wintypes
+        user32=ctypes.windll.user32
+        user32.PeekMessageW.argtypes=(ctypes.POINTER(wintypes.MSG),wintypes.HWND,
+                                    wintypes.UINT,wintypes.UINT,wintypes.UINT)
+        user32.PeekMessageW.restype=wintypes.BOOL
+        user32.DispatchMessageW.argtypes=(ctypes.POINTER(wintypes.MSG),)
+        user32.DispatchMessageW.restype=wintypes.LPARAM
+        for popup in (self.emote,self.gift):
+            with self.subTest(popup=type(popup).__name__):
+                popup.open_at(self.anchor);APP.processEvents()
+                before=popup.pos();host_before=self.host.pos()
+                try:
+                    for step in range(1,21):self.host.move(host_before+QPoint(step,step//2))
+                    # A Windows move loop dispatches posted window messages;
+                    # no Qt timer event is pumped in this controlled interval.
+                    message=wintypes.MSG()
+                    while user32.PeekMessageW(ctypes.byref(message),int(popup.winId()),0x8000,0xBFFF,1):
+                        user32.DispatchMessageW(ctypes.byref(message))
+                    error=(popup.pos()-before)-QPoint(20,10)
+                    self.assertLessEqual(abs(error.x()),1,
+                        'native follow waited for a Qt timer instead of the posted move')
+                    self.assertLessEqual(abs(error.y()),1)
+                    self.assertTrue(popup.isVisible())
+                finally:popup.hide();self.host.move(host_before);APP.processEvents()
+
     def test_wallet_and_other_tab_refresh_keep_selected_cards_and_scroll_position(self):
         items=tuple(replace(self.item,key=f'long:{i}',name=f'Gift {i}',counts=(1,),allow_custom=False) for i in range(80))
         main=GiftTab('main','礼物',items)

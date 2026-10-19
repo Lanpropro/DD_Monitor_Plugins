@@ -6,11 +6,12 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from unittest.mock import patch
 from bili_live_support import HOST,ROOT
 from bili_live_fixtures import room_payload
-from PySide6.QtCore import QPoint,Qt,QEvent
+from PySide6.QtCore import QPoint,Qt,QEvent,QTimer,QEventLoop,QAbstractNativeEventFilter
 from PySide6.QtGui import QCursor,QInputMethodEvent,QMouseEvent,QMovie
 from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
@@ -28,6 +29,77 @@ def settle(predicate,seconds=5):
         if predicate():return
         QTest.qWait(10)
     raise AssertionError('native state did not settle')
+
+
+def check_native_move_loop(owner,popup,anchor):
+    # Exercise the real Windows modal move loop on our synthetic window. Key
+    # messages target only this HWND; no global input injection is needed.
+    user32=ctypes.windll.user32
+    user32.PostMessageW.argtypes=(wintypes.HWND,wintypes.UINT,wintypes.WPARAM,wintypes.LPARAM)
+    user32.PostMessageW.restype=wintypes.BOOL
+    hwnd=int(owner.winId())
+    quantity=getattr(popup,'quantity_popup',None)
+    followers=[popup]+([quantity] if quantity is not None and quantity.isVisible() else [])
+    handles={int(w.winId()):type(w).__name__ for w in followers}
+    loop=QEventLoop();rows=[];inside=False
+    class NativeMoves(QAbstractNativeEventFilter):
+        def nativeEventFilter(self,event_type,message):
+            nonlocal inside
+            native=wintypes.MSG.from_address(int(message))
+            if native.hWnd==hwnd and native.message==0x231:
+                inside=True;rows.append((time.perf_counter(),'enter'))
+            elif native.hWnd==hwnd and native.message==0x232:
+                rows.append((time.perf_counter(),'exit'));inside=False
+                loop.quit()
+            elif inside and native.message==3:
+                if native.hWnd==hwnd:rows.append((time.perf_counter(),'owner'))
+                elif native.hWnd in handles:rows.append((time.perf_counter(),handles[native.hWnd]))
+            return False,0
+    observer=NativeMoves();APP.installNativeEventFilter(observer)
+    start=QTimer();start.setSingleShot(True)
+    timeout=QTimer();timeout.setSingleShot(True);timeout.timeout.connect(loop.quit)
+    outside=QPoint(owner.x()+20,owner.y()-10)
+    APP.sendEvent(owner,QMouseEvent(QEvent.NonClientAreaMouseButtonPress,
+        QPoint(20,-10),outside,Qt.LeftButton,Qt.LeftButton,Qt.NoModifier))
+    def actions():
+        time.sleep(.08)
+        for index in range(40):
+            user32.PostMessageW(hwnd,0x100,0x27 if index<20 else 0x25,0)
+            time.sleep(.004)
+        time.sleep(.05)
+        user32.PostMessageW(hwnd,0x100,0x0D,0)
+    sender=threading.Thread(target=actions,daemon=True)
+    def begin():
+        sender.start();user32.PostMessageW(hwnd,0x112,0xF010,0)
+    start.timeout.connect(begin)
+    try:
+        start.start(1);timeout.start(3000);loop.exec()
+    finally:
+        timeout.stop();start.stop();APP.removeNativeEventFilter(observer)
+        if sender.ident is not None:sender.join(1)
+        APP.sendEvent(owner,QMouseEvent(QEvent.NonClientAreaMouseButtonRelease,
+            QPoint(20,-10),outside,Qt.LeftButton,Qt.NoButton,Qt.NoModifier))
+    APP.processEvents()
+    names=[name for _,name in rows]
+    assert names.count('enter')==1 and names.count('exit')==1,names
+    assert names.count('owner')>=10,names
+    for follower in followers:
+        label=type(follower).__name__
+        assert names.count(label)>=5,('popup did not follow during native modal move',label,names)
+        assert follower.isVisible(),label
+    screen=anchor.screen().availableGeometry()
+    expected=max(screen.left(),min(anchor.mapToGlobal(QPoint(anchor.width()//2,0)).x()-popup.width()//2,
+                                  screen.right()-popup.width()+1))
+    assert abs(popup.x()-expected)<=1,(popup.x(),expected)
+    owner_times=[t for t,name in rows if name=='owner']
+    timings=[]
+    for follower in followers:
+        label=type(follower).__name__
+        delays=sorted((t-max(p for p in owner_times if p<=t))*1000 for t,name in rows
+                      if name==label and any(p<=t for p in owner_times))
+        timings.append(f'{label} updates={len(delays)}, p95={delays[int(len(delays)*.95)]:.2f}ms, max={max(delays):.2f}ms')
+    print(f'PASS: actual native move loop owner={len(owner_times)}; '+ '; '.join(timings),flush=True)
+
 
 def main():
     with tempfile.TemporaryDirectory() as root:
@@ -85,6 +157,7 @@ def main():
                         quantity=popup.quantity_popup
                         assert quantity.screen().availableGeometry().contains(quantity.geometry())
                         if width==900:
+                            if mode=='dark':check_native_move_loop(tile,popup,composer.gift_button)
                             title_point=QPoint(tile.x()+20,tile.y()-10)
                             APP.sendEvent(tile,QMouseEvent(QEvent.NonClientAreaMouseButtonPress,
                                 QPoint(20,-10),title_point,Qt.LeftButton,Qt.LeftButton,Qt.NoModifier))
@@ -106,6 +179,14 @@ def main():
                         QCursor.setPos(quantity.mapToGlobal(quantity.rect().center()));QTest.qWait(170)
                         assert popup.isVisible() and quantity.isVisible()
                         popup.hide();assert all(c.image.movie is None or c.image.movie.state()!=QMovie.Running for c in popup._cards)
+                    if mode=='dark':
+                        tile.resize(900,400);APP.processEvents()
+                        emote_api=importlib.import_module('ddm_plugin_bili_live.composer').bili
+                        with patch.object(emote_api,'get_emoticons',return_value=[]):
+                            composer.open_emoticons()
+                            settle(lambda:composer.popup is not None and not workers._active_requests)
+                            check_native_move_loop(tile,composer.popup,composer.emote_button)
+                            composer.popup.hide()
                     tile.setProperty('fullscreen',True);tile._layout_areas();APP.processEvents()
                     geometry=tile.video.geometry();composer.edit.setFocus();APP.processEvents()
                     assert tile.plugin_interaction_active(),'editor focus not protected'
