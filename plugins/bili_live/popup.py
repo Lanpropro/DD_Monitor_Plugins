@@ -1,23 +1,9 @@
 """Shared rounded, non-grabbing pickers anchored to a host widget."""
-import sys
 from PySide6.QtCore import QEvent, QPoint, QRectF, Qt, QTimer
 from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import QApplication, QWidget
 from shiboken6 import isValid
 from ddm import theme
-
-
-# Use this popup's own native queue, not an application-wide native filter.
-# Qt zero timers may wait inside the Windows interactive move/resize loop.
-_PLACEMENT_MESSAGE = 0x8000 + 0xDD0
-_user32 = None
-if sys.platform == 'win32':
-    import ctypes
-    from ctypes import wintypes
-    _user32 = ctypes.WinDLL('user32', use_last_error=True)
-    _user32.PostMessageW.argtypes = (wintypes.HWND, wintypes.UINT,
-                                    wintypes.WPARAM, wintypes.LPARAM)
-    _user32.PostMessageW.restype = wintypes.BOOL
 
 
 class RefreshSpinner(QWidget):
@@ -100,23 +86,9 @@ class AnchoredPopup(QWidget):
                   max(screen.top(), min(y, screen.bottom()-self.height()+1)))
 
     def _schedule_placement(self):
-        # Both layouts and high-rate owner drags can deliver several moves
-        # before the next paint. Submit only the latest native position in that
-        # event-loop turn; do not spend time moving through obsolete samples.
-        if not self._placement_timer.isActive():
-            self._placement_timer.start(0)
-            if _user32 is not None and QApplication.platformName() == 'windows':
-                # The zero timer is also the portable/failure fallback and the
-                # cancellation flag for an already-posted native message.
-                _user32.PostMessageW(int(self.winId()), _PLACEMENT_MESSAGE, 0, 0)
-
-    def nativeEvent(self, event_type, message):
-        if _user32 is not None and event_type == b'windows_generic_MSG':
-            native = wintypes.MSG.from_address(int(message))
-            if native.message == _PLACEMENT_MESSAGE:
-                if self._placement_timer.isActive():self._place_after_layout()
-                return True, 0
-        return super().nativeEvent(event_type, message)
+        # A layout can move/resize several ancestors before the button reaches
+        # its final position. Expose only the settled native window position.
+        if not self._placement_timer.isActive():self._placement_timer.start(0)
 
     def _place_after_layout(self):
         if self._event_targets_alive() and self.isVisible() and self._anchor:
@@ -160,7 +132,11 @@ class AnchoredPopup(QWidget):
             widget = self._anchor
             while widget is not None:
                 if watched is widget:
-                    self._schedule_placement()
+                    # Keep the owner and picker in the same move dispatch.
+                    # Queuing this path makes a live drag visibly trail behind.
+                    if watched is self._owner and kind==QEvent.Move:
+                        self.place_at(self._anchor)
+                    else:self._schedule_placement()
                     break
                 widget = widget.parentWidget()
         elif kind == QEvent.MouseButtonPress:

@@ -11,7 +11,7 @@ import time
 from unittest.mock import patch
 from bili_live_support import HOST,ROOT
 from bili_live_fixtures import room_payload
-from PySide6.QtCore import QPoint,Qt,QEvent,QTimer,QEventLoop,QAbstractNativeEventFilter
+from PySide6.QtCore import QPoint,Qt,QEvent,QTimer,QEventLoop,QObject,QAbstractNativeEventFilter
 from PySide6.QtGui import QCursor,QInputMethodEvent,QMouseEvent,QMovie
 from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
@@ -55,6 +55,21 @@ def check_native_move_loop(owner,popup,anchor):
                 if native.hWnd==hwnd:rows.append((time.perf_counter(),'owner'))
                 elif native.hWnd in handles:rows.append((time.perf_counter(),handles[native.hWnd]))
             return False,0
+    # Check each owner event itself, before pumping any queued follow update.
+    # Merely counting eventual follower moves allowed an entire event of lag.
+    frame_errors=[]
+    class OwnerFrames(QObject):
+        def eventFilter(self,watched,event):
+            if event.type()==QEvent.Move:
+                for follower in followers:
+                    target=follower._anchor
+                    screen=target.screen().availableGeometry()
+                    expected=max(screen.left(),min(
+                        target.mapToGlobal(QPoint(target.width()//2,0)).x()-follower.width()//2,
+                        screen.right()-follower.width()+1))
+                    frame_errors.append((type(follower).__name__,abs(follower.x()-expected)))
+            return False
+    frames=OwnerFrames();owner.installEventFilter(frames)
     observer=NativeMoves();APP.installNativeEventFilter(observer)
     start=QTimer();start.setSingleShot(True)
     timeout=QTimer();timeout.setSingleShot(True);timeout.timeout.connect(loop.quit)
@@ -75,7 +90,7 @@ def check_native_move_loop(owner,popup,anchor):
     try:
         start.start(1);timeout.start(3000);loop.exec()
     finally:
-        timeout.stop();start.stop();APP.removeNativeEventFilter(observer)
+        timeout.stop();start.stop();APP.removeNativeEventFilter(observer);owner.removeEventFilter(frames)
         if sender.ident is not None:sender.join(1)
         APP.sendEvent(owner,QMouseEvent(QEvent.NonClientAreaMouseButtonRelease,
             QPoint(20,-10),outside,Qt.LeftButton,Qt.NoButton,Qt.NoModifier))
@@ -83,6 +98,7 @@ def check_native_move_loop(owner,popup,anchor):
     names=[name for _,name in rows]
     assert names.count('enter')==1 and names.count('exit')==1,names
     assert names.count('owner')>=10,names
+    assert frame_errors and max(error for _,error in frame_errors)<=1,('picker trailed owner during move',frame_errors)
     for follower in followers:
         label=type(follower).__name__
         assert names.count(label)>=5,('popup did not follow during native modal move',label,names)

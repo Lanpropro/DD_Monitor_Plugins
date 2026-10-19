@@ -1,5 +1,6 @@
 """Install the real ZIP and exercise real host tile/account/fullscreen lifecycle."""
 import importlib
+from dataclasses import replace
 import os
 from pathlib import Path
 import sys
@@ -11,9 +12,9 @@ from unittest.mock import patch
 from bili_live_support import HOST,ROOT,session,bili
 from bili_live_fixtures import room_payload
 import shiboken6
-from PySide6.QtCore import QEvent,QPoint,Qt,qInstallMessageHandler
-from PySide6.QtGui import QCursor
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QEvent,QPoint,QObject,Qt,qInstallMessageHandler
+from PySide6.QtGui import QColor,QCursor,QImage
+from PySide6.QtWidgets import QApplication,QToolButton
 from PySide6.QtTest import QTest
 from ddm import plugins as host_api,theme
 from ddm.app import MainWindow
@@ -127,6 +128,62 @@ class IntegrationTests(unittest.TestCase):
                 self.assertLessEqual(abs(popup.x()-expected),1,(type(popup).__name__,step,popup.x(),expected))
                 self.assertTrue(popup.isVisible())
             popup.hide()
+    def test_installed_pickers_follow_during_each_mainwindow_move(self):
+        composer=self.composer()
+        image=QImage(32,32,QImage.Format_ARGB32);image.fill(QColor('#00a1d6'))
+        image_path=Path(self.temp.name)/'picker.png';self.assertTrue(image.save(str(image_path)))
+        media=importlib.import_module('ddm_plugin_bili_live.gift_media')
+        emoticons=importlib.import_module('ddm_plugin_bili_live.emoticons')
+        item=self.catalog.tabs[0].items[1]
+        items=tuple(replace(item,key=f'follow:{i}',name=f'Gift {i}') for i in range(80))
+        catalog=replace(self.catalog,tabs=(self.api.GiftTab('main','礼物',items),))
+        packages=[{'pkg_type':3,'pkg_name':'跟随回归','emoticons':[
+            {'emoji':f'[emote-{i}]','perm':1,'emoticon_unique':f'emote_{i}',
+             'url':f'https://example.invalid/follow-{i}.png'} for i in range(80)]}]
+        for local_patch in (patch.object(self.api,'get_catalog',return_value=catalog),
+                patch.object(media,'_fetch',return_value=str(image_path)),
+                patch.object(emoticons,'_load_image',return_value=image),
+                patch.object(self.emotes,'get_emoticons',return_value=packages)):
+            local_patch.start();self.addCleanup(local_patch.stop)
+        composer.open_gifts();settle(lambda:not composer.gift_controller.state.loading)
+        settle(lambda:any(c.image.pixmap() and not c.image.pixmap().isNull()
+                         for c in composer.gift_popup._cards))
+        self.assertEqual(len(composer.gift_popup._cards),80)
+        composer.gift_popup.hide()
+        composer.open_emoticons()
+        settle(lambda:composer.popup is not None and
+               len(composer.popup.scroll.findChildren(QToolButton))==80)
+        settle(lambda:any(not b.icon().isNull() for b in composer.popup.scroll.findChildren(QToolButton)))
+        composer.popup.hide()
+        self.window.move(100,250);APP.processEvents()
+        class OwnerFrames(QObject):
+            def __init__(self,button,popup):
+                super().__init__();self.button,self.popup=button,popup;self.errors=[]
+            def eventFilter(self,watched,event):
+                if event.type()==QEvent.Move:
+                    screen=self.button.screen().availableGeometry()
+                    expected=max(screen.left(),min(
+                        self.button.mapToGlobal(QPoint(self.button.width()//2,0)).x()-self.popup.width()//2,
+                        screen.right()-self.popup.width()+1))
+                    self.errors.append(abs(self.popup.x()-expected))
+                return False
+        for popup,button in ((composer.popup,composer.emote_button),(composer.gift_popup,composer.gift_button)):
+            with self.subTest(popup=type(popup).__name__):
+                popup.open_at(button);APP.processEvents()
+                observer=OwnerFrames(button,popup);self.window.installEventFilter(observer)
+                before=self.window.pos()
+                try:
+                    for step in range(1,41):
+                        self.window.move(before+QPoint(step*2,step%2))
+                        # Observe before a queued position update can hide lag.
+                        APP.processEvents()
+                    self.assertEqual(len(observer.errors),40)
+                    self.assertLessEqual(max(observer.errors),1,
+                        'installed picker followed one event behind the actual MainWindow')
+                finally:
+                    self.window.removeEventFilter(observer)
+                    popup.hide();self.window.move(before);APP.processEvents()
+
     def test_existing_new_empty_room_swap_and_fullscreen_same_control(self):
         tile=self.window.wall.tiles[0];composer=self.composer(tile)
         self.window.wall.set_layout('2x2');empty=next(t for t in self.window.wall.tiles if not t.room.get('room_id'));self.assertFalse(self.composer(empty).isVisible())
