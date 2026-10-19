@@ -35,7 +35,7 @@ const filtered = computed(() => plugins.filter(p =>
       <ul><li v-for="feature in p.features" :key="feature">{{ feature }}</li></ul>
       <p class="requirement">需配套更新的软件 · <a :href="withBase('/download#插件兼容性')">查看兼容要求</a></p>
       <div class="card-actions"><a class="action primary" :href="p.download">下载 ZIP</a>
-        <a class="action secondary" :href="withBase('/plugins/' + p.id)">使用说明</a></div>
+        <a class="detail-link" :href="withBase('/plugins/' + p.id)">查看详情 ↗</a></div>
     </article>
   </div>
   <div v-if="!filtered.length" class="empty-result"><p>没有匹配的插件。试试平台名称，或清空筛选。</p>

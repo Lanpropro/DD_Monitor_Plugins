@@ -15,7 +15,7 @@ const plugin = computed(() => plugins.find(p => p.id === props.id))
     <p>插件 ID：<code>{{ plugin.id }}</code> · 支持 {{ plugin.platforms.join('、') }}</p>
     <div class="card-actions"><a class="action primary" :href="plugin.download">下载 v{{ plugin.version }} ZIP</a>
       <a class="action secondary" :href="`https://github.com/Lanpropro/DD_Monitor_Plugins/tree/main/plugins/${plugin.id}`">插件源码</a></div>
-    <p class="requirement">安装前请先阅读<a :href="withBase('/download#插件兼容性')">软件兼容要求</a>，公开 v0.2 安装包缺少插件所需模块。</p>
+    <p class="requirement">安装前请先阅读<a :href="withBase('/download#插件兼容性')">软件兼容要求</a>，推荐使用最新公开版软件，旧 v0.2 不能补齐这些依赖。</p>
     <details><summary>安装包 SHA256</summary><code class="checksum">{{ plugin.sha256 }}</code></details>
   </div>
 </template>
