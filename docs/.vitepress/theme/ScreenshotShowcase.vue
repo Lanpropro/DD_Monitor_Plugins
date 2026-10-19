@@ -74,9 +74,9 @@ onUnmounted(() => {
 
 <template>
   <section ref="story" class="screenshot-story" :class="{ 'is-enhanced': enhanced }" aria-label="真实软件截图"
-    :style="{ '--shot-scale': enhanced ? 1 - progress * .18 : 1, '--frame-ratio': active === 2 ? 9 / 16 : 16 / 9, '--selected': active, '--controls': controlsReady || !enhanced ? 1 : Math.min(1, Math.max(0, (progress - .55) / .4)) }">
+    :style="{ '--shot-scale': enhanced ? 1 - progress * .08 : 1, '--frame-ratio': active === 2 ? 9 / 16 : 16 / 9, '--selected': active, '--controls': controlsReady || !enhanced ? 1 : Math.min(1, Math.max(0, (progress - .55) / .4)) }">
     <div ref="pin" class="screenshot-pin">
-      <div class="product-wrap" :class="{ 'is-measured': enhanced && productHeight > 0 }" :style="enhanced && productHeight > 0 ? { height: productHeight * (1 - progress * .18) + 'px' } : undefined">
+      <div class="product-wrap" :class="{ 'is-measured': enhanced && productHeight > 0 }" :style="enhanced && productHeight > 0 ? { height: productHeight * (1 - progress * .08) + 'px' } : undefined">
       <div ref="product" class="hero-product">
         <div class="window-label"><img :src="withBase('/logo.svg')" width="24" height="24" alt="" /><span>DD 监控室 CE</span><span class="window-mode">多画面 · 自在观看</span></div>
         <div class="screenshot-stage">
@@ -105,21 +105,21 @@ onUnmounted(() => {
 
 <style scoped>
 .screenshot-story { grid-column: 1 / -1; min-width: 0; overflow-anchor: none; }
-.screenshot-pin { display: flex; flex-direction: column; align-items: center; gap: 24px; }
+.screenshot-pin { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
 .product-wrap { position: relative; width: min(100%, calc((100svh - var(--vp-nav-height) - 220px) * var(--frame-ratio))); }
 .product-wrap.is-measured .hero-product { position: absolute; top: 0; left: 0; }
 .hero-product { width: 100%; flex-shrink: 0; }
 .screenshot-stage { position: relative; aspect-ratio: var(--frame-ratio); }
 .gallery-playback { position: absolute; right: 12px; bottom: 12px; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; color: white; background: #101418b3; backdrop-filter: blur(12px); }
-.gallery-controls { text-align: center; width: 100%; }
+.gallery-controls { display: grid; justify-items: center; gap: 8px; text-align: center; width: 100%; }
 .gallery-tabs { position: relative; display: inline-flex; flex-wrap: nowrap; gap: 0; padding: 4px; border-radius: 12px; background: var(--vp-c-bg-soft); border: 1px solid var(--vp-c-divider); }
 .gallery-tabs button { position: relative; z-index: 1; flex: 1 1 0; min-height: 44px; padding: 8px 18px; border: 0; border-radius: 8px; background: transparent; white-space: nowrap; color: var(--vp-c-text-2); }
 .gallery-tabs button[aria-pressed=true] { color: var(--selected-text); background: transparent; }
 .layout-ratio { margin-left: 5px; opacity: .6; font-size: 12px; }
 .gallery-selection { position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc((100% - 8px) / 3); border-radius: 8px; background: var(--selected-surface); border: 1px solid var(--vp-c-divider); transform: translateX(calc(var(--selected) * 100%)); }
-.screenshot-source { margin: 14px 0 0; }
-.is-enhanced::after { content: ''; display: block; height: 45svh; }
-.is-enhanced .screenshot-pin { position: sticky; top: calc(var(--vp-nav-height) + 24px); }
+.screenshot-source { margin: 0; }
+.is-enhanced::after { content: ''; display: block; height: 16svh; }
+.is-enhanced .screenshot-pin { position: sticky; top: calc(var(--vp-nav-height) + 24px); min-height: calc(100svh - var(--vp-nav-height) - 48px); }
 .is-enhanced .hero-product { transform: scale(var(--shot-scale)); transform-origin: top center; }
 .is-enhanced .gallery-controls { opacity: var(--controls); }
 @media (prefers-reduced-motion: no-preference) {
@@ -128,7 +128,7 @@ onUnmounted(() => {
   .gallery-selection { transition: transform 400ms var(--ease-out); }
 }
 @media (max-width: 700px) {
-  .screenshot-pin { gap: 20px; }
+  .screenshot-pin { gap: 10px; }
   .gallery-tabs button { padding: 8px 10px; font-size: 12px; }
   .layout-ratio { display: none; }
   .screenshot-source { font-size: 11px; }
