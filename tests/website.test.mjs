@@ -416,6 +416,7 @@ test('restored screenshot contraction starts at the sticky offset and spans the 
 test('the sticky screenshot and facts stay vertically centered with compact controls', () => {
   const source = read('docs/.vitepress/theme/ScreenshotShowcase.vue')
   const home = read('docs/.vitepress/theme/HomePage.vue')
+  const styles = read('docs/.vitepress/theme/style.css')
   const pin = source.match(/\.screenshot-pin \{([^}]+)\}/)[1]
   const enhancedPin = source.match(/\.is-enhanced \.screenshot-pin \{([^}]+)\}/)[1]
   const tail = source.match(/\.is-enhanced::after \{([^}]+)\}/)[1]
@@ -425,6 +426,8 @@ test('the sticky screenshot and facts stay vertically centered with compact cont
   assert.match(pin, /gap:\s*12px/, 'the controls stay close to the screenshot')
   assert.match(controls, /gap:\s*8px/, 'the controls and source note form one compact group')
   assert.match(details, /gap:\s*14px/, 'the facts row joins the centered showcase group')
+  assert.match(styles, /\.facts \{[^}]*width:\s*100%/, 'the facts row keeps the full container width')
+  assert.match(styles, /\.facts \{[^}]*padding:\s*26px 0 38px/, 'the facts row keeps its vertical padding')
   assert.match(enhancedPin, /min-height:\s*calc\(100svh - var\(--vp-nav-height\) - 48px\)/,
     'the sticky viewport spans the area below the navigation bar')
   assert.match(tail, /height:\s*45svh/, 'the original scroll distance is restored')
