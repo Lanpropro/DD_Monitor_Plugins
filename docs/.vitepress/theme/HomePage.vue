@@ -74,10 +74,10 @@ onUnmounted(() => {
           <a class="action secondary" href="#plugins">探索插件</a></div>
         <p class="hero-note">Windows 10 / 11 · 免费开源 · B 站原生支持</p>
       </div>
-      <ScreenshotShowcase />
+      <ScreenshotShowcase>
+        <div class="facts"><div data-reveal><strong>16<span> 路</span></strong><span>最多同时管理直播</span></div><div data-reveal data-reveal-delay="80"><strong>横屏 / 竖屏</strong><span>一套适合你的布局</span></div><div data-reveal data-reveal-delay="160"><strong>独立控制</strong><span>音量、静音与画质</span></div><div data-reveal data-reveal-delay="240"><strong>{{ plugins.length }} 款插件</strong><span>扩展平台与观看方式</span></div></div>
+      </ScreenshotShowcase>
     </section>
-
-    <div class="facts"><div data-reveal><strong>16<span> 路</span></strong><span>最多同时管理直播</span></div><div data-reveal data-reveal-delay="80"><strong>横屏 / 竖屏</strong><span>一套适合你的布局</span></div><div data-reveal data-reveal-delay="160"><strong>独立控制</strong><span>音量、静音与画质</span></div><div data-reveal data-reveal-delay="240"><strong>{{ plugins.length }} 款插件</strong><span>扩展平台与观看方式</span></div></div>
 
     <section class="home-section viewing-section">
       <div class="section-heading"><div data-reveal><p class="eyebrow">01 / 观看体验</p><h2>把直播墙，<br />调成你的样子。</h2></div><div data-reveal data-reveal-delay="120"><p class="section-description">切换布局预设 · 拖入关注卡片</p><a :href="withBase('/software')">了解全部软件功能 ↗</a></div></div>

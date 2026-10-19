@@ -79,7 +79,7 @@ body { min-width: 0; }
 .gallery-tabs button[aria-pressed=true], .filters button[aria-pressed=true] { color: var(--vp-c-brand-1); border-color: var(--vp-c-brand-1); }
 .tab-number { opacity: .55; font-size: 12px; margin-right: 12px; font-variant-numeric: tabular-nums; }
 .screenshot-source { color: var(--vp-c-text-2); font-size: 12px; text-align: center; margin: 0 0 18px; }
-.facts { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--vp-c-divider); padding: 26px 0 38px; gap: 24px; }
+.facts { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--vp-c-divider); padding: 4px 0 38px; gap: 24px; }
 .facts > div + div { padding-left: 26px; border-left: 1px solid var(--vp-c-divider); }
 .facts strong { display: block; font-size: 28px; line-height: 1.4; font-weight: 600; margin-bottom: 8px; letter-spacing: -.02em; }
 .facts strong span { font-size: 18px; }

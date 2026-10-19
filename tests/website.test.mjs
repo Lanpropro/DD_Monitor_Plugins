@@ -398,34 +398,41 @@ test('screenshot scroll contracts the display and playback loops only while bein
   assert.ok(gallery.sizeDisconnected)
 })
 
-test('restored screenshot contraction starts at the original sticky offset', () => {
+test('restored screenshot contraction starts at the sticky offset and spans the scroll tail', () => {
   const gallery = mountGallery()
-  // Original gallery uses the sticky top (100px), with a 420px scroll range.
+  // The 600px scroll range is the full distance between the sticky start and the tail end.
   gallery.story.top = 160
   gallery.state.update()
   assert.equal(gallery.state.progress.value, 0)
   gallery.story.top = 100
   gallery.state.update()
   assert.equal(gallery.state.progress.value, 0)
-  gallery.story.top = 58
+  gallery.story.top = -440
   gallery.state.update()
-  assert.ok(Math.abs(gallery.state.progress.value - .1) < .001)
+  assert.ok(Math.abs(gallery.state.progress.value - .9) < .001)
   gallery.unmount()
 })
 
-test('the sticky screenshot stays vertically centered with compact controls', () => {
+test('the sticky screenshot and facts stay vertically centered with compact controls', () => {
   const source = read('docs/.vitepress/theme/ScreenshotShowcase.vue')
+  const home = read('docs/.vitepress/theme/HomePage.vue')
   const pin = source.match(/\.screenshot-pin \{([^}]+)\}/)[1]
   const enhancedPin = source.match(/\.is-enhanced \.screenshot-pin \{([^}]+)\}/)[1]
   const tail = source.match(/\.is-enhanced::after \{([^}]+)\}/)[1]
   const controls = source.match(/\.gallery-controls \{([^}]+)\}/)[1]
+  const details = source.match(/\.showcase-details \{([^}]+)\}/)[1]
   assert.match(pin, /justify-content:\s*center/, 'the gallery is centered inside its sticky viewport')
   assert.match(pin, /gap:\s*12px/, 'the controls stay close to the screenshot')
   assert.match(controls, /gap:\s*8px/, 'the controls and source note form one compact group')
+  assert.match(details, /gap:\s*14px/, 'the facts row joins the centered showcase group')
   assert.match(enhancedPin, /min-height:\s*calc\(100svh - var\(--vp-nav-height\) - 48px\)/,
     'the sticky viewport spans the area below the navigation bar')
-  assert.match(tail, /height:\s*16svh/, 'the tail does not leave a large empty scroll area')
-  assert.match(source, /--shot-scale': enhanced \? 1 - progress \* \.08 : 1/, 'the final frame keeps most of its size')
+  assert.match(tail, /height:\s*45svh/, 'the original scroll distance is restored')
+  assert.match(source, /--shot-scale': enhanced \? 1 - progress \* \.18 : 1/, 'the original contraction is restored')
+  assert.ok(source.includes('<slot />'), 'the facts row is rendered inside the sticky showcase')
+  const facts = home.indexOf('<div class="facts"')
+  assert.ok(facts > home.indexOf('<ScreenshotShowcase>') && facts < home.indexOf('</ScreenshotShowcase>'),
+    'the facts row is no longer outside the centered group')
   const gallery = mountGallery()
   gallery.story.top = -500
   gallery.state.update()

@@ -32,7 +32,7 @@ function update() {
   if (!enhanced.value || !story.value || !pin.value) return
   const top = parseFloat(getComputedStyle(pin.value).top) || 0
   const range = story.value.offsetHeight - pin.value.offsetHeight
-  progress.value = Math.min(1, Math.max(0, (top - story.value.getBoundingClientRect().top) / Math.max(1, range * .7)))
+  progress.value = Math.min(1, Math.max(0, (top - story.value.getBoundingClientRect().top) / Math.max(1, range)))
   if (progress.value >= .95) controlsReady.value = true
   else if (progress.value <= .15) controlsReady.value = false
   schedule()
@@ -74,9 +74,9 @@ onUnmounted(() => {
 
 <template>
   <section ref="story" class="screenshot-story" :class="{ 'is-enhanced': enhanced }" aria-label="真实软件截图"
-    :style="{ '--shot-scale': enhanced ? 1 - progress * .08 : 1, '--frame-ratio': active === 2 ? 9 / 16 : 16 / 9, '--selected': active, '--controls': controlsReady || !enhanced ? 1 : Math.min(1, Math.max(0, (progress - .55) / .4)) }">
+    :style="{ '--shot-scale': enhanced ? 1 - progress * .18 : 1, '--frame-ratio': active === 2 ? 9 / 16 : 16 / 9, '--selected': active, '--controls': controlsReady || !enhanced ? 1 : Math.min(1, Math.max(0, (progress - .55) / .4)) }">
     <div ref="pin" class="screenshot-pin">
-      <div class="product-wrap" :class="{ 'is-measured': enhanced && productHeight > 0 }" :style="enhanced && productHeight > 0 ? { height: productHeight * (1 - progress * .08) + 'px' } : undefined">
+      <div class="product-wrap" :class="{ 'is-measured': enhanced && productHeight > 0 }" :style="enhanced && productHeight > 0 ? { height: productHeight * (1 - progress * .18) + 'px' } : undefined">
       <div ref="product" class="hero-product">
         <div class="window-label"><img :src="withBase('/logo.svg')" width="24" height="24" alt="" /><span>DD 监控室 CE</span><span class="window-mode">多画面 · 自在观看</span></div>
         <div class="screenshot-stage">
@@ -91,13 +91,16 @@ onUnmounted(() => {
         <div class="product-caption">{{ shots[active].caption }}</div>
       </div>
       </div>
-      <div class="gallery-controls" :inert="enhanced && !controlsReady && progress < .65" @pointerenter="interact(true)" @pointerleave="interact(false)"
-        @focusin="interact(true)" @focusout="interact(false)">
-        <div class="gallery-tabs" role="group" aria-label="截图布局">
-          <span class="gallery-selection" aria-hidden="true"></span>
-          <button v-for="(shot, i) in shots" :key="shot.file" :aria-pressed="active === i" @click="selectShot(i)">{{ shot.label }} <span class="layout-ratio" aria-hidden="true">{{ i === 2 ? '9:16' : '16:9' }}</span></button>
+      <div class="showcase-details">
+        <div class="gallery-controls" :inert="enhanced && !controlsReady && progress < .65" @pointerenter="interact(true)" @pointerleave="interact(false)"
+          @focusin="interact(true)" @focusout="interact(false)">
+          <div class="gallery-tabs" role="group" aria-label="截图布局">
+            <span class="gallery-selection" aria-hidden="true"></span>
+            <button v-for="(shot, i) in shots" :key="shot.file" :aria-pressed="active === i" @click="selectShot(i)">{{ shot.label }} <span class="layout-ratio" aria-hidden="true">{{ i === 2 ? '9:16' : '16:9' }}</span></button>
+          </div>
+          <p class="screenshot-source">截图来自现有项目文档，不同版本的界面细节可能有所调整。</p>
         </div>
-        <p class="screenshot-source">截图来自现有项目文档，不同版本的界面细节可能有所调整。</p>
+        <slot />
       </div>
     </div>
   </section>
@@ -106,6 +109,7 @@ onUnmounted(() => {
 <style scoped>
 .screenshot-story { grid-column: 1 / -1; min-width: 0; overflow-anchor: none; }
 .screenshot-pin { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+.showcase-details { display: grid; justify-items: center; gap: 14px; width: 100%; }
 .product-wrap { position: relative; width: min(100%, calc((100svh - var(--vp-nav-height) - 220px) * var(--frame-ratio))); }
 .product-wrap.is-measured .hero-product { position: absolute; top: 0; left: 0; }
 .hero-product { width: 100%; flex-shrink: 0; }
@@ -118,8 +122,9 @@ onUnmounted(() => {
 .layout-ratio { margin-left: 5px; opacity: .6; font-size: 12px; }
 .gallery-selection { position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc((100% - 8px) / 3); border-radius: 8px; background: var(--selected-surface); border: 1px solid var(--vp-c-divider); transform: translateX(calc(var(--selected) * 100%)); }
 .screenshot-source { margin: 0; }
-.is-enhanced::after { content: ''; display: block; height: 16svh; }
+.is-enhanced::after { content: ''; display: block; height: 45svh; }
 .is-enhanced .screenshot-pin { position: sticky; top: calc(var(--vp-nav-height) + 24px); min-height: calc(100svh - var(--vp-nav-height) - 48px); }
+.is-enhanced .screenshot-pin > .showcase-details { align-self: stretch; }
 .is-enhanced .hero-product { transform: scale(var(--shot-scale)); transform-origin: top center; }
 .is-enhanced .gallery-controls { opacity: var(--controls); }
 @media (prefers-reduced-motion: no-preference) {
