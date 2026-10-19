@@ -11,6 +11,16 @@ const plugins = JSON.parse(read('docs/data/plugins.json'))
 const dist = resolve(root, 'docs/.vitepress/dist')
 const base = '/DD_Monitor_Plugins/'
 
+test('homepage uses the approved product name and viewing copy', () => {
+  const source = read('docs/.vitepress/theme/HomePage.vue')
+  const home = readFileSync(resolve(dist, 'index.html'), 'utf8')
+  for (const text of ['DD_Monitor_CE', '横屏、竖屏，按你的方式观看。', '准备好你的下一场观看']) {
+    assert.ok(source.includes(text))
+    assert.ok(home.includes(text))
+  }
+  assert.ok(!source.includes('下载 Windows 便携版，完整解压后即可开始。'))
+})
+
 // Execute the component's actual setup with browser/lifecycle boundaries mocked.
 function mountShowcase({ reduced = false, intersection = true, delay = 0 } = {}) {
   let preferenceChanged

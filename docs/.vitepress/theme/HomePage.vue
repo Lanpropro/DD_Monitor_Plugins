@@ -64,12 +64,12 @@ onUnmounted(() => {
   <main id="home-intro" ref="page" class="showcase">
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy" data-reveal>
-        <p class="eyebrow">DD MONITOR CE <span>/</span> 为多路直播而生</p>
+        <p class="eyebrow">DD_Monitor_CE <span>/</span> 为多路直播而生</p>
         <h1 id="hero-title" tabindex="-1">喜欢的直播，<br /><span>在同一屏相遇。</span></h1>
       </div>
       <div class="hero-intro" data-reveal data-reveal-delay="120">
         <a class="release-badge" :href="release.release">{{ release.tag }} 已发布 <span aria-hidden="true">↗</span></a>
-        <p class="hero-description">把直播、声音和弹幕放进一面画面墙。横屏、竖屏、跨平台，按你的方式观看。</p>
+        <p class="hero-description">把直播、声音和弹幕放进一面画面墙。横屏、竖屏，按你的方式观看。</p>
         <div class="hero-actions"><a class="action primary" :href="release.download">下载 DD 监控室 CE <span aria-hidden="true">↗</span></a>
           <a class="action secondary" href="#plugins">探索插件</a></div>
         <p class="hero-note">Windows 10 / 11 · 免费开源 · B 站原生支持</p>
@@ -102,7 +102,7 @@ onUnmounted(() => {
       <p class="plugin-compatibility">插件独立下载、独立启用。安装前请查看<a :href="withBase('/download#插件兼容性')">软件版本与兼容要求</a>。</p>
     </section>
 
-    <section class="home-bottom"><div data-reveal><p class="eyebrow">准备好你的下一场直播</p><h2>打开软件，<br />把喜欢的直播拖进来。</h2><p>下载 Windows 便携版，完整解压后即可开始。</p></div><div class="bottom-actions" data-reveal data-reveal-delay="120"><a class="action primary" :href="withBase('/download')">获取软件 <span aria-hidden="true">↗</span></a><a :href="withBase('/guide')">第一次使用？阅读安装帮助</a></div></section>
+    <section class="home-bottom"><div data-reveal><p class="eyebrow">准备好你的下一场观看</p><h2>打开软件，<br />把喜欢的直播拖进来。</h2></div><div class="bottom-actions" data-reveal data-reveal-delay="120"><a class="action primary" :href="withBase('/download')">获取软件 <span aria-hidden="true">↗</span></a><a :href="withBase('/guide')">第一次使用？阅读安装帮助</a></div></section>
   </main>
   <BackToIntro />
 </template>
