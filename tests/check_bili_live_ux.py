@@ -10,7 +10,7 @@ import shiboken6
 from unittest.mock import patch
 from bili_live_support import bili
 from bili_live_fixtures import room_payload
-from PySide6.QtCore import QEvent, QObject, QPoint, Qt, qInstallMessageHandler
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt, qInstallMessageHandler
 from PySide6.QtGui import QCursor, QImage, QColor, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton, QVBoxLayout, QWidget
@@ -149,6 +149,57 @@ class PickerUXTests(unittest.TestCase):
         card.click();self.assertTrue(q.isVisible())
         QCursor.setPos(other.mapToGlobal(other.rect().center()))
         settle(lambda:not q.isVisible())
+
+
+    def test_second_row_quantity_path_does_not_close_over_underlying_gift(self):
+        items=tuple(replace(self.item,key=f'quantity:{i}',name=f'Gift {i}') for i in range(15))
+        self.gift.set_state(replace(self.state,tabs=(GiftTab('main','礼物',items),)))
+        self.gift.open_at(self.anchor);APP.processEvents()
+        card=self.gift._cards[self.gift.columns+2]
+        rect=QRect(card.mapToGlobal(QPoint()),card.size())
+        QCursor.setPos(rect.center());APP.processEvents();card.click();APP.processEvents()
+        q=self.gift.quantity_popup
+        self.assertTrue(q.isVisible());self.assertLess(q.geometry().bottom(),rect.top())
+        sent=[];self.gift.sendRequested.connect(lambda *args:sent.append(args))
+        # The six-pixel gap crosses the bottom of the gift in the row above:
+        # grid spacing is only three pixels. Exercise both enter and timer paths.
+        for y in range(rect.top(),q.geometry().bottom()-2,-1):
+            point=QPoint(rect.center().x(),y)
+            QCursor.setPos(point);APP.processEvents()
+            underlying=next((c for c in self.gift._cards if c is not card and
+                c.rect().contains(c.mapFromGlobal(point))),None)
+            if underlying:self.gift._inspect(underlying)
+            self.gift._check_quantity_pointer()
+            self.assertTrue(q.isVisible(),f'quantity popup closed while crossing {point}')
+        self.assertEqual(sent,[])
+        q.edit.setText('10');QTest.mouseClick(q.send_button,Qt.LeftButton)
+        self.assertEqual(sent,[(card.item.key,10)])
+        # A real move onto a neighboring gift must still close immediately.
+        QCursor.setPos(rect.center());card.click();APP.processEvents()
+        other=self.gift._cards[self.gift.columns+3]
+        QCursor.setPos(other.mapToGlobal(other.rect().center()));APP.processEvents()
+        self.gift._check_quantity_pointer();self.assertFalse(q.isVisible())
+
+
+    def test_quantity_path_also_works_when_screen_edge_places_panel_below(self):
+        items=tuple(replace(self.item,key=f'below:{i}',name=f'Gift {i}') for i in range(15))
+        self.gift.set_state(replace(self.state,tabs=(GiftTab('main','礼物',items),)))
+        self.gift.open_at(self.anchor);APP.processEvents()
+        screen=self.gift.screen().availableGeometry()
+        self.gift.move(screen.left()+100,screen.top()+5);APP.processEvents()
+        card=self.gift._cards[2]
+        rect=QRect(card.mapToGlobal(QPoint()),card.size())
+        QCursor.setPos(rect.center());APP.processEvents();card.click();APP.processEvents()
+        q=self.gift.quantity_popup
+        self.assertTrue(q.isVisible());self.assertGreater(q.geometry().top(),rect.bottom())
+        for y in range(rect.bottom(),q.geometry().top()+2):
+            point=QPoint(rect.center().x(),y)
+            QCursor.setPos(point);APP.processEvents()
+            underlying=next((c for c in self.gift._cards if c is not card and
+                c.rect().contains(c.mapFromGlobal(point))),None)
+            if underlying:self.gift._inspect(underlying)
+            self.gift._check_quantity_pointer()
+            self.assertTrue(q.isVisible(),f'below-screen-edge transition closed at {point}')
 
     def test_send_status_shares_balance_row_and_success_is_quiet(self):
         self.gift.open_at(self.anchor)

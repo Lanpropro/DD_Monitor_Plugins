@@ -84,8 +84,19 @@ class IntegrationTests(unittest.TestCase):
             [composer.edit,composer.emote_button,composer.gift_button,composer.send_button])
         for button in (composer.emote_button,composer.gift_button):
             self.assertEqual((button.width(),button.height()),(28,28))
-        with patch.object(self.api,'send_gift',return_value=self.api.GiftResult('main:1',1,{})):
-            composer.gift_controller.send('main:1',1);settle(lambda:not self.entry.coordinator.busy)
+        release=threading.Event()
+        def refresh_wallet(**kw):
+            release.wait(3);return 999800
+        try:
+            with patch.object(self.api,'send_gift',return_value=self.api.GiftResult('main:1',1,{})),patch.object(self.api,'get_wallet',side_effect=refresh_wallet):
+                composer.gift_controller.send('main:1',1)
+                settle(lambda:not self.entry.coordinator.busy)
+                self.assertEqual(composer.gift_controller.state.wallet,999894)
+                self.assertEqual(composer.gift_popup.wallet_label.text(),'剩余电池：9998.94')
+                self.assertEqual(composer.gift_controller.state.feedback,'')
+                release.set();settle(lambda:not composer.gift_controller.state.loading)
+                self.assertEqual(composer.gift_popup.wallet_label.text(),'剩余电池：9998')
+        finally:release.set()
         self.assertEqual(composer.edit.text(),'draft remains')
         with patch.object(self.emotes,'get_emoticons',return_value=[]):
             composer.open_emoticons();settle(lambda:composer.popup is not None)

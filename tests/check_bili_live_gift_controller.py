@@ -54,6 +54,7 @@ class ControllerTests(unittest.TestCase):
         with patch.object(api,'send_gift',side_effect=send) as post:
             a.send('main:1',1);settle(entered.is_set);b.send('main:1',1)
             self.assertTrue(self.coordinator.busy);self.assertEqual(post.call_count,1)
+            self.assertEqual((a.state.wallet,b.state.wallet),(99999,99999))
             release.set();settle(lambda:not self.coordinator.busy)
     def test_room_change_during_target_preparation_never_posts(self):
         a=self.controller();entered,release,prepare=self.barrier()
@@ -64,11 +65,13 @@ class ControllerTests(unittest.TestCase):
         post.assert_not_called()
     def test_destroyed_view_does_not_release_inflight_reservation(self):
         a,b=self.controller(),self.controller();entered,release,send=self.barrier()
+        b.set_active(False)
         with patch.object(api,'send_gift',side_effect=send) as post:
             a.send('main:1',1);settle(entered.is_set);a.shutdown();a.deleteLater()
             APP.sendPostedEvents(None,QEvent.DeferredDelete)
             b.send('main:1',1);self.assertEqual(post.call_count,1);self.assertTrue(self.coordinator.busy)
             release.set();settle(lambda:not self.coordinator.busy)
+        self.assertEqual(b.state.wallet,99894)
     def test_account_change_does_not_apply_old_result(self):
         a=self.controller();entered,release,send=self.barrier();sent=[];a.sent.connect(sent.append)
         with patch.object(api,'send_gift',side_effect=send):
@@ -85,7 +88,7 @@ class ControllerTests(unittest.TestCase):
             with patch.object(api,'send_gift',return_value=api.GiftResult('main:1',1,{})):
                 a.send('main:1',1);settle(lambda:not self.coordinator.busy)
             release.set();settle(lambda:not _active_requests)
-        self.assertIsNone(b.state.wallet)
+        self.assertEqual(b.state.wallet,99894)
         self.assertEqual(next(t for t in b.state.tabs if t.key=='bag').items,())
     def test_hidden_panel_reopens_with_refreshed_bag(self):
         a,b=self.controller(),self.controller()
@@ -124,6 +127,7 @@ class ControllerTests(unittest.TestCase):
             a.send('main:1',1);settle(lambda:not self.coordinator.busy and not a.state.loading)
         self.assertEqual(len(sent),1);self.assertEqual(failed,[])
         self.assertEqual(a.state.feedback,'');self.assertIn('refresh failed',a.state.wallet_error)
+        self.assertEqual(a.state.wallet,99894)
 
     def test_success_ok_payload_refreshes_wallet_without_feedback(self):
         from unittest.mock import Mock
@@ -138,5 +142,79 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(len(sent),1)
         self.assertEqual(a.state.wallet,99894)
         self.assertEqual(a.state.feedback,'')
+
+    def test_manual_refresh_retains_balance_until_authoritative_value_arrives(self):
+        a=self.controller();entered,release=threading.Event(),threading.Event();self.releases.append(release)
+        def wallet(**kw):entered.set();release.wait(3);return 76543
+        with patch.object(api,'get_wallet',side_effect=wallet):
+            a.load(force=True);settle(entered.is_set)
+            self.assertEqual(a.state.wallet,99999)
+            release.set();settle(lambda:not a.state.loading)
+        self.assertEqual(a.state.wallet,76543)
+
+    def test_confirmed_quantity_debits_all_tiles_then_reconciles(self):
+        a,b=self.controller(),self.controller()
+        b.set_context('90002',session.snapshot());b.load();settle(lambda:not b.state.loading)
+        entered,release=threading.Event(),threading.Event();self.releases.append(release)
+        def wallet(**kw):entered.set();release.wait(3);return 95000
+        states=[];a.stateChanged.connect(states.append)
+        with patch.object(api,'send_gift',return_value=api.GiftResult('main:1',10,{})),patch.object(api,'get_wallet',side_effect=wallet):
+            a.send('main:1',10);settle(lambda:not self.coordinator.busy and entered.is_set())
+            self.assertEqual(a.state.wallet,98949)
+            self.assertEqual(b.state.wallet,98949)
+            self.assertEqual(a.state.feedback,'')
+            self.assertTrue(all(s.wallet is not None for s in states))
+            release.set();settle(lambda:not _active_requests)
+        self.assertEqual((a.state.wallet,b.state.wallet),(95000,95000))
+
+    def test_consecutive_successes_accumulate_and_ignore_older_refresh(self):
+        a=self.controller();entered,release=threading.Event(),threading.Event();self.releases.append(release)
+        calls=[]
+        def wallet(**kw):
+            calls.append(True)
+            if len(calls)==1:entered.set();release.wait(3);return 99894
+            return 99000
+        def send(target,item,count,**kw):return api.GiftResult(item.key,count,{})
+        with patch.object(api,'send_gift',side_effect=send),patch.object(api,'get_wallet',side_effect=wallet):
+            a.send('main:1',1);settle(lambda:not self.coordinator.busy and entered.is_set())
+            self.assertEqual(a.state.wallet,99894)
+            a.set_active(False)
+            a.send('main:1',10);settle(lambda:not self.coordinator.busy)
+            self.assertEqual(a.state.wallet,98844)
+            release.set();settle(lambda:not _active_requests)
+            self.assertEqual(a.state.wallet,98844,'older authoritative response replaced the second debit')
+            a.load();settle(lambda:not a.state.loading)
+        self.assertEqual(a.state.wallet,99000)
+
+    def test_bag_success_does_not_debit_batteries(self):
+        a=self.controller()
+        bag=api.normalize_bag(bag_payload(),self.catalog,'90001',now=100)
+        # Do not expire this synthetic fixture against the current wall clock.
+        item=replace(bag.items[0],expires_at=0)
+        a._update(tabs=tuple(t for t in a.state.tabs if t.key!='bag')+(replace(bag,items=(item,)),))
+        a.set_active(False)
+        with patch.object(api,'send_gift',return_value=api.GiftResult(item.key,2,{})):
+            a.send(item.key,2);settle(lambda:not self.coordinator.busy)
+        self.assertEqual(a.state.wallet,99999)
+        self.assertEqual(next(t for t in a.state.tabs if t.key=='bag').items,())
+
+    def test_uncertain_send_retains_display_but_requires_balance_refresh(self):
+        a=self.controller();a.set_active(False)
+        with patch.object(api,'send_gift',side_effect=api.GiftSendError('unconfirmed',uncertain=True)) as post:
+            a.send('main:1',1);settle(lambda:not self.coordinator.busy)
+            self.assertEqual(a.state.wallet,99999)
+            self.assertFalse(a.state.wallet_valid)
+            a.send('main:1',1);APP.processEvents()
+            self.assertEqual(post.call_count,1)
+        with patch.object(api,'get_wallet',return_value=98765) as read:
+            a.load();settle(lambda:not a.state.loading)
+            read.assert_called_once()
+        self.assertEqual(a.state.wallet,98765);self.assertTrue(a.state.wallet_valid)
+
+    def test_rejected_send_does_not_debit_balance(self):
+        a=self.controller()
+        with patch.object(api,'send_gift',side_effect=api.GiftSendError('rejected')):
+            a.send('main:1',1);settle(lambda:not self.coordinator.busy)
+        self.assertEqual(a.state.wallet,99999)
 
 if __name__=='__main__':unittest.main()

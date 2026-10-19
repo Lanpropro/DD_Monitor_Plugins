@@ -8,6 +8,7 @@ from .workers import Request, start_worker, request_message
 class GiftPanelState:
     tabs: tuple = ()
     wallet: int | None = None
+    wallet_valid: bool = True
     catalog_error: str = ''
     wallet_error: str = ''
     bag_error: str = ''
@@ -15,24 +16,30 @@ class GiftPanelState:
     sending: bool = False
     feedback: str = ''
 
+    @property
+    def spendable_wallet(self):
+        # Keep the displayed value even when an uncertain POST needs a fresh read.
+        return self.wallet if self.wallet_valid else None
+
 class GiftCoordinator(QObject):
     completed = Signal(object,object,object)
     busyChanged = Signal(bool)
-    invalidated = Signal(int,object)
+    invalidated = Signal(int,object,object)
 
     def __init__(self,parent=None):
         super().__init__(parent)
         self.revision=0
         self._worker=None
         self._token=None
+        self._debit=0
         self._result=self._error=None
 
     @property
     def busy(self):return self._worker is not None
 
-    def submit(self,worker,token):
+    def submit(self,worker,token,*,debit):
         if self.busy:return False
-        self._worker,self._token=worker,token
+        self._worker,self._token,self._debit=worker,token,debit
         self._result=self._error=None
         worker.completed.connect(self._success)
         worker.failed.connect(self._failure)
@@ -48,11 +55,14 @@ class GiftCoordinator(QObject):
     @Slot()
     def _finished(self):
         # Release only after the actual thread ends, even if its view vanished.
-        result,error,token=self._result,self._error,self._token
+        result,error,token,debit=self._result,self._error,self._token,self._debit
         self._worker=self._token=None
+        self._debit=0
         if result is not None or getattr(error,'uncertain',False):
             self.revision+=1
-            self.invalidated.emit(self.revision,token)
+            # The reservation owns the captured cost even if the sending tile
+            # closed or switched rooms before the confirmed response arrived.
+            self.invalidated.emit(self.revision,token,debit if result is not None else None)
         self.busyChanged.emit(False)
         self.completed.emit(token,result,error)
 
@@ -67,7 +77,7 @@ class GiftController(QObject):
         self.state=GiftPanelState(sending=coordinator.busy)
         self._room='';self._snapshot=None;self._serial=0;self._closed=False
         self._reads={};self._send=None;self._catalog=None;self._active=False
-        self._read_id=0;self._revision=coordinator.revision;self._bag_valid=False
+        self._read_id=0;self._revision=coordinator.revision;self._bag_valid=False;self._wallet_fresh=False
         coordinator.busyChanged.connect(self._busy)
         coordinator.invalidated.connect(self._invalidate)
         coordinator.completed.connect(self._submission_done)
@@ -86,7 +96,7 @@ class GiftController(QObject):
         for worker in tuple(self._reads.values()):worker.cancel()
         self._reads.clear()
         if self._send:self._send.cancel()
-        self._catalog=None;self._bag_valid=False
+        self._catalog=None;self._bag_valid=False;self._wallet_fresh=False
         self.state=GiftPanelState(sending=self.coordinator.busy)
         self.stateChanged.emit(self.state)
 
@@ -100,7 +110,7 @@ class GiftController(QObject):
             self._reads.clear()
         kinds=[]
         if force or self._catalog is None:kinds.append('catalog')
-        if force or self.state.wallet is None:kinds.append('wallet')
+        if force or not self._wallet_fresh:kinds.append('wallet')
         if force or not self._bag_valid:kinds.append('bag')
         self._load_kinds(kinds)
 
@@ -138,7 +148,9 @@ class GiftController(QObject):
         elif kind=='bag':
             self._bag_valid=True
             changes['tabs']=tuple(t for t in self.state.tabs if t.key!='bag')+(result,)
-        else:changes['wallet']=result
+        else:
+            self._wallet_fresh=True
+            changes.update(wallet=result,wallet_valid=True)
         self._update(**changes)
 
     @Slot(object,object)
@@ -152,10 +164,10 @@ class GiftController(QObject):
         item=next((i for t in self.state.tabs for i in t.items if i.key==gift_key),None)
         if item is None:return
         snapshot=self._snapshot
-        try:api.validate_send(item,quantity,cookies=snapshot.values if snapshot else {},wallet=self.state.wallet)
+        try:api.validate_send(item,quantity,cookies=snapshot.values if snapshot else {},wallet=self.state.spendable_wallet)
         except api.GiftSendError as error:
             self._update(feedback=str(error));self.failed.emit(str(error),False);return
-        serial=self._serial;room=self._room;wallet=self.state.wallet
+        serial=self._serial;room=self._room;wallet=self.state.spendable_wallet
         token=(id(self),serial,snapshot.generation)
         def operation(cookies):
             target=api.prepare_target(room,cookies=cookies)
@@ -164,25 +176,28 @@ class GiftController(QObject):
         worker.deviceReady.connect(self.session.publish_device)
         self._send=worker
         self._update(feedback='正在赠送…')
-        self.coordinator.submit(worker,token)
+        self.coordinator.submit(worker,token,debit=item.price*quantity if item.source=='gold' else 0)
 
     @Slot(bool)
     def _busy(self,busy):
         if not self._closed:self._update(sending=busy)
 
-    @Slot(int,object)
-    def _invalidate(self,revision,token):
+    @Slot(int,object,object)
+    def _invalidate(self,revision,token,debit):
         if self._closed:return
         # A completion from an earlier account cannot mutate the new account.
-        if not self._snapshot or token[2]!=self._snapshot.generation:return
+        if not self._snapshot or token[2]!=self._snapshot.generation or revision<=self._revision:return
         # Revisions affect only this account context; another account's late POST
         # must not discard valid reads that are already in progress here.
-        self._revision=revision;self._bag_valid=False
+        self._revision=revision;self._bag_valid=False;self._wallet_fresh=False
         for kind in ('wallet','bag'):
             worker=self._reads.pop(kind,None)
             if worker:worker.cancel()
         tabs=tuple(t for t in self.state.tabs if t.key!='bag')+(api.GiftTab('bag','背包',()),)
-        self._update(wallet=None,tabs=tabs,loading=frozenset(self._reads))
+        wallet=self.state.wallet
+        if debit is not None and wallet is not None:wallet=max(0,wallet-debit)
+        self._update(wallet=wallet,wallet_valid=self.state.wallet_valid and debit is not None,
+                     tabs=tabs,loading=frozenset(self._reads))
         if self._active:self._load_kinds(('wallet','bag'))
 
     @Slot(object,object,object)

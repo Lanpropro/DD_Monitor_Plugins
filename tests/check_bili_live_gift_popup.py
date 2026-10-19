@@ -99,6 +99,18 @@ class PopupTests(unittest.TestCase):
         q.edit.setText('1');self.assertTrue(q.send_button.isEnabled())
         self.popup.set_state(replace(self.state,wallet=None,wallet_error='offline'))
         self.assertFalse(q.send_button.isEnabled());self.assertIn('未知',self.popup.wallet_label.text())
+
+    def test_retained_unconfirmed_balance_is_visible_but_cannot_buy(self):
+        self.card('main:1').click();q=self.popup.quantity_popup
+        self.popup.set_state(replace(self.state,wallet_valid=False))
+        self.assertNotIn('未知',self.popup.wallet_label.text())
+        self.assertFalse(self.card('main:1').isEnabled())
+        self.assertFalse(q.send_button.isEnabled())
+        self.popup._request_send('main:1',1)
+        self.assertEqual(self.sent,[])
+        self.popup.set_state(replace(self.state,wallet_valid=True))
+        self.assertTrue(self.card('main:1').isEnabled());self.assertTrue(q.send_button.isEnabled())
+
     def test_browsing_outside_stays_open(self):
         self.point(self.outside);QTest.qWait(220)
         self.assertTrue(self.popup.isVisible())

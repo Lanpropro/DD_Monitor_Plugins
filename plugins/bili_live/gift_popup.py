@@ -178,10 +178,10 @@ class GiftPopup(AnchoredPopup):
                 self._select(selected)
         for card in self._cards:
             valid=not card.item.disabled_reason and card.item.source in ('gold','bag')
-            card.setEnabled(valid and not state.sending and (card.item.source=='bag' or state.wallet is not None))
+            card.setEnabled(valid and not state.sending and (card.item.source=='bag' or state.spendable_wallet is not None))
         q=self.quantity_popup
         if q.item:
-            q.wallet,q.sending=state.wallet,state.sending;q._validate()
+            q.wallet,q.sending=state.spendable_wallet,state.sending;q._validate()
         if self.isVisible():
             self.layout().activate();self.place_at(self._anchor)
         self._check_pointer()
@@ -200,7 +200,7 @@ class GiftPopup(AnchoredPopup):
             for item in tab.items:
                 card=GiftCard(item,self.body);card.chosen.connect(self._choose);card.inspected.connect(self._inspect)
                 card.setEnabled(not item.disabled_reason and not self.state.sending and
-                    item.source in ('gold','bag') and (item.source=='bag' or self.state.wallet is not None))
+                    item.source in ('gold','bag') and (item.source=='bag' or self.state.spendable_wallet is not None))
                 self._cards.append(card)
         self._arrange()
     def _arrange(self):
@@ -214,13 +214,13 @@ class GiftPopup(AnchoredPopup):
         if (item.counts==(1,) and not item.allow_custom or
                 self.quantity_popup.isVisible() and self._quantity_card is card):
             self.quantity_popup.hide()
-            if _quantity_valid(item,1,self.state.wallet):self._request_send(item.key,1)
+            if _quantity_valid(item,1,self.state.spendable_wallet):self._request_send(item.key,1)
         else:self._quantity(card)
 
     def _request_send(self,key,count):
         state=self.state
         item=next((i for t in state.tabs for i in t.items if i.key==key),None)
-        if self._closed or state.sending or not item or not _quantity_valid(item,count,state.wallet):return
+        if self._closed or state.sending or not item or not _quantity_valid(item,count,state.spendable_wallet):return
         if item.pay_type=='interactive_pay' and item.payment_scene=='guard_gift':
             dialog=QMessageBox(QMessageBox.Question,'确认投喂',
                 f'{escape(item.name)} × {count}，共 {format_battery(item.price*count)} 电池',
@@ -241,14 +241,15 @@ class GiftPopup(AnchoredPopup):
         self.sendRequested.emit(key,count)
 
     def _inspect(self,card):
-        if self.quantity_popup.isVisible() and card is not self._quantity_card:
+        if (self.quantity_popup.isVisible() and card is not self._quantity_card and
+                not self._quantity_contains(QCursor.pos())):
             self.quantity_popup.hide()
     def _quantity(self,card):
         if not self.isVisible() or not card.isEnabled():return
         if card.item.counts==(1,) and not card.item.allow_custom:return
         q=self.quantity_popup
         self._quantity_card=card;self._quantity_outside=None
-        q.set_item(card.item,self.state.wallet,self.state.sending)
+        q.set_item(card.item,self.state.spendable_wallet,self.state.sending)
         screen=card.screen().availableGeometry();q.setMaximumSize(screen.size())
         q.place_at(card);q.show();q.raise_();self._outside_since=None
     def _visible_media(self,*args):
@@ -306,7 +307,7 @@ class GiftPopup(AnchoredPopup):
     def _inside(self,point):
         return (self.geometry().contains(point) or
             self._agreement is not None and self._agreement.geometry().contains(point) or
-            self.quantity_popup.isVisible() and self.quantity_popup.geometry().contains(point))
+            self.quantity_popup.isVisible() and self._quantity_contains(point))
     def _check_pointer(self):
         if self._agreement is not None:return
         if self._owner_dragging:
@@ -319,14 +320,31 @@ class GiftPopup(AnchoredPopup):
         if self._outside_since is None:self._outside_since=now
         elif now-self._outside_since>=.15:self.hide()
 
+    def _quantity_contains(self,point):
+        card=self._quantity_card
+        if card is None:return False
+        popup=self.quantity_popup.geometry()
+        anchor=QRect(card.mapToGlobal(QPoint()),card.size())
+        if popup.contains(point) or anchor.contains(point):return True
+        # The six-pixel travel gap overlaps the previous row when grid spacing
+        # is only three pixels. Both Enter events and polling must protect this
+        # narrow bridge, without extending it sideways onto neighboring gifts.
+        left=max(popup.left(),anchor.left());right=min(popup.right(),anchor.right())
+        if popup.bottom()<anchor.top():
+            top,bottom=popup.bottom()+1,anchor.top()-1
+        elif anchor.bottom()<popup.top():
+            top,bottom=anchor.bottom()+1,popup.top()-1
+        else:return False
+        return QRect(QPoint(left,top),QPoint(right,bottom)).contains(point)
+
     def _check_quantity_pointer(self):
         q=self.quantity_popup;card=self._quantity_card
         if not q.isVisible() or not card:return
         point=QCursor.pos()
-        if q.geometry().contains(point) or card.rect().contains(card.mapFromGlobal(point)):
+        if self._quantity_contains(point):
             self._quantity_outside=None;return
-        # Moving onto another gift closes immediately; a small gap between
-        # the selected gift and its quantity panel has a short grace period.
+        # Moving onto another gift outside the bridge closes immediately;
+        # other departures retain the existing short grace period.
         if any(c is not card and c.rect().contains(c.mapFromGlobal(point)) for c in self._cards):
             q.hide();return
         now=time.monotonic()
