@@ -258,6 +258,13 @@ test('the full-screen wall leaves vertical touch gestures to page scrolling', ()
   assert.match(splash, /dx\s*<\s*dy/, 'a mostly vertical gesture must not become a wall drag')
 })
 
+test('idle drift orbits the full wall period so every unique tile comes into view', () => {
+  const splash = read('docs/.vitepress/theme/SplashWall.vue')
+  assert.match(splash, /const angle = \(now \/ 1000\) \* \(Math\.PI \* 2 \/ 48\)/, 'one orbit should take 48 seconds')
+  assert.match(splash, /driftX = Math\.cos\(angle\) \* period\.x \/ 2/, 'horizontal radius must span half the repeat period')
+  assert.match(splash, /driftY = Math\.sin\(angle\) \* period\.y \/ 2/, 'vertical radius must span half the repeat period')
+})
+
 test('the plugin catalog escapes the narrow documentation column', () => {
   const catalogPage = read('docs/plugins/index.md')
   assert.match(catalogPage, /layout:\s*page/, 'the catalog needs the full-width page layout')

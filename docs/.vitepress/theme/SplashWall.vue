@@ -55,13 +55,14 @@ function applyTransform() {
   element.style.opacity = (1 - scrollProgress * 0.72).toFixed(3)
 }
 
-// 没人操作时整面墙自己缓缓游动，双频叠加让轨迹不重复。
+// 没人操作时沿整块重复区域的边缘缓慢绕行，一圈经过全部 56 个不重复格子。
 function drift(now) {
   // 开屏墙在手机上铺满第一屏，若继续游动会一直重绘，滚动后停手。
   const active = !dragging && !reduced && !navRevealed && (window.scrollY || 0) < (window.innerHeight || 1) * 0.6
   if (active) {
-    driftX = Math.sin(now / 2600) * 62 + Math.sin(now / 7100) * 22
-    driftY = Math.cos(now / 3300) * 44 + Math.cos(now / 8300) * 16
+    const angle = (now / 1000) * (Math.PI * 2 / 48)
+    driftX = Math.cos(angle) * period.x / 2
+    driftY = Math.sin(angle) * period.y / 2
     applyTransform()
   }
   driftFrame = requestAnimationFrame(drift)
