@@ -183,6 +183,40 @@ class IntegrationTests(unittest.TestCase):
                 finally:
                     self.window.removeEventFilter(observer)
                     popup.hide();self.window.move(before);APP.processEvents()
+        if APP.platformName()=='windows':
+            import ctypes
+            from ctypes import wintypes
+            user32=ctypes.WinDLL('user32',use_last_error=True)
+            user32.GetWindowRect.argtypes=(wintypes.HWND,ctypes.POINTER(wintypes.RECT))
+            user32.SetWindowPos.argtypes=(wintypes.HWND,wintypes.HWND,ctypes.c_int,
+                ctypes.c_int,ctypes.c_int,ctypes.c_int,wintypes.UINT)
+            user32.SendMessageW.argtypes=(wintypes.HWND,wintypes.UINT,wintypes.WPARAM,wintypes.LPARAM)
+            def native_rect(widget):
+                rect=wintypes.RECT();self.assertTrue(user32.GetWindowRect(int(widget.winId()),ctypes.byref(rect)))
+                return rect.left,rect.top,rect.right,rect.bottom
+            owner=int(self.window.winId())
+            for popup,button in ((composer.popup,composer.emote_button),(composer.gift_popup,composer.gift_button)):
+                with self.subTest(native_picker=type(popup).__name__):
+                    popup.open_at(button);APP.processEvents()
+                    followers=[popup]
+                    if popup is composer.gift_popup:
+                        popup._quantity(popup._cards[0]);APP.processEvents()
+                        followers.append(popup.quantity_popup)
+                    origin=native_rect(self.window);initial=[native_rect(f) for f in followers]
+                    user32.SendMessageW(owner,0x231,0,0)
+                    try:
+                        for dx,dy in ((45,12),(90,24),(30,8),(0,0)):
+                            self.assertTrue(user32.SetWindowPos(owner,None,origin[0]+dx,origin[1]+dy,0,0,0x15))
+                            for follower,old in zip(followers,initial):
+                                expected=(old[0]+dx,old[1]+dy)
+                                self.assertLessEqual(max(abs(a-b) for a,b in zip(native_rect(follower)[:2],expected)),1,
+                                                     'installed native follower waited for Qt')
+                        final=[native_rect(f) for f in followers];APP.processEvents()
+                        for follower,position in zip(followers,final):
+                            self.assertLessEqual(max(abs(a-b) for a,b in zip(native_rect(follower),position)),1)
+                    finally:
+                        user32.SendMessageW(owner,0x232,0,0);popup.hide()
+                        user32.SetWindowPos(owner,None,*origin[:2],0,0,0x15);APP.processEvents()
 
     def test_existing_new_empty_room_swap_and_fullscreen_same_control(self):
         tile=self.window.wall.tiles[0];composer=self.composer(tile)

@@ -55,6 +55,7 @@ class AnchoredPopup(QWidget):
         self._anchor = None
         self._owner = None
         self._owner_dragging = False
+        self._native_follow = None
         self._placement_timer = QTimer(self)
         self._placement_timer.setSingleShot(True)
         self._placement_timer.timeout.connect(self._place_after_layout)
@@ -70,6 +71,8 @@ class AnchoredPopup(QWidget):
 
     def place_at(self, anchor):
         self._placement_timer.stop()
+        if self._native_follow is not None and self._native_follow.dragging:
+            return
         self._anchor = anchor
         self._owner = anchor.window()
         if self.parentWidget() is not self._owner:
@@ -84,6 +87,7 @@ class AnchoredPopup(QWidget):
             y = anchor.mapToGlobal(QPoint(0, anchor.height())).y() + 6
         self.move(max(screen.left(), min(x, screen.right()-self.width()+1)),
                   max(screen.top(), min(y, screen.bottom()-self.height()+1)))
+        if self._native_follow is not None and self.isVisible():self._native_follow.start()
 
     def _schedule_placement(self):
         # A layout can move/resize several ancestors before the button reaches
@@ -154,7 +158,16 @@ class AnchoredPopup(QWidget):
 
     def hideEvent(self,event):
         self._placement_timer.stop()
+        if self._native_follow is not None:self._native_follow.stop()
         super().hideEvent(event)
+
+    def showEvent(self,event):
+        super().showEvent(event)
+        if QApplication.platformName()=='windows':
+            if self._native_follow is None:
+                from .native_follow import NativePopupFollower
+                self._native_follow=NativePopupFollower(self)
+            self._native_follow.start()
 
 
 def picker_style():

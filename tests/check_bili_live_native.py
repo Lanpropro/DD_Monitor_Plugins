@@ -51,6 +51,13 @@ def check_native_move_loop(owner,popup,anchor):
             elif native.hWnd==hwnd and native.message==0x232:
                 rows.append((time.perf_counter(),'exit'));inside=False
                 loop.quit()
+            elif inside and native.hWnd==hwnd and native.message==0x46:
+                class WindowPos(ctypes.Structure):
+                    _fields_=[('hwnd',wintypes.HWND),('after',wintypes.HWND),
+                              ('x',ctypes.c_int),('y',ctypes.c_int),('cx',ctypes.c_int),
+                              ('cy',ctypes.c_int),('flags',wintypes.UINT)]
+                if not WindowPos.from_address(native.lParam).flags&2:
+                    rows.append((time.perf_counter(),'owner-proposal'))
             elif inside and native.message==3:
                 if native.hWnd==hwnd:rows.append((time.perf_counter(),'owner'))
                 elif native.hWnd in handles:rows.append((time.perf_counter(),handles[native.hWnd]))
@@ -107,14 +114,16 @@ def check_native_move_loop(owner,popup,anchor):
     expected=max(screen.left(),min(anchor.mapToGlobal(QPoint(anchor.width()//2,0)).x()-popup.width()//2,
                                   screen.right()-popup.width()+1))
     assert abs(popup.x()-expected)<=1,(popup.x(),expected)
-    owner_times=[t for t,name in rows if name=='owner']
+    # Followers now move before the owner's WM_MOVE. Comparing with the
+    # previous WM_MOVE would misleadingly report a full input interval of lag.
+    owner_times=[t for t,name in rows if name=='owner-proposal']
     timings=[]
     for follower in followers:
         label=type(follower).__name__
         delays=sorted((t-max(p for p in owner_times if p<=t))*1000 for t,name in rows
                       if name==label and any(p<=t for p in owner_times))
         timings.append(f'{label} updates={len(delays)}, p95={delays[int(len(delays)*.95)]:.2f}ms, max={max(delays):.2f}ms')
-    print(f'PASS: actual native move loop owner={len(owner_times)}; '+ '; '.join(timings),flush=True)
+    print(f'PASS: native proposal-to-follower, owner={len(owner_times)}; '+ '; '.join(timings),flush=True)
 
 
 def main():
