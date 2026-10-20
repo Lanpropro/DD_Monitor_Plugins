@@ -5,28 +5,14 @@ import { onMounted, onUnmounted, reactive, ref } from 'vue'
 // 标准画面墙：等尺寸格子铺成 2×2 的重复块，拖动按周期取模，四向都接得上。
 const TILE_COUNT = 56
 const REPEATS = 4
-const TOTAL_TILES = TILE_COUNT * REPEATS
-const COLUMNS = 14
-const REPEAT_COLUMNS = COLUMNS / 2
-const REPEAT_ROWS = TILE_COUNT / REPEAT_COLUMNS
-// 沿矩形环依次摆放已提供画面，中间与四周留出占位格。
-const RING_TILES = [
-  15, 16, 17, 18, 19, 20,
-  34, 48,
-  62, 61, 60, 59, 58, 57,
-  43, 29, 37
+// 从小键盘 5 开始按 6、3、2、1、4、7、8、9 的方向由内向外绕圈。
+const RING_OFFSETS = [
+  [0, 0], [1, 0], [1, 1], [0, 1], [-1, 1],
+  [-1, 0], [-1, -1], [0, -1], [1, -1],
+  [2, -1], [2, 0], [2, 1], [2, 2], [1, 2],
+  [0, 2], [-1, 2], [-2, 2]
 ]
-const BASE_IMAGE_TILES = new Map(RING_TILES.map((tile, index) => [tile, index + 1]))
-const IMAGE_TILES = new Map()
-for (const [tile, image] of BASE_IMAGE_TILES) {
-  for (let row = 0; row < 2; row += 1) {
-    for (let column = 0; column < 2; column += 1) {
-      const offset = row * REPEAT_ROWS * COLUMNS + column * REPEAT_COLUMNS
-      const repeated = (tile - 1 + offset) % TOTAL_TILES + 1
-      IMAGE_TILES.set(repeated, image)
-    }
-  }
-}
+const RING_IMAGES = RING_OFFSETS.map(([x, y], index) => ({ x, y, image: index + 1 }))
 const base = withBase('/')
 const section = ref(null)
 const wall = ref(null)
@@ -54,10 +40,6 @@ const MAGNIFY_SCALE = 0.45
 function wrap(value, p) {
   if (!p) return value
   return (((value + p / 2) % p) + p) % p - p / 2
-}
-
-function tileImage(n) {
-  return IMAGE_TILES.get(n)
 }
 
 function applyTransform() {
@@ -238,9 +220,13 @@ onUnmounted(() => {
     @pointerdown="onPointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp"
     @pointercancel="onPointerUp" @pointerleave="onPointerLeave">
     <div ref="wall" class="splash-wall">
-      <span v-for="n in TILE_COUNT * REPEATS" :key="n" class="splash-tile" :style="{ '--i': (n - 1) % 14 }">
-        <img v-if="tileImage(n)" :src="`${base}wall/${String(tileImage(n)).padStart(2, '0')}.webp`"
-          :alt="''" width="1280" height="720" draggable="false" />
+      <span v-for="n in TILE_COUNT * REPEATS" :key="n" class="splash-tile" :style="{ '--i': (n - 1) % 14 }"></span>
+    </div>
+    <div class="splash-ring" aria-hidden="true">
+      <span v-for="tile in RING_IMAGES" :key="tile.image" class="splash-ring-tile"
+        :style="{ '--x': tile.x, '--y': tile.y, '--i': tile.image - 1 }">
+        <img :src="`${base}wall/${String(tile.image).padStart(2, '0')}.webp`"
+          alt="" width="1280" height="720" draggable="false" />
       </span>
     </div>
     <p class="splash-hint">拖动查看<span class="splash-dot">·</span>向下滚动进入主页</p>
@@ -296,6 +282,36 @@ onUnmounted(() => {
   object-fit: cover;
   pointer-events: none;
 }
+.splash-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-rows: repeat(5, minmax(0, 1fr));
+  gap: clamp(6px, 0.7vw, 14px);
+  width: min(92vw, 1480px, 160vh);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.splash-ring-tile {
+  grid-column: calc(var(--x) + 3);
+  grid-row: calc(var(--y) + 3);
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 10px;
+  background: var(--vp-c-bg-alt);
+  animation: tile-rise 760ms var(--ease-out) both;
+  animation-delay: calc(var(--i) * 55ms);
+}
+.splash-ring-tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 @keyframes tile-rise {
   from { opacity: 0; translate: 0 26px; }
   to { opacity: 1; translate: 0 0; }
@@ -323,6 +339,7 @@ onUnmounted(() => {
 }
 @media (prefers-reduced-motion: reduce) {
   .splash-tile { animation: none; transition: none; }
+  .splash-ring-tile { animation: none; }
   .splash-hint { animation: none; }
 }
 </style>
