@@ -1,4 +1,4 @@
-"""Native Windows/VLC synthetic checks; requires QT_QPA_PLATFORM=windows."""
+"""Native Windows/libmpv synthetic checks; requires QT_QPA_PLATFORM=windows."""
 import ctypes
 from ctypes import wintypes
 import importlib
@@ -164,15 +164,25 @@ def main():
                 user32.MapWindowPoints(hwnd,child,ctypes.byref(point),1);hwnd=child
             raise AssertionError('native recursion')
         try:
-            settle(lambda:player.player.get_time()>0)
+            settle(lambda:player._prop("time-pos",0)>0 and player._prop("vo-configured",False))
             with patch.object(api,'get_catalog',return_value=catalog),patch.object(api,'get_wallet',return_value=99999),                    patch.object(api,'get_bag',return_value=api.GiftTab('bag','背包',())),                    patch.object(media,'_fetch',return_value=str(gif)):
                 for mode in ('dark','light'):
                     theme.apply(mode);APP.setStyleSheet(theme.qss())
                     for width in (900,360,200):
                         tile.resize(width,400);APP.processEvents();tile.raise_overlays()
+                        region=tile._plugin_controls.widget
+                        for button in (tile.volume_button,tile.danmaku_button,tile.recording_button,tile.fullscreen_button):
+                            assert button.isVisible() and tile.bottom.rect().contains(button.geometry())
+                            target=native_hit(button,tile);bottom=int(tile.bottom.winId())
+                            assert target==bottom or user32.IsChild(bottom,target),'native video blocked host action'
+                        if width<900:
+                            assert not region.isVisible(),(width,region.geometry())
+                            continue
+                        assert region.isVisible() and region.width()==405,region.geometry()
+                        assert abs(region.geometry().center().x()-tile.bottom.width()/2)<=2
                         assert composer.edit.width()>=24,(width,composer.edit.width())
                         target=native_hit(composer.gift_button,tile);bottom=int(tile.bottom.winId())
-                        assert target==bottom or user32.IsChild(bottom,target),'VLC blocked gift entry'
+                        assert target==bottom or user32.IsChild(bottom,target),'native video blocked gift entry'
                         composer.open_gifts();settle(lambda:not composer.gift_controller.state.loading)
                         popup=composer.gift_popup
                         settle(lambda:any(c.image.movie for c in popup._cards))
@@ -204,8 +214,8 @@ def main():
                         QCursor.setPos(quantity.mapToGlobal(quantity.rect().center()));QTest.qWait(170)
                         assert popup.isVisible() and quantity.isVisible()
                         popup.hide();assert all(c.image.movie is None or c.image.movie.state()!=QMovie.Running for c in popup._cards)
+                    tile.resize(900,400);APP.processEvents()
                     if mode=='dark':
-                        tile.resize(900,400);APP.processEvents()
                         emote_api=importlib.import_module('ddm_plugin_bili_live.composer').bili
                         with patch.object(emote_api,'get_emoticons',return_value=[]):
                             composer.open_emoticons()
@@ -220,7 +230,7 @@ def main():
                     assert not composer.busy,'IME confirmation sent text'
                     APP.sendEvent(composer.edit,QInputMethodEvent('',[]));composer.edit.clearFocus()
                     tile.setProperty('fullscreen',False);tile._layout_areas()
-                print(f'PASS: native VLC gift hit targets, dark/light 900/360/200, continuous owner/picker following, GIFs, gap, focus/IME; scale={tile.devicePixelRatioF()}',flush=True)
+                print(f'PASS: native libmpv host/gift hit targets, dark/light 900/360/200, continuous owner/picker following, GIFs, gap, focus/IME; scale={tile.devicePixelRatioF()}',flush=True)
         finally:
             manager.unload();settle(lambda:not workers._active_requests)
             player.release();tile.close();tile.deleteLater();APP.sendPostedEvents(None,QEvent.DeferredDelete)

@@ -26,11 +26,11 @@ ZIP 内必须只有插件 ID 对应的顶层文件夹。GitHub 自动生成的 S
 
 ## 软件依赖
 
-需要包含直播平台扩展支持的配套软件构建，源码基线为 `4bf84bc` 或之后的版本。
-当前软件公开仓库的 `main` 尚未同步该开发基线；安装前请确认使用配套更新的软件。
-软件显示的 `v0.2` 名称不足以判断是否包含这些接口。
+直播平台插件需要软件提供公开的平台扩展接口。B站直播互动还需要公开的格子控件、
+登录快照与条件凭据更新接口；当前配套本体分支为 `function/plugin-tile-extensions`，
+基于上游 `main` 的 `c3743fd`。安装前请确认所用构建包含这些能力。
 
-插件通过软件提供的 `ddm.plugins` 平台接口、VLC 播放器、FFmpeg 转流、预览和弹幕模块运行。
+插件通过软件提供的 `ddm.plugins` 平台接口、本体播放器、FFmpeg 转流、预览和弹幕模块运行。
 海外自动画质需要软件提供 HLS 下载监测与自动画质控制；建议使用软件最新版本。
 源码运行时，在软件仓库安装其 `requirements.txt`，其中固定 `streamlink==8.6.1`。
 便携版使用软件随附的依赖。直播平台请求使用软件当前网络及代理配置。
@@ -51,7 +51,7 @@ python tests/check_packages.py --host ../DD_Monitor_CE
 
 输出为 `dist/domestic_live-1.2.zip`、`dist/global_live-1.1.zip`、`dist/match_sync-1.1.zip`
 和 `dist/bili_live-1.0.zip`。本分支的 bili_live 仅本地交付，配套本体分支为
-`codex/plugin-tile-extensions`；尚未上传 Releases 或加入网站下载目录。
+`function/plugin-tile-extensions`；尚未上传 Releases 或加入网站下载目录。
 构建只读取 Git 跟踪文件，并将许可与来源说明放入每个安装包。
 各插件 README 中的播放、预览和弹幕集成测试在软件源码仓库执行，需先安装对应插件。
 

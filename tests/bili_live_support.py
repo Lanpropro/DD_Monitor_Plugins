@@ -15,7 +15,6 @@ sys.path.insert(0, str(HOST))
 os.chdir(HOST)
 os.environ.setdefault('DDM_NO_SAVE', '1')
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-os.environ.setdefault('PYTHON_VLC_LIB_PATH', str(HOST / 'libvlc.dll'))
 from PySide6.QtCore import QObject, Signal
 from ddm.plugins import PluginManager, CredentialSnapshot
 

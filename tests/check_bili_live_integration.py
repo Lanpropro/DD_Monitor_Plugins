@@ -1,5 +1,6 @@
 """Install the real ZIP and exercise real host tile/account/fullscreen lifecycle."""
 import importlib
+import json
 from dataclasses import replace
 import os
 from pathlib import Path
@@ -8,13 +9,14 @@ import tempfile
 import threading
 import time
 import unittest
+import zipfile
 from unittest.mock import patch
 from bili_live_support import HOST,ROOT,session,bili
 from bili_live_fixtures import room_payload
 import shiboken6
 from PySide6.QtCore import QEvent,QPoint,QObject,Qt,qInstallMessageHandler
 from PySide6.QtGui import QColor,QCursor,QImage
-from PySide6.QtWidgets import QApplication,QToolButton
+from PySide6.QtWidgets import QApplication,QLineEdit,QToolButton
 from PySide6.QtTest import QTest
 from ddm import plugins as host_api,theme
 from ddm.app import MainWindow
@@ -40,6 +42,8 @@ class IntegrationTests(unittest.TestCase):
         installer.install_zip(str(archive));self.assertEqual(installer.plugins,[])
         self.patches=[patch.object(host_api,'DEFAULT_PLUGINS_DIR',str(self.directory)),
             patch('ddm.config.save'),patch.object(MainWindow,'refresh_account'),
+            patch.object(MainWindow,'refresh_status'),patch.object(MainWindow,'refresh_stats'),
+            patch.object(MainWindow,'load_room_avatars'),patch.object(MainWindow,'_check_startup_plugins'),
             patch.object(MainWindow,'sync_danmaku'),patch.object(MainWindow,'stop_danmaku')]
         for p in self.patches:p.start()
         self.window=self.new_window(['bili_live'])
@@ -50,7 +54,11 @@ class IntegrationTests(unittest.TestCase):
         self.workers=importlib.import_module('ddm_plugin_bili_live.workers')
         self.emotes=importlib.import_module('ddm_plugin_bili_live.composer').bili
         self.catalog=self.api.normalize_catalog(room_payload(),'90001')
-        self.reads=[patch.object(self.api,'get_catalog',return_value=self.catalog),
+        media=importlib.import_module('ddm_plugin_bili_live.gift_media')
+        image=QImage(32,32,QImage.Format_ARGB32);image.fill(QColor('#00a1d6'))
+        image_path=Path(self.temp.name)/'fixture.png';self.assertTrue(image.save(str(image_path)))
+        self.reads=[patch.object(media,'_fetch',return_value=str(image_path)),
+            patch.object(self.api,'get_catalog',return_value=self.catalog),
             patch.object(self.api,'get_wallet',return_value=999999),
             patch.object(self.api,'get_bag',return_value=self.api.GiftTab('bag','背包',())),
             patch.object(self.api,'prepare_target',return_value=self.api.GiftTarget('90001',123,456))]
@@ -76,6 +84,41 @@ class IntegrationTests(unittest.TestCase):
     def composer(self,tile=None):
         tile=tile or self.window.wall.tiles[0]
         return next(e.control.widget for e in tile._plugin_controls.entries if e.owner=='bili_live')
+    def test_zip_integrity_and_tracked_source_bytes(self):
+        with zipfile.ZipFile(ROOT/'dist/bili_live-1.0.zip') as archive:
+            self.assertIsNone(archive.testzip())
+            names=archive.namelist()
+            self.assertEqual(len(names),len(set(names)))
+            self.assertTrue(all(name.startswith('bili_live/') for name in names))
+            manifest=json.loads(archive.read('bili_live/plugin.json'))
+            self.assertEqual((manifest['id'],manifest['version']),('bili_live','1.0'))
+            self.assertEqual(archive.read('bili_live/LICENSE'),(ROOT/'LICENSE').read_bytes())
+            for name in names:
+                source=ROOT/'plugins'/name
+                if source.is_file():self.assertEqual(archive.read(name),source.read_bytes(),name)
+    def test_zip_upgrade_preserves_local_data(self):
+        from ddm.plugin_updates import stage,apply_pending,pending_versions
+        old_zip=Path(self.temp.name)/'bili-live-old.zip'
+        current=ROOT/'dist/bili_live-1.0.zip'
+        with zipfile.ZipFile(current) as source,zipfile.ZipFile(old_zip,'w') as target:
+            for name in source.namelist():
+                data=source.read(name)
+                if name=='bili_live/plugin.json':
+                    manifest=json.loads(data);manifest['version']='0.9'
+                    data=json.dumps(manifest).encode('utf-8')
+                target.writestr(name,data)
+        manager=host_api.PluginManager(plugins_dir=str(Path(self.temp.name)/'upgrade'),enabled=[])
+        manager.install_zip(str(old_zip))
+        folder=Path(manager.plugins_dir)/'bili_live'
+        sentinel=folder/'user-data.txt';sentinel.write_bytes(b'preserve local data')
+        stage(manager,str(current),'bili_live','1.0')
+        self.assertEqual(pending_versions(manager),{'bili_live':'1.0'})
+        self.assertEqual(host_api.read_manifest(str(folder),'bili_live')['version'],'0.9')
+        apply_pending(manager)
+        self.assertEqual(pending_versions(manager),{})
+        self.assertEqual(host_api.read_manifest(str(folder),'bili_live')['version'],'1.0')
+        self.assertEqual(sentinel.read_bytes(),b'preserve local data')
+        self.assertEqual((folder/'plugin.py').read_bytes(),(ROOT/'plugins/bili_live/plugin.py').read_bytes())
     def test_gift_row_lazy_shared_state_and_drafts(self):
         composer=self.composer()
         self.assertIsNone(composer.gift_controller)
@@ -104,6 +147,7 @@ class IntegrationTests(unittest.TestCase):
             self.assertFalse(composer.gift_popup.isVisible())
             composer.open_gifts();self.assertFalse(composer.popup.isVisible())
     def test_rapid_pointer_sweeps_across_tiles_keep_both_pickers_at_their_anchors(self):
+        self.window.resize(1900,1000);APP.processEvents()
         self.window.wall.set_layout('2x2')
         tiles=self.window.wall.tiles
         for index,tile in enumerate(tiles):tile.set_room({'room_id':str(90001+index),'uname':f'Tile {index}'})
@@ -231,17 +275,32 @@ class IntegrationTests(unittest.TestCase):
             self.assertIs(self.composer(tile),composer)
             self.window.wall.set_fullscreen_tile(None);APP.processEvents()
         self.window._wire_tile(tile);self.assertEqual(len(tile._plugin_controls.entries),1)
-    def test_200_360_900_geometry_no_overlap(self):
+    def test_centered_bounded_group_and_narrow_host_actions(self):
         tile=self.window.wall.tiles[0];composer=self.composer()
-        # Standalone tile geometry avoids the wall's responsive layout overriding requested widths.
-        tile.setParent(None);tile.show()
-        for width in (900,360,200):
-            tile.resize(width,300);APP.processEvents()
-            self.assertGreaterEqual(composer.edit.width(),24,(width,composer.width(),composer.edit.width()))
-            self.assertTrue(tile.volume_button.isVisible());self.assertTrue(tile.fullscreen_button.isVisible())
-            self.assertLess(tile.fullscreen_button.geometry().right(),width)
-            self.assertLessEqual(composer.parentWidget().geometry().right(),tile.danmaku_button.x())
-        tile.setParent(self.window.wall);self.window.wall.relayout(force=True)
+        self.assertEqual(tile.bottom.findChildren(QLineEdit),[composer.edit])
+        # Fix the tile size without reparenting its native video surface.
+        # The wall may otherwise override requested test widths.
+        composer.edit.setText('draft survives resize')
+        try:
+            for width in (900,360,200,1600,900):
+                tile.setFixedSize(width,300);APP.processEvents()
+                region=tile._plugin_controls.widget
+                self.assertEqual(region.isVisible(),width>=900)
+                for button in (tile.pause_button,tile.volume_button,tile.danmaku_button,
+                               tile.danmaku_settings_button,tile.recording_button,tile.fullscreen_button):
+                    self.assertTrue(button.isVisible())
+                    self.assertTrue(tile.bottom.rect().contains(button.geometry()))
+                if width>=900:
+                    self.assertEqual(region.width(),min(520,max(300,int(width*.45))))
+                    self.assertLessEqual(abs(region.geometry().center().x()-tile.bottom.width()/2),2)
+                    self.assertLess(region.geometry().right(),tile.danmaku_button.x())
+                    self.assertGreaterEqual(composer.edit.width(),24)
+                else:
+                    self.assertTrue(tile.volume_button.compact_popup)
+                self.assertEqual(composer.edit.text(),'draft survives resize')
+        finally:
+            tile.setMinimumSize(0,0);tile.setMaximumSize(16777215,16777215)
+            self.window.wall.relayout(force=True)
     def test_shared_account_device_publication_and_logout_close_views(self):
         composer=self.composer();composer.open_gifts();settle(lambda:not composer.gift_controller.state.loading)
         generation=self.entry.session.snapshot().generation
@@ -255,7 +314,12 @@ class IntegrationTests(unittest.TestCase):
         self.assertIsNone(composer.gift_controller.state.wallet)
         self.assertNotIn('SESSDATA',self.entry.session.snapshot().values)
     def test_two_tiles_hide_remove_inflight_exit(self):
+        self.window.resize(1900,1000);APP.processEvents()
         a=self.composer();self.window.wall.set_layout('2x2');tile=next(t for t in self.window.wall.tiles if not t.room.get('room_id'));tile.set_room({'room_id':'90002'});b=self.composer(tile)
+        a.edit.setText('first draft');b.edit.setText('second draft')
+        self.assertEqual((a.edit.text(),b.edit.text()),('first draft','second draft'))
+        tile.set_room({'room_id':'90003'})
+        self.assertEqual((a.edit.text(),b.edit.text()),('first draft',''))
         a.open_gifts();b.open_gifts();settle(lambda:not a.gift_controller.state.loading and not b.gift_controller.state.loading)
         self.assertIs(a.gift_controller.coordinator,b.gift_controller.coordinator)
         entered,release=threading.Event(),threading.Event()
