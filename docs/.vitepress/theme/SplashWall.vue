@@ -5,6 +5,7 @@ import { onMounted, onUnmounted, reactive, ref } from 'vue'
 // 标准画面墙：等尺寸格子铺成 2×2 的重复块，拖动按周期取模，四向都接得上。
 const TILE_COUNT = 56
 const REPEATS = 4
+const TOTAL_TILES = TILE_COUNT * REPEATS
 // 从小键盘 5 开始按 6、3、2、1、4、7、8、9 的方向由内向外绕圈。
 const RING_OFFSETS = [
   [0, 0], [1, 0], [1, 1], [0, 1], [-1, 1],
@@ -12,13 +13,15 @@ const RING_OFFSETS = [
   [2, -1], [2, 0], [2, 1], [2, 2], [1, 2],
   [0, 2], [-1, 2], [-2, 2]
 ]
-const RING_IMAGES = RING_OFFSETS.map(([x, y], index) => ({ x, y, image: index + 1 }))
 const base = withBase('/')
 const section = ref(null)
 const wall = ref(null)
 const offset = reactive({ x: 0, y: 0 })
+const columns = ref(14)
+const imageTiles = ref(buildImageTiles(14))
 let tileNodes = []
 let period = { x: 0, y: 0 }
+let centerShift = { x: 0, y: 0 }
 let scrollProgress = 0
 let reduced = false
 let dragging = false
@@ -42,14 +45,38 @@ function wrap(value, p) {
   return (((value + p / 2) % p) + p) % p - p / 2
 }
 
+// 同一组画面在四个重复象限各放一份，拖动折回时内容仍能接上。
+function buildImageTiles(gridColumns) {
+  const rows = TOTAL_TILES / gridColumns
+  const repeatColumns = gridColumns / 2
+  const repeatRows = TILE_COUNT / repeatColumns
+  const centerRow = rows / 2
+  const centerColumn = gridColumns / 2
+  const tiles = new Map()
+  for (let quadrantRow = 0; quadrantRow < 2; quadrantRow += 1) {
+    for (let quadrantColumn = 0; quadrantColumn < 2; quadrantColumn += 1) {
+      RING_OFFSETS.forEach(([x, y], index) => {
+        const row = (centerRow - 1 + quadrantRow * repeatRows + y + rows) % rows
+        const column = (centerColumn - 1 + quadrantColumn * repeatColumns + x + gridColumns) % gridColumns
+        tiles.set(row * gridColumns + column + 1, index + 1)
+      })
+    }
+  }
+  return tiles
+}
+
+function tileImage(n) {
+  return imageTiles.value.get(n)
+}
+
 function applyTransform() {
   const element = wall.value
   if (!element) return
   const sink = reduced ? 0 : scrollProgress * 26
   const scale = reduced ? 1 : 1 - scrollProgress * 0.16
   element.style.transform =
-    `translate3d(calc(-50% + ${(offset.x + driftX).toFixed(1)}px), ` +
-    `calc(-50% + ${(offset.y + driftY).toFixed(1)}px + ${sink.toFixed(2)}vh), 0) scale(${scale.toFixed(3)})`
+    `translate3d(calc(-50% + ${(offset.x + driftX + centerShift.x).toFixed(1)}px), ` +
+    `calc(-50% + ${(offset.y + driftY + centerShift.y).toFixed(1)}px + ${sink.toFixed(2)}vh), 0) scale(${scale.toFixed(3)})`
   element.style.opacity = (1 - scrollProgress * 0.72).toFixed(3)
 }
 
@@ -105,11 +132,23 @@ function resetMagnify() {
 function measure() {
   const element = wall.value
   if (!element) return
-  const gap = parseFloat(getComputedStyle(element).gap) || 16
+  const styles = getComputedStyle(element)
+  const gridColumns = styles.gridTemplateColumns.split(/\s+/).filter(Boolean).length
+  if (gridColumns && gridColumns !== columns.value) {
+    columns.value = gridColumns
+    imageTiles.value = buildImageTiles(gridColumns)
+  }
+  const gap = parseFloat(styles.gap) || 16
+  const rows = TOTAL_TILES / columns.value
   // 墙面由 2×2 份相同内容拼成，位移的重复周期就是其中一份的边长。
   period = {
     x: (element.offsetWidth + gap) / 2,
     y: (element.offsetHeight + gap) / 2
+  }
+  // 偶数列的中心落在两格之间，补半格让第 5 格真正对齐屏幕中心。
+  centerShift = {
+    x: (element.offsetWidth + gap) / (columns.value * 2),
+    y: (element.offsetHeight + gap) / (rows * 2)
   }
   offset.x = wrap(offset.x, period.x)
   offset.y = wrap(offset.y, period.y)
@@ -220,12 +259,8 @@ onUnmounted(() => {
     @pointerdown="onPointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp"
     @pointercancel="onPointerUp" @pointerleave="onPointerLeave">
     <div ref="wall" class="splash-wall">
-      <span v-for="n in TILE_COUNT * REPEATS" :key="n" class="splash-tile" :style="{ '--i': (n - 1) % 14 }"></span>
-    </div>
-    <div class="splash-ring" aria-hidden="true">
-      <span v-for="tile in RING_IMAGES" :key="tile.image" class="splash-ring-tile"
-        :style="{ '--x': tile.x, '--y': tile.y, '--i': tile.image - 1 }">
-        <img :src="`${base}wall/${String(tile.image).padStart(2, '0')}.webp`"
+      <span v-for="n in TILE_COUNT * REPEATS" :key="n" class="splash-tile" :style="{ '--i': (n - 1) % 14 }">
+        <img v-if="tileImage(n)" :src="`${base}wall/${String(tileImage(n)).padStart(2, '0')}.webp`"
           alt="" width="1280" height="720" draggable="false" />
       </span>
     </div>
@@ -282,36 +317,6 @@ onUnmounted(() => {
   object-fit: cover;
   pointer-events: none;
 }
-.splash-ring {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  z-index: 2;
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  grid-template-rows: repeat(5, minmax(0, 1fr));
-  gap: clamp(6px, 0.7vw, 14px);
-  width: min(92vw, 1480px, 160vh);
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-}
-.splash-ring-tile {
-  grid-column: calc(var(--x) + 3);
-  grid-row: calc(var(--y) + 3);
-  aspect-ratio: 16 / 9;
-  overflow: hidden;
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 10px;
-  background: var(--vp-c-bg-alt);
-  animation: tile-rise 760ms var(--ease-out) both;
-  animation-delay: calc(var(--i) * 55ms);
-}
-.splash-ring-tile img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
 @keyframes tile-rise {
   from { opacity: 0; translate: 0 26px; }
   to { opacity: 1; translate: 0 0; }
@@ -339,7 +344,6 @@ onUnmounted(() => {
 }
 @media (prefers-reduced-motion: reduce) {
   .splash-tile { animation: none; transition: none; }
-  .splash-ring-tile { animation: none; }
   .splash-hint { animation: none; }
 }
 </style>

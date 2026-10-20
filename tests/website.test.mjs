@@ -240,7 +240,13 @@ test('opening screen shows the recorded tiles in the placeholder wall before any
   const wallTiles = (home.match(/class="splash-tile"/g) || []).length
   assert.equal(wallTiles, 224, 'the wall repeats its 56 tiles twice per axis so it wraps without a seam')
   const splash = read('docs/.vitepress/theme/SplashWall.vue')
-  for (let index = 1; index <= 17; index++) assert.ok(existsSync(resolve(root, `docs/public/wall/${String(index).padStart(2, '0')}.webp`)))
+  assert.ok(!home.includes('splash-ring'), 'recordings must live in the wall rather than a separate overlay')
+  for (let index = 1; index <= 17; index++) {
+    const file = String(index).padStart(2, '0') + '.webp'
+    assert.ok(existsSync(resolve(root, `docs/public/wall/${file}`)))
+    assert.equal((home.match(new RegExp(`${base}wall/${file}`, 'g')) || []).length, 4, `${file} must appear in all four repeated wall quadrants`)
+  }
+  assert.equal((home.match(/\/wall\/\d{2}\.webp/g) || []).length, 68, 'only the supplied recordings replace placeholders')
   assert.ok(home.includes('拖动查看'), 'the opening screen must say it can be dragged')
   assert.ok(home.indexOf('class="splash"') < home.indexOf('class="showcase"'), 'the wall comes before the page content')
 })
@@ -265,24 +271,17 @@ test('supplied recordings spiral outward from the center without overlapping til
   const splash = read('docs/.vitepress/theme/SplashWall.vue')
   const ring = splash.match(/const RING_OFFSETS = (\[[\s\S]*?\])\nconst /)?.[1]
   assert.ok(ring, 'missing the center-out tile order')
-  const ringStyle = splash.match(/\.splash-ring \{([^}]+)\}/)?.[1]
-  assert.ok(ringStyle, 'missing the centered recording array')
-  assert.match(ringStyle, /left:\s*50%/)
-  assert.match(ringStyle, /top:\s*50%/)
-  assert.match(ringStyle, /grid-template-rows:\s*repeat\(5,/)
-  assert.match(ringStyle, /transform:\s*translate\(-50%,\s*-50%\)/)
+  assert.match(splash, /function buildImageTiles\(gridColumns\)/, 'recordings must be mapped onto the repeated wall')
+  assert.match(splash, /for \(let quadrantRow = 0; quadrantRow < 2;/, 'the wall needs all four repeated quadrants')
+  assert.match(splash, /centerShift = \{[\s\S]*?columns\.value \* 2[\s\S]*?rows \* 2/, 'the center tile needs a half-cell alignment')
   const offsets = [...ring.matchAll(/\[(-?\d+),\s*(-?\d+)\]/g)].map(match => `${match[1]},${match[2]}`)
   assert.deepEqual(offsets.slice(0, 9), ['0,0', '1,0', '1,1', '0,1', '-1,1', '-1,0', '-1,-1', '0,-1', '1,-1'],
     'tiles must follow numpad 5, 6, 3, 2, 1, 4, 7, 8, 9')
   assert.equal(offsets.length, 17, 'every supplied recording needs one position')
   assert.equal(new Set(offsets).size, offsets.length, 'tile positions must not overlap')
   const home = readFileSync(resolve(dist, 'index.html'), 'utf8')
-  assert.ok(home.includes('class="splash-ring"'), 'the centered recording array must render')
-  for (let index = 1; index <= 17; index++) {
-    const file = String(index).padStart(2, '0') + '.webp'
-    assert.equal((home.match(new RegExp(`${base}wall/${file}`, 'g')) || []).length, 1, `${file} must appear once`)
-  }
-  assert.equal((home.match(/\/wall\/\d{2}\.webp/g) || []).length, 17, 'the centered array contains every supplied recording')
+  assert.ok(!home.includes('class="splash-ring"'), 'the recordings must not be rendered as a separate centered layer')
+  assert.match(home, /class="splash-tile"[^>]*>\s*<img[^>]+wall\/01\.webp/, 'the first recording must render inside a wall tile')
 })
 
 test('the plugin catalog escapes the narrow documentation column', () => {
