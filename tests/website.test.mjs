@@ -239,11 +239,11 @@ test('opening screen shows the recorded tiles in the placeholder wall before any
   assert.match(wall[0], /aria-hidden="true"/, 'the decorative wall must stay out of the accessibility tree')
   const wallTiles = (home.match(/class="splash-tile"/g) || []).length
   assert.equal(wallTiles, 224, 'the wall repeats its 56 tiles twice per axis so it wraps without a seam')
-  for (let index = 1; index <= 16; index++) {
+  for (let index = 1; index <= 17; index++) {
     const file = String(index).padStart(2, '0') + '.webp'
     assert.equal((home.match(new RegExp(`${base}wall/${file}`, 'g')) || []).length, 4, `${file} must appear in all four repeated wall quadrants`)
   }
-  assert.equal((home.match(/\/wall\/\d{2}\.webp/g) || []).length, 64, 'only the supplied recordings replace placeholders')
+  assert.equal((home.match(/\/wall\/\d{2}\.webp/g) || []).length, 68, 'only the supplied recordings replace placeholders')
   assert.ok(home.includes('拖动查看'), 'the opening screen must say it can be dragged')
   assert.ok(home.indexOf('class="splash"') < home.indexOf('class="showcase"'), 'the wall comes before the page content')
 })
@@ -262,6 +262,15 @@ test('idle drift keeps the original compact orbit speed and amplitude', () => {
   const splash = read('docs/.vitepress/theme/SplashWall.vue')
   assert.match(splash, /driftX = Math\.sin\(now \/ 2600\) \* 62 \+ Math\.sin\(now \/ 7100\) \* 22/, 'horizontal drift must keep the original speed')
   assert.match(splash, /driftY = Math\.cos\(now \/ 3300\) \* 44 \+ Math\.cos\(now \/ 8300\) \* 16/, 'vertical drift must keep the original speed')
+})
+
+test('supplied recordings follow one ring without overlapping tiles', () => {
+  const splash = read('docs/.vitepress/theme/SplashWall.vue')
+  const ring = splash.match(/const RING_TILES = \[([\s\S]*?)\]/)?.[1]
+  assert.ok(ring, 'missing the ring tile order')
+  const tiles = ring.match(/\d+/g).map(Number)
+  assert.equal(tiles.length, 17, 'every supplied recording needs one ring position')
+  assert.equal(new Set(tiles).size, tiles.length, 'ring positions must not overlap')
 })
 
 test('the plugin catalog escapes the narrow documentation column', () => {

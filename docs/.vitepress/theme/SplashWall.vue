@@ -9,15 +9,14 @@ const TOTAL_TILES = TILE_COUNT * REPEATS
 const COLUMNS = 14
 const REPEAT_COLUMNS = COLUMNS / 2
 const REPEAT_ROWS = TILE_COUNT / REPEAT_COLUMNS
-// 标记测试格，再映射到四面重复墙的对应位置。
-const BASE_IMAGE_TILES = new Map([
-  [90, 1], [91, 2], [92, 3],
-  [104, 4], [105, 5], [106, 6],
-  [118, 7], [119, 8], [120, 9],
-  [76, 10], [77, 11], [78, 12],
-  [79, 13], [80, 14],
-  [62, 15], [63, 16]
-])
+// 沿矩形环依次摆放已提供画面，中间与四周留出占位格。
+const RING_TILES = [
+  15, 16, 17, 18, 19, 20,
+  34, 48,
+  62, 61, 60, 59, 58, 57,
+  43, 29, 37
+]
+const BASE_IMAGE_TILES = new Map(RING_TILES.map((tile, index) => [tile, index + 1]))
 const IMAGE_TILES = new Map()
 for (const [tile, image] of BASE_IMAGE_TILES) {
   for (let row = 0; row < 2; row += 1) {
