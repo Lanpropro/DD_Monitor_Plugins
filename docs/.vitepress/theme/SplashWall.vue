@@ -15,7 +15,8 @@ const BASE_IMAGE_TILES = new Map([
   [104, 4], [105, 5], [106, 6],
   [118, 7], [119, 8], [120, 9],
   [76, 10], [77, 11], [78, 12],
-  [79, 13], [80, 14]
+  [79, 13], [80, 14],
+  [62, 15], [63, 16]
 ])
 const IMAGE_TILES = new Map()
 for (const [tile, image] of BASE_IMAGE_TILES) {

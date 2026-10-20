@@ -239,11 +239,11 @@ test('opening screen shows the recorded tiles in the placeholder wall before any
   assert.match(wall[0], /aria-hidden="true"/, 'the decorative wall must stay out of the accessibility tree')
   const wallTiles = (home.match(/class="splash-tile"/g) || []).length
   assert.equal(wallTiles, 224, 'the wall repeats its 56 tiles twice per axis so it wraps without a seam')
-  for (let index = 1; index <= 14; index++) {
+  for (let index = 1; index <= 16; index++) {
     const file = String(index).padStart(2, '0') + '.webp'
     assert.equal((home.match(new RegExp(`${base}wall/${file}`, 'g')) || []).length, 4, `${file} must appear in all four repeated wall quadrants`)
   }
-  assert.equal((home.match(/\/wall\/\d{2}\.webp/g) || []).length, 56, 'only the supplied recordings replace placeholders')
+  assert.equal((home.match(/\/wall\/\d{2}\.webp/g) || []).length, 64, 'only the supplied recordings replace placeholders')
   assert.ok(home.includes('拖动查看'), 'the opening screen must say it can be dragged')
   assert.ok(home.indexOf('class="splash"') < home.indexOf('class="showcase"'), 'the wall comes before the page content')
 })
