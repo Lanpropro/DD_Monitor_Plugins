@@ -11,7 +11,7 @@ const RING_OFFSETS = [
   [0, 0], [1, 0], [1, 1], [0, 1], [-1, 1],
   [-1, 0], [-1, -1], [0, -1], [1, -1],
   [2, -1], [2, 0], [2, 1], [2, 2], [1, 2],
-  [0, 2], [-1, 2], [-2, 2]
+  [0, 2], [-1, 2], [-2, 2], [-2, 1], [-2, 0], [-2, -1]
 ]
 const base = withBase('/')
 const section = ref(null)
@@ -50,12 +50,16 @@ function buildImageTiles(gridColumns) {
   const rows = TOTAL_TILES / gridColumns
   const repeatColumns = gridColumns / 2
   const repeatRows = TILE_COUNT / repeatColumns
+  // 手机每份只有 4 列，外圈左侧会与右侧重叠，剩余画面接到上方空行。
+  const ringOffsets = repeatColumns === 4
+    ? [...RING_OFFSETS.slice(0, 16), [-1, -2], [0, -2], [1, -2], [2, -2]]
+    : RING_OFFSETS
   const centerRow = rows / 2
   const centerColumn = gridColumns / 2
   const tiles = new Map()
   for (let quadrantRow = 0; quadrantRow < 2; quadrantRow += 1) {
     for (let quadrantColumn = 0; quadrantColumn < 2; quadrantColumn += 1) {
-      RING_OFFSETS.forEach(([x, y], index) => {
+      ringOffsets.forEach(([x, y], index) => {
         const row = (centerRow - 1 + quadrantRow * repeatRows + y + rows) % rows
         const column = (centerColumn - 1 + quadrantColumn * repeatColumns + x + gridColumns) % gridColumns
         tiles.set(row * gridColumns + column + 1, index + 1)
