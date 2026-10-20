@@ -21,12 +21,13 @@ def _quantity_valid(item,count,wallet):
 
 class GiftButton(QPushButton):
     def __init__(self,parent=None):
-        super().__init__(parent);_style_button(self);self.setFixedSize(28,28)
+        super().__init__(parent);_style_button(self,diameter=24)
         self.setAccessibleName('选择直播间礼物');self.setToolTip('赠送礼物与背包礼物')
     def paintEvent(self,event):
         super().paintEvent(event)
         painter=QPainter(self);painter.setRenderHint(QPainter.Antialiasing)
         painter.translate(self.width()/2,self.height()/2)
+        painter.scale(.875,.875)
         color=theme.TEXT2 if self.isEnabled() else theme.TEXT4
         if self.isEnabled() and (self.underMouse() or self.property('hovered') is True):
             color=theme.ACCENT if theme.is_light() else theme.BG

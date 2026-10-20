@@ -15,7 +15,7 @@ from bili_live_support import HOST,ROOT,session,bili
 from bili_live_fixtures import room_payload
 import shiboken6
 from PySide6.QtCore import QEvent,QPoint,QObject,Qt,qInstallMessageHandler
-from PySide6.QtGui import QColor,QCursor,QImage
+from PySide6.QtGui import QColor,QCursor,QImage,QRegion
 from PySide6.QtWidgets import QApplication,QLineEdit,QToolButton
 from PySide6.QtTest import QTest
 from ddm import plugins as host_api,theme
@@ -127,7 +127,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual([composer.layout().itemAt(i).widget() for i in range(4)],
             [composer.edit,composer.emote_button,composer.gift_button,composer.send_button])
         for button in (composer.emote_button,composer.gift_button):
-            self.assertEqual((button.width(),button.height()),(28,28))
+            self.assertEqual((button.width(),button.height()),(24,24))
         release=threading.Event()
         def refresh_wallet(**kw):
             release.wait(3);return 999800
@@ -173,6 +173,7 @@ class IntegrationTests(unittest.TestCase):
                 self.assertTrue(popup.isVisible())
             popup.hide()
     def test_installed_pickers_follow_during_each_mainwindow_move(self):
+        self.addCleanup(QCursor.setPos,QCursor.pos())
         composer=self.composer()
         image=QImage(32,32,QImage.Format_ARGB32);image.fill(QColor('#00a1d6'))
         image_path=Path(self.temp.name)/'picker.png';self.assertTrue(image.save(str(image_path)))
@@ -244,8 +245,13 @@ class IntegrationTests(unittest.TestCase):
                     popup.open_at(button);APP.processEvents()
                     followers=[popup]
                     if popup is composer.gift_popup:
-                        popup._quantity(popup._cards[0]);APP.processEvents()
-                        followers.append(popup.quantity_popup)
+                        popup._quantity(popup._cards[0])
+                        # Keep the auto-hiding quantity picker open while checking
+                        # native following; the desktop cursor may be elsewhere.
+                        quantity=popup.quantity_popup
+                        QCursor.setPos(quantity.mapToGlobal(quantity.rect().center()))
+                        APP.processEvents();self.assertTrue(quantity.isVisible())
+                        followers.append(quantity)
                     origin=native_rect(self.window);initial=[native_rect(f) for f in followers]
                     user32.SendMessageW(owner,0x231,0,0)
                     try:
@@ -301,6 +307,32 @@ class IntegrationTests(unittest.TestCase):
         finally:
             tile.setMinimumSize(0,0);tile.setMaximumSize(16777215,16777215)
             self.window.wall.relayout(force=True)
+    def test_composer_border_fits_real_bottom_bar_in_normal_and_fullscreen_tiles(self):
+        # The normal bar leaves 27px after its margins. A 28px editor loses
+        # its bottom border even though a standalone composer looks correct.
+        tile=self.window.wall.tiles[0];composer=self.composer()
+        self.window.resize(1100,600);APP.processEvents()
+        try:
+            for mode in ('dark','light'):
+                theme.apply(mode);APP.setStyleSheet(theme.qss())
+                for fullscreen in (False,True):
+                    self.window.wall.set_fullscreen_tile(tile if fullscreen else None)
+                    with self.subTest(mode=mode,fullscreen=fullscreen):
+                        tile.setFixedSize(900,350);tile.set_controls_visible(True)
+                        APP.processEvents()
+                        self.assertTrue(composer.isVisible())
+                        for widget in (composer.edit,composer.emote_button,
+                                       composer.gift_button,composer.send_button):
+                            self.assertTrue(QRegion(widget.rect()).subtracted(widget.visibleRegion()).isEmpty(),
+                                f'{widget.accessibleName() or widget.text()} is clipped: '
+                                f'{widget.rect()} vs {widget.visibleRegion().boundingRect()}')
+                            bounds=widget.rect().translated(widget.mapTo(tile.bottom,QPoint()))
+                            self.assertTrue(tile.bottom.rect().contains(bounds))
+        finally:
+            self.window.wall.set_fullscreen_tile(None)
+            tile.setMinimumSize(0,0);tile.setMaximumSize(16777215,16777215)
+            self.window.wall.relayout(force=True);theme.apply('dark')
+
     def test_shared_account_device_publication_and_logout_close_views(self):
         composer=self.composer();composer.open_gifts();settle(lambda:not composer.gift_controller.state.loading)
         generation=self.entry.session.snapshot().generation

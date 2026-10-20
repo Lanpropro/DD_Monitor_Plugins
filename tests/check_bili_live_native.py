@@ -12,7 +12,7 @@ from unittest.mock import patch
 from bili_live_support import HOST,ROOT
 from bili_live_fixtures import room_payload
 from PySide6.QtCore import QPoint,Qt,QEvent,QTimer,QEventLoop,QObject,QAbstractNativeEventFilter
-from PySide6.QtGui import QCursor,QInputMethodEvent,QMouseEvent,QMovie
+from PySide6.QtGui import QCursor,QInputMethodEvent,QMouseEvent,QMovie,QRegion
 from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
 from ddm import plugins as host_api,theme
@@ -181,8 +181,12 @@ def main():
                         assert region.isVisible() and region.width()==405,region.geometry()
                         assert abs(region.geometry().center().x()-tile.bottom.width()/2)<=2
                         assert composer.edit.width()>=24,(width,composer.edit.width())
-                        target=native_hit(composer.gift_button,tile);bottom=int(tile.bottom.winId())
-                        assert target==bottom or user32.IsChild(bottom,target),'native video blocked gift entry'
+                        for control in (composer.edit,composer.emote_button,composer.gift_button,composer.send_button):
+                            assert QRegion(control.rect()).subtracted(control.visibleRegion()).isEmpty(), (
+                                'composer control clipped',control.accessibleName(),control.rect(),
+                                control.visibleRegion().boundingRect())
+                            target=native_hit(control,tile);bottom=int(tile.bottom.winId())
+                            assert target==bottom or user32.IsChild(bottom,target),'native video blocked composer control'
                         composer.open_gifts();settle(lambda:not composer.gift_controller.state.loading)
                         popup=composer.gift_popup
                         settle(lambda:any(c.image.movie for c in popup._cards))

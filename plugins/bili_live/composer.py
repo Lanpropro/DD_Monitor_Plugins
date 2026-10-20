@@ -45,7 +45,7 @@ class DanmakuEdit(QLineEdit):
 
 class DanmakuComposer(QWidget):
     deviceCookieReady = Signal()
-    HEIGHT = 28
+    HEIGHT = 26
 
     def __init__(self, session, parent=None, *, coordinator=None):
         super().__init__(parent)
@@ -83,25 +83,23 @@ class DanmakuComposer(QWidget):
         self.edit.setPlaceholderText("输入弹幕，Enter 发送")
         self.edit.setMinimumWidth(0)
         self.edit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        self.edit.setFixedHeight(28)
+        self.edit.setFixedHeight(self.HEIGHT)
         self.edit.textChanged.connect(self._text_changed)
         self.edit.returnPressed.connect(self.send_text)
         row.addWidget(self.edit, 1)
         self.emote_button = EmoticonButton()
         self.emote_button.setAccessibleName("选择直播间表情")
         self.emote_button.setToolTip("选择表情；大表情点击后直接发送")
-        self.emote_button.setFixedSize(28, 28)
         self.emote_button.clicked.connect(self.open_emoticons)
         row.addWidget(self.emote_button)
         self.gift_button = GiftButton()
         self.gift_button.clicked.connect(self.open_gifts)
         row.addWidget(self.gift_button)
         self.send_button = QPushButton("发送")
-        self.send_button.setFixedSize(44, 28)
+        self.send_button.setFixedSize(44, self.HEIGHT)
         self.send_button.clicked.connect(self.send_text)
         row.addWidget(self.send_button)
-        for button in (self.emote_button, self.send_button):
-            _style_button(button)
+        _style_button(self.send_button)
         self.feedback = QLabel("", self, Qt.ToolTip)
         self.feedback.setObjectName("DanmakuSendFeedback")
         self.feedback.setAttribute(Qt.WA_ShowWithoutActivating)

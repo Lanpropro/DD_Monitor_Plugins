@@ -113,6 +113,47 @@ class ComposerTests(unittest.TestCase):
         self.assertEqual(self.composer.edit.text(), '前[doge]后')
         send.assert_not_called()
 
+    def test_picker_buttons_render_smaller_circular_hover_targets_in_both_themes(self):
+        # A square hover background or an oversized entry button breaks the
+        # compact round controls used alongside the host's 26px settings button.
+        try:
+            self.composer.edit.setFocus()
+            for mode in ('dark', 'light'):
+                theme.apply(mode)
+                APP.setStyleSheet(theme.qss())
+                for button in (self.composer.emote_button, self.composer.gift_button):
+                    with self.subTest(mode=mode, button=button.accessibleName()):
+                        self.assertEqual(button.width(), button.height())
+                        self.assertLess(button.height(), 26)
+                        button.clearFocus()
+                        APP.sendEvent(button, QEvent(QEvent.Leave))
+                        images = []
+                        for hovered in (False, True):
+                            button.setProperty('hovered', hovered)
+                            button.style().unpolish(button)
+                            button.style().polish(button)
+                            APP.processEvents()
+                            # Include the parent behind the transparent round corners.
+                            images.append(self.composer.grab().toImage())
+                        def pixel(image, x, y):
+                            scale = image.devicePixelRatioF()
+                            return image.pixelColor(round((button.x() + x) * scale),
+                                                    round((button.y() + y) * scale))
+                        normal, hover = images
+                        mid = button.width() // 2
+                        for x, y in ((1, 1), (button.width()-2, 1),
+                                     (1, button.height()-2), (button.width()-2, button.height()-2)):
+                            self.assertEqual(pixel(normal, x, y), pixel(hover, x, y),
+                                             '圆形悬停背景不能填满方形角落')
+                        for x, y in ((mid, 1), (1, mid)):
+                            self.assertNotEqual(pixel(normal, x, y), pixel(hover, x, y),
+                                                '圆形边缘应显示主程序的悬停背景')
+                        button.setProperty('hovered', False)
+        finally:
+            for button in (self.composer.emote_button, self.composer.gift_button):
+                button.setProperty('hovered', False)
+            theme.apply('dark')
+
     def test_emoticon_icon_is_legible_without_a_font_glyph_in_both_themes(self):
         button = self.composer.emote_button
         original_font = button.font()
@@ -128,7 +169,7 @@ class ComposerTests(unittest.TestCase):
                 scale = image.devicePixelRatioF()
                 ink = []
                 foreground = theme.qcolor(theme.TEXT2)
-                background = image.pixelColor(round(2 * scale), round(14 * scale))
+                background = image.pixelColor(round(2 * scale), round(button.height() / 2 * scale))
                 alpha = foreground.alphaF()
                 expected = QColor(*(round(foreground.getRgb()[i] * alpha + background.getRgb()[i] * (1 - alpha)) for i in range(3)))
                 for y in range(image.height()):
@@ -139,8 +180,8 @@ class ComposerTests(unittest.TestCase):
                 self.assertTrue(ink)
                 left, right = (min((x for x, y in ink)), max((x for x, y in ink)))
                 top, bottom = (min((y for x, y in ink)), max((y for x, y in ink)))
-                self.assertGreaterEqual(right - left, 15, '表情图标不能退化成很小的字体字符')
-                self.assertGreaterEqual(bottom - top, 15)
+                self.assertGreaterEqual(right - left, 13, '表情图标不能退化成很小的字体字符')
+                self.assertGreaterEqual(bottom - top, 13)
                 self.assertGreater(left, 2)
                 self.assertLess(right, button.width() - 2)
                 self.assertEqual(button.accessibleName(), '选择直播间表情')

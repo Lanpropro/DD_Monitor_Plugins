@@ -15,19 +15,28 @@ from .gift_media import _fetch
 from .popup import AnchoredPopup, RefreshSpinner, picker_style
 from .workers import start_worker as _start
 
-def _style_button(button):
+def _style_button(button, *, diameter=None):
     button.setObjectName("TileCtrl")
     # 与主题注入的浅色局部样式放在同一层，并保留状态选择器的优先级。
     button.setStyleSheet("""
         QPushButton#TileCtrl:disabled {background: transparent; color: palette(tooltip-text);}
         QPushButton#TileCtrl:focus {border: 1px solid palette(highlight);}
     """)
+    if diameter is not None:
+        button.setFixedSize(diameter, diameter)
+        button.setStyleSheet(button.styleSheet() + f"""
+            QPushButton#TileCtrl {{border-radius: {diameter // 2}px; padding: 0;}}
+        """)
     button.setCursor(Qt.PointingHandCursor)
     button.setAutoDefault(False)
 
 
 class EmoticonButton(QPushButton):
     """与播放器控制同样使用矢量绘制，避免字体笑脸过小或被替换为彩色 emoji。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        _style_button(self, diameter=24)
 
     def paintEvent(self, event):
         super().paintEvent(event)
@@ -37,6 +46,7 @@ class EmoticonButton(QPushButton):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.translate(self.width() / 2, self.height() / 2)
+        painter.scale(.875, .875)
         pen = QPen(theme.qcolor(color), 1.7)
         pen.setCapStyle(Qt.RoundCap)
         pen.setJoinStyle(Qt.RoundJoin)
