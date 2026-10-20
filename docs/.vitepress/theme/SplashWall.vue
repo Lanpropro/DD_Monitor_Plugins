@@ -9,11 +9,13 @@ const TOTAL_TILES = TILE_COUNT * REPEATS
 const COLUMNS = 14
 const REPEAT_COLUMNS = COLUMNS / 2
 const REPEAT_ROWS = TILE_COUNT / REPEAT_COLUMNS
-// 先标记一组 3×3 测试格，再映射到四面重复墙的对应位置。
+// 标记测试格，再映射到四面重复墙的对应位置。
 const BASE_IMAGE_TILES = new Map([
   [90, 1], [91, 2], [92, 3],
   [104, 4], [105, 5], [106, 6],
-  [118, 7], [119, 8], [120, 9]
+  [118, 7], [119, 8], [120, 9],
+  [76, 10], [77, 11], [78, 12],
+  [79, 13], [80, 14]
 ])
 const IMAGE_TILES = new Map()
 for (const [tile, image] of BASE_IMAGE_TILES) {
