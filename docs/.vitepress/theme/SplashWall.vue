@@ -11,7 +11,9 @@ const RING_OFFSETS = [
   [0, 0], [1, 0], [1, 1], [0, 1], [-1, 1],
   [-1, 0], [-1, -1], [0, -1], [1, -1],
   [2, -1], [2, 0], [2, 1], [2, 2], [1, 2],
-  [0, 2], [-1, 2], [-2, 2], [-2, 1], [-2, 0], [-2, -1]
+  [0, 2], [-1, 2], [-2, 2], [-2, 1], [-2, 0], [-2, -1],
+  [-2, -2], [-1, -2], [0, -2], [1, -2], [2, -2],
+  [3, -2], [3, -1], [3, 0], [3, 1]
 ]
 const base = withBase('/')
 const section = ref(null)
@@ -50,9 +52,10 @@ function buildImageTiles(gridColumns) {
   const rows = TOTAL_TILES / gridColumns
   const repeatColumns = gridColumns / 2
   const repeatRows = TILE_COUNT / repeatColumns
-  // 手机每份只有 4 列，外圈左侧会与右侧重叠，剩余画面接到上方空行。
+  // 手机每份只有 4 列，外圈左右会重叠，剩余画面依次接到上下空行。
   const ringOffsets = repeatColumns === 4
-    ? [...RING_OFFSETS.slice(0, 16), [-1, -2], [0, -2], [1, -2], [2, -2]]
+    ? [...RING_OFFSETS.slice(0, 16), [-1, -2], [0, -2], [1, -2], [2, -2],
+      [2, 3], [1, 3], [0, 3], [-1, 3], [-1, -3], [0, -3], [1, -3], [2, -3], [2, 4]]
     : RING_OFFSETS
   const centerRow = rows / 2
   const centerColumn = gridColumns / 2

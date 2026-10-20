@@ -241,12 +241,12 @@ test('opening screen shows the recorded tiles in the placeholder wall before any
   assert.equal(wallTiles, 224, 'the wall repeats its 56 tiles twice per axis so it wraps without a seam')
   const splash = read('docs/.vitepress/theme/SplashWall.vue')
   assert.ok(!home.includes('splash-ring'), 'recordings must live in the wall rather than a separate overlay')
-  for (let index = 1; index <= 20; index++) {
+  for (let index = 1; index <= 29; index++) {
     const file = String(index).padStart(2, '0') + '.webp'
     assert.ok(existsSync(resolve(root, `docs/public/wall/${file}`)))
     assert.equal((home.match(new RegExp(`${base}wall/${file}`, 'g')) || []).length, 4, `${file} must appear in all four repeated wall quadrants`)
   }
-  assert.equal((home.match(/\/wall\/\d{2}\.webp/g) || []).length, 80, 'only the supplied recordings replace placeholders')
+  assert.equal((home.match(/\/wall\/\d{2}\.webp/g) || []).length, 116, 'only the supplied recordings replace placeholders')
   assert.ok(home.includes('拖动查看'), 'the opening screen must say it can be dragged')
   assert.ok(home.indexOf('class="splash"') < home.indexOf('class="showcase"'), 'the wall comes before the page content')
 })
@@ -277,16 +277,18 @@ test('supplied recordings spiral outward from the center without overlapping til
   const offsets = [...ring.matchAll(/\[(-?\d+),\s*(-?\d+)\]/g)].map(match => `${match[1]},${match[2]}`)
   assert.deepEqual(offsets.slice(0, 9), ['0,0', '1,0', '1,1', '0,1', '-1,1', '-1,0', '-1,-1', '0,-1', '1,-1'],
     'tiles must follow numpad 5, 6, 3, 2, 1, 4, 7, 8, 9')
-  assert.deepEqual(offsets.slice(9), ['2,-1', '2,0', '2,1', '2,2', '1,2', '0,2', '-1,2', '-2,2', '-2,1', '-2,0', '-2,-1'],
+  assert.deepEqual(offsets.slice(9, 20), ['2,-1', '2,0', '2,1', '2,2', '1,2', '0,2', '-1,2', '-2,2', '-2,1', '-2,0', '-2,-1'],
     'recordings 18–20 must continue the existing spiral without moving recordings 01–17')
-  assert.equal(offsets.length, 20, 'every supplied recording needs one position')
+  assert.deepEqual(offsets.slice(20), ['-2,-2', '-1,-2', '0,-2', '1,-2', '2,-2', '3,-2', '3,-1', '3,0', '3,1'],
+    'recordings 21–29 must continue around the upper and right edges of the existing spiral')
+  assert.equal(offsets.length, 29, 'every supplied recording needs one position')
   assert.equal(new Set(offsets).size, offsets.length, 'tile positions must not overlap')
   const home = readFileSync(resolve(dist, 'index.html'), 'utf8')
   assert.ok(!home.includes('class="splash-ring"'), 'the recordings must not be rendered as a separate centered layer')
   assert.match(home, /class="splash-tile"[^>]*>\s*<img[^>]+wall\/01\.webp/, 'the first recording must render inside a wall tile')
 })
 
-test('all twenty recordings survive desktop and mobile wall repetition without overwriting each other', () => {
+test('all twenty-nine recordings survive desktop and mobile wall repetition without overwriting each other', () => {
   const script = read('docs/.vitepress/theme/SplashWall.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
   const { buildImageTiles, wrap } = runInNewContext(script + '\n;({ buildImageTiles, wrap })', {
     ref: value => ({ value }), reactive: value => value, withBase: value => value,
@@ -297,8 +299,8 @@ test('all twenty recordings survive desktop and mobile wall repetition without o
   assert.equal(wrap(2501, 1000), -499, 'long drags must retain their phase across multiple periods')
   for (const columns of [14, 8]) {
     const tiles = buildImageTiles(columns)
-    assert.equal(tiles.size, 80, `${columns} columns must retain all four copies of all twenty recordings`)
-    for (let recording = 1; recording <= 20; recording++) {
+    assert.equal(tiles.size, 116, `${columns} columns must retain all four copies of all twenty-nine recordings`)
+    for (let recording = 1; recording <= 29; recording++) {
       assert.equal([...tiles.values()].filter(value => value === recording).length, 4)
     }
     for (const tile of tiles.keys()) assert.ok(tile >= 1 && tile <= 224)
