@@ -15,17 +15,15 @@ const productHeight = ref(0)
 const enhanced = ref(false)
 const progress = ref(1)
 const controlsReady = ref(false)
-const paused = ref(false)
 let motion, observer, sizeObserver, timer, frame = 0, visible = false, interacting = false
 
 function stop() { clearTimeout(timer); timer = undefined }
 function schedule() {
   stop()
-  if (!enhanced.value || !visible || paused.value || interacting || motion?.matches || document.hidden || (!controlsReady.value && progress.value < .65)) return
+  if (!enhanced.value || !visible || interacting || motion?.matches || document.hidden || (!controlsReady.value && progress.value < .65)) return
   timer = setTimeout(() => { active.value = (active.value + 1) % shots.length; schedule() }, 5000)
 }
 function selectShot(index) { active.value = index; schedule() }
-function togglePlayback() { paused.value = !paused.value; schedule() }
 function interact(value) { interacting = value; schedule() }
 function update() {
   frame = 0
@@ -84,9 +82,6 @@ onUnmounted(() => {
             <img :key="shots[active].file" class="hero-shot" :src="withBase('/screenshots/' + shots[active].file)"
               :alt="shots[active].caption" width="1920" height="1080" fetchpriority="high" />
           </Transition>
-          <button class="gallery-playback" :aria-label="paused ? '播放截图轮播' : '暂停截图轮播'" :aria-pressed="paused" @click="togglePlayback">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path v-if="paused" d="m8 5 11 7-11 7Z" /><path v-else d="M7 5h4v14H7zm6 0h4v14h-4z" /></svg>
-          </button>
         </div>
         <div class="product-caption">{{ shots[active].caption }}</div>
       </div>
@@ -114,7 +109,6 @@ onUnmounted(() => {
 .product-wrap.is-measured .hero-product { position: absolute; top: 0; left: 0; }
 .hero-product { width: 100%; flex-shrink: 0; }
 .screenshot-stage { position: relative; aspect-ratio: var(--frame-ratio); }
-.gallery-playback { position: absolute; right: 12px; bottom: 12px; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; color: white; background: #101418b3; backdrop-filter: blur(12px); }
 .gallery-controls { display: grid; justify-items: center; gap: 8px; text-align: center; width: 100%; }
 .gallery-tabs { position: relative; display: inline-flex; flex-wrap: nowrap; gap: 0; padding: 4px; border-radius: 12px; background: var(--vp-c-bg-soft); border: 1px solid var(--vp-c-divider); }
 .gallery-tabs button { position: relative; z-index: 1; flex: 1 1 0; min-height: 44px; padding: 8px 18px; border: 0; border-radius: 8px; background: transparent; white-space: nowrap; color: var(--vp-c-text-2); }

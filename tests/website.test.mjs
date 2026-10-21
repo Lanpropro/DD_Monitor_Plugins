@@ -193,13 +193,20 @@ test('built pages preserve compatibility boundaries and real downloads', () => {
   assert.ok(catalog.includes('Source code ZIP'))
 })
 
+test('the replacement landscape screenshot is a compact WebP rather than a renamed PNG', () => {
+  const screenshot = readFileSync(resolve(root, 'docs/public/screenshots/landscape.webp'))
+  assert.equal(screenshot.toString('ascii', 0, 4), 'RIFF')
+  assert.equal(screenshot.toString('ascii', 8, 12), 'WEBP')
+  assert.ok(screenshot.length < 1024 * 1024, 'the homepage screenshot must stay below 1 MiB')
+})
+
 test('homepage exposes software and every plugin download before JavaScript runs', () => {
   const home = readFileSync(resolve(dist, 'index.html'), 'utf8')
   assert.ok(home.includes('href="/DD_Monitor_Plugins/download"'))
   assert.ok(home.includes('id="plugins"'))
   assert.ok(home.includes('screenshots/landscape.webp'))
   assert.ok(!home.includes('查看完整截图'), 'the presentation should not show a redundant screenshot link')
-  assert.ok(home.includes('aria-label="暂停截图轮播"'), 'autoplay must have a manual pause control')
+  assert.ok(!home.includes('gallery-playback'), 'the screenshot must not have an overlaid playback button')
   for (const label of ['横屏观看', '弹幕布局', '竖屏布局']) assert.ok(home.includes(label))
   const release = JSON.parse(read('docs/data/software-release.json'))
   assert.ok(home.includes(release.download))
@@ -406,7 +413,7 @@ function mountGallery({ reduced = false, intersection = true, resize = true } = 
     disconnect() { sizeDisconnected = true }
   }
   const script = read('docs/.vitepress/theme/ScreenshotShowcase.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
-  const state = runInNewContext(script + '\n;({ active, progress, controlsReady, productHeight, enhanced, paused, selectShot, togglePlayback, interact, update, preferenceChanged })', {
+  const state = runInNewContext(script + '\n;({ active, progress, controlsReady, productHeight, enhanced, selectShot, interact, update, preferenceChanged })', {
     ref: value => ({ value: value === null ? [story, pin, product][refs++] : value }),
     onMounted: fn => { mount = fn }, onUnmounted: fn => { unmount = fn },
     window: { innerHeight: 800, matchMedia: () => media, ...(intersection ? { IntersectionObserver: Observer } : {}), ...(resize ? { ResizeObserver: SizeObserver } : {}), addEventListener() {}, removeEventListener() {} },
@@ -436,12 +443,9 @@ test('screenshot scroll contracts the display and playback loops only while bein
   gallery.state.update()
   assert.equal(gallery.state.progress.value, 1)
   for (const expected of [1, 2, 0]) { gallery.tick(); assert.equal(gallery.state.active.value, expected) }
-  gallery.state.togglePlayback()
-  assert.equal(gallery.timers.size, 0)
   gallery.state.selectShot(2)
   assert.equal(gallery.state.active.value, 2)
-  assert.equal(gallery.timers.size, 0, 'manual selection respects pause')
-  gallery.state.togglePlayback()
+  assert.equal(gallery.timers.size, 1, 'manual selection restarts the automatic slideshow')
   gallery.state.interact(true)
   assert.equal(gallery.timers.size, 0, 'do not advance beneath a pointer or keyboard focus')
   gallery.state.interact(false)
