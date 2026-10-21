@@ -161,7 +161,7 @@ class GiftController(QObject):
 
     def send(self,gift_key,quantity):
         if self._closed or self.coordinator.busy:return
-        item=next((i for t in self.state.tabs for i in t.items if i.key==gift_key),None)
+        item=api.find_gift(self.state.tabs,gift_key)
         if item is None:return
         snapshot=self._snapshot
         try:api.validate_send(item,quantity,cookies=snapshot.values if snapshot else {},wallet=self.state.spendable_wallet)

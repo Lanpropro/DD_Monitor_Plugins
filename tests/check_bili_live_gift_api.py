@@ -3,10 +3,47 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 from bili_live_support import bili
-from bili_live_fixtures import config,room_payload,bag_payload,guard_payload
+from bili_live_fixtures import config,room_payload,bag_payload,guard_payload,upgrade_payload
 from ddm_plugin_bili_live import gift_api as api
 
 class ReadTests(unittest.TestCase):
+    def test_upgrade_gifts_keep_their_identity_price_and_quantity_rules(self):
+        data=upgrade_payload()
+        data['gift_config']['room_config']=[{'id':35640,'price':1700}]
+        catalog=api.normalize_catalog(data,'90001')
+        self.assertEqual([i.gift_id for i in catalog.tabs[0].items],[35638])
+        parent=catalog.tabs[0].items[0]
+        variants=getattr(parent,'variants',())
+        self.assertEqual([(i.key,i.gift_id,i.name,i.price) for i in variants],[
+            ('main:35638:35641',35641,'真好听',1000),
+            ('main:35638:35640',35640,'贴贴',1700),
+            ('main:35638:35639',35639,'摸摸头',1500)])
+        self.assertEqual([(i.counts,i.allow_custom) for i in variants],
+            [((1,),False),((1,),False),((1,10,100),True)])
+        self.assertTrue(all(i.payment_scene=='default_gift' and not i.disabled_reason for i in variants))
+
+    def test_upgrade_locks_missing_configs_and_child_permissions_block_send(self):
+        data=upgrade_payload();row=data['gift_data']['room_gift_list']['gold_list'][0]
+        row['upgrade_gift'][0].update(locked=True,lock_tip='尚未解锁')
+        data['gift_config']['base_config']['list'][2]['perm']=0
+        data['gift_config']['base_config']['list'].pop()
+        parent=api.normalize_catalog(data,'90001').tabs[0].items[0]
+        variants=getattr(parent,'variants',())
+        self.assertEqual(len(variants),3)
+        self.assertIn('尚未解锁',variants[0].disabled_reason)
+        self.assertTrue(all(i.disabled_reason for i in variants))
+        for item in variants:
+            with self.subTest(gift=item.gift_id),self.assertRaises(api.GiftSendError):
+                api.validate_send(item,1,cookies={'SESSDATA':'fake','bili_jct':'csrf'},wallet=99999)
+
+    def test_upgrade_gifts_inherit_parent_restrictions_and_ignore_duplicate_refs(self):
+        data=upgrade_payload();row=data['gift_data']['room_gift_list']['gold_list'][0]
+        row['special'].update(is_use=0,tips='房间未解锁')
+        row['upgrade_gift'] += [row['upgrade_gift'][0],{'gift_id':35638},{'gift_id':0}]
+        variants=getattr(api.normalize_catalog(data,'90001').tabs[0].items[0],'variants',())
+        self.assertEqual([i.gift_id for i in variants],[35641,35640,35639])
+        self.assertTrue(all(i.disabled_reason=='房间未解锁' for i in variants))
+
     def test_direct_guard_and_unlocked_attire_use_their_server_payment_scene(self):
         for scene in ('guard_gift','guard_attire'):
             with self.subTest(scene=scene):

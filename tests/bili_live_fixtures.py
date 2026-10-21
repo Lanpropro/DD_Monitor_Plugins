@@ -35,3 +35,23 @@ def guard_payload(*,scene='guard_gift',unlocked=True):
         'special':{'special_type':15 if attire else 0,'is_use':int(unlocked),'tips':'请先开通大航海'},
         'gift_scene':{'scene':scene,'pay_type':'interactive_pay','hide_price':False}}]
     return data
+
+
+def upgrade_payload():
+    """Public room 21452505, 2026-10-21: upgrade_gift and independent counts."""
+    data=room_payload()
+    data['gift_config']['base_config']['list']=[
+        config(35638,name='送花花',price=1000,count_map=[{'num':1}],diy_count_map=0),
+        config(35641,name='真好听',price=1000,count_map=[{'num':1}],diy_count_map=0),
+        config(35640,name='贴贴',price=1500,count_map=[{'num':1}],diy_count_map=0),
+        config(35639,name='摸摸头',price=1500)]
+    data['gift_config']['room_config']=[]
+    data['gift_data']['tab_list']=[]
+    data['gift_data']['room_gift_list']['gold_list']=[{'gift_id':35638,'position':1,
+        'special':{'special_type':0,'is_use':1},
+        'gift_scene':{'scene':'default_gift','pay_type':'send_gift','hide_price':False},
+        'upgrade_gift':[
+            {'gift_id':35641,'alias':'真好听','desc':'+0电池','locked':False,'lock_tip':''},
+            {'gift_id':35640,'alias':'贴贴','desc':'+5电池','locked':False,'lock_tip':''},
+            {'gift_id':35639,'alias':'摸摸头','desc':'+5电池','locked':False,'lock_tip':''}]}]
+    return data

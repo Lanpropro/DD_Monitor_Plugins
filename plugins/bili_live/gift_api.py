@@ -1,6 +1,6 @@
 """Immutable gift models, conservative room/bag normalization and HTTP reads."""
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import time
 from types import MappingProxyType
@@ -31,6 +31,7 @@ class GiftItem:
     expires_at: int = 0
     pay_type: str = 'send_gift'
     gift_scene: str = ''
+    variants: tuple = ()
 
     @property
     def payment_scene(self):
@@ -152,6 +153,28 @@ def _item(config, key, room_id, max_count, *, source='gold', bag_id=0, stock=0, 
         scene.get('pay_type','send_gift') if isinstance(scene,dict) else 'send_gift',
         json.dumps(scene,ensure_ascii=False,separators=(',',':')) if isinstance(scene,dict) else '')
 
+def find_gift(tabs, key):
+    return next((choice for tab in tabs for item in tab.items
+        for choice in (item,*item.variants) if choice.key==key),None)
+
+def _variants(parent, references, configs, room_id, maximum):
+    items=[];seen={parent.gift_id}
+    for row in _list(references):
+        ident=_integer(row.get('gift_id'),0)
+        if ident<=0 or ident in seen:continue
+        seen.add(ident)
+        config={**configs.get(ident,{}),'id':ident}
+        # Children have their own price/counts; the room's payment route and
+        # parent permission restrictions still apply to this group.
+        if not config.get('gift_scene') and parent.gift_scene:
+            config['gift_scene']=json.loads(parent.gift_scene)
+        if row.get('alias'):config['name']=str(row['alias'])
+        item=_item(config,f'{parent.key}:{ident}',room_id,maximum)
+        reason=parent.disabled_reason or item.disabled_reason
+        if row.get('locked'):reason=str(row.get('lock_tip') or '当前账号尚未解锁')
+        items.append(replace(item,disabled_reason=reason))
+    return tuple(items)
+
 def normalize_catalog(data, room_id):
     if not isinstance(data,dict) or not isinstance(data.get('gift_data'),dict) or not isinstance(data.get('gift_config'),dict):
         raise ValueError('礼物列表格式异常')
@@ -174,7 +197,8 @@ def normalize_catalog(data, room_id):
             if ident<=0 or ident in seen:continue
             seen.add(ident)
             merged={**configs.get(ident,{}),**row,'id':ident}
-            items.append(_item(merged,f'{key}:{ident}',room_id,maximum))
+            item=_item(merged,f'{key}:{ident}',room_id,maximum)
+            items.append(replace(item,variants=_variants(item,merged.get('upgrade_gift'),configs,room_id,maximum)))
         result.append(GiftTab(key,title,tuple(items)))
     return GiftCatalog(tuple(result),MappingProxyType(configs),maximum)
 
