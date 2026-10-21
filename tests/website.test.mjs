@@ -283,6 +283,20 @@ test('the full-screen wall leaves vertical touch gestures to page scrolling', ()
   assert.match(splash, /dx\s*<\s*dy/, 'a mostly vertical gesture must not become a wall drag')
 })
 
+test('the wall hint has a readable rounded envelope and a single reduced-motion-safe opening', () => {
+  const source = read('docs/.vitepress/theme/SplashWall.vue')
+  const hint = source.match(/\.splash-hint \{([^}]+)\}/)[1]
+  assert.ok(hint.includes('border-radius: 18px'))
+  assert.ok(hint.includes('pointer-events: none'), 'the hint must not block wall dragging or scrolling')
+  assert.ok(hint.includes('max-width: calc(100% - 32px)'))
+  assert.ok(source.includes('class="hint-envelope"'))
+  assert.ok(source.includes('class="hint-copy"'))
+  assert.ok(source.includes('拖动查看')); assert.ok(source.includes('向下滚动进入主页'))
+  assert.match(source, /\.hint-flap \{[^}]*animation: envelope-open 350ms/)
+  assert.ok(!source.includes('envelope-open 350ms infinite'))
+  assert.ok(source.includes('.splash-hint, .hint-copy, .hint-flap, .hint-letter { animation: none; }'))
+})
+
 test('idle drift keeps the original compact orbit speed and amplitude', () => {
   const splash = read('docs/.vitepress/theme/SplashWall.vue')
   assert.match(splash, /driftX = Math\.sin\(now \/ 2600\) \* 62 \+ Math\.sin\(now \/ 7100\) \* 22/, 'horizontal drift must keep the original speed')

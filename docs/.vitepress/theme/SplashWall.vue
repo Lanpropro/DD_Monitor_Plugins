@@ -280,7 +280,7 @@ onUnmounted(() => {
           alt="" width="1280" height="720" draggable="false" />
       </span>
     </div>
-    <p class="splash-hint">拖动查看<span class="splash-dot">·</span>向下滚动进入主页</p>
+    <p class="splash-hint"><span class="hint-envelope"><svg class="hint-pocket" viewBox="0 0 24 20" fill="none"><rect x="1" y="3" width="22" height="16" rx="3" fill="var(--vp-c-bg)" stroke="currentColor" /><path d="m2 18 7-6m13 6-7-6" stroke="currentColor" /></svg><span class="hint-letter"></span><svg class="hint-flap" viewBox="0 0 24 12" fill="none"><path d="M2 1h20L13.5 10a2 2 0 0 1-3 0Z" fill="var(--vp-c-bg)" stroke="currentColor" stroke-linejoin="round" /></svg></span><span class="hint-copy"><span>拖动查看</span><span class="splash-dot">·</span><span>向下滚动进入主页</span></span></p>
   </section>
 </template>
 
@@ -344,22 +344,39 @@ onUnmounted(() => {
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
+  max-width: calc(100% - 32px);
+  padding: 12px 18px;
+  border: 1px solid color-mix(in srgb, var(--vp-c-brand-1) 35%, var(--vp-c-divider));
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--vp-c-bg) 94%, transparent);
+  box-shadow: 0 8px 28px #0005, inset 0 1px 0 #ffffff0a;
   margin: 0;
-  color: var(--vp-c-text-2);
+  color: var(--vp-c-text-1);
   font-size: 13px;
   letter-spacing: .1em;
   pointer-events: none;
-  animation: hint-in 700ms 900ms var(--ease-out) both;
+  animation: hint-in 250ms 900ms var(--ease-out) both;
 }
+.hint-copy { display: flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; animation: letter-reveal 350ms 1150ms var(--ease-out) both; }
+.hint-envelope { position: relative; flex: 0 0 24px; height: 20px; color: var(--vp-c-brand-1); perspective: 100px; }
+.hint-pocket { position: absolute; inset: 0; width: 24px; height: 20px; z-index: 2; }
+.hint-letter { position: absolute; left: 5px; top: 4px; width: 14px; height: 12px; border-radius: 2px; background: var(--vp-c-text-1); z-index: 1; animation: envelope-letter 350ms 1150ms var(--ease-out) both; }
+.hint-flap { position: absolute; left: 0; top: 3px; width: 24px; height: 12px; transform-origin: center top; z-index: 3; animation: envelope-open 350ms 950ms var(--ease-out) both; }
 .splash-dot { opacity: .5; }
+@keyframes envelope-open { from { transform: rotateX(0); } to { transform: rotateX(160deg); } }
+@keyframes envelope-letter { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(-3px); } }
+@keyframes letter-reveal { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes hint-in { from { opacity: 0; } to { opacity: 1; } }
 @media (max-width: 700px) {
   .splash-wall { grid-template-columns: repeat(8, minmax(0, 1fr)); }
-  .splash-hint { font-size: 12px; }
+  .splash-hint { gap: 8px; padding: 11px 12px; font-size: 11px; letter-spacing: .04em; }
+  .hint-copy { gap: 5px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .splash-tile { animation: none; transition: none; }
-  .splash-hint { animation: none; }
+  .splash-hint, .hint-copy, .hint-flap, .hint-letter { animation: none; }
+  .hint-flap { transform: rotateX(160deg); }
+  .hint-letter { transform: translateY(-3px); }
 }
 </style>
