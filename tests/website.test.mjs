@@ -241,12 +241,12 @@ test('opening screen shows the recorded tiles in the placeholder wall before any
   assert.equal(wallTiles, 224, 'the wall repeats its 56 tiles twice per axis so it wraps without a seam')
   const splash = read('docs/.vitepress/theme/SplashWall.vue')
   assert.ok(!home.includes('splash-ring'), 'recordings must live in the wall rather than a separate overlay')
-  for (let index = 1; index <= 52; index++) {
+  for (let index = 1; index <= 55; index++) {
     const file = String(index).padStart(2, '0') + '.webp'
     assert.ok(existsSync(resolve(root, `docs/public/wall/${file}`)))
     assert.equal((home.match(new RegExp(`${base}wall/${file}`, 'g')) || []).length, 4, `${file} must appear in all four repeated wall quadrants`)
   }
-  assert.equal((home.match(/\/wall\/\d{2}\.webp/g) || []).length, 208, 'only the supplied recordings replace placeholders')
+  assert.equal((home.match(/\/wall\/\d{2}\.webp/g) || []).length, 220, 'only the supplied recordings replace placeholders')
   assert.ok(home.includes('拖动查看'), 'the opening screen must say it can be dragged')
   assert.ok(home.indexOf('class="splash"') < home.indexOf('class="showcase"'), 'the wall comes before the page content')
 })
@@ -281,16 +281,17 @@ test('supplied recordings spiral outward from the center without overlapping til
     'recordings 18–20 must continue the existing spiral without moving recordings 01–17')
   assert.deepEqual(offsets.slice(20, 29), ['-2,-2', '-1,-2', '0,-2', '1,-2', '2,-2', '3,-2', '3,-1', '3,0', '3,1'],
     'recordings 21–29 must continue around the upper and right edges of the existing spiral')
-  assert.deepEqual(offsets.slice(29), ['3,2', '3,3', '2,3', '1,3', '0,3', '-1,3', '-2,3', '-3,3', '-3,2', '-3,1', '-3,0', '-3,-1', '-3,-2', '-3,-3', '-2,-3', '-1,-3', '0,-3', '1,-3', '2,-3', '3,-3', '3,4', '2,4', '1,4'],
+  assert.deepEqual(offsets.slice(29, 52), ['3,2', '3,3', '2,3', '1,3', '0,3', '-1,3', '-2,3', '-3,3', '-3,2', '-3,1', '-3,0', '-3,-1', '-3,-2', '-3,-3', '-2,-3', '-1,-3', '0,-3', '1,-3', '2,-3', '3,-3', '3,4', '2,4', '1,4'],
     'recordings 30–52 must fill the outer edge and available bottom row without moving earlier recordings')
-  assert.equal(offsets.length, 52, 'every supplied recording needs one position')
+  assert.deepEqual(offsets.slice(52), ['0,4', '-1,4', '-2,4'], 'recordings 53–55 must continue along the remaining bottom row')
+  assert.equal(offsets.length, 55, 'every supplied recording needs one position')
   assert.equal(new Set(offsets).size, offsets.length, 'tile positions must not overlap')
   const home = readFileSync(resolve(dist, 'index.html'), 'utf8')
   assert.ok(!home.includes('class="splash-ring"'), 'the recordings must not be rendered as a separate centered layer')
   assert.match(home, /class="splash-tile"[^>]*>\s*<img[^>]+wall\/01\.webp/, 'the first recording must render inside a wall tile')
 })
 
-test('all fifty-two recordings survive desktop and mobile wall repetition without overwriting each other', () => {
+test('all fifty-five recordings survive desktop and mobile wall repetition without overwriting each other', () => {
   const script = read('docs/.vitepress/theme/SplashWall.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
   const { buildImageTiles, wrap } = runInNewContext(script + '\n;({ buildImageTiles, wrap })', {
     ref: value => ({ value }), reactive: value => value, withBase: value => value,
@@ -301,8 +302,8 @@ test('all fifty-two recordings survive desktop and mobile wall repetition withou
   assert.equal(wrap(2501, 1000), -499, 'long drags must retain their phase across multiple periods')
   for (const columns of [14, 8]) {
     const tiles = buildImageTiles(columns)
-    assert.equal(tiles.size, 208, `${columns} columns must retain all four copies of all fifty-two recordings`)
-    for (let recording = 1; recording <= 52; recording++) {
+    assert.equal(tiles.size, 220, `${columns} columns must retain all four copies of all fifty-five recordings`)
+    for (let recording = 1; recording <= 55; recording++) {
       assert.equal([...tiles.values()].filter(value => value === recording).length, 4)
     }
     for (const tile of tiles.keys()) assert.ok(tile >= 1 && tile <= 224)
