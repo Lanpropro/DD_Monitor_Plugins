@@ -786,7 +786,7 @@ test('viewing and plugin demos restore the pre-fusion presentation without layou
   assert.ok(home.includes('aria-label="二路同步演示时间轴"'))
   const css = read('docs/.vitepress/theme/style.css')
   assert.ok(!css.includes('max-width: 880px'))
-  assert.ok(css.includes('.plugin-demo-panel.is-match-demo { display:block;'))
+  assert.ok(css.includes('.plugin-demo-panel { display:block;'))
 })
 
 test('follow cards support pointer dragging, tap placement, cancellation and outside drops', () => {
@@ -951,9 +951,8 @@ test('plugin cards expose full-card selection and render concrete feature detail
   const home = readFileSync(resolve(dist, 'index.html'), 'utf8')
   const panel = home.split('id="plugin-demo"')[1].split('plugin-compatibility')[0]
   for (const p of plugins) {
-    assert.equal(p.featureDetails.length, p.features.length)
+    assert.ok(p.features.length > 0)
     assert.ok(home.includes('aria-label="查看' + p.name + '的具体功能"'))
-    for (const detail of p.featureDetails) assert.ok(detail.length > 20)
   }
   assert.ok(panel.includes('比赛二路同步实录预览'))
   assert.ok(panel.includes('match-sync-demo'))
@@ -977,55 +976,51 @@ test('plugin carousel initially shows the selected match-sync card', () => {
   page.unmount()
 })
 
-function mountFeatureMotion({ reduced = false, intersection = true, plugin = plugins[0] } = {}) {
-  const timers = new Map(), listeners = new Map()
-  let mount, unmount, notify, next = 0, disconnected = false
-  const media = { matches: reduced, addEventListener: (name, fn) => listeners.set('media:' + name, fn), removeEventListener: name => listeners.delete('media:' + name) }
-  const doc = { hidden: false, addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name) }
+function mountPluginRecording({ plugin = plugins[0], intersection = true } = {}) {
+  let mount, unmount, notify, disconnected = false, refs = 0
+  const listeners = new Map()
+  const video = { paused:false, pause() { this.paused = true } }
+  const doc = { hidden:false, addEventListener:(name,fn) => listeners.set(name,fn), removeEventListener:name => listeners.delete(name) }
   class Observer { constructor(fn) { notify = fn } observe() {} disconnect() { disconnected = true } }
-  const script = read('docs/.vitepress/theme/PluginFeatureMotion.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
-  const state = runInNewContext(script + '\n;({ phase, paused, playing, phaseLabels, phaseDescription, screenshot, sync, selectPhase, togglePlayback, onEnter, onLeave, onFocus, onBlur })', {
-    defineProps: () => ({ plugin }), computed: fn => ({ get value() { return fn() } }), ref: value => ({ value: value === null ? {} : value }),
-    onMounted: fn => { mount = fn }, onUnmounted: fn => { unmount = fn },
-    window: { matchMedia: () => media, ...(intersection ? { IntersectionObserver: Observer } : {}) }, document: doc, IntersectionObserver: Observer,
-    setTimeout: fn => { timers.set(++next, fn); return next }, clearTimeout: id => timers.delete(id)
+  const script = read('docs/.vitepress/theme/PluginRecording.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
+  const state = runInNewContext(script + '\n;({ recording })', {
+    defineProps:() => ({ plugin }), computed:fn => ({ get value() { return fn() } }), ref:value => ({ value:value === null ? refs++ === 0 ? {} : video : value }),
+    onMounted:fn => { mount = fn }, onUnmounted:fn => { unmount = fn }, window:intersection ? { IntersectionObserver:Observer } : {}, document:doc, IntersectionObserver:Observer
   })
   mount()
-  return { state, timers, listeners, media, doc, unmount, visible(value) { notify?.([{ isIntersecting:value }]) },
-    tick() { const [id, fn] = timers.entries().next().value; timers.delete(id); fn() }, get disconnected() { return disconnected } }
+  return { state, video, doc, listeners, unmount, visible(value) { notify?.([{ isIntersecting:value }]) }, get disconnected() { return disconnected } }
 }
 
-test('platform feature illustration loops through quality, preview and chat only while watched', () => {
-  const page = mountFeatureMotion(), s = page.state
-  assert.equal(s.phaseDescription.value, plugins[0].featureDetails[0])
-  assert.equal(page.timers.size, 0)
-  page.visible(true)
-  for (const expected of [1,2,0]) { page.tick(); assert.equal(s.phase.value, expected) }
-  s.onEnter({ pointerType: 'mouse' }); assert.equal(page.timers.size, 0)
-  s.onLeave(); assert.equal(page.timers.size, 1)
-  s.onFocus({ target:{ matches:() => true } }); assert.equal(page.timers.size, 0)
-  s.onBlur({ currentTarget:{ contains:() => false } }); assert.equal(page.timers.size, 1)
-  s.togglePlayback(); assert.equal(page.timers.size, 0)
-  s.selectPhase(2); assert.equal(s.phaseDescription.value, plugins[0].featureDetails[2])
-  s.selectPhase(10); assert.equal(s.phase.value, 2)
-  s.togglePlayback(); page.doc.hidden = true; page.listeners.get('visibilitychange')(); assert.equal(page.timers.size, 0)
-  page.doc.hidden = false; s.sync(); assert.equal(page.timers.size, 1)
-  page.visible(false); assert.equal(page.timers.size, 0)
-  page.visible(true); page.media.matches = true; page.listeners.get('media:change')(); assert.equal(page.timers.size, 0)
-  page.unmount(); assert.equal(page.timers.size, 0); assert.equal(page.listeners.size, 0); assert.ok(page.disconnected)
+test('platform recordings use the corresponding local footage and replace simulated feature displays', () => {
+  for (const [plugin,file] of [[plugins[0],'domestic-live'],[plugins[1],'global-live']]) {
+    const page = mountPluginRecording({ plugin })
+    assert.equal(page.state.recording.value.file,file)
+    const bytes = readFileSync(resolve(root, `docs/public/videos/${file}-recording.mp4`))
+    assert.equal(bytes.toString('ascii',4,8),'ftyp')
+    assert.ok(bytes.indexOf(Buffer.from('moov')) < bytes.indexOf(Buffer.from('mdat')))
+    assert.ok(bytes.length < 25 * 1024 * 1024)
+    assert.ok(existsSync(resolve(root, `docs/public/videos/${file}-poster.webp`)))
+    page.unmount()
+  }
+  const source = read('docs/.vitepress/theme/PluginRecording.vue'), home = read('docs/.vitepress/theme/HomePage.vue')
+  assert.match(source, /controls muted playsinline preload="none"/)
+  assert.ok(!source.includes('autoplay'))
+  assert.ok(!home.includes('PluginFeatureMotion')); assert.ok(!home.includes('plugin-flow'))
+  assert.ok(home.includes('<PluginRecording v-else :key="plugins[previewPlugin].id"'))
+  assert.ok(source.includes('各格取自不同时间段'))
 })
 
-test('feature motion degrades to manual phases and platform demos show the matching screenshot', () => {
-  for (const options of [{ reduced: true }, { intersection: false }]) {
-    const page = mountFeatureMotion(options); page.visible(true)
-    assert.equal(page.timers.size, 0); page.state.selectPhase(2); assert.equal(page.state.phase.value, 2); page.unmount()
-  }
-  for (const plugin of plugins.slice(0,2)) {
-    const page = mountFeatureMotion({ plugin }), s = page.state
-    s.selectPhase(2); assert.equal(s.screenshot.value, 'danmaku.webp'); assert.equal(s.phaseDescription.value, plugin.featureDetails[2])
-    s.selectPhase(0); assert.equal(s.screenshot.value, 'landscape.webp'); page.unmount()
-  }
+test('recordings pause offscreen, in the background and when switching plugins', () => {
+  const page = mountPluginRecording()
+  page.visible(true); assert.equal(page.video.paused,false)
+  page.visible(false); assert.equal(page.video.paused,true)
+  page.video.paused = false; page.doc.hidden = true; page.listeners.get('visibilitychange')(); assert.equal(page.video.paused,true)
+  page.doc.hidden = false; page.listeners.get('visibilitychange')(); assert.equal(page.video.paused,true, 'returning must preserve a paused recording')
+  page.video.paused = false; page.unmount(); assert.equal(page.video.paused,true); assert.ok(page.disconnected); assert.equal(page.listeners.size,0)
+  const fallback = mountPluginRecording({ intersection:false })
+  fallback.doc.hidden = true; fallback.listeners.get('visibilitychange')(); assert.equal(fallback.video.paused,true); fallback.unmount()
 })
+
 
 function mountBackToIntro({ reduced = false, hasAnchor = true } = {}) {
   let mount, unmount, focused = false
