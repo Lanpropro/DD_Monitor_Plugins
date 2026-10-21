@@ -2,8 +2,8 @@
 
 - `logo.svg`：软件仓库 `assets/logo.svg`，保留原标志。
 - `screenshots/landscape.webp`：用户于2026-10-21替换的实际软件横屏截图，保留本地原图并转为1920×1080 WebP。
-- `screenshots/danmaku.webp`：软件 `docs/overview2_Landscape_mode.png` 的缩小副本。
-- `screenshots/portrait.webp`：软件 `docs/overview1_Portrait_Mode.png` 的缩小副本。
+- `screenshots/danmaku.webp`：软件 `docs/overview5_Landscape_mode.png` 转为1920像素宽 WebP。
+- `screenshots/portrait.webp`：软件 `docs/overview2_Portrait_Mode.png` 转为1080×1728 WebP，保留原始5:8比例。
 - 原截图未改动；这些图片来自项目现有文档，用于布局展示，不代表最新版本的每项控件。
 - 平台图标复制自软件 `assets/platforms/`，具体出处见 `platforms/README.md`，仅用于识别平台。
 

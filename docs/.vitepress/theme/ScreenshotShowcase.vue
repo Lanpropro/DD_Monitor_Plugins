@@ -72,7 +72,7 @@ onUnmounted(() => {
 
 <template>
   <section ref="story" class="screenshot-story" :class="{ 'is-enhanced': enhanced }" aria-label="真实软件截图"
-    :style="{ '--shot-scale': enhanced ? 1 - progress * .18 : 1, '--frame-ratio': active === 2 ? 9 / 16 : 16 / 9, '--selected': active, '--controls': controlsReady || !enhanced ? 1 : Math.min(1, Math.max(0, (progress - .55) / .4)), '--facts': controlsReady || !enhanced ? 1 : Math.min(1, Math.max(0, (progress - .62) / .32)) }">
+    :style="{ '--shot-scale': enhanced ? 1 - progress * .18 : 1, '--frame-ratio': active === 2 ? 5 / 8 : 16 / 9, '--selected': active, '--controls': controlsReady || !enhanced ? 1 : Math.min(1, Math.max(0, (progress - .55) / .4)), '--facts': controlsReady || !enhanced ? 1 : Math.min(1, Math.max(0, (progress - .62) / .32)) }">
     <div ref="pin" class="screenshot-pin">
       <div class="product-wrap" :class="{ 'is-measured': enhanced && productHeight > 0 }" :style="enhanced && productHeight > 0 ? { height: productHeight * (1 - progress * .18) + 'px' } : undefined">
       <div ref="product" class="hero-product">
@@ -91,7 +91,7 @@ onUnmounted(() => {
           @focusin="interact(true)" @focusout="interact(false)">
           <div class="gallery-tabs" role="group" aria-label="截图布局">
             <span class="gallery-selection" aria-hidden="true"></span>
-            <button v-for="(shot, i) in shots" :key="shot.file" :aria-pressed="active === i" @click="selectShot(i)">{{ shot.label }} <span class="layout-ratio" aria-hidden="true">{{ i === 2 ? '9:16' : '16:9' }}</span></button>
+            <button v-for="(shot, i) in shots" :key="shot.file" :aria-pressed="active === i" @click="selectShot(i)">{{ shot.label }} <span class="layout-ratio" aria-hidden="true">{{ i === 2 ? '5:8' : '16:9' }}</span></button>
           </div>
           <p class="screenshot-source">截图来自现有项目文档，不同版本的界面细节可能有所调整。</p>
         </div>

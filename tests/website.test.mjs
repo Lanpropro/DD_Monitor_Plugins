@@ -4,6 +4,7 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import { resolve, relative, dirname } from 'node:path'
 import { runInNewContext } from 'node:vm'
 import { createAppearanceToggle } from '../docs/.vitepress/theme/appearance.mjs'
+import { TOUR_DURATION, viewingTourFrame } from '../docs/.vitepress/theme/viewing-tour.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const read = path => readFileSync(resolve(root, path), 'utf8')
@@ -193,11 +194,13 @@ test('built pages preserve compatibility boundaries and real downloads', () => {
   assert.ok(catalog.includes('Source code ZIP'))
 })
 
-test('the replacement landscape screenshot is a compact WebP rather than a renamed PNG', () => {
-  const screenshot = readFileSync(resolve(root, 'docs/public/screenshots/landscape.webp'))
-  assert.equal(screenshot.toString('ascii', 0, 4), 'RIFF')
-  assert.equal(screenshot.toString('ascii', 8, 12), 'WEBP')
-  assert.ok(screenshot.length < 1024 * 1024, 'the homepage screenshot must stay below 1 MiB')
+test('the replacement screenshots are compact WebP images rather than renamed PNGs', () => {
+  for (const name of ['landscape', 'danmaku', 'portrait']) {
+    const screenshot = readFileSync(resolve(root, `docs/public/screenshots/${name}.webp`))
+    assert.equal(screenshot.toString('ascii', 0, 4), 'RIFF')
+    assert.equal(screenshot.toString('ascii', 8, 12), 'WEBP')
+    assert.ok(screenshot.length < 1024 * 1024, `${name} must stay below 1 MiB`)
+  }
 })
 
 test('homepage exposes software and every plugin download before JavaScript runs', () => {
@@ -242,6 +245,7 @@ test('Dock navigation renders all destinations and exactly one current page on e
 test('opening screen shows the recorded tiles in the placeholder wall before any page content', () => {
   const home = readFileSync(resolve(dist, 'index.html'), 'utf8')
   const wall = home.match(/<section class="splash"[^>]*>/)
+  const wallContent = home.match(/<section class="splash"[\s\S]*?<\/section>/)?.[0]
   assert.ok(wall, 'missing opening wall')
   assert.match(wall[0], /aria-hidden="true"/, 'the decorative wall must stay out of the accessibility tree')
   const wallTiles = (home.match(/class="splash-tile"/g) || []).length
@@ -251,9 +255,9 @@ test('opening screen shows the recorded tiles in the placeholder wall before any
   for (let index = 1; index <= 55; index++) {
     const file = String(index).padStart(2, '0') + '.webp'
     assert.ok(existsSync(resolve(root, `docs/public/wall/${file}`)))
-    assert.equal((home.match(new RegExp(`${base}wall/${file}`, 'g')) || []).length, 4, `${file} must appear in all four repeated wall quadrants`)
+    assert.equal((wallContent.match(new RegExp(`${base}wall/${file}`, 'g')) || []).length, 4, `${file} must appear in all four repeated wall quadrants`)
   }
-  assert.equal((home.match(/\/wall\/\d{2}\.webp/g) || []).length, 220, 'only the supplied recordings replace placeholders')
+  assert.equal((wallContent.match(/\/wall\/\d{2}\.webp/g) || []).length, 220, 'only the supplied recordings replace placeholders')
   assert.ok(home.includes('拖动查看'), 'the opening screen must say it can be dragged')
   assert.ok(home.indexOf('class="splash"') < home.indexOf('class="showcase"'), 'the wall comes before the page content')
 })
@@ -353,13 +357,14 @@ test('appearance miniature and editable controls remain usable before hydration'
   assert.ok(home.includes('class="mini-sidebar"'))
   assert.equal((home.match(/class="[^"]*\bmini-tile\b[^"]*"/g) || []).length, 6)
   assert.ok(!home.includes('aria-label="主画面比例"'))
-  assert.ok(!home.includes('role="separator"'))
+  assert.ok(home.includes('role="separator"'))
+  assert.ok(home.includes('aria-label="主画面宽度"'))
   assert.ok(!home.includes('比例支持拖动'))
   assert.ok(home.includes('aria-label="布局预设页面"'))
   const miniature = home.match(/<div class="software-miniature[\s\S]*?<p class="demo-status"/)?.[0]
   assert.ok(miniature?.includes('id="mini-layout-presets"'), 'the preset page belongs inside the software preview')
   assert.ok(!home.includes('<details id="mini-layout-presets"'))
-  assert.ok(home.includes('切换布局预设'))
+  for (const label of ['摆放直播', '调整比例', '控制声音', '观看体验演示进度']) assert.ok(home.includes(label))
   assert.ok(home.includes('aria-controls="mini-layout-presets"'))
   assert.ok(home.includes('aria-label="选择演示主播 A"'))
   assert.ok(!home.includes('观看组合'))
@@ -523,6 +528,7 @@ test('the facts row enters with the later part of the screenshot scroll', () => 
 })
 
 test('revealed screenshot controls stay visible during a ratio change', () => {
+  assert.match(read('docs/.vitepress/theme/ScreenshotShowcase.vue'), /'--frame-ratio': active === 2 \? 5 \/ 8 : 16 \/ 9/, 'the new portrait screenshot keeps its actual 5:8 proportions')
   const gallery = mountGallery()
   gallery.story.top = -500
   gallery.state.update()
@@ -600,17 +606,80 @@ test('theme wipe originates at the button, supports rapid toggles and falls back
 })
 
 
-function mountMiniature() {
-  let target = null, nullRefs = 0, backFocus = 0
+function mountMiniature({ empty = true, reduced = false, observer = true } = {}) {
+  let target = null, nullRefs = 0, backFocus = 0, mount, unmount, notify, preferenceChanged, next = 0, disconnected = false
+  const frames = new Map(), listeners = new Map()
+  const media = { matches: reduced, addEventListener(name, fn) { preferenceChanged = fn }, removeEventListener() {} }
+  const doc = { hidden: false, elementFromPoint: () => ({ closest: () => target }), addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name) }
+  const rect = { left: 200, top: 100, width: 600, height: 400 }
+  const surface = { getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 520 }), querySelector: () => ({ getBoundingClientRect: () => rect }) }
+  const rootElement = { contains: element => element.inside, querySelector: selector => selector === '.software-miniature' ? surface : selector === '.mini-wall' ? { getBoundingClientRect: () => rect } : { focus() { backFocus++ } } }
+  class Observer { constructor(fn) { notify = fn } observe() {} disconnect() { disconnected = true } }
   const script = read('docs/.vitepress/theme/FeatureDemo.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
-  const state = runInNewContext(script + '\n;({ presets, preset, presetId, columns, slots, cards, selected, dragged, over, light, pickerOpen, selectCard, placeCard, clearSlot, changePreset, onCardDown, onCardMove, onCardUp, cancelCard, openPicker, closePicker })', {
+  const state = runInNewContext(script + '\n;({ presets, preset, presetId, columns, slots, cards, selected, dragged, over, light, pickerOpen, selectCard, placeCard, clearSlot, changePreset, onCardDown, onCardMove, onCardUp, cancelCard, openPicker, closePicker, scenes, scene, manual, held, reduced, tourTime, tourFrame, seekTour, selectScene, replayTour, scrubTour, takeControl, ratio, volumes, muted, setRatio, setVolume, toggleMute, resizeDown, resizeMove, resizeUp })', {
     computed: fn => ({ get value() { return fn() } }),
     nextTick: fn => fn(),
-    ref: value => ({ value: value === null && nullRefs++ === 1 ? { contains: element => element.inside, querySelector: () => ({ focus() { backFocus++ } }) } : value }),
-    document: { elementFromPoint: () => ({ closest: () => target }) }
+    ref: value => ({ value: value === null && nullRefs++ === 1 ? rootElement : value }),
+    TOUR_DURATION, viewingTourFrame, withBase: value => value,
+    onMounted: fn => { mount = fn }, onUnmounted: fn => { unmount = fn },
+    requestAnimationFrame: fn => { frames.set(++next, fn); return next }, cancelAnimationFrame: id => frames.delete(id),
+    document: doc, window: { matchMedia: () => media, ...(observer ? { IntersectionObserver: Observer } : {}) }, IntersectionObserver: Observer
   })
-  return { state, get backFocus() { return backFocus }, hit(index, inside = true) { target = index === null ? null : { dataset: { miniSlot: String(index) }, inside } } }
+  if (empty) state.slots.value = Array(16).fill(null)
+  return { state, frames, doc, media, listeners, mount, unmount,
+    visible(value) { notify?.([{ isIntersecting: value }]) }, preferenceChanged() { preferenceChanged() },
+    tick(now) { const [id, fn] = frames.entries().next().value; frames.delete(id); fn(now) },
+    get disconnected() { return disconnected }, get backFocus() { return backFocus }, hit(index, inside = true) { target = index === null ? null : { dataset: { miniSlot: String(index) }, inside } } }
 }
+
+test('the virtual pointer and the demonstrated layout, ratio and sound share the same seekable clock', () => {
+  const page = mountMiniature({ empty: false }), s = page.state
+  assert.equal(s.slots.value.filter(Boolean).length, 6, 'real thumbnails are visible before hydration')
+  s.seekTour(1500); assert.equal(s.pickerOpen.value, true)
+  s.seekTour(3500); assert.equal(s.presetId.value, '2x2'); assert.equal(s.tourFrame.value.ghost, 'a'); assert.equal(s.slots.value[0], null)
+  s.seekTour(4500); assert.equal(s.slots.value[0].id, 'a'); assert.equal(s.tourFrame.value.ghost, null)
+  s.seekTour(9000); assert.deepEqual(Array.from(s.slots.value.slice(0, 3), card => card.id), ['a', 'b', 'c'])
+  s.seekTour(1500); assert.equal(s.pickerOpen.value, true, 'seeking backward restores the picker and earlier state')
+  s.selectScene('ratio'); s.seekTour(5400); assert.equal(s.ratio.value, 78)
+  s.seekTour(10000); assert.equal(s.ratio.value, 55)
+  s.selectScene('sound'); s.seekTour(9000); assert.equal(s.volumes.value[0], 15); assert.equal(s.volumes.value[1], 40)
+  assert.equal(s.muted.value[1], true); assert.equal(s.muted.value[0], false)
+  s.seekTour(0); assert.equal(s.muted.value[1], false); assert.equal(s.volumes.value[0], 40)
+})
+
+test('the viewing tour stops offscreen, in the background, on takeover and with reduced motion', () => {
+  const page = mountMiniature(), s = page.state
+  page.mount(); assert.equal(page.frames.size, 0)
+  page.visible(true); page.tick(100); page.tick(116); assert.equal(s.tourTime.value, 16)
+  s.scrubTour({ target: { value: '3500' } }); assert.equal(s.held.value, true); assert.equal(s.manual.value, false)
+  assert.equal(s.tourFrame.value.ghost, 'a'); assert.equal(page.frames.size, 0, 'scrubbing freezes the virtual pointer along with the scene')
+  page.visible(false); page.visible(true); assert.equal(page.frames.size, 0)
+  s.replayTour(); assert.equal(s.held.value, false); assert.equal(page.frames.size, 1)
+  s.seekTour(TOUR_DURATION - 1); page.tick(200); page.tick(216); assert.equal(s.scene.value, 'ratio'); assert.equal(s.tourTime.value, 0)
+  page.visible(false); assert.equal(page.frames.size, 0)
+  page.visible(true); s.takeControl(); assert.equal(page.frames.size, 0)
+  page.visible(false); page.visible(true); assert.equal(page.frames.size, 0, 'visibility must not overwrite manual work')
+  s.selectScene('sound'); assert.equal(page.frames.size, 1)
+  page.doc.hidden = true; page.listeners.get('visibilitychange')(); assert.equal(page.frames.size, 0)
+  page.doc.hidden = false; page.listeners.get('visibilitychange')(); assert.equal(page.frames.size, 1)
+  page.media.matches = true; page.preferenceChanged(); assert.equal(s.reduced.value, true); assert.equal(s.manual.value, true)
+  assert.equal(page.frames.size, 0); assert.equal(s.tourFrame.value.muted, true)
+  page.unmount(); assert.equal(page.disconnected, true); assert.equal(page.listeners.size, 0)
+  const fallback = mountMiniature({ observer: false }); fallback.mount(); assert.equal(fallback.state.manual.value, true); assert.equal(fallback.frames.size, 0)
+  const quiet = mountMiniature({ reduced: true }); quiet.mount(); quiet.visible(true)
+  assert.equal(quiet.frames.size, 0); assert.equal(quiet.state.manual.value, true); assert.equal(quiet.state.slots.value.filter(Boolean).length, 3)
+})
+
+test('manual ratio and sound controls affect only their target and clamp to supported bounds', () => {
+  const { state: s } = mountMiniature()
+  const event = x => ({ clientX: x, pointerId: 1, currentTarget: { setPointerCapture() {}, releasePointerCapture() {} } })
+  s.resizeDown(event(650)); assert.equal(s.ratio.value, 75); assert.equal(s.manual.value, true)
+  s.resizeMove(event(2000)); assert.equal(s.ratio.value, 82)
+  s.resizeUp(event(2000)); s.resizeMove(event(200)); assert.equal(s.ratio.value, 82)
+  s.setRatio(0); assert.equal(s.ratio.value, 40)
+  s.setVolume(0, 200); assert.equal(s.volumes.value[0], 100); assert.equal(s.volumes.value[1], 40)
+  s.toggleMute(1); assert.equal(s.muted.value[1], true); assert.equal(s.muted.value[0], false)
+})
 
 test('all software presets apply, preserve assigned cards and reject hidden targets', () => {
   const { state: s } = mountMiniature()

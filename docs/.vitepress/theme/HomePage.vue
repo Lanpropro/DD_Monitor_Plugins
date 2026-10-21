@@ -80,7 +80,7 @@ onUnmounted(() => {
     </section>
 
     <section class="home-section viewing-section">
-      <div class="section-heading"><div data-reveal><p class="eyebrow">01 / 观看体验</p><h2>把直播墙，<br />调成你的样子。</h2></div><div data-reveal data-reveal-delay="120"><p class="section-description">切换布局预设 · 拖入关注卡片</p><a :href="withBase('/software')">了解全部软件功能 ↗</a></div></div>
+      <div class="section-heading"><div data-reveal><p class="eyebrow">01 / 观看体验</p><h2>把直播墙，<br />调成你的样子。</h2></div><div data-reveal data-reveal-delay="120"><p class="section-description">摆放直播 · 调整比例 · 控制声音</p><a :href="withBase('/software')">了解全部软件功能 ↗</a></div></div>
       <FeatureDemo />
     </section>
 
