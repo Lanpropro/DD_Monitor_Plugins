@@ -6,7 +6,7 @@ import time
 import unittest
 from unittest.mock import patch
 from bili_live_support import bili
-from bili_live_fixtures import room_payload,guard_payload
+from bili_live_fixtures import room_payload,guard_payload,upgrade_payload
 from PySide6.QtCore import QEvent,QPoint,Qt,QTimer
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import QApplication,QPushButton,QMessageBox
@@ -25,6 +25,70 @@ def settle(predicate,seconds=2):
     raise AssertionError('popup state not reached')
 
 class PopupTests(unittest.TestCase):
+    def upgrade_card(self):
+        catalog=normalize_catalog(upgrade_payload(),'90001')
+        self.popup.set_state(replace(self.state,tabs=catalog.tabs))
+        card=self.popup._cards[0]
+        self.point(card.mapToGlobal(card.rect().center()))
+        return card
+
+    def test_upgrade_first_click_opens_picker_second_click_sends_base_once(self):
+        card=self.upgrade_card();QTest.mouseClick(card,Qt.LeftButton)
+        self.assertEqual(self.sent,[])
+        self.assertTrue(self.popup.quantity_popup.isVisible())
+        QTest.mouseClick(card,Qt.LeftButton)
+        self.assertEqual(self.sent,[('main:35638',1)])
+        self.assertFalse(self.popup.quantity_popup.isVisible())
+
+    def test_upgrade_selection_and_send_use_selected_gift_and_own_quantities(self):
+        card=self.upgrade_card();card.click();q=self.popup.quantity_popup
+        self.assertTrue(q.isVisible(),'single-count grouped gift must open its choices')
+        for key,count,total in [('main:35638:35641',1,'10'),
+                                ('main:35638:35640',1,'15'),
+                                ('main:35638:35639',10,'150')]:
+            with self.subTest(key=key):
+                if not q.isVisible():card.click()
+                QTest.mouseClick(q.variant_buttons[key],Qt.LeftButton)
+                self.assertEqual(self.sent,[])
+                q.edit.setText(str(count))
+                self.assertIn(total,q.total.text())
+                QTest.mouseClick(q.send_button,Qt.LeftButton)
+                self.assertEqual(self.sent,[(key,count)])
+                self.sent.clear()
+
+    def test_upgrade_lock_and_quantity_reset_do_not_leak_into_ordinary_gifts(self):
+        data=upgrade_payload()
+        data['gift_data']['room_gift_list']['gold_list'][0]['upgrade_gift'][0].update(
+            locked=True,lock_tip='需要解锁')
+        self.popup.set_state(replace(self.state,tabs=normalize_catalog(data,'90001').tabs))
+        card=self.popup._cards[0];card.click();q=self.popup.quantity_popup
+        self.assertTrue(q.isVisible())
+        locked=q.variant_buttons['main:35638:35641']
+        self.assertFalse(locked.isEnabled());self.assertIn('需要解锁',locked.toolTip())
+        locked.click();self.assertEqual(q.item.gift_id,35638)
+        q.variant_buttons['main:35638:35639'].click();q.edit.setText('10')
+        q.variant_buttons['main:35638:35640'].click()
+        self.assertEqual(q.edit.text(),'1');self.assertTrue(q.edit.isReadOnly())
+        self.assertEqual(self.sent,[])
+        self.popup.set_state(self.state)
+        self.card('main:1').click()
+        self.assertTrue(q.isVisible());self.assertFalse(q.variants.isVisible())
+        self.assertEqual(q.variant_buttons,{})
+
+    def test_upgrade_send_is_blocked_by_wallet_busy_and_context_changes(self):
+        card=self.upgrade_card();card.click();q=self.popup.quantity_popup
+        self.assertTrue(q.isVisible())
+        q.variant_buttons['main:35638:35640'].click()
+        self.popup.set_state(replace(self.popup.state,wallet=1000))
+        self.assertFalse(q.send_button.isEnabled())
+        self.popup.set_state(replace(self.popup.state,sending=True))
+        self.assertTrue(all(not b.isEnabled() for b in q.variant_buttons.values()))
+        q.send_button.click();self.assertEqual(self.sent,[])
+        self.popup.set_state(GiftPanelState())
+        self.assertFalse(q.isVisible())
+        self.popup._request_send('main:35638:35640',1)
+        self.assertEqual(self.sent,[])
+
     def test_guard_gift_confirms_price_and_terms_before_emitting_send(self):
         item=normalize_catalog(guard_payload(),'90001').tabs[0].items[0]
         self.popup.set_state(replace(self.state,tabs=(GiftTab('main','礼物',(item,)),),wallet=19998000))
@@ -154,7 +218,11 @@ class PopupTests(unittest.TestCase):
         self.popup.open_at(self.button);QTest.keyClick(self.popup,Qt.Key_Escape)
         self.assertFalse(self.popup.isVisible())
         self.popup.open_at(self.button)
-        other=QPushButton();other.show();QTest.mouseClick(other,Qt.LeftButton)
+        other=QPushButton();other.resize(60,28)
+        # Native placement can overlap the picker at fractional DPI. Make this
+        # an actual outside click, independent of Windows' default position.
+        other.move(screen.bottomRight()-QPoint(80,40));other.show();APP.processEvents()
+        QTest.mouseClick(other,Qt.LeftButton)
         self.assertFalse(self.popup.isVisible());other.close()
     def test_independent_errors_bag_stock_and_unsupported_remain_readable(self):
         bag=replace(self.single,key='bag:702',source='bag',bag_id=702,stock=1,expires_at=int(time.time())+3600)

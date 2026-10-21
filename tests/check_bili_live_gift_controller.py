@@ -5,7 +5,7 @@ import time
 import unittest
 from unittest.mock import patch
 from bili_live_support import session
-from bili_live_fixtures import room_payload,bag_payload
+from bili_live_fixtures import room_payload,bag_payload,upgrade_payload
 from PySide6.QtCore import QCoreApplication, QEvent
 from ddm_plugin_bili_live import gift_api as api
 from ddm_plugin_bili_live.gift_controller import GiftController, GiftCoordinator
@@ -21,6 +21,22 @@ def settle(predicate):
     raise AssertionError('barrier not completed')
 
 class ControllerTests(unittest.TestCase):
+    def test_upgrade_send_posts_child_identity_and_debits_child_price(self):
+        from unittest.mock import Mock
+        controller=self.controller();controller.set_active(False)
+        catalog=api.normalize_catalog(upgrade_payload(),'90001')
+        controller.state=replace(controller.state,tabs=catalog.tabs)
+        sent=[];controller.sent.connect(sent.append)
+        with patch.object(api.requests,'post',return_value=Mock(status_code=200,
+                json=lambda:{'code':0,'message':'ok'})) as post:
+            controller.send('main:35638:35639',10)
+            settle(lambda:bool(sent))
+        self.assertEqual(post.call_count,1)
+        form=post.call_args.kwargs['data']
+        self.assertEqual((form['gift_id'],form['price'],form['gift_num']),(35639,1500,10))
+        self.assertEqual((sent[0].gift_key,sent[0].quantity),('main:35638:35639',10))
+        self.assertEqual(controller.state.wallet,84999)
+
     def setUp(self):
         session.set_login_cookies('fake','csrf','device')
         self.coordinator=GiftCoordinator()

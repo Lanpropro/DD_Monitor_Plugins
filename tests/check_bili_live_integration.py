@@ -12,7 +12,7 @@ import unittest
 import zipfile
 from unittest.mock import patch
 from bili_live_support import HOST,ROOT,session,bili
-from bili_live_fixtures import room_payload
+from bili_live_fixtures import room_payload,upgrade_payload
 import shiboken6
 from PySide6.QtCore import QEvent,QPoint,QObject,Qt,qInstallMessageHandler
 from PySide6.QtGui import QColor,QCursor,QImage,QRegion
@@ -84,6 +84,30 @@ class IntegrationTests(unittest.TestCase):
     def composer(self,tile=None):
         tile=tile or self.window.wall.tiles[0]
         return next(e.control.widget for e in tile._plugin_controls.entries if e.owner=='bili_live')
+    def test_installed_upgrade_picker_posts_selected_gift_once(self):
+        from unittest.mock import Mock
+        catalog=self.api.normalize_catalog(upgrade_payload(),'90001')
+        composer=self.composer()
+        with patch.object(self.api,'get_catalog',return_value=catalog):
+            composer.open_gifts();settle(lambda:not composer.gift_controller.state.loading)
+        popup=composer.gift_popup;card=popup._cards[0]
+        QCursor.setPos(card.mapToGlobal(card.rect().center()))
+        QTest.mouseClick(card,Qt.LeftButton)
+        quantity=popup.quantity_popup
+        self.assertTrue(quantity.isVisible())
+        QTest.mouseClick(quantity.variant_buttons['main:35638:35639'],Qt.LeftButton)
+        quantity.edit.setText('10')
+        composer.gift_controller.set_active(False)
+        results=[];composer.gift_controller.sent.connect(results.append)
+        with patch.object(self.api.requests,'post',return_value=Mock(status_code=200,
+                json=lambda:{'code':0,'message':'ok'})) as post:
+            QTest.mouseClick(quantity.send_button,Qt.LeftButton)
+            settle(lambda:bool(results))
+        self.assertEqual(post.call_count,1)
+        form=post.call_args.kwargs['data']
+        self.assertEqual((form['gift_id'],form['price'],form['gift_num']),(35639,1500,10))
+        self.assertEqual(composer.gift_controller.state.wallet,984999)
+
     def test_zip_integrity_and_tracked_source_bytes(self):
         with zipfile.ZipFile(ROOT/'dist/bili_live-1.0.zip') as archive:
             self.assertIsNone(archive.testzip())

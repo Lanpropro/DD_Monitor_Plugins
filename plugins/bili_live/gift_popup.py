@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (QGridLayout,QHBoxLayout,QLabel,QLineEdit,
     QMessageBox,QPushButton,QScrollArea,QSizePolicy,QTabBar,QVBoxLayout,QWidget)
 from ddm import config,theme
 from .emoticons import _style_button
-from .gift_api import format_battery
+from .gift_api import find_gift,format_battery
 from .gift_controller import GiftPanelState
 from .gift_media import GiftMediaLoader,GiftImageLabel
 from .popup import AnchoredPopup,RefreshSpinner,picker_style
@@ -65,6 +65,9 @@ class GiftQuantityPopup(AnchoredPopup):
         self.setObjectName('GiftQuantityPopup');self.setAccessibleName('礼物数量')
         self.row=QVBoxLayout(self);self.row.setContentsMargins(10,10,10,10)
         self.title=QLabel();self.row.addWidget(self.title)
+        self.variants=QWidget();self.variant_grid=QGridLayout(self.variants)
+        self.variant_grid.setContentsMargins(0,0,0,0);self.row.addWidget(self.variants)
+        self.variant_buttons={}
         self.options=QWidget();self.option_grid=QGridLayout(self.options);self.option_grid.setContentsMargins(0,0,0,0)
         self.row.addWidget(self.options)
         self.edit=QLineEdit('1');self.edit.setAccessibleName('礼物数量');self.edit.textChanged.connect(self._validate)
@@ -74,11 +77,29 @@ class GiftQuantityPopup(AnchoredPopup):
         self.send_button.clicked.connect(self._send);self.row.addWidget(self.send_button)
         self.setFixedWidth(168)
     def set_item(self,item,wallet,sending=False):
-        self.item,self.wallet,self.sending=item,wallet,sending
+        self.wallet,self.sending=wallet,sending
+        while self.variant_grid.count():
+            child=self.variant_grid.takeAt(0).widget()
+            if child:child.hide();child.deleteLater()
+        self.variant_buttons={}
+        self._choices=(item,*item.variants) if item.variants else ()
+        for index,choice in enumerate(self._choices):
+            button=QPushButton(f'{choice.name}\n{format_battery(choice.price)} 电池');_style_button(button)
+            button.setAccessibleName(choice.name);button.setCheckable(True)
+            button.setMinimumWidth(0);button.setFixedHeight(theme.TILE_CONTROL_HEIGHT*2)
+            button.setStyleSheet(button.styleSheet()+
+                'QPushButton#TileCtrl:checked {border: 1px solid palette(highlight);}')
+            button.setToolTip(choice.disabled_reason or choice.name)
+            button.clicked.connect(lambda checked=False,i=choice:self._select_item(i))
+            self.variant_buttons[choice.key]=button;self.variant_grid.addWidget(button,index//2,index%2)
+        self.variants.setVisible(bool(self._choices));self._select_item(item)
+    def _select_item(self,item):
+        self.item=item
+        for key,button in self.variant_buttons.items():button.setChecked(key==item.key)
         self.title.setText(item.name)
         while self.option_grid.count():
             child=self.option_grid.takeAt(0).widget()
-            if child:child.deleteLater()
+            if child:child.hide();child.deleteLater()
         for index,count in enumerate(n for n in item.counts if n!=1):
             button=QPushButton(str(count));_style_button(button)
             button.setFixedHeight(theme.TILE_CONTROL_HEIGHT)
@@ -87,6 +108,7 @@ class GiftQuantityPopup(AnchoredPopup):
         self.edit.setReadOnly(not item.allow_custom)
         initial=1 if item.allow_custom or 1 in item.counts else item.counts[0] if item.counts else 1
         self.edit.setText(str(initial));self._validate();self.adjustSize()
+        if self.isVisible():self.place_at(self._anchor)
     def _count(self):
         text=self.edit.text()
         return int(text) if text.isascii() and text.isdigit() and len(text)<10 else 0
@@ -94,6 +116,9 @@ class GiftQuantityPopup(AnchoredPopup):
         if self.item is None:return
         count=self._count();valid=_quantity_valid(self.item,count,self.wallet)
         self.send_button.setEnabled(valid and not self.sending)
+        for choice in self._choices:
+            self.variant_buttons[choice.key].setEnabled(not choice.disabled_reason and not self.sending and
+                choice.source in ('gold','bag') and (choice.source=='bag' or self.wallet is not None))
         self.total.setText(f'共 {format_battery(self.item.price*count)} 电池' if self.item.source=='gold' else f'库存 {self.item.stock}')
     def _send(self):
         if self.send_button.isEnabled():
@@ -212,7 +237,7 @@ class GiftPopup(AnchoredPopup):
     def _choose(self,card):
         if not card.isEnabled():return
         item=card.item
-        if (item.counts==(1,) and not item.allow_custom or
+        if (item.counts==(1,) and not item.allow_custom and not item.variants or
                 self.quantity_popup.isVisible() and self._quantity_card is card):
             self.quantity_popup.hide()
             if _quantity_valid(item,1,self.state.spendable_wallet):self._request_send(item.key,1)
@@ -220,7 +245,7 @@ class GiftPopup(AnchoredPopup):
 
     def _request_send(self,key,count):
         state=self.state
-        item=next((i for t in state.tabs for i in t.items if i.key==key),None)
+        item=find_gift(state.tabs,key)
         if self._closed or state.sending or not item or not _quantity_valid(item,count,state.spendable_wallet):return
         if item.pay_type=='interactive_pay' and item.payment_scene=='guard_gift':
             dialog=QMessageBox(QMessageBox.Question,'确认投喂',
@@ -247,7 +272,7 @@ class GiftPopup(AnchoredPopup):
             self.quantity_popup.hide()
     def _quantity(self,card):
         if not self.isVisible() or not card.isEnabled():return
-        if card.item.counts==(1,) and not card.item.allow_custom:return
+        if card.item.counts==(1,) and not card.item.allow_custom and not card.item.variants:return
         q=self.quantity_popup
         self._quantity_card=card;self._quantity_outside=None
         q.set_item(card.item,self.state.spendable_wallet,self.state.sending)
