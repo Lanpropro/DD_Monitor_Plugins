@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { withBase } from 'vitepress'
-import { TOUR_DURATION, viewingTourFrame } from './viewing-tour.mjs'
+import { TOUR_CHAPTERS, TOUR_DURATION, viewingTourFrame } from './viewing-tour.mjs'
 
 // Preset cells mirror ddm/layouts.py: [row, column, rowSpan, columnSpan].
 const even = (rows, cols) => Array.from({ length: rows * cols }, (_, i) => [Math.floor(i / cols), i % cols, 1, 1])
@@ -18,7 +18,10 @@ const presets = [
 const cards = [
   { id: 'a', name: '演示主播 A', image: '01.webp' },
   { id: 'b', name: '演示主播 B', image: '02.webp' },
-  { id: 'c', name: '演示主播 C', image: '03.webp' }
+  { id: 'c', name: '演示主播 C', image: '03.webp' },
+  { id: 'd', name: '演示主播 D', image: '04.webp' },
+  { id: 'e', name: '演示主播 E', image: '05.webp' },
+  { id: 'f', name: '演示主播 F', image: '06.webp' }
 ]
 const presetId = ref('corner')
 const preset = computed(() => presets.find(item => item.id === presetId.value))
@@ -36,12 +39,16 @@ const status = ref('把关注卡片拖入画面，或先选择卡片再点击画
 let cardStart = null
 let pickerTrigger = null
 const scenes = [
-  { id: 'layout', title: '摆放直播', heading: '选个布局，把直播拖进来。', description: '选择布局预设，再将关注栏里的直播拖入格子。喜欢的直播，各有位置。' },
+  { id: 'layout', title: '摆放直播', heading: '一个主画面，五个小画面。', description: '选择主画面 + 5 小布局，再将关注栏里的六位主播依次拖入格子。喜欢的直播，各有位置。' },
   { id: 'ratio', title: '调整比例', heading: '把更多空间，留给主画面。', description: '拖动主画面与小画面之间的边框，按观看重点分配空间。' },
   { id: 'sound', title: '控制声音', heading: '多路同屏，只听想听的声音。', description: '每路直播独立调节音量与静音，其他画面继续保持原来的声音设置。' }
 ]
 const scene = ref('layout')
 const sceneInfo = computed(() => scenes.find(item => item.id === scene.value))
+const chapter = computed(() => TOUR_CHAPTERS.find(item => item.id === scene.value))
+const sceneDuration = computed(() => chapter.value.end - chapter.value.start)
+const playbackTime = computed(() => chapter.value.start + tourTime.value)
+const clock = time => `${Math.floor(time / 60000)}:${String(Math.floor(time / 1000) % 60).padStart(2, '0')}`
 const manual = ref(false)
 const held = ref(false)
 const reduced = ref(false)
@@ -74,11 +81,10 @@ function anchorPoint(name) {
   const surface = root.value?.querySelector('.software-miniature')
   if (!surface) return { x: 0, y: 0 }
   const box = surface.getBoundingClientRect()
-  const selectors = { preset: '.mini-actions button', choice: '[data-tour-preset="2x2"]',
-    'card-a': '[data-tour-card="a"]', 'card-b': '[data-tour-card="b"]', 'card-c': '[data-tour-card="c"]',
-    'slot-0': '[data-mini-slot="0"]', 'slot-1': '[data-mini-slot="1"]', 'slot-2': '[data-mini-slot="2"]',
+  const selectors = { preset: '.mini-actions button', choice: '[data-tour-preset="corner"]',
     'mute-1': '[data-tour-mute="1"]' }
-  let rect = surface.querySelector(selectors[name] || (name.startsWith('divider') ? '.mini-wall' : '[data-tour-volume="0"]'))?.getBoundingClientRect()
+  const target = name.startsWith('card-') ? `[data-tour-card="${name.slice(5)}"]` : name.startsWith('slot-') ? `[data-mini-slot="${name.slice(5)}"]` : selectors[name]
+  let rect = surface.querySelector(target || (name.startsWith('divider') ? '.mini-wall' : '[data-tour-volume="0"]'))?.getBoundingClientRect()
   if (!rect?.width) return { x: box.width * .5, y: box.height * .5 }
   let fraction = .5
   if (name.startsWith('divider')) fraction = name === 'divider-large' ? .78 : name === 'divider-small' ? .55 : .62
@@ -86,11 +92,21 @@ function anchorPoint(name) {
   return { x: rect.left - box.left + rect.width * fraction, y: rect.top - box.top + rect.height * .5 }
 }
 function positionCursor() {
-  const frame = tourFrame.value, from = anchorPoint(frame.from), to = anchorPoint(frame.to)
+  const frame = tourFrame.value
+  const list = root.value?.querySelector('.mini-follow-list')
+  if (list?.clientHeight) {
+    const target = index => {
+      const card = list.children[index]
+      return card ? Math.max(0, card.offsetTop + card.offsetHeight - list.clientHeight) : 0
+    }
+    const index = frame.followIndex || 0, start = target(Math.max(0, index - 1))
+    list.scrollTop = start + (target(index) - start) * (frame.followProgress || 0)
+  }
+  const from = anchorPoint(frame.from), to = anchorPoint(frame.to)
   cursor.value = { x: from.x + (to.x - from.x) * frame.progress, y: from.y + (to.y - from.y) * frame.progress }
 }
 function seekTour(time) {
-  tourTime.value = Math.max(0, Math.min(TOUR_DURATION, Number(time)))
+  tourTime.value = Math.max(0, Math.min(sceneDuration.value, Number(time)))
   const frame = viewingTourFrame(scene.value, tourTime.value)
   tourFrame.value = frame
   presetId.value = frame.preset
@@ -107,7 +123,7 @@ function tickTour(now) {
   if (!tourVisible || manual.value || held.value || reduced.value || document.hidden) { previousTime = 0; return }
   const elapsed = previousTime ? Math.min(100, now - previousTime) : 0
   previousTime = now
-  if (tourTime.value + elapsed >= TOUR_DURATION) {
+  if (tourTime.value + elapsed >= sceneDuration.value) {
     scene.value = scenes[(scenes.findIndex(item => item.id === scene.value) + 1) % scenes.length].id
     seekTour(0)
   } else seekTour(tourTime.value + elapsed)
@@ -121,13 +137,18 @@ function selectScene(id) {
   if (!scenes.some(item => item.id === id)) return
   cancelCard(); pickerTrigger = null
   scene.value = id; manual.value = reduced.value; held.value = false
-  seekTour(reduced.value ? 10500 : 0); syncTour()
+  seekTour(reduced.value ? sceneDuration.value - 1500 : 0); syncTour()
 }
-function replayTour() { manual.value = reduced.value; held.value = false; seekTour(reduced.value ? 10500 : 0); syncTour() }
-function scrubTour(event) { stopTour(); held.value = true; manual.value = reduced.value; seekTour(event.target.value) }
+function replayTour() { manual.value = reduced.value; held.value = false; seekTour(reduced.value ? sceneDuration.value - 1500 : 0); syncTour() }
+function scrubTour(event) {
+  stopTour(); held.value = true; manual.value = reduced.value
+  const time = Math.max(0, Math.min(TOUR_DURATION, Number(event.target.value)))
+  scene.value = (TOUR_CHAPTERS.find(item => time < item.end) || TOUR_CHAPTERS.at(-1)).id
+  seekTour(time - chapter.value.start)
+}
 function motionChanged() {
   reduced.value = motion.matches
-  if (reduced.value) { takeControl(); seekTour(10500) }
+  if (reduced.value) { takeControl(); seekTour(sceneDuration.value - 1500) }
   syncTour()
 }
 onMounted(() => {
@@ -136,7 +157,7 @@ onMounted(() => {
   if ('IntersectionObserver' in window) {
     tourObserver = new IntersectionObserver(entries => { tourVisible = entries[0].isIntersecting; syncTour() }, { threshold: .25 })
     tourObserver.observe(root.value)
-  } else { manual.value = true; seekTour(10500) }
+  } else { manual.value = true; seekTour(sceneDuration.value - 1500) }
   document.addEventListener('visibilitychange', syncTour)
 })
 onUnmounted(() => { stopTour(); tourObserver?.disconnect(); motion?.removeEventListener('change', motionChanged); document.removeEventListener('visibilitychange', syncTour) })
@@ -208,10 +229,12 @@ function onCardUp(event) {
           <div class="mini-brand" aria-hidden="true">DD监控室CE <span>«</span></div>
           <div class="mini-tools"><span aria-hidden="true">排序</span><button class="mini-theme" :aria-label="light ? '预览切换为深色' : '预览切换为浅色'" :aria-pressed="light" @click="light = !light"><span aria-hidden="true">◐</span></button><span aria-hidden="true">↻</span></div>
           <div class="mini-folder">关注 · {{ cards.length }}</div>
+          <div class="mini-follow-list" aria-label="关注主播列表" @wheel.passive="takeControl">
           <button v-for="card in cards" :key="card.id" class="mini-follow" :data-tour-card="card.id" :class="{ 'is-selected': selected === card.id, 'is-dragging': dragged?.id === card.id }" :aria-label="'选择' + card.name" :aria-pressed="selected === card.id"
             @pointerdown="onCardDown($event, card)" @pointermove="onCardMove" @pointerup="onCardUp" @pointercancel="cancelCard" @click="$event.detail === 0 && selectCard(card.id)">
             <span class="mini-card-image" :style="cardStyle(card)"></span><span>{{ card.name }}</span>
           </button>
+          </div>
           <div class="mini-actions"><button :aria-expanded="pickerOpen" aria-controls="mini-layout-presets" @click="openPicker($event)">布局预设</button></div>
         </aside>
         <div v-show="!pickerOpen" class="mini-wall" :style="{ gridTemplateColumns: columns, gridTemplateRows: `repeat(${preset.rows}, minmax(0, 1fr))` }">
@@ -237,7 +260,19 @@ function onCardUp(event) {
           <svg viewBox="0 0 28 36" width="25" height="32"><path d="M3 2v26l7-7 6 12 5-3-6-11h10Z" fill="white" stroke="#101820" stroke-width="2" stroke-linejoin="round" /></svg><i v-if="tourFrame.pressed"></i>
         </div>
       </div>
-      <input class="demo-scrubber" type="range" aria-label="观看体验演示进度" min="0" :max="TOUR_DURATION" step="100" :value="tourTime" @input="scrubTour" />
+      <div class="tour-heading"><div><span>本段演示</span><h4>{{ sceneInfo.title }}</h4></div><output>{{ clock(playbackTime) }} <span>/ {{ clock(TOUR_DURATION) }}</span></output></div>
+      <div class="tour-track" role="group" aria-label="观看体验分段时间轴">
+        <button v-for="(item, i) in scenes" :key="item.id" class="tour-chapter" :style="{ flex: TOUR_CHAPTERS[i].end - TOUR_CHAPTERS[i].start }" :aria-pressed="scene === item.id" @click="selectScene(item.id)">
+          <svg viewBox="0 0 28 22" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+            <rect x="2" y="2" width="24" height="18" rx="2" />
+            <path v-if="item.id === 'layout'" d="M18 2v18M2 14h24M18 8h8M10 14v6" />
+            <path v-else-if="item.id === 'ratio'" d="M17 2v18M6 11h7m-3-3 3 3-3 3m10-3h3" />
+            <path v-else d="M7 9v4m5-7v10m5-13v16m5-11v6" />
+          </svg><span>{{ item.title }}</span>
+        </button>
+        <div class="tour-playhead-clip" aria-hidden="true"><div class="tour-playhead-position" :style="{ transform: `translateX(${playbackTime / TOUR_DURATION * 100}%)` }"><i></i></div></div>
+        <input class="tour-seek" type="range" aria-label="观看体验演示进度" min="0" :max="TOUR_DURATION" step="100" :value="playbackTime" @input="scrubTour" />
+      </div>
       <p class="demo-status" role="status">{{ status }}</p>
     </div>
     <Teleport to="body"><div v-if="dragged" class="card-ghost" aria-hidden="true" :style="{ left: point.x + 'px', top: point.y + 'px', ...cardStyle(dragged) }">{{ dragged.name }}</div></Teleport>
@@ -268,7 +303,8 @@ function onCardUp(event) {
 .mini-tools > span:last-child { text-align: center; }
 .mini-theme { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border-radius: 50%; font-size: 15px; line-height: 1; color: var(--mini-text); background: var(--mini-card); }
 .mini-folder { padding: 4px 2px; border-bottom: 1px solid var(--mini-border); }
-.mini-follow { flex: 1; position: relative; display: flex; flex-direction: column; justify-content: end; min-height: 0; padding: 4px; gap: 3px; border: 1px solid transparent; border-radius: 5px; background: var(--mini-card); color: var(--mini-text); touch-action: none; cursor: grab; user-select: none; text-align: left; }
+.mini-follow-list { position: relative; flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; scrollbar-width: thin; scrollbar-color: var(--mini-border) transparent; }
+.mini-follow { flex: 0 0 clamp(68px, 7vw, 96px); position: relative; display: flex; flex-direction: column; justify-content: end; min-height: 0; padding: 4px; gap: 3px; border: 1px solid transparent; border-radius: 5px; background: var(--mini-card); color: var(--mini-text); touch-action: none; cursor: grab; user-select: none; text-align: left; }
 .mini-card-image { flex: 1; width: 100%; min-height: 0; border-radius: 3px; background-size: cover; }
 .mini-follow { font-size: inherit; line-height: 1.35; }
 .mini-follow > span:last-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -295,7 +331,22 @@ function onCardUp(event) {
 .demo-cursor.is-pressed svg { transform: scale(.9); transform-origin: 3px 3px; }
 .demo-cursor i { position: absolute; left: -9px; top: -9px; width: 24px; height: 24px; border: 2px solid #00c8ff; border-radius: 50%; background: #00c8ff30; }
 .demo-card-ghost { position: absolute; left: -40px; top: -24px; width: 90px; height: 54px; border: 2px solid #00c8ff; border-radius: 5px; background-size: cover; opacity: .9; }
-.demo-scrubber { display: block; width: 100%; height: 16px; margin-top: 12px; accent-color: var(--vp-c-brand-1); cursor: ew-resize; }
+.tour-heading { display: flex; justify-content: space-between; align-items: end; gap: 20px; margin: 22px 0 20px; }
+.tour-heading > div > span { color: var(--vp-c-text-2); font-size: 12px; }
+.tour-heading h4 { margin: 5px 0 0; font-size: 20px; font-weight: 600; }
+.tour-heading output { font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tour-heading output span { color: var(--vp-c-text-2); }
+.tour-track { position: relative; display: flex; gap: 6px; }
+.tour-chapter { display: flex; min-width: 0; flex-direction: column; justify-content: center; align-items: start; gap: 12px; min-height: 88px; padding: 14px; border: 1px solid var(--vp-c-divider); border-radius: 12px; color: var(--vp-c-text-2); background: var(--vp-c-bg-alt); text-align: left; }
+.tour-chapter svg { width: 28px; height: 22px; }
+.tour-chapter > span { font-size: 13px; font-weight: 500; }
+.tour-chapter[aria-pressed=true] { border-color: var(--vp-c-brand-1); background: color-mix(in srgb, var(--vp-c-brand-1) 16%, var(--vp-c-bg-alt)); color: var(--vp-c-text-1); }
+.tour-playhead-clip { position: absolute; inset: -8px 0 0; overflow: hidden; pointer-events: none; }
+.tour-playhead-position { position: absolute; left: 8px; right: 8px; top: 0; bottom: 0; }
+.tour-playhead-position > i { position: absolute; left: 0; top: 4px; bottom: 0; border-left: 2px solid var(--vp-c-text-1); }
+.tour-playhead-position > i::before { content: ''; position: absolute; top: -4px; left: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--vp-c-text-1); }
+.tour-seek { position: absolute; z-index: 2; left: 0; top: -12px; width: 100%; height: 24px; margin: 0; opacity: 0; cursor: ew-resize; }
+.tour-track:has(.tour-seek:focus-visible) { outline: 2px solid var(--vp-c-brand-1); outline-offset: 5px; border-radius: 12px; }
 .mini-clear { position: absolute; right: 2px; top: 2px; width: 22px; height: 22px; color: #fff; background: #101418c9; border-radius: 50%; }
 .mini-tile.is-over { outline: 2px solid #00a1d6; outline-offset: 1px; }
 .preset-picker { position: absolute; inset: 7px; overflow: auto; border-radius: 6px; padding: 12px; background: var(--mini-side); color: var(--mini-text); }

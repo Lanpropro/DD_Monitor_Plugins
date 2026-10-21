@@ -4,7 +4,7 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import { resolve, relative, dirname } from 'node:path'
 import { runInNewContext } from 'node:vm'
 import { createAppearanceToggle } from '../docs/.vitepress/theme/appearance.mjs'
-import { TOUR_DURATION, viewingTourFrame } from '../docs/.vitepress/theme/viewing-tour.mjs'
+import { TOUR_CHAPTERS, TOUR_DURATION, viewingTourFrame } from '../docs/.vitepress/theme/viewing-tour.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const read = path => readFileSync(resolve(root, path), 'utf8')
@@ -613,20 +613,21 @@ function mountMiniature({ empty = true, reduced = false, observer = true } = {})
   const doc = { hidden: false, elementFromPoint: () => ({ closest: () => target }), addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name) }
   const rect = { left: 200, top: 100, width: 600, height: 400 }
   const surface = { getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 520 }), querySelector: () => ({ getBoundingClientRect: () => rect }) }
-  const rootElement = { contains: element => element.inside, querySelector: selector => selector === '.software-miniature' ? surface : selector === '.mini-wall' ? { getBoundingClientRect: () => rect } : { focus() { backFocus++ } } }
+  const followList = { clientHeight: 250, scrollTop: 0, children: Array.from({ length: 6 }, (_, i) => ({ offsetTop: i * 82, offsetHeight: 77 })) }
+  const rootElement = { contains: element => element.inside, querySelector: selector => selector === '.mini-follow-list' ? followList : selector === '.software-miniature' ? surface : selector === '.mini-wall' ? { getBoundingClientRect: () => rect } : { focus() { backFocus++ } } }
   class Observer { constructor(fn) { notify = fn } observe() {} disconnect() { disconnected = true } }
   const script = read('docs/.vitepress/theme/FeatureDemo.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
-  const state = runInNewContext(script + '\n;({ presets, preset, presetId, columns, slots, cards, selected, dragged, over, light, pickerOpen, selectCard, placeCard, clearSlot, changePreset, onCardDown, onCardMove, onCardUp, cancelCard, openPicker, closePicker, scenes, scene, manual, held, reduced, tourTime, tourFrame, seekTour, selectScene, replayTour, scrubTour, takeControl, ratio, volumes, muted, setRatio, setVolume, toggleMute, resizeDown, resizeMove, resizeUp })', {
+  const state = runInNewContext(script + '\n;({ presets, preset, presetId, columns, slots, cards, selected, dragged, over, light, pickerOpen, selectCard, placeCard, clearSlot, changePreset, onCardDown, onCardMove, onCardUp, cancelCard, openPicker, closePicker, scenes, scene, manual, held, reduced, tourTime, tourFrame, sceneDuration, playbackTime, clock, seekTour, selectScene, replayTour, scrubTour, takeControl, ratio, volumes, muted, setRatio, setVolume, toggleMute, resizeDown, resizeMove, resizeUp })', {
     computed: fn => ({ get value() { return fn() } }),
     nextTick: fn => fn(),
     ref: value => ({ value: value === null && nullRefs++ === 1 ? rootElement : value }),
-    TOUR_DURATION, viewingTourFrame, withBase: value => value,
+    TOUR_CHAPTERS, TOUR_DURATION, viewingTourFrame, withBase: value => value,
     onMounted: fn => { mount = fn }, onUnmounted: fn => { unmount = fn },
     requestAnimationFrame: fn => { frames.set(++next, fn); return next }, cancelAnimationFrame: id => frames.delete(id),
     document: doc, window: { matchMedia: () => media, ...(observer ? { IntersectionObserver: Observer } : {}) }, IntersectionObserver: Observer
   })
   if (empty) state.slots.value = Array(16).fill(null)
-  return { state, frames, doc, media, listeners, mount, unmount,
+  return { state, frames, doc, media, listeners, mount, unmount, followList,
     visible(value) { notify?.([{ isIntersecting: value }]) }, preferenceChanged() { preferenceChanged() },
     tick(now) { const [id, fn] = frames.entries().next().value; frames.delete(id); fn(now) },
     get disconnected() { return disconnected }, get backFocus() { return backFocus }, hit(index, inside = true) { target = index === null ? null : { dataset: { miniSlot: String(index) }, inside } } }
@@ -635,27 +636,61 @@ function mountMiniature({ empty = true, reduced = false, observer = true } = {})
 test('the virtual pointer and the demonstrated layout, ratio and sound share the same seekable clock', () => {
   const page = mountMiniature({ empty: false }), s = page.state
   assert.equal(s.slots.value.filter(Boolean).length, 6, 'real thumbnails are visible before hydration')
-  s.seekTour(1500); assert.equal(s.pickerOpen.value, true)
-  s.seekTour(3500); assert.equal(s.presetId.value, '2x2'); assert.equal(s.tourFrame.value.ghost, 'a'); assert.equal(s.slots.value[0], null)
-  s.seekTour(4500); assert.equal(s.slots.value[0].id, 'a'); assert.equal(s.tourFrame.value.ghost, null)
-  s.seekTour(9000); assert.deepEqual(Array.from(s.slots.value.slice(0, 3), card => card.id), ['a', 'b', 'c'])
-  s.seekTour(1500); assert.equal(s.pickerOpen.value, true, 'seeking backward restores the picker and earlier state')
-  s.selectScene('ratio'); s.seekTour(5400); assert.equal(s.ratio.value, 78)
-  s.seekTour(10000); assert.equal(s.ratio.value, 55)
-  s.selectScene('sound'); s.seekTour(9000); assert.equal(s.volumes.value[0], 15); assert.equal(s.volumes.value[1], 40)
+  assert.equal(new Set(s.slots.value.filter(Boolean).map(card => card.image)).size, 6)
+  s.seekTour(1800); assert.equal(s.pickerOpen.value, true)
+  for (let i = 0; i < 6; i++) {
+    const pickup = 4200 + i * 2400, id = String.fromCharCode(97 + i)
+    s.seekTour(pickup + 700)
+    assert.equal(s.presetId.value, 'corner'); assert.equal(s.preset.value.cells.length, 6)
+    assert.equal(s.tourFrame.value.ghost, id); assert.equal(s.slots.value.filter(Boolean).length, i)
+    assert.equal(s.tourFrame.value.to, `slot-${i}`)
+    assert.equal(s.tourFrame.value.followIndex, i); assert.equal(s.tourFrame.value.followProgress, 1)
+    s.seekTour(pickup + 1400)
+    assert.equal(s.slots.value[i].id, id); assert.equal(s.tourFrame.value.ghost, null)
+  }
+  assert.deepEqual(Array.from(s.slots.value.slice(0, 6), card => card.id), ['a', 'b', 'c', 'd', 'e', 'f'])
+  assert.equal(page.followList.scrollTop, 237, 'the sixth full-height card is scrolled into view')
+  s.seekTour(15700); assert.equal(page.followList.scrollTop, 196, 'scrolling follows the seekable clock')
+  s.seekTour(1800); assert.equal(s.pickerOpen.value, true, 'seeking backward restores the picker and earlier state')
+  assert.equal(page.followList.scrollTop, 0, 'rewinding restores the top of the follow list')
+  s.selectScene('ratio'); s.seekTour(8100); assert.equal(s.ratio.value, 78)
+  s.seekTour(15000); assert.equal(s.ratio.value, 55)
+  s.selectScene('sound'); s.seekTour(13500); assert.equal(s.volumes.value[0], 15); assert.equal(s.volumes.value[1], 40)
   assert.equal(s.muted.value[1], true); assert.equal(s.muted.value[0], false)
   s.seekTour(0); assert.equal(s.muted.value[1], false); assert.equal(s.volumes.value[0], 40)
+})
+
+test('the viewing chapter timeline seeks continuously through all three slower demonstrations', () => {
+  const s = mountMiniature().state
+  assert.equal(TOUR_DURATION, 58000)
+  assert.equal(s.clock(TOUR_DURATION), '0:58')
+  assert.equal(viewingTourFrame('layout', 15700).followProgress, .5)
+  assert.equal(viewingTourFrame('layout', 0).followIndex, 0)
+  const source = read('docs/.vitepress/theme/FeatureDemo.vue')
+  assert.ok(source.includes('overflow-y: auto'))
+  assert.ok(source.includes('flex: 0 0 clamp(68px, 7vw, 96px)'))
+  for (const [time, scene, local] of [[0, 'layout', 0], [21900, 'layout', 21900], [22000, 'ratio', 0], [32500, 'ratio', 10500], [40000, 'sound', 0], [58000, 'sound', 18000]]) {
+    s.scrubTour({ target: { value: String(time) } })
+    assert.equal(s.scene.value, scene); assert.equal(s.tourTime.value, local)
+    assert.equal(s.playbackTime.value, time); assert.equal(s.held.value, true)
+  }
+  s.selectScene('ratio'); assert.equal(s.playbackTime.value, 22000)
+  s.selectScene('layout'); assert.equal(s.playbackTime.value, 0)
+  const home = readFileSync(resolve(dist, 'index.html'), 'utf8')
+  assert.ok(home.includes('aria-label="观看体验分段时间轴"'))
+  assert.ok(home.includes('class="tour-playhead-clip"'))
+  assert.equal((home.match(/class="tour-chapter"/g) || []).length, 3)
 })
 
 test('the viewing tour stops offscreen, in the background, on takeover and with reduced motion', () => {
   const page = mountMiniature(), s = page.state
   page.mount(); assert.equal(page.frames.size, 0)
   page.visible(true); page.tick(100); page.tick(116); assert.equal(s.tourTime.value, 16)
-  s.scrubTour({ target: { value: '3500' } }); assert.equal(s.held.value, true); assert.equal(s.manual.value, false)
+  s.scrubTour({ target: { value: '4900' } }); assert.equal(s.held.value, true); assert.equal(s.manual.value, false)
   assert.equal(s.tourFrame.value.ghost, 'a'); assert.equal(page.frames.size, 0, 'scrubbing freezes the virtual pointer along with the scene')
   page.visible(false); page.visible(true); assert.equal(page.frames.size, 0)
   s.replayTour(); assert.equal(s.held.value, false); assert.equal(page.frames.size, 1)
-  s.seekTour(TOUR_DURATION - 1); page.tick(200); page.tick(216); assert.equal(s.scene.value, 'ratio'); assert.equal(s.tourTime.value, 0)
+  s.seekTour(s.sceneDuration.value - 1); page.tick(200); page.tick(216); assert.equal(s.scene.value, 'ratio'); assert.equal(s.tourTime.value, 0)
   page.visible(false); assert.equal(page.frames.size, 0)
   page.visible(true); s.takeControl(); assert.equal(page.frames.size, 0)
   page.visible(false); page.visible(true); assert.equal(page.frames.size, 0, 'visibility must not overwrite manual work')
@@ -667,7 +702,7 @@ test('the viewing tour stops offscreen, in the background, on takeover and with 
   page.unmount(); assert.equal(page.disconnected, true); assert.equal(page.listeners.size, 0)
   const fallback = mountMiniature({ observer: false }); fallback.mount(); assert.equal(fallback.state.manual.value, true); assert.equal(fallback.frames.size, 0)
   const quiet = mountMiniature({ reduced: true }); quiet.mount(); quiet.visible(true)
-  assert.equal(quiet.frames.size, 0); assert.equal(quiet.state.manual.value, true); assert.equal(quiet.state.slots.value.filter(Boolean).length, 3)
+  assert.equal(quiet.frames.size, 0); assert.equal(quiet.state.manual.value, true); assert.equal(quiet.state.slots.value.filter(Boolean).length, 6)
 })
 
 test('manual ratio and sound controls affect only their target and clamp to supported bounds', () => {

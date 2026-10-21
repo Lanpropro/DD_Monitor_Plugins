@@ -1,22 +1,35 @@
-export const TOUR_DURATION = 12000
+export const TOUR_CHAPTERS = [
+  { id: 'layout', start: 0, end: 22000 },
+  { id: 'ratio', start: 22000, end: 40000 },
+  { id: 'sound', start: 40000, end: 58000 }
+]
+export const TOUR_DURATION = TOUR_CHAPTERS.at(-1).end
 
 const clamp = value => Math.min(1, Math.max(0, value))
 const between = (time, start, end) => clamp((time - start) / (end - start))
 
 // One clock drives both the virtual pointer and the resulting software state.
 export function viewingTourFrame(scene, time) {
-  const t = Math.max(0, Math.min(TOUR_DURATION, time))
+  const chapter = TOUR_CHAPTERS.find(item => item.id === scene)
+  const localTime = Math.max(0, Math.min(chapter.end - chapter.start, time))
+  const t = scene === 'layout' ? localTime : localTime / 1.5
   let points, frame
   if (scene === 'layout') {
-    points = [[0, 'preset'], [900, 'preset'], [1500, 'choice'], [2000, 'choice'],
-      [2700, 'card-a'], [3000, 'card-a'], [4400, 'slot-0'], [4900, 'card-b'],
-      [5200, 'card-b'], [6600, 'slot-1'], [7100, 'card-c'], [7400, 'card-c'], [8800, 'slot-2'], [12000, 'slot-2']]
-    const ghost = t >= 3000 && t < 4400 ? 'a' : t >= 5200 && t < 6600 ? 'b' : t >= 7400 && t < 8800 ? 'c' : null
-    frame = { preset: t < 2200 ? 'corner' : '2x2', picker: t >= 1100 && t < 2200,
-      filled: t < 2200 ? 6 : t < 4400 ? 0 : t < 6600 ? 1 : t < 8800 ? 2 : 3,
+    points = [[0, 'preset'], [900, 'preset'], [1800, 'choice'], [2800, 'choice']]
+    let ghost = null, filled = t < 2800 ? 6 : 0, followIndex = 0, followProgress = 0
+    for (let i = 0; i < 6; i++) {
+      const pickup = 4200 + i * 2400, drop = pickup + 1400
+      const card = String.fromCharCode(97 + i)
+      points.push([pickup - 400, `card-${card}`], [pickup, `card-${card}`], [drop, `slot-${i}`], [drop + 300, `slot-${i}`])
+      if (t >= pickup - 600) { followIndex = i; followProgress = between(t, pickup - 600, pickup - 400) }
+      if (t >= pickup && t < drop) ghost = card
+      if (t >= drop) filled++
+    }
+    points.push([22000, 'slot-5'])
+    frame = { preset: 'corner', picker: t >= 1200 && t < 2800, filled, followIndex, followProgress,
       ratio: 62, volume: 40, muted: false, ghost,
-      pressed: !!ghost || (t >= 850 && t < 1100) || (t >= 1900 && t < 2200),
-      caption: t < 2200 ? '选择四分布局。' : t < 8800 ? '把关注卡片依次拖入画面。' : '布局已就位，随时换一个观看组合。' }
+      pressed: !!ghost || (t >= 900 && t < 1200) || (t >= 2500 && t < 2800),
+      caption: t < 2800 ? '选择主画面 + 5 小布局。' : t < 17600 ? '把六位主播依次拖入主画面和五个小画面。' : '六位主播已全部就位，一个主画面，五个小画面。' }
   } else if (scene === 'ratio') {
     points = [[0, 'divider-start'], [1400, 'divider-start'], [5400, 'divider-large'],
       [7400, 'divider-large'], [10000, 'divider-small'], [12000, 'divider-small']]
