@@ -234,7 +234,6 @@ function onCardUp(event) {
     <div class="demo-preview" data-reveal data-reveal-delay="120">
       <div class="demo-toolbar"><span>DD 监控室 CE · 可操作缩略预览</span><div><button v-if="(manual || held) && !reduced" @click="replayTour">观看演示</button><button v-if="!manual" @click="takeControl">自己试试</button><button @click="replayTour">重播</button></div></div>
       <div class="software-miniature" :class="{ 'is-light': light }" role="group" aria-label="软件外观缩略预览" @pointerdown.capture="takeControl" @keydown.capture="takeControl">
-        <div class="mini-titlebar" aria-hidden="true"><span><img :src="withBase('/logo.svg')" alt="" />DD监控室CE</span><span>—　□　×</span></div>
         <aside v-show="!pickerOpen" class="mini-sidebar">
           <div class="mini-brand" aria-hidden="true"><img :src="withBase('/logo.svg')" alt="" /><span>DD监控室CE<small>多窗口直播监控</small></span><span>«</span></div>
           <div class="mini-search" aria-hidden="true">搜索主播 / 房间号</div>
@@ -307,11 +306,8 @@ function onCardUp(event) {
 .demo-toolbar { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 14px; color: var(--vp-c-text-2); font-size: 12px; }
 .demo-toolbar > div { display: flex; gap: 12px; white-space: nowrap; }
 .demo-toolbar button { color: var(--vp-c-brand-1); }
-.software-miniature { --mini-bg: #222428; --mini-side: #1d2023; --mini-card: #303338; --mini-text: #f1f2f5; --mini-muted: #aeb6c1; --mini-border: #414851; --mini-overlay: #17202b; display: grid; grid-template-columns: 22% minmax(0,1fr); grid-template-rows: 14px minmax(0,1fr); gap: 7px; padding: 7px; position: relative; aspect-ratio: 800 / 520; border-radius: 9px; background: var(--mini-bg); color: var(--mini-text); line-height: 1.35; }
+.software-miniature { --mini-bg: #222428; --mini-side: #1d2023; --mini-card: #303338; --mini-text: #f1f2f5; --mini-muted: #aeb6c1; --mini-border: #414851; --mini-overlay: #17202b; display: grid; grid-template-columns: 22% minmax(0,1fr); grid-template-rows: minmax(0,1fr); gap: 7px; padding: 7px; position: relative; aspect-ratio: 800 / 520; border-radius: 9px; background: var(--mini-bg); color: var(--mini-text); line-height: 1.35; }
 .software-miniature.is-light { --mini-bg: #f4f6f9; --mini-side: #ebeef3; --mini-card: #fff; --mini-text: #202630; --mini-muted: #4a5565; --mini-border: #d7dde7; --mini-overlay: #f7f9fc; }
-.mini-titlebar { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; font-size: 7px; color: #32363b; background: #f3f0ee; margin: -7px -7px 0; padding: 1px 5px; border-radius: 9px 9px 0 0; }
-.mini-titlebar > span:first-child { display: flex; align-items: center; gap: 3px; }
-.mini-titlebar img { width: 10px; height: 10px; }
 .mini-search { padding: 4px 5px; border-radius: 4px; background: var(--mini-card); color: var(--mini-muted); overflow: hidden; white-space: nowrap; }
 .mini-sidebar { display: flex; flex-direction: column; gap: 5px; min-width: 0; min-height: 0; padding: 5px; border-radius: 5px; background: var(--mini-side); font-size: clamp(7px,.75vw,10px); }
 .mini-brand { display: flex; align-items: center; gap: 4px; font-weight: 600; white-space: nowrap; }
@@ -395,7 +391,7 @@ function onCardUp(event) {
 @keyframes drop-land { from { opacity: 1; transform: scale(.96); } to { opacity: 0; transform: scale(1.04); } }
 @media (hover:hover) and (pointer:fine) { .mini-follow:hover { border-color: #00a1d6; } .preset-grid button:hover { background: var(--mini-card); } }
 @media (max-width:900px) { .feature-demo { grid-template-columns: 1fr; gap: 20px; } .demo-scenes { grid-template-columns: repeat(3,minmax(0,1fr)); } .demo-scene { min-height: 48px; padding: 10px; gap: 8px; font-size: 12px; } .demo-scene span:last-child { display:none; } .demo-description { margin-top: 18px; } }
-@media (max-width:480px) { .demo-preview { padding: 12px; } .software-miniature { gap: 4px; padding: 4px; } .mini-wall { --mini-gap: 4px; } .mini-titlebar { margin: -4px -4px 0; } .mini-sidebar { padding: 3px; gap: 3px; } .mini-controls { gap: 3px; padding: 3px; } .mini-badge { top: 2px; left: 2px; padding: 1px 2px; } .mini-brand { font-size: 6px; } .mini-tools { grid-template-columns: 1fr 18px 14px; } .mini-theme { width:18px; height:18px; font-size:13px; } .preset-grid { grid-template-columns:repeat(2,minmax(0,1fr)); padding:0; } .preset-picker { inset:4px; padding:8px; } .preset-header { gap:6px; margin-bottom:8px; flex-wrap:wrap; } .preset-header > span { display:none; } }
+@media (max-width:480px) { .demo-preview { padding: 12px; } .software-miniature { gap: 4px; padding: 4px; } .mini-wall { --mini-gap: 4px; } .mini-sidebar { padding: 3px; gap: 3px; } .mini-controls { gap: 3px; padding: 3px; } .mini-badge { top: 2px; left: 2px; padding: 1px 2px; } .mini-brand { font-size: 6px; } .mini-tools { grid-template-columns: 1fr 18px 14px; } .mini-theme { width:18px; height:18px; font-size:13px; } .preset-grid { grid-template-columns:repeat(2,minmax(0,1fr)); padding:0; } .preset-picker { inset:4px; padding:8px; } .preset-header { gap:6px; margin-bottom:8px; flex-wrap:wrap; } .preset-header > span { display:none; } }
 @media (prefers-reduced-motion:reduce) { .drop-flash { display:none; animation:none; } .demo-cursor { display:none; } .card-ghost { transform:translate(-50%,-50%); } }
 @media (max-width:480px) { .software-miniature { width:100%; min-width:0; min-height:220px; } }
 @media (max-width:480px) { .mini-controls > span:first-child, .mini-controls > span:last-child { display:none; } .mini-controls { gap:2px; } .mini-controls button { min-width:14px; } .mini-volume { min-width:12px; } }
