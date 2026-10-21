@@ -366,7 +366,7 @@ test('appearance miniature and editable controls remain usable before hydration'
   assert.ok(!home.includes('<details id="mini-layout-presets"'))
   for (const label of ['摆放直播', '调整比例', '控制声音', '观看体验演示进度']) assert.ok(home.includes(label))
   assert.ok(home.includes('aria-controls="mini-layout-presets"'))
-  assert.ok(home.includes('aria-label="选择演示主播 A"'))
+  assert.ok(home.includes(`aria-label="选择${mountMiniature().state.cards[0].name}"`))
   assert.ok(!home.includes('观看组合'))
   assert.ok(home.includes('id="plugin-demo"'))
   for (const plugin of plugins) {
@@ -617,7 +617,7 @@ function mountMiniature({ empty = true, reduced = false, observer = true } = {})
   const rootElement = { contains: element => element.inside, querySelector: selector => selector === '.mini-follow-list' ? followList : selector === '.software-miniature' ? surface : selector === '.mini-wall' ? { getBoundingClientRect: () => rect } : { focus() { backFocus++ } } }
   class Observer { constructor(fn) { notify = fn } observe() {} disconnect() { disconnected = true } }
   const script = read('docs/.vitepress/theme/FeatureDemo.vue').split('<script setup>')[1].split('</script>')[0].replace(/^import .*$/gm, '')
-  const state = runInNewContext(script + '\n;({ presets, preset, presetId, columns, slots, cards, selected, dragged, over, light, pickerOpen, selectCard, placeCard, clearSlot, changePreset, onCardDown, onCardMove, onCardUp, cancelCard, openPicker, closePicker, scenes, scene, manual, held, reduced, tourTime, tourFrame, sceneDuration, playbackTime, clock, seekTour, selectScene, replayTour, scrubTour, takeControl, ratio, volumes, muted, setRatio, setVolume, toggleMute, resizeDown, resizeMove, resizeUp })', {
+  const state = runInNewContext(script + '\n;({ presets, preset, presetId, columns, cellStyle, slots, cards, selected, dragged, over, light, pickerOpen, selectCard, placeCard, clearSlot, changePreset, onCardDown, onCardMove, onCardUp, cancelCard, openPicker, closePicker, scenes, scene, manual, held, reduced, tourTime, tourFrame, sceneDuration, playbackTime, clock, seekTour, selectScene, replayTour, scrubTour, takeControl, ratio, volumes, muted, setRatio, setVolume, toggleMute, resizeDown, resizeMove, resizeUp })', {
     computed: fn => ({ get value() { return fn() } }),
     nextTick: fn => fn(),
     ref: value => ({ value: value === null && nullRefs++ === 1 ? rootElement : value }),
@@ -705,6 +705,24 @@ test('the viewing tour stops offscreen, in the background, on takeover and with 
   assert.equal(quiet.frames.size, 0); assert.equal(quiet.state.manual.value, true); assert.equal(quiet.state.slots.value.filter(Boolean).length, 6)
 })
 
+test('resizing the main preview preserves independent bottom regions and uncropped stream images', () => {
+  const s = mountMiniature({ empty: false }).state
+  const cells = s.preset.value.cells
+  const before = cells.map((cell, i) => s.cellStyle(cell, i))
+  s.setRatio(78)
+  const after = cells.map((cell, i) => s.cellStyle(cell, i))
+  assert.notEqual(before[0].width, after[0].width)
+  assert.notEqual(before[1].width, after[1].width)
+  for (let i = 3; i < 6; i++) assert.deepEqual(before[i], after[i], 'bottom widths are independent from the main divider')
+  s.changePreset('2x2'); assert.equal(s.cellStyle(s.preset.value.cells[0], 0).gridArea, '1 / 1 / span 1 / span 1')
+  const home = readFileSync(resolve(dist, 'index.html'), 'utf8')
+  assert.equal((home.match(/class="mini-stream-image"/g) || []).length, 6)
+  for (const card of s.cards) assert.ok(home.includes(`/wall/${card.image}`))
+  const source = read('docs/.vitepress/theme/FeatureDemo.vue')
+  assert.match(source, /\.mini-stream-image \{[^}]*object-fit: contain/)
+  assert.ok(home.includes('class="mini-titlebar"')); assert.ok(home.includes('class="mini-live"'))
+})
+
 test('manual ratio and sound controls affect only their target and clamp to supported bounds', () => {
   const { state: s } = mountMiniature()
   const event = x => ({ clientX: x, pointerId: 1, currentTarget: { setPointerCapture() {}, releasePointerCapture() {} } })
@@ -753,7 +771,7 @@ test('viewing and plugin demos restore the pre-fusion presentation without layou
   assert.ok(!viewing.includes('layout-quick-tabs'))
   assert.ok(!viewing.includes('layout-options'))
   assert.ok(viewing.includes('aria-controls="mini-layout-presets"'))
-  assert.ok(viewing.includes('aria-label="选择演示主播 A"'))
+  assert.ok(viewing.includes(`aria-label="选择${mountMiniature().state.cards[0].name}"`))
   assert.ok(home.includes('aria-label="二路同步演示时间轴"'))
   const css = read('docs/.vitepress/theme/style.css')
   assert.ok(!css.includes('max-width: 880px'))

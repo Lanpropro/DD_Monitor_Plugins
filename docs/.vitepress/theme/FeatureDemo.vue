@@ -15,6 +15,7 @@ const presets = [
   { id: '4x4', name: '十六分', rows: 4, cols: 4, cells: even(4,4) },
   { id: 'main2', name: '主画面 + 2 小', rows: 2, cols: 3, cells: [[0,0,2,2],[0,2,1,1],[1,2,1,1]] }
 ]
+// 修改下方 name 即可同步更新关注卡片、画面标签和操作提示；id 用于演示时间轴，请保持不变。
 const cards = [
   { id: 'a', name: '演示主播 A', image: '01.webp' },
   { id: 'b', name: '演示主播 B', image: '02.webp' },
@@ -161,7 +162,15 @@ onMounted(() => {
   document.addEventListener('visibilitychange', syncTour)
 })
 onUnmounted(() => { stopTour(); tourObserver?.disconnect(); motion?.removeEventListener('change', motionChanged); document.removeEventListener('visibilitychange', syncTour) })
-function cellStyle(cell) { return { gridArea: `${cell[0] + 1} / ${cell[1] + 1} / span ${cell[2]} / span ${cell[3]}` } }
+function cellStyle(cell, index) {
+  if (presetId.value === 'corner') {
+    // The bottom three regions keep independent widths, as in WallGrid._corner_rectangles.
+    if (index === 0) return { left: 0, top: 0, width: `calc(${ratio.value}% - var(--mini-gap) / 2)`, height: 'calc(200% / 3 - var(--mini-gap) / 2)' }
+    if (index < 3) return { left: `calc(${ratio.value}% + var(--mini-gap) / 2)`, top: index === 1 ? 0 : 'calc(100% / 3 + var(--mini-gap) / 4)', width: `calc(${100 - ratio.value}% - var(--mini-gap) / 2)`, height: 'calc(100% / 3 - var(--mini-gap) * 3 / 4)' }
+    return { left: `calc(${(index - 3) * 100 / 3}% + var(--mini-gap) * ${(index - 3) / 3})`, top: 'calc(200% / 3 + var(--mini-gap) / 2)', width: 'calc(100% / 3 - var(--mini-gap) * 2 / 3)', height: 'calc(100% / 3 - var(--mini-gap) / 2)' }
+  }
+  return { gridArea: `${cell[0] + 1} / ${cell[1] + 1} / span ${cell[2]} / span ${cell[3]}` }
+}
 function openPicker(event) {
   pickerTrigger = event.currentTarget
   cancelCard()
@@ -225,26 +234,29 @@ function onCardUp(event) {
     <div class="demo-preview" data-reveal data-reveal-delay="120">
       <div class="demo-toolbar"><span>DD 监控室 CE · 可操作缩略预览</span><div><button v-if="(manual || held) && !reduced" @click="replayTour">观看演示</button><button v-if="!manual" @click="takeControl">自己试试</button><button @click="replayTour">重播</button></div></div>
       <div class="software-miniature" :class="{ 'is-light': light }" role="group" aria-label="软件外观缩略预览" @pointerdown.capture="takeControl" @keydown.capture="takeControl">
+        <div class="mini-titlebar" aria-hidden="true"><span><img :src="withBase('/logo.svg')" alt="" />DD监控室CE</span><span>—　□　×</span></div>
         <aside v-show="!pickerOpen" class="mini-sidebar">
-          <div class="mini-brand" aria-hidden="true">DD监控室CE <span>«</span></div>
+          <div class="mini-brand" aria-hidden="true"><img :src="withBase('/logo.svg')" alt="" /><span>DD监控室CE<small>多窗口直播监控</small></span><span>«</span></div>
+          <div class="mini-search" aria-hidden="true">搜索主播 / 房间号</div>
           <div class="mini-tools"><span aria-hidden="true">排序</span><button class="mini-theme" :aria-label="light ? '预览切换为深色' : '预览切换为浅色'" :aria-pressed="light" @click="light = !light"><span aria-hidden="true">◐</span></button><span aria-hidden="true">↻</span></div>
           <div class="mini-folder">关注 · {{ cards.length }}</div>
           <div class="mini-follow-list" aria-label="关注主播列表" @wheel.passive="takeControl">
           <button v-for="card in cards" :key="card.id" class="mini-follow" :data-tour-card="card.id" :class="{ 'is-selected': selected === card.id, 'is-dragging': dragged?.id === card.id }" :aria-label="'选择' + card.name" :aria-pressed="selected === card.id"
             @pointerdown="onCardDown($event, card)" @pointermove="onCardMove" @pointerup="onCardUp" @pointercancel="cancelCard" @click="$event.detail === 0 && selectCard(card.id)">
-            <span class="mini-card-image" :style="cardStyle(card)"></span><span>{{ card.name }}</span>
+            <span class="mini-card-image" :style="cardStyle(card)"></span><span class="mini-card-info"><span class="mini-avatar" :style="cardStyle(card)"></span><span>{{ card.name }}<small>直播画面预览</small></span></span><span class="mini-live">直播中</span>
           </button>
           </div>
           <div class="mini-actions"><button :aria-expanded="pickerOpen" aria-controls="mini-layout-presets" @click="openPicker($event)">布局预设</button></div>
         </aside>
-        <div v-show="!pickerOpen" class="mini-wall" :style="{ gridTemplateColumns: columns, gridTemplateRows: `repeat(${preset.rows}, minmax(0, 1fr))` }">
-          <div v-for="(cell, i) in preset.cells" :key="i" class="mini-tile" :class="{ 'is-over': over === i }" :style="cellStyle(cell)" :data-mini-slot="i">
-            <button class="tile-target" :style="slots[i] ? cardStyle(slots[i]) : undefined" :aria-label="`第 ${i + 1} 个画面，${slots[i]?.name || '空位'}${selected ? '，放入所选卡片' : ''}`" @click="placeCard(i)">
+        <div v-show="!pickerOpen" class="mini-wall" :class="{ 'is-corner': presetId === 'corner' }" :style="{ gridTemplateColumns: columns, gridTemplateRows: `repeat(${preset.rows}, minmax(0, 1fr))` }">
+          <div v-for="(cell, i) in preset.cells" :key="i" class="mini-tile" :class="{ 'is-over': over === i }" :style="cellStyle(cell, i)" :data-mini-slot="i">
+            <button class="tile-target" :aria-label="`第 ${i + 1} 个画面，${slots[i]?.name || '空位'}${selected ? '，放入所选卡片' : ''}`" @click="placeCard(i)">
+              <img v-if="slots[i]" class="mini-stream-image" :src="withBase('/wall/' + slots[i].image)" alt="" draggable="false" />
               <span class="mini-badge" aria-hidden="true"><b>{{ slots[i] ? '演示' : '空位' }}</b> · {{ slots[i]?.name || '画面 ' + (i + 1) }}</span>
               <span v-if="!slots[i]" class="mini-video-label" aria-hidden="true">拖入直播</span>
             </button>
             <button v-if="slots[i]" class="mini-clear" :aria-label="`清空第 ${i + 1} 个画面`" @click="clearSlot(i)">×</button>
-            <div class="mini-controls"><span aria-hidden="true">Ⅱ</span><button :data-tour-mute="i" :aria-label="`${muted[i] ? '取消静音' : '静音'}第 ${i + 1} 个画面`" :aria-pressed="muted[i]" @click="toggleMute(i)">{{ muted[i] ? '×' : '♪' }}</button><input type="range" :data-tour-volume="i" :aria-label="`第 ${i + 1} 个画面音量`" min="0" max="100" :value="volumes[i]" @input="setVolume(i, $event.target.value)" /><span class="mini-volume">{{ muted[i] ? '静音' : volumes[i] }}</span><span aria-hidden="true">⛶</span></div>
+            <div class="mini-controls"><span aria-hidden="true">Ⅱ</span><button :data-tour-mute="i" :aria-label="`${muted[i] ? '取消静音' : '静音'}第 ${i + 1} 个画面`" :aria-pressed="muted[i]" @click="toggleMute(i)"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 8h3l4-4v12l-4-4H3Z" /><path v-if="muted[i]" d="m13 7 5 6m0-6-5 6" /><path v-else d="M13 7q3 3 0 6m3-9q6 6 0 12" /></svg></button><input type="range" :data-tour-volume="i" :aria-label="`第 ${i + 1} 个画面音量`" min="0" max="100" :value="volumes[i]" :style="{ '--volume': volumes[i] + '%' }" @input="setVolume(i, $event.target.value)" /><span class="mini-volume">{{ muted[i] ? '静音' : volumes[i] }}</span><span aria-hidden="true">⛶</span></div>
             <span v-if="landed === i" :key="placement" class="drop-flash" aria-hidden="true" @animationend="landed = -1"></span>
           </div>
           <div v-if="['corner', 'main2'].includes(presetId)" class="mini-divider" role="separator" aria-label="主画面宽度" aria-orientation="vertical" tabindex="0" aria-valuemin="40" aria-valuemax="82" :aria-valuenow="Math.round(ratio)" :style="{ left: ratio + '%' }" @pointerdown.stop="resizeDown" @pointermove="resizeMove" @pointerup="resizeUp" @pointercancel="resizeUp" @keydown.left.prevent="setRatio(ratio - 2)" @keydown.right.prevent="setRatio(ratio + 2)"><span></span></div>
@@ -295,34 +307,51 @@ function onCardUp(event) {
 .demo-toolbar { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 14px; color: var(--vp-c-text-2); font-size: 12px; }
 .demo-toolbar > div { display: flex; gap: 12px; white-space: nowrap; }
 .demo-toolbar button { color: var(--vp-c-brand-1); }
-.software-miniature { --mini-bg: #222428; --mini-side: #1d2023; --mini-card: #303338; --mini-text: #f1f2f5; --mini-muted: #aeb6c1; --mini-border: #414851; --mini-overlay: #17202b; display: grid; grid-template-columns: 22% minmax(0,1fr); gap: 7px; padding: 7px; position: relative; aspect-ratio: 800 / 520; border-radius: 9px; background: var(--mini-bg); color: var(--mini-text); line-height: 1.35; }
+.software-miniature { --mini-bg: #222428; --mini-side: #1d2023; --mini-card: #303338; --mini-text: #f1f2f5; --mini-muted: #aeb6c1; --mini-border: #414851; --mini-overlay: #17202b; display: grid; grid-template-columns: 22% minmax(0,1fr); grid-template-rows: 14px minmax(0,1fr); gap: 7px; padding: 7px; position: relative; aspect-ratio: 800 / 520; border-radius: 9px; background: var(--mini-bg); color: var(--mini-text); line-height: 1.35; }
 .software-miniature.is-light { --mini-bg: #f4f6f9; --mini-side: #ebeef3; --mini-card: #fff; --mini-text: #202630; --mini-muted: #4a5565; --mini-border: #d7dde7; --mini-overlay: #f7f9fc; }
+.mini-titlebar { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; font-size: 7px; color: #32363b; background: #f3f0ee; margin: -7px -7px 0; padding: 1px 5px; border-radius: 9px 9px 0 0; }
+.mini-titlebar > span:first-child { display: flex; align-items: center; gap: 3px; }
+.mini-titlebar img { width: 10px; height: 10px; }
+.mini-search { padding: 4px 5px; border-radius: 4px; background: var(--mini-card); color: var(--mini-muted); overflow: hidden; white-space: nowrap; }
 .mini-sidebar { display: flex; flex-direction: column; gap: 5px; min-width: 0; min-height: 0; padding: 5px; border-radius: 5px; background: var(--mini-side); font-size: clamp(7px,.75vw,10px); }
-.mini-brand { display: flex; justify-content: space-between; font-weight: 600; white-space: nowrap; }
+.mini-brand { display: flex; align-items: center; gap: 4px; font-weight: 600; white-space: nowrap; }
+.mini-brand > img { width: 17px; height: 17px; }
+.mini-brand > span:last-child { margin-left: auto; color: var(--mini-muted); }
+.mini-brand small { display: block; font-size: .7em; font-weight: 400; color: var(--mini-muted); }
 .mini-tools { display: grid; grid-template-columns: 1fr 22px 22px; align-items: center; gap: 2px; color: var(--mini-muted); }
 .mini-tools > span:last-child { text-align: center; }
 .mini-theme { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border-radius: 50%; font-size: 15px; line-height: 1; color: var(--mini-text); background: var(--mini-card); }
 .mini-folder { padding: 4px 2px; border-bottom: 1px solid var(--mini-border); }
 .mini-follow-list { position: relative; flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; scrollbar-width: thin; scrollbar-color: var(--mini-border) transparent; }
 .mini-follow { flex: 0 0 clamp(68px, 7vw, 96px); position: relative; display: flex; flex-direction: column; justify-content: end; min-height: 0; padding: 4px; gap: 3px; border: 1px solid transparent; border-radius: 5px; background: var(--mini-card); color: var(--mini-text); touch-action: none; cursor: grab; user-select: none; text-align: left; }
-.mini-card-image { flex: 1; width: 100%; min-height: 0; border-radius: 3px; background-size: cover; }
+.mini-card-image { position: absolute; inset: 0; border-radius: 4px; background-size: cover; opacity: .55; }
+.mini-card-info { position: absolute; inset: 6px 4px auto; display: flex; align-items: center; gap: 4px; text-shadow: 0 1px 3px #000; color: #fff; }
+.mini-card-info > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mini-card-info small { display: block; margin-top: 2px; font-size: .85em; opacity: .75; }
+.mini-avatar { flex: 0 0 16px; height: 16px; border: 1px solid #fff7; border-radius: 50%; background-size: cover; }
+.mini-live { position: absolute; right: 4px; bottom: 4px; padding: 1px 4px; border-radius: 3px; color: #28131b; background: #fb7299; font-size: .85em; }
 .mini-follow { font-size: inherit; line-height: 1.35; }
-.mini-follow > span:last-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
 .mini-follow.is-selected { border-color: #00a1d6; }
 .mini-follow.is-dragging { opacity: .45; }
 .mini-actions { margin-top: 3px; }
 .mini-actions button { width: 100%; min-height: 24px; border-radius: 4px; background: var(--mini-card); font-size: inherit; }
-.mini-wall { position: relative; display: grid; gap: 6px; min-width: 0; }
+.mini-wall { --mini-gap: 6px; position: relative; display: grid; gap: var(--mini-gap); min-width: 0; min-height: 0; }
+.mini-wall.is-corner > .mini-tile { position: absolute; }
 .mini-tile { position: relative; min-width: 0; min-height: 0; border-radius: 5px; background: #101114; border: 1px solid var(--mini-border); }
-.tile-target { position: absolute; inset: 0; display: grid; place-items: center; width: 100%; height: 100%; border-radius: 4px; background-size: cover; overflow: hidden; }
+.tile-target { position: absolute; inset: 0; display: grid; place-items: center; width: 100%; height: 100%; border-radius: 4px; background: #000; overflow: hidden; }
+.mini-stream-image { position: absolute; inset: 0 0 24px; display: block; width: 100%; height: calc(100% - 24px); object-fit: contain; pointer-events: none; }
 .mini-badge { position: absolute; top: 4px; left: 4px; max-width: calc(100% - 8px); overflow: hidden; white-space: nowrap; padding: 2px 4px; border-radius: 3px; font-size: clamp(6px,.65vw,9px); background: var(--mini-overlay); color: var(--mini-text); }
 .mini-badge b { color: #fb7299; }
 .is-light .mini-badge b { color: #b93665; }
 .mini-video-label { color: #78818b; font-size: clamp(7px,.8vw,11px); }
-.mini-controls { position: absolute; inset: auto 0 0; display: flex; align-items: center; gap: 5px; min-height: 24px; padding: 3px 4px; background: var(--mini-overlay); color: var(--mini-muted); font-size: clamp(6px,.7vw,10px); border-radius: 0 0 4px 4px; }
+.mini-controls { position: absolute; inset: auto 0 0; display: flex; align-items: center; gap: 5px; min-height: 24px; padding: 3px 4px; background: var(--mini-side); color: var(--mini-muted); font-size: clamp(6px,.7vw,10px); border-radius: 0 0 4px 4px; }
 .mini-controls button { display: grid; place-items: center; min-width: 18px; min-height: 18px; color: inherit; border-radius: 3px; }
 .mini-controls button[aria-pressed=true] { color: #fb7299; background: #fb729919; }
-.mini-controls input { width: 100%; min-width: 0; flex: 1; height: 18px; accent-color: #00a1d6; cursor: ew-resize; }
+.mini-controls svg { width: 12px; height: 12px; }
+.mini-controls input { width: 100%; min-width: 0; flex: 1; height: 3px; border-radius: 2px; background: linear-gradient(to right, #00a1d6 var(--volume), #59616a var(--volume)); appearance: none; cursor: ew-resize; }
+.mini-controls input::-webkit-slider-thumb { appearance: none; width: 7px; height: 7px; border-radius: 50%; background: #f0f3f5; }
+.mini-controls input::-moz-range-thumb { width: 7px; height: 7px; border: 0; border-radius: 50%; background: #f0f3f5; }
 .mini-volume { min-width: 18px; text-align: right; }
 .mini-divider { position: absolute; top: 0; bottom: 0; width: 14px; transform: translateX(-50%); z-index: 3; cursor: col-resize; touch-action: none; display: grid; place-items: center; }
 .mini-divider span { width: 3px; height: 36px; border-radius: 3px; background: #00b6e6; box-shadow: 0 0 0 3px #0b1529bb; }
@@ -347,7 +376,7 @@ function onCardUp(event) {
 .tour-playhead-position > i::before { content: ''; position: absolute; top: -4px; left: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--vp-c-text-1); }
 .tour-seek { position: absolute; z-index: 2; left: 0; top: -12px; width: 100%; height: 24px; margin: 0; opacity: 0; cursor: ew-resize; }
 .tour-track:has(.tour-seek:focus-visible) { outline: 2px solid var(--vp-c-brand-1); outline-offset: 5px; border-radius: 12px; }
-.mini-clear { position: absolute; right: 2px; top: 2px; width: 22px; height: 22px; color: #fff; background: #101418c9; border-radius: 50%; }
+.mini-clear { position: absolute; right: 2px; top: 2px; width: 16px; height: 16px; font-size: 12px; line-height: 16px; color: #fff; background: #101418c9; border-radius: 3px; }
 .mini-tile.is-over { outline: 2px solid #00a1d6; outline-offset: 1px; }
 .preset-picker { position: absolute; inset: 7px; overflow: auto; border-radius: 6px; padding: 12px; background: var(--mini-side); color: var(--mini-text); }
 .preset-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
@@ -366,7 +395,7 @@ function onCardUp(event) {
 @keyframes drop-land { from { opacity: 1; transform: scale(.96); } to { opacity: 0; transform: scale(1.04); } }
 @media (hover:hover) and (pointer:fine) { .mini-follow:hover { border-color: #00a1d6; } .preset-grid button:hover { background: var(--mini-card); } }
 @media (max-width:900px) { .feature-demo { grid-template-columns: 1fr; gap: 20px; } .demo-scenes { grid-template-columns: repeat(3,minmax(0,1fr)); } .demo-scene { min-height: 48px; padding: 10px; gap: 8px; font-size: 12px; } .demo-scene span:last-child { display:none; } .demo-description { margin-top: 18px; } }
-@media (max-width:480px) { .demo-preview { padding: 12px; } .software-miniature { gap: 4px; padding: 4px; } .mini-wall { gap: 4px; } .mini-sidebar { padding: 3px; gap: 3px; } .mini-controls { gap: 3px; padding: 3px; } .mini-badge { top: 2px; left: 2px; padding: 1px 2px; } .mini-brand { font-size: 6px; } .mini-tools { grid-template-columns: 1fr 18px 14px; } .mini-theme { width:18px; height:18px; font-size:13px; } .preset-grid { grid-template-columns:repeat(2,minmax(0,1fr)); padding:0; } .preset-picker { inset:4px; padding:8px; } .preset-header { gap:6px; margin-bottom:8px; flex-wrap:wrap; } .preset-header > span { display:none; } }
+@media (max-width:480px) { .demo-preview { padding: 12px; } .software-miniature { gap: 4px; padding: 4px; } .mini-wall { --mini-gap: 4px; } .mini-titlebar { margin: -4px -4px 0; } .mini-sidebar { padding: 3px; gap: 3px; } .mini-controls { gap: 3px; padding: 3px; } .mini-badge { top: 2px; left: 2px; padding: 1px 2px; } .mini-brand { font-size: 6px; } .mini-tools { grid-template-columns: 1fr 18px 14px; } .mini-theme { width:18px; height:18px; font-size:13px; } .preset-grid { grid-template-columns:repeat(2,minmax(0,1fr)); padding:0; } .preset-picker { inset:4px; padding:8px; } .preset-header { gap:6px; margin-bottom:8px; flex-wrap:wrap; } .preset-header > span { display:none; } }
 @media (prefers-reduced-motion:reduce) { .drop-flash { display:none; animation:none; } .demo-cursor { display:none; } .card-ghost { transform:translate(-50%,-50%); } }
 @media (max-width:480px) { .software-miniature { width:100%; min-width:0; min-height:220px; } }
 @media (max-width:480px) { .mini-controls > span:first-child, .mini-controls > span:last-child { display:none; } .mini-controls { gap:2px; } .mini-controls button { min-width:14px; } .mini-volume { min-width:12px; } }
