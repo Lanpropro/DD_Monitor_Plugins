@@ -3,6 +3,8 @@
 [DD 监控室 CE](https://github.com/Lanpropro/DD_Monitor_CE) 的独立插件集合。
 每个插件单独启用、单独维护版本并提供一个可导入的 ZIP。
 
+软件与插件展示网站已独立至 [DD_Monitor_Website](https://github.com/Lanpropro/DD_Monitor_Website)，本仓库仅维护插件。迁移与本地入口见 [WEBSITE.md](WEBSITE.md)。
+
 ## 插件
 
 | 插件 | ID | 版本 | 支持平台 |
