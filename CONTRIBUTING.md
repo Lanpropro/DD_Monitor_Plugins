@@ -21,6 +21,8 @@
 
 ## 日常开发与 PR
 
+新插件投稿无需 Fork 或创建 PR，作者直接填写 [Issue 表单](https://github.com/Lanpropro/DD_Monitor_Plugins/issues/new?template=plugin-submission.yml)；维护者审核后由机器人生成社区索引 PR。启用条件、包限制、安全边界及自动化验证见[新插件投稿](SUBMISSIONS.md)。下面的流程继续适用于源码贡献与已有插件开发。
+
 开始前确认目录、分支和未提交文件。工作区未归类清楚时，不切换分支或拉取合并。
 
 ```powershell

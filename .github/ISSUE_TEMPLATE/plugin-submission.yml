@@ -1,0 +1,69 @@
+name: 提交新插件
+description: 填写资料即可投稿，无需 Fork 或创建 PR。
+title: "[插件投稿] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        网站不需要登录；提交此表单需要 GitHub 账号。请先把单插件 ZIP 上传到自己的 GitHub Release。
+        检查只读取包结构与清单，不运行插件。维护者会在这里与你交流，审核后代为生成索引 PR。
+        请勿提交账号、Cookie、密钥或其他私人信息。已有插件的更新暂时继续联系维护者。
+  - type: input
+    id: plugin-id
+    attributes:
+      label: 插件 ID
+      description: 与 plugin.json 和 ZIP 顶层文件夹一致，只使用小写字母、数字和下划线，以字母开头。
+      placeholder: my_plugin
+    validations:
+      required: true
+  - type: input
+    id: plugin-name
+    attributes:
+      label: 插件名称
+      description: 与 plugin.json 中的 name 一致。
+    validations:
+      required: true
+  - type: input
+    id: plugin-version
+    attributes:
+      label: 版本
+      description: 与 plugin.json 中的 version 一致，例如 1.0 或 1.0.1。
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: 简介
+      description: 插件能做什么，适合什么使用场景？
+    validations:
+      required: true
+  - type: input
+    id: source
+    attributes:
+      label: 源码仓库
+      description: 公开 GitHub 仓库地址，不填写分支或文件地址；请保留许可证和可审查源码。
+      placeholder: https://github.com/your-name/your-plugin
+    validations:
+      required: true
+  - type: input
+    id: package
+    attributes:
+      label: 安装包 ZIP
+      description: 同一源码仓库的公开 Release 附件直链，不支持 Source code ZIP、网盘或临时附件。
+      placeholder: https://github.com/your-name/your-plugin/releases/download/v1.0/my_plugin-1.0.zip
+    validations:
+      required: true
+  - type: textarea
+    id: requirements
+    attributes:
+      label: 兼容要求
+      description: 所需软件版本、额外依赖、系统限制及安装方式。
+    validations:
+      required: true
+  - type: textarea
+    id: permissions
+    attributes:
+      label: 权限与网络访问
+      description: 说明访问的服务、读写的文件、是否运行子进程或需要登录；没有也请写明。
+    validations:
+      required: true
