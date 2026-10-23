@@ -134,12 +134,14 @@ class IntegrationTests(unittest.TestCase):
         with patch.object(self.emotes,'send_danmaku',side_effect=self.emotes.BiliAPIError('登录已失效',-101)), \
              patch.object(self.window,'open_login') as login:
             composer.send_text()
+            self.assertFalse(composer.edit.isEnabled())
             settle(lambda:getattr(self.window,'_result_notice',None) is not None and
                    self.window._result_notice.isVisible())
             notice=self.window._result_notice
             self.assertIn('90001',notice.title.text());self.assertIn('Synthetic',notice.title.text())
             self.assertIn('重新登录',notice.title.text())
             self.assertEqual(composer.edit.text(),'保留登录失败草稿')
+            self.assertTrue(composer.edit.isEnabled())
             QTest.mouseClick(notice,Qt.LeftButton)
             self.assertFalse(notice.isVisible());login.assert_not_called()
             settle(lambda:login.call_count==1)

@@ -206,6 +206,31 @@ class ComposerTests(unittest.TestCase):
                 self.composer.choose_emoticon(pkg, emote)
         send.assert_not_called()
 
+    def test_send_disables_text_input_until_success_failure_or_timeout(self):
+        for error in (None, ValueError('发送失败'), bili.requests.Timeout()):
+            with self.subTest(error=type(error).__name__):
+                entered, release = threading.Event(), threading.Event()
+                def send(*args, **kwargs):
+                    entered.set()
+                    release.wait(3)
+                    if error is not None:
+                        raise error
+                    return {'code': 0}
+                self.composer.edit.setText('等待发送的草稿')
+                with patch.object(bili, 'send_danmaku', side_effect=send) as sending:
+                    try:
+                        self.composer.send_text()
+                        self.assertFalse(self.composer.edit.isEnabled())
+                        settle(entered.is_set)
+                        QTest.keyClicks(self.composer.edit, 'extra input')
+                        self.assertEqual(self.composer.edit.text(), '等待发送的草稿')
+                    finally:
+                        release.set()
+                        settle(lambda: not self.composer.busy)
+                self.assertEqual(sending.call_count, 1)
+                self.assertTrue(self.composer.edit.isEnabled())
+                self.assertEqual(self.composer.edit.text(), '' if error is None else '等待发送的草稿')
+
     def test_pending_send_blocks_duplicates_and_keeps_ui_responsive(self):
         entered, release = (threading.Event(), threading.Event())
 
@@ -219,6 +244,7 @@ class ComposerTests(unittest.TestCase):
             settle(entered.is_set)
             self.assertTrue(self.composer.busy)
             self.assertFalse(self.composer.send_button.isEnabled())
+            self.assertFalse(self.composer.edit.isEnabled())
             self.composer.send_text()
             self.composer.choose_emoticon(1, {'perm': 1, 'emoticon_unique': 'official_1'})
             self.composer.edit.setText('下一条草稿')
@@ -226,6 +252,7 @@ class ComposerTests(unittest.TestCase):
             settle(lambda: not self.composer.busy)
         self.assertEqual(sending.call_count, 1)
         self.assertEqual(self.composer.edit.text(), '下一条草稿')
+        self.assertTrue(self.composer.edit.isEnabled())
 
     def test_room_or_account_change_ignores_old_send_completion(self):
         for changed in ('room', 'account'):
@@ -236,10 +263,14 @@ class ComposerTests(unittest.TestCase):
                 self.composer.edit.setText('旧消息')
                 with patch.object(bili, 'send_danmaku', side_effect=lambda *a, **kw: release.wait(2)):
                     self.composer.send_text()
+                    self.assertFalse(self.composer.edit.isEnabled())
                     if changed == 'room':
                         self.composer.set_room('202')
                     else:
                         session.set_sessdata('other-session')
+                        # The cookie-only test session must mirror BiliSession's notification.
+                        session.changed.emit(session.snapshot())
+                    self.assertTrue(self.composer.edit.isEnabled())
                     self.composer.edit.setText('新的草稿')
                     release.set()
                     settle(lambda: not self.composer.busy)

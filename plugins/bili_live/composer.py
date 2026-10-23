@@ -207,6 +207,7 @@ class DanmakuComposer(QWidget):
         self._update_buttons()
 
     def _update_buttons(self):
+        self.edit.setEnabled(not self.busy)
         self.send_button.setEnabled(bool(self.edit.text().strip()) and not self.busy)
         self.send_button.setText("…" if self.busy else "发送")
 
