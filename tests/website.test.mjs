@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import { createHash } from 'node:crypto'
+import { inflateRawSync } from 'node:zlib'
 import { resolve, relative, dirname } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
@@ -14,11 +15,42 @@ const walk = dir => readdirSync(dir, { withFileTypes: true }).flatMap(item => {
   return item.isDirectory() ? walk(path) : [path]
 })
 
-test('catalog versions and IDs agree with the actual plugin manifests', () => {
-  assert.equal(plugins.length, 3)
-  assert.equal(new Set(plugins.map(p => p.id)).size, 3)
+// Source packages and already published releases have independent versions.
+const publishedZip = p => readFileSync(resolve(root, `dist/published/${p.id}-${p.version}.zip`))
+function zipEntry(bytes, name) {
+  let end = bytes.length - 22
+  while (end >= 0 && bytes.readUInt32LE(end) !== 0x06054b50) end--
+  assert.ok(end >= 0, 'ZIP directory missing')
+  const count = bytes.readUInt16LE(end + 10)
+  let offset = bytes.readUInt32LE(end + 16)
+  for (let index = 0; index < count; index++) {
+    assert.equal(bytes.readUInt32LE(offset), 0x02014b50)
+    const method = bytes.readUInt16LE(offset + 10)
+    const size = bytes.readUInt32LE(offset + 20)
+    const nameLength = bytes.readUInt16LE(offset + 28)
+    const extraLength = bytes.readUInt16LE(offset + 30)
+    const commentLength = bytes.readUInt16LE(offset + 32)
+    const entryName = bytes.subarray(offset + 46, offset + 46 + nameLength).toString('utf8')
+    if (entryName === name) {
+      const local = bytes.readUInt32LE(offset + 42)
+      const start = local + 30 + bytes.readUInt16LE(local + 26) + bytes.readUInt16LE(local + 28)
+      const data = bytes.subarray(start, start + size)
+      assert.ok(method === 0 || method === 8, 'Unsupported ZIP compression')
+      return method === 8 ? inflateRawSync(data) : data
+    }
+    offset += 46 + nameLength + extraLength + commentLength
+  }
+  assert.fail(`Missing ZIP entry: ${name}`)
+}
+
+test('published catalog is a unique subset of source IDs with actual release manifests', () => {
+  assert.ok(plugins.length > 0)
+  assert.equal(new Set(plugins.map(p => p.id)).size, plugins.length)
+  const sourceIds = readdirSync(resolve(root, 'plugins')).filter(id => existsSync(resolve(root, `plugins/${id}/plugin.json`)))
   for (const p of plugins) {
-    const manifest = JSON.parse(read(`plugins/${p.id}/plugin.json`))
+    assert.ok(sourceIds.includes(p.id))
+    const manifest = JSON.parse(zipEntry(publishedZip(p), `${p.id}/plugin.json`).toString('utf8'))
+    assert.equal(p.id, manifest.id)
     assert.equal(p.name, manifest.name)
     assert.equal(p.version, manifest.version)
     assert.equal(p.download, `https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/v1.0/${p.id}-${p.version}.zip`)
@@ -28,9 +60,9 @@ test('catalog versions and IDs agree with the actual plugin manifests', () => {
   }
 })
 
-test('published package checksums match the local versioned ZIP files', () => {
+test('published package checksums match the actual versioned release ZIP files', () => {
   for (const p of plugins) {
-    const bytes = readFileSync(resolve(root, `dist/${p.id}-${p.version}.zip`))
+    const bytes = publishedZip(p)
     assert.equal(createHash('sha256').update(bytes).digest('hex'), p.sha256)
   }
 })
