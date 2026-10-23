@@ -9,6 +9,7 @@ from .bili_api import HEADERS, api_result, resolve_room
 
 BASE = 'https://api.live.bilibili.com'
 GOLD_ENDPOINT = BASE + '/xlive/revenue/v1/gift/sendGold'
+GOLD_MULTI_ENDPOINT = BASE + '/xlive/revenue/v2/gift/sendGoldMultiUser'
 BAG_ENDPOINT = BASE + '/xlive/revenue/v1/gift/sendBag'
 INTERACTIVE_ENDPOINT = BASE + '/xlive/revenue/v2/interactive_pay/send'
 DIRECT_INTERACTIVE_SCENES = ('guard_gift','guard_attire')
@@ -32,6 +33,7 @@ class GiftItem:
     pay_type: str = 'send_gift'
     gift_scene: str = ''
     variants: tuple = ()
+    gift_type: int = 0
 
     @property
     def payment_scene(self):
@@ -113,9 +115,13 @@ def _reason(config, room_id, source):
     # Its default_gift/send_gift path uses the same form as ordinary paid gifts.
     light_sign=(config.get('id',config.get('gift_id')) in (31164,34001) and special_type==3)
     attire=interactive and scene['scene']=='guard_attire' and special_type==15
-    if gift_type==6:
-        return '盲盒流程暂不支持，请在 B 站直播间投喂'
-    if config.get('interactive_pay') or gift_type or kind or special_type and not (light_sign or attire):
+    # Paid type-6 boxes without a special payment scene use the ordinary
+    # gift sender in the official web client. Other blind-box scenes differ.
+    blind=(gift_type==6 and source=='gold' and not interactive
+           and scene.get('scene','') in ('','default_gift'))
+    if gift_type==6 and not blind:
+        return '暂不支持此盲盒流程'
+    if config.get('interactive_pay') or gift_type and not blind or kind or special_type and not (light_sign or attire):
         return '暂不支持特殊礼物流程'
     bound=config.get('bind_roomid') or config.get('room_id') or 0
     if str(bound) not in ('0','',str(room_id)):return '仅限指定直播间'
@@ -154,7 +160,8 @@ def _item(config, key, room_id, max_count, *, source='gold', bag_id=0, stock=0, 
         tuple(counts),maximum,custom and maximum>1,reason,
         bag_id,stock,expires_at,
         scene.get('pay_type','send_gift') if isinstance(scene,dict) else 'send_gift',
-        json.dumps(scene,ensure_ascii=False,separators=(',',':')) if isinstance(scene,dict) else '')
+        json.dumps(scene,ensure_ascii=False,separators=(',',':')) if isinstance(scene,dict) else '',
+        gift_type=_integer(config.get('gift_type',0),0))
 
 def find_gift(tabs, key):
     return next((choice for tab in tabs for item in tab.items
@@ -262,6 +269,9 @@ def validate_send(item, quantity, *, cookies, wallet):
         raise GiftSendError('此礼物不支持该数量')
     if item.disabled_reason or item.source not in ('gold','bag'):
         raise GiftSendError(item.disabled_reason or '暂不支持此礼物流程')
+    if item.gift_type==6 and (item.source!='gold' or item.pay_type!='send_gift'
+                             or item.payment_scene not in ('','default_gift')):
+        raise GiftSendError('暂不支持此盲盒流程')
     if item.pay_type not in ('send_gift','interactive_pay'):
         raise GiftSendError('暂不支持此购买流程')
     if item.pay_type=='interactive_pay' and (item.source!='gold' or item.payment_scene not in DIRECT_INTERACTIVE_SCENES):
@@ -291,6 +301,13 @@ def send_gift(target,item,quantity,*,cookies,wallet,still_current):
         form.update(ruid=target.ruid,biz_id=target.room_id,biz_code='live',send_ruid=0,storm_beat_id=0)
         if item.source=='bag':
             endpoint=BAG_ENDPOINT;form['bag_id']=item.bag_id
+        elif item.gift_type==6:
+            # The current web sender submits the box ID/price, with one
+            # explicit receiver. Award IDs/values never determine the charge.
+            endpoint=GOLD_MULTI_ENDPOINT
+            form.update(coin_type='gold',bag_id=0,biz_code='Live',
+                receive_users=json.dumps([{'uid':target.ruid}],separators=(',',':')),
+                all_flag=0,web_location='444.8')
         else:
             endpoint=GOLD_ENDPOINT;form.update(coin_type='gold',bag_id=0,rnd=int(time.time()),visit_id='')
     if not still_current():raise GiftSendError('房间或账号已改变，已取消赠送')

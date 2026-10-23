@@ -5,7 +5,7 @@ import time
 import unittest
 from unittest.mock import patch
 from bili_live_support import session
-from bili_live_fixtures import room_payload,bag_payload,upgrade_payload
+from bili_live_fixtures import room_payload,bag_payload,upgrade_payload,blind_payload
 from PySide6.QtCore import QCoreApplication, QEvent
 from ddm_plugin_bili_live import gift_api as api
 from ddm_plugin_bili_live.gift_controller import GiftController, GiftCoordinator
@@ -36,6 +36,20 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual((form['gift_id'],form['price'],form['gift_num']),(35639,1500,10))
         self.assertEqual((sent[0].gift_key,sent[0].quantity),('main:35638:35639',10))
         self.assertEqual(controller.state.wallet,84999)
+
+    def test_blind_box_success_debits_box_price_not_the_random_award_value(self):
+        from unittest.mock import Mock
+        controller=self.controller();controller.set_active(False)
+        catalog=api.normalize_catalog(blind_payload(),'90001')
+        controller.state=replace(controller.state,tabs=catalog.tabs)
+        sent=[];controller.sent.connect(sent.append)
+        with patch.object(api.requests,'post',return_value=Mock(status_code=200,
+                json=lambda:{'code':0,'message':'ok','data':{'gift_list':[{'gift_id':32132,'price':2233000,'gift_num':1}]}})) as post:
+            controller.send('main:32251',1);settle(lambda:bool(sent))
+        self.assertEqual(post.call_count,1)
+        self.assertEqual(post.call_args.kwargs['data']['gift_id'],32251)
+        self.assertEqual(controller.state.wallet,84999)
+        self.assertEqual((sent[0].gift_key,sent[0].quantity),('main:32251',1))
 
     def setUp(self):
         session.set_login_cookies('fake','csrf','device')

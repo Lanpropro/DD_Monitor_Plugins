@@ -7,7 +7,7 @@ from bili_live_fixtures import config,room_payload,bag_payload,guard_payload,upg
 from ddm_plugin_bili_live import gift_api as api
 
 class ReadTests(unittest.TestCase):
-    def test_anonymous_blind_box_and_server_disabled_gift_explain_their_own_restrictions(self):
+    def test_anonymous_blind_box_is_available_while_server_disabled_gift_stays_blocked(self):
         # Minimal public roomGiftList metadata observed in both 21452505 and
         # 22637261, 2026-10-23. No account or live request is used by this test.
         data=room_payload()
@@ -20,15 +20,14 @@ class ReadTests(unittest.TestCase):
             {'gift_id':36081,'gift_scene':{'scene':'default_gift','pay_type':'send_gift'},
              'special':{'special_type':0,'is_use':0,'tips':'网络异常，请稍后再试'}}]
         items={i.gift_id:i for i in api.normalize_catalog(data,'21452505').tabs[0].items}
-        self.assertIn('盲盒',items[32251].disabled_reason)
-        self.assertIn('B 站',items[32251].disabled_reason)
+        self.assertFalse(items[32251].disabled_reason)
         self.assertEqual(items[36081].disabled_reason,'网络异常，请稍后再试')
         # An ordinary route becomes usable only when the fresh server response
         # grants permission. A client-side gift ID allowlist must not override it.
         data['gift_data']['room_gift_list']['gold_list'][1]['special']['is_use']=1
         unlocked=api.normalize_catalog(data,'21452505').tabs[0].items[-1]
         self.assertFalse(unlocked.disabled_reason)
-        for item in items.values():
+        for item in (items[36081],):
             with self.subTest(gift=item.name),patch.object(api.requests,'post') as post:
                 with self.assertRaises(api.GiftSendError):
                     api.send_gift(api.GiftTarget('21452505',123,456),item,1,

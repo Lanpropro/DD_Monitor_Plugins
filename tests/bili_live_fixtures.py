@@ -55,3 +55,21 @@ def upgrade_payload():
             {'gift_id':35640,'alias':'贴贴','desc':'+5电池','locked':False,'lock_tip':''},
             {'gift_id':35639,'alias':'摸摸头','desc':'+5电池','locked':False,'lock_tip':''}]}]
     return data
+
+
+def blind_payload():
+    """Public room 21452505, 2026-10-23: regular paid blind-box metadata."""
+    data=room_payload()
+    data['gift_data']['max_send_gift']=5000
+    data['gift_config']['base_config']['list']=[
+        config(32251,name='心动盲盒',price=15000,type=0,gift_type=6,
+            count_map=[{'num':n} for n in (1,10,50)],diy_count_map=0,max_send_limit=5000),
+        config(35206,name='幸运盲盒',price=5000,type=0,gift_type=6,
+            count_map=[{'num':n} for n in (1,10,50)],diy_count_map=0,max_send_limit=5000)]
+    data['gift_config']['room_config']=[]
+    data['gift_data']['tab_list']=[]
+    data['gift_data']['room_gift_list']['gold_list']=[
+        {'gift_id':32251,'special':{'special_type':0,'is_use':1,'tips':''},'gift_scene':None},
+        {'gift_id':35206,'special':{'special_type':0,'is_use':1,'tips':''},
+            'gift_scene':{'scene':'default_gift','pay_type':'send_gift','hide_price':False}}]
+    return data

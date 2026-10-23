@@ -12,7 +12,7 @@ import unittest
 import zipfile
 from unittest.mock import patch
 from bili_live_support import HOST,ROOT,session,bili
-from bili_live_fixtures import room_payload,upgrade_payload
+from bili_live_fixtures import room_payload,upgrade_payload,blind_payload
 import shiboken6
 from PySide6.QtCore import QEvent,QPoint,QObject,Qt,qInstallMessageHandler
 from PySide6.QtGui import QColor,QCursor,QImage,QRegion
@@ -107,6 +107,27 @@ class IntegrationTests(unittest.TestCase):
         form=post.call_args.kwargs['data']
         self.assertEqual((form['gift_id'],form['price'],form['gift_num']),(35639,1500,10))
         self.assertEqual(composer.gift_controller.state.wallet,984999)
+
+    def test_installed_blind_box_posts_one_single_recipient_order(self):
+        from unittest.mock import Mock
+        catalog=self.api.normalize_catalog(blind_payload(),'90001');composer=self.composer()
+        with patch.object(self.api,'get_catalog',return_value=catalog):
+            composer.open_gifts();settle(lambda:not composer.gift_controller.state.loading)
+        popup=composer.gift_popup;card=popup._cards[0]
+        self.assertTrue(card.isEnabled())
+        QCursor.setPos(card.mapToGlobal(card.rect().center()));QTest.mouseClick(card,Qt.LeftButton)
+        quantity=popup.quantity_popup;self.assertTrue(quantity.isVisible())
+        quantity.edit.setText('10');composer.gift_controller.set_active(False)
+        results=[];composer.gift_controller.sent.connect(results.append)
+        with patch.object(self.api.requests,'post',return_value=Mock(status_code=200,
+                json=lambda:{'code':0,'message':'ok','data':{'gift_list':[{'gift_id':32132,'price':2233000}]}})) as post:
+            QTest.mouseClick(quantity.send_button,Qt.LeftButton);settle(lambda:bool(results))
+        self.assertEqual(post.call_count,1)
+        self.assertEqual(post.call_args.args[0],self.api.BASE+'/xlive/revenue/v2/gift/sendGoldMultiUser')
+        form=post.call_args.kwargs['data']
+        self.assertEqual((form['gift_id'],form['price'],form['gift_num']),(32251,15000,10))
+        self.assertEqual(json.loads(form['receive_users']),[{'uid':456}])
+        self.assertEqual(composer.gift_controller.state.wallet,849999)
 
     def test_installed_failure_notice_captures_room_and_defers_relogin(self):
         composer=self.composer();composer.edit.setText('保留登录失败草稿')

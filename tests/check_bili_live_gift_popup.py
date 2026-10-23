@@ -6,7 +6,7 @@ import time
 import unittest
 from unittest.mock import patch
 from bili_live_support import bili
-from bili_live_fixtures import room_payload,guard_payload,upgrade_payload
+from bili_live_fixtures import room_payload,guard_payload,upgrade_payload,blind_payload
 from PySide6.QtCore import QEvent,QPoint,Qt,QTimer
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import QApplication,QPushButton,QMessageBox,QWidget
@@ -70,6 +70,18 @@ class PopupTests(unittest.TestCase):
         self.assertEqual(card.accessibleDescription(),disabled.disabled_reason)
         self.assertIn('B 站',card.toolTip())
         card.click();self.assertEqual(self.sent,[])
+
+    def test_blind_box_opens_quantity_picker_and_emits_selected_count_once(self):
+        catalog=normalize_catalog(blind_payload(),'90001')
+        self.popup.set_state(replace(self.state,tabs=catalog.tabs,wallet=999999))
+        card=self.popup._cards[0];self.assertTrue(card.isEnabled())
+        card.click();q=self.popup.quantity_popup
+        self.assertTrue(q.isVisible());self.assertEqual(self.sent,[])
+        self.assertEqual(q.item.gift_id,32251)
+        self.assertIn('150',q.total.text())
+        q.edit.setText('10');self.assertIn('1500',q.total.text())
+        self.assertTrue(q.send_button.isEnabled())
+        q.send_button.click();self.assertEqual(self.sent,[('main:32251',10)])
 
     def upgrade_card(self):
         catalog=normalize_catalog(upgrade_payload(),'90001')
