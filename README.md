@@ -3,13 +3,15 @@
 [DD 监控室 CE](https://github.com/Lanpropro/DD_Monitor_CE) 的独立插件集合。
 每个插件单独启用、单独维护版本并提供一个可导入的 ZIP。
 
+软件与插件展示网站已独立至 [DD_Monitor_Website](https://github.com/Lanpropro/DD_Monitor_Website)，本仓库仅维护插件。迁移与本地入口见 [WEBSITE.md](WEBSITE.md)。
+
 ## 插件
 
 | 插件 | ID | 版本 | 支持平台 |
 | --- | --- | --- | --- |
 | [国内直播平台](plugins/domestic_live/README.md) | `domestic_live` | 1.2 | 提供虎牙、斗鱼、抖音的主播，直播流解析 |
 | [海外直播平台](plugins/global_live/README.md) | `global_live` | 1.1 | 提供Twitch、YouTube平台的主播，直播流解析 |
-| [比赛二路同步](plugins/match_sync/README.md) | `match_sync` | 1.2 | 提供保持单一直播流情况下的多路混音，合并弹幕观看 |
+| [比赛二路同步](plugins/match_sync/README.md) | `match_sync` | 1.3 | 提供保持单一直播流情况下的多路混音，合并弹幕观看 |
 
 ## 安装
 
@@ -37,6 +39,8 @@ YouTube 已结束的直播可保留关注，但不会将录像当作正在直播
 
 ## 开发与打包
 
+分支、PR、提交整理和验证流程见[开发与贡献指南](CONTRIBUTING.md)。
+
 目录 `plugins/<ID>/` 包含 `plugin.json`、`plugin.py`、README 和所需资源。
 清单 `id` 必须与目录名一致，版本填写在各插件的 `plugin.json` 中。
 
@@ -48,7 +52,7 @@ python tools/build_plugins.py
 python tests/check_packages.py --host ../DD_Monitor_CE
 ```
 
-输出为 `dist/domestic_live-1.2.zip` 、`dist/global_live-1.1.zip` 和 `dist/match_sync-1.1.zip`，上传到 Releases。
+输出为 `dist/domestic_live-1.2.zip` 、`dist/global_live-1.1.zip` 和 `dist/match_sync-1.3.zip`，上传到 Releases。
 构建只读取 Git 跟踪文件，并将许可与来源说明放入每个安装包。
 各插件 README 中的播放、预览和弹幕集成测试在软件源码仓库执行，需先安装对应插件。
 
