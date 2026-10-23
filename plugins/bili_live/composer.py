@@ -14,6 +14,7 @@ from .emoticons import EmoticonButton, EmoticonPopup, _style_button
 from .gift_popup import GiftButton, GiftPopup
 from .gift_controller import GiftController, GiftCoordinator
 from .catalog_cache import CatalogCache, preview_packages
+from .notifications import needs_login
 from .workers import Request, start_worker, request_message, _active_requests, wait_for_requests
 
 class DanmakuEdit(QLineEdit):
@@ -73,7 +74,6 @@ class DanmakuComposer(QWidget):
         self._closing = False
         self.notifier=notifier
         self._room_info={}
-        self._gift_errors=()
         self._generation = self._revision = 0
         self._auth = self._auth_identity(self._cookies())
         self._pending = self._catalog_pending = None
@@ -245,7 +245,8 @@ class DanmakuComposer(QWidget):
         self.edit.setToolTip(text)
         self.feedback.hide()
         if error is not None and self.notifier:
-            if self.notifier.error(error,room=self._room_info,login_required=login_required):return
+            login = needs_login(error) if login_required is None else login_required
+            if self.notifier.error(text,room=self._room_info,login_required=login):return
         if text and not self.busy and self.isVisible():
             self.feedback.adjustSize()
             anchor = self.edit.mapToGlobal(QPoint(0, 0))
@@ -394,8 +395,8 @@ class DanmakuComposer(QWidget):
         if self.gift_controller is None:
             self.gift_controller=GiftController(self.session,self.coordinator,self)
             self.gift_popup=GiftPopup(self)
-            self.gift_controller.stateChanged.connect(self._gift_state)
-            self.gift_controller.failed.connect(self._gift_failed)
+            self.gift_controller.stateChanged.connect(self.gift_popup.set_state)
+            self.gift_controller.errorRaised.connect(self._gift_error)
             self.gift_controller.sent.connect(self.gift_popup.mark_sent)
             self.gift_popup.sendRequested.connect(self.gift_controller.send)
             self.gift_popup.refreshRequested.connect(self._refresh_gifts)
@@ -406,17 +407,8 @@ class DanmakuComposer(QWidget):
         if self.gift_popup.isVisible():
             self.gift_controller.load()
 
-    def _gift_failed(self,message,uncertain):
-        if not self._closing:self._feedback(message,error=message)
-
-    def _gift_state(self,state):
-        if self._closing:return
-        self.gift_popup.set_state(state)
-        errors=(state.catalog_error,state.wallet_error,state.bag_error)
-        previous=self._gift_errors;self._gift_errors=errors
-        for index,message in enumerate(errors):
-            if message and (index>=len(previous) or message!=previous[index]):
-                self._feedback(message,error=message)
+    def _gift_error(self,error,sending=False):
+        if not self._closing:self._feedback(request_message(error,sending=sending),error=error)
 
     def _refresh_gifts(self):
         if self.gift_controller:

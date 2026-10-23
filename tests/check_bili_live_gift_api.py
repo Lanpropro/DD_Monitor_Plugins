@@ -222,6 +222,14 @@ class ReadTests(unittest.TestCase):
 
 
 class SendTests(unittest.TestCase):
+    def test_gift_post_preserves_explicit_auth_status_for_relogin(self):
+        for code,want in ((-101,True),(-111,True),(-400,False)):
+            with self.subTest(code=code),patch.object(api.requests,'post',return_value=Mock(
+                    status_code=200,json=lambda:{'code':code,'message':'opaque rejection'})):
+                with self.assertRaises(api.GiftSendError) as caught:
+                    api.send_gift(self.target,self.item,1,cookies=self.cookies,wallet=99999,still_current=lambda:True)
+                self.assertEqual(getattr(caught.exception,'login_required',False),want)
+
     def test_guard_payment_posts_one_interactive_form_with_original_scene(self):
         import json
         for scene in ('guard_gift','guard_attire'):

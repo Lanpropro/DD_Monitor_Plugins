@@ -53,7 +53,7 @@ class FeedbackTests(unittest.TestCase):
                 json=lambda:{'code':-101,'message':'opaque account error'})):
             self.widget.send_text();settle(lambda:not self.widget.busy)
         error,context=self.notices.calls[-1]
-        self.assertTrue(getattr(error,'login_required',False))
+        self.assertTrue(context['login_required'])
     def test_stale_send_failure_does_not_notify_the_new_room(self):
         entered=threading.Event()
         def send(*args,**kwargs):entered.set();self.release.wait(3);raise ValueError('old room')
@@ -75,8 +75,47 @@ class FeedbackTests(unittest.TestCase):
              patch.object(gifts,'get_bag',return_value=gifts.GiftTab('bag','背包',())):
             self.widget.open_gifts();settle(lambda:not self.widget.gift_controller.state.loading)
         self.assertTrue(any('礼物目录不可用' in str(error) for error,_ in self.notices.calls))
-        self.widget._gift_failed('账号未登录',False)
+        self.widget._gift_error(bili.BiliAPIError('账号未登录',-101))
         self.assertEqual(self.notices.calls[-1][1]['room']['room_id'],'101')
+    def test_opaque_gift_auth_errors_keep_login_action_for_reads_and_send(self):
+        from ddm_plugin_bili_live import gift_api as gifts
+        from bili_live_fixtures import room_payload
+        failure=bili.BiliAPIError('opaque account rejection',-101)
+        with patch.object(gifts,'get_catalog',side_effect=failure), \
+             patch.object(gifts,'get_wallet',return_value=99999), \
+             patch.object(gifts,'get_bag',return_value=gifts.GiftTab('bag','背包',())):
+            self.widget.open_gifts();settle(lambda:not self.widget.gift_controller.state.loading)
+        self.assertEqual(len(self.notices.calls),1)
+        self.assertTrue(self.notices.calls[0][1]['login_required'])
+        self.notices.calls.clear()
+        controller=self.widget.gift_controller;controller.set_active(False)
+        from dataclasses import replace
+        controller.state=replace(controller.state,tabs=gifts.normalize_catalog(room_payload(),'101').tabs)
+        with patch.object(gifts,'prepare_target',side_effect=failure):
+            controller.send('main:1',1);settle(lambda:bool(self.notices.calls))
+        self.assertEqual(len(self.notices.calls),1)
+        self.assertTrue(self.notices.calls[0][1]['login_required'])
+
+    def test_send_timeout_notice_keeps_uncertain_result_guidance(self):
+        import requests
+        self.widget.edit.setText('不要重复发送')
+        with patch.object(bili,'send_danmaku',side_effect=requests.Timeout('raw transport details')):
+            self.widget.send_text();settle(lambda:not self.widget.busy)
+        message,context=self.notices.calls[-1]
+        self.assertIn('发送请求超时',str(message));self.assertIn('结果可能未确认',str(message))
+        self.assertNotIn('raw transport',str(message));self.assertFalse(context['login_required'])
+
+    def test_gift_read_timeout_notice_does_not_claim_an_uncertain_send(self):
+        import requests
+        from ddm_plugin_bili_live import gift_api as gifts
+        with patch.object(gifts,'get_catalog',side_effect=requests.Timeout('raw read details')), \
+             patch.object(gifts,'get_wallet',return_value=99999), \
+             patch.object(gifts,'get_bag',return_value=gifts.GiftTab('bag','背包',())):
+            self.widget.open_gifts();settle(lambda:not self.widget.gift_controller.state.loading)
+        message,context=self.notices.calls[-1]
+        self.assertIn('请求超时',str(message));self.assertNotIn('发送',str(message))
+        self.assertNotIn('未确认',str(message));self.assertFalse(context['login_required'])
+
     def test_shutdown_closes_reporter(self):
         self.widget.shutdown();self.assertTrue(self.notices.closed)
 

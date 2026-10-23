@@ -62,9 +62,10 @@ class GiftResult:
     payload: object
 
 class GiftSendError(ValueError):
-    def __init__(self, message, *, uncertain=False):
+    def __init__(self, message, *, uncertain=False, login_required=False):
         super().__init__(message)
         self.uncertain = uncertain
+        self.login_required = login_required
 
 def _integer(value, default=None):
     if isinstance(value, bool) or not (isinstance(value,int) or isinstance(value,str) and value.isascii() and value.isdigit()):
@@ -244,7 +245,7 @@ def get_bag(room_id, catalog, *, cookies):
 
 def prepare_target(room_id, *, cookies):
     if not cookies.get('SESSDATA') or not cookies.get('bili_jct'):
-        raise GiftSendError('请重新登录 B 站后赠送礼物')
+        raise GiftSendError('请重新登录 B 站后赠送礼物',login_required=True)
     real_id, anchor=resolve_room(room_id,cookies=cookies)
     response=requests.get('https://api.bilibili.com/x/web-interface/nav',headers=HEADERS,cookies=dict(cookies),timeout=10)
     data=api_result(response).get('data') or {}
@@ -254,7 +255,7 @@ def prepare_target(room_id, *, cookies):
 
 def validate_send(item, quantity, *, cookies, wallet):
     if not cookies.get('SESSDATA') or not cookies.get('bili_jct'):
-        raise GiftSendError('请重新登录 B 站后赠送礼物')
+        raise GiftSendError('请重新登录 B 站后赠送礼物',login_required=True)
     if type(quantity) is not int or quantity<=0 or quantity>item.max_count:
         raise GiftSendError('赠送数量超出限制')
     if not item.allow_custom and quantity not in item.counts:
@@ -306,7 +307,7 @@ def send_gift(target,item,quantity,*,cookies,wallet,still_current):
         reason=payload.get('message') or payload.get('msg')
         success_message=reason in (None,'',0,'0') or isinstance(reason,str) and reason.lower() in ('success','ok')
         if payload['code']!=0 or not success_message:
-            raise GiftSendError(str(reason or '服务器拒绝赠送'))
+            raise GiftSendError(str(reason or '服务器拒绝赠送'),login_required=payload['code'] in (-101,-111))
     except GiftSendError:raise
     except Exception as error:
         raise GiftSendError('赠送结果未确认，请先检查余额与背包，不要重复点击',uncertain=True) from error

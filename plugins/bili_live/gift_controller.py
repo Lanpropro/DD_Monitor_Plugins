@@ -70,6 +70,7 @@ class GiftController(QObject):
     stateChanged = Signal(object)
     sent = Signal(object)
     failed = Signal(str,bool)
+    errorRaised = Signal(object,bool)
 
     def __init__(self,session,coordinator,parent=None):
         super().__init__(parent)
@@ -158,6 +159,7 @@ class GiftController(QObject):
         if not self._current_read(context):return
         kind=context[1];self._reads.pop(kind,None)
         self._update(**{kind+'_error':request_message(error),'loading':frozenset(self._reads)})
+        self.errorRaised.emit(error,False)
 
     def send(self,gift_key,quantity):
         if self._closed or self.coordinator.busy:return
@@ -166,7 +168,7 @@ class GiftController(QObject):
         snapshot=self._snapshot
         try:api.validate_send(item,quantity,cookies=snapshot.values if snapshot else {},wallet=self.state.spendable_wallet)
         except api.GiftSendError as error:
-            self._update(feedback=str(error));self.failed.emit(str(error),False);return
+            self._update(feedback=str(error));self.errorRaised.emit(error,True);self.failed.emit(str(error),False);return
         serial=self._serial;room=self._room;wallet=self.state.spendable_wallet
         token=(id(self),serial,snapshot.generation)
         def operation(cookies):
@@ -208,7 +210,7 @@ class GiftController(QObject):
             self._update(feedback='');self.sent.emit(result)
         elif error is not None:
             message=request_message(error,sending=True)
-            self._update(feedback=message);self.failed.emit(message,bool(getattr(error,'uncertain',False)))
+            self._update(feedback=message);self.errorRaised.emit(error,True);self.failed.emit(message,bool(getattr(error,'uncertain',False)))
         else:self._update(feedback='')
 
     def shutdown(self):
