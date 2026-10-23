@@ -24,6 +24,12 @@ def main():
                 for path in (ROOT / "plugins").glob("*/plugin.json")}
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert all(f"| `{plugin_id}` | {version} |" in readme for plugin_id, version in versions.items())
+    match_version = versions["match_sync"]
+    match_readme = (ROOT / "plugins/match_sync/README.md").read_text(encoding="utf-8")
+    assert match_readme.startswith(f"# 比赛二路同步 v{match_version}\n")
+    assert f"match_sync-{match_version}.zip" in match_readme
+    notes = ROOT / f"RELEASE-match-sync-v{match_version}.md"
+    assert notes.read_text(encoding="utf-8").startswith(f"# 比赛二路同步 v{match_version}\n")
     display_names = {"domestic_live": "国内直播平台", "global_live": "海外直播平台", "match_sync": "比赛二路同步"}
     with tempfile.TemporaryDirectory() as directory:
         manager = PluginManager(plugins_dir=directory, enabled=[])
