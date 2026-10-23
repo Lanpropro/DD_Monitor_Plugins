@@ -108,6 +108,23 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual((form['gift_id'],form['price'],form['gift_num']),(35639,1500,10))
         self.assertEqual(composer.gift_controller.state.wallet,984999)
 
+    def test_installed_failure_notice_captures_room_and_defers_relogin(self):
+        composer=self.composer();composer.edit.setText('保留登录失败草稿')
+        with patch.object(self.emotes,'send_danmaku',side_effect=self.emotes.BiliAPIError('登录已失效',-101)), \
+             patch.object(self.window,'open_login') as login:
+            composer.send_text()
+            settle(lambda:getattr(self.window,'_result_notice',None) is not None and
+                   self.window._result_notice.isVisible())
+            notice=self.window._result_notice
+            self.assertIn('90001',notice.title.text());self.assertIn('Synthetic',notice.title.text())
+            self.assertIn('重新登录',notice.title.text())
+            self.assertEqual(composer.edit.text(),'保留登录失败草稿')
+            QTest.mouseClick(notice,Qt.LeftButton)
+            self.assertFalse(notice.isVisible());login.assert_not_called()
+            settle(lambda:login.call_count==1)
+            self.assertEqual(login.call_args.args,('bilibili',))
+            self.assertTrue(login.call_args.kwargs['reauthenticate'])
+
     def test_zip_integrity_and_tracked_source_bytes(self):
         with zipfile.ZipFile(ROOT/'dist/bili_live-1.0.zip') as archive:
             self.assertIsNone(archive.testzip())
@@ -253,6 +270,11 @@ class IntegrationTests(unittest.TestCase):
                     self.window.removeEventFilter(observer)
                     popup.hide();self.window.move(before);APP.processEvents()
         if APP.platformName()=='windows':
+            # Keep this no-clamp motion probe inside the work area even when
+            # the effective DPR makes the desktop shorter than 850px. Edge
+            # clamping is covered separately by native-follow regressions.
+            self.window.move(self.window.screen().availableGeometry().topLeft()+QPoint(10,10))
+            APP.processEvents()
             import ctypes
             from ctypes import wintypes
             user32=ctypes.WinDLL('user32',use_last_error=True)

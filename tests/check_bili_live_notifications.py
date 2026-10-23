@@ -132,6 +132,20 @@ class NotificationTests(unittest.TestCase):
         self.assertEqual(len(context.logs), 1)
         self.assertIn('120', context.logs[0])
 
+    def test_notification_only_host_does_not_advertise_an_unavailable_login(self):
+        from ddm_plugin_bili_live.notifications import NotificationReporter
+        class NotifyOnlyContext:
+            def __init__(self):
+                self.notices = []
+            def notify(self, message, **options):
+                self.notices.append((message, options))
+                return True
+        context = NotifyOnlyContext()
+        self.assertTrue(NotificationReporter(context).error('登录失效'))
+        message, options = context.notices[0]
+        self.assertNotIn('点击', message)
+        self.assertIsNone(options['on_click'])
+
     def test_headless_host_returns_false(self):
         from ddm_plugin_bili_live.notifications import NotificationReporter
         self.assertFalse(NotificationReporter(PluginContext(manager, 'bili_live')).error(
@@ -140,4 +154,3 @@ class NotificationTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-

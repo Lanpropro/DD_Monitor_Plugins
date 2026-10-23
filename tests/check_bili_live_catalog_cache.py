@@ -41,6 +41,27 @@ class CatalogCacheTests(unittest.TestCase):
         session.set_login_cookies('secret-session','secret-csrf','device-test')
         widget=DanmakuComposer(session,catalog_cache=self.cache);self.widgets.append(widget)
         widget.set_room('101');widget.show();return widget
+    def test_normal_checks_never_read_real_storage_or_persist_unexpected_fields(self):
+        from ddm_plugin_bili_live.catalog_cache import CatalogCache
+        with patch('ddm_plugin_bili_live.catalog_cache.os.environ',{'DDM_NO_SAVE':'1'}):
+            disabled=CatalogCache()
+            with patch.object(Path,'stat',side_effect=AssertionError('real cache accessed')):
+                self.assertIsNone(disabled.load('101',self.cookies))
+                disabled.save('101',self.cookies,PACKAGES)
+        leaked=[dict(PACKAGES[0],SESSDATA='secret-session',bili_jct='secret-csrf')]
+        self.cache.save('101',self.cookies,leaked)
+        self.assertEqual(self.cache.load('101',self.cookies),PACKAGES)
+    def test_catalog_cache_is_bounded_and_refresh_keeps_the_picker_visible(self):
+        for room in range(40):self.cache.save(str(room),self.cookies,PACKAGES)
+        self.assertLessEqual(len(list(self.root.glob('*.json'))),32)
+        self.assertEqual(self.cache.load('39',self.cookies),PACKAGES)
+        widget=self.composer()
+        with patch.object(bili,'get_emoticons',return_value=PACKAGES):
+            widget.open_emoticons();settle(lambda:widget._catalog_pending is None)
+            self.assertTrue(widget.popup.isVisible())
+            widget.popup.retry_button.click();settle(lambda:widget._catalog_pending is None)
+            self.assertTrue(widget.popup.isVisible())
+
     def test_disk_roundtrip_is_account_room_scoped_and_contains_no_credentials(self):
         self.cache.save('101',self.cookies,PACKAGES)
         result=type(self.cache)(self.root).load('101',self.cookies)

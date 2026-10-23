@@ -99,10 +99,20 @@ class NativeFollowTests(unittest.TestCase):
     def test_native_quantity_stays_with_gift_when_parent_clamps_at_edge(self):
         followers=self.open_picker(self.gift,quantity=True)
         original=[self.rect(f) for f in followers];origin=self.rect(self.owner)
-        offset=original[1][0]-original[0][0];self.start_drag()
-        self.move_native(self.owner,origin[0]-1200,origin[1])
-        self.assertEqual(self.rect(followers[1])[0]-self.rect(followers[0])[0],offset,
-                         'quantity window detached from the clamped gift picker')
+        offset=original[1][0]-original[0][0]
+        work=self.owner.screen().availableGeometry();scale=self.owner.devicePixelRatioF()
+        left=round(work.left()*scale);right=round((work.right()+1)*scale)
+        self.start_drag()
+        for delta in (-1200,1200,0):
+            self.move_native(self.owner,origin[0]+delta,origin[1])
+            parent,quantity=(self.rect(f) for f in followers)
+            # Sparse bags anchor to the first column, so the child can extend
+            # left of its parent. It must follow with its own screen clamp.
+            expected=max(left,min(parent[0]+offset,right-(quantity[2]-quantity[0])))
+            self.assertLessEqual(abs(quantity[0]-expected),1,
+                                 'quantity window detached from its clamped gift anchor')
+            self.assertGreaterEqual(quantity[0],left);self.assertLessEqual(quantity[2],right)
+        self.assert_native_position(self.rect(followers[1]),original[1])
 
     def test_native_follow_does_not_move_for_an_unrelated_window(self):
         self.open_picker(self.emote);before=self.rect(self.emote)

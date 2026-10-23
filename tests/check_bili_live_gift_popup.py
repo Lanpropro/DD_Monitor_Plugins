@@ -9,7 +9,7 @@ from bili_live_support import bili
 from bili_live_fixtures import room_payload,guard_payload,upgrade_payload
 from PySide6.QtCore import QEvent,QPoint,Qt,QTimer
 from PySide6.QtGui import QCursor
-from PySide6.QtWidgets import QApplication,QPushButton,QMessageBox
+from PySide6.QtWidgets import QApplication,QPushButton,QMessageBox,QWidget
 from PySide6.QtTest import QTest
 from ddm_plugin_bili_live.gift_api import normalize_catalog,GiftTab,GiftResult
 from ddm_plugin_bili_live.gift_controller import GiftPanelState
@@ -177,8 +177,16 @@ class PopupTests(unittest.TestCase):
 
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()
-        self.button=GiftButton();self.button.move(300,400);self.button.show()
-        self.popup=GiftPopup(cache_dir=self.temp.name)
+        # Use a stable application owner, as in the real host. A standalone
+        # 24px button can lose native application activation while a modal
+        # dialog opens, correctly closing its owned picker before the click.
+        self.host=QWidget();self.host.setGeometry(200,400,500,260)
+        self.button=GiftButton(self.host);self.button.move(100,0)
+        self.host.show();self.host.raise_();self.host.activateWindow();self.button.show()
+        APP.processEvents()
+        if APP.platformName()=='windows':
+            self.assertTrue(QTest.qWaitForWindowActive(self.host,2000))
+        self.popup=GiftPopup(self.host,cache_dir=self.temp.name)
         self.item=normalize_catalog(room_payload(),'90001').tabs[0].items[1]
         self.single=replace(self.item,key='single',counts=(1,),allow_custom=False)
         self.state=GiftPanelState(tabs=(GiftTab('main','礼物',(self.single,self.item)),),wallet=99999)
@@ -189,7 +197,7 @@ class PopupTests(unittest.TestCase):
         self.inside=self.popup.mapToGlobal(self.popup.rect().center())
         self.outside=QPoint(self.popup.geometry().right()+100,self.popup.geometry().bottom()+100)
     def tearDown(self):
-        self.popup.shutdown();self.popup.deleteLater();self.button.close()
+        self.popup.shutdown();self.popup.deleteLater();self.host.close();self.host.deleteLater()
         APP.sendPostedEvents(None,QEvent.DeferredDelete)
         APP.processEvents();self.no_media.stop();self.temp.cleanup()
     def card(self,key):return next(c for c in self.popup.findChildren(GiftCard) if c.item.key==key)
