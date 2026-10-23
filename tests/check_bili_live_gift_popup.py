@@ -25,6 +25,52 @@ def settle(predicate,seconds=2):
     raise AssertionError('popup state not reached')
 
 class PopupTests(unittest.TestCase):
+    def test_refreshed_sparse_bag_uses_the_same_column_slots_as_a_full_row(self):
+        def bag_items(count):
+            return tuple(replace(self.single,key=f'bag:{i+1}',source='bag',bag_id=i+1,
+                stock=3,name='花' if i%2 else '心动盲盒') for i in range(count))
+        self.popup.set_state(replace(self.state,tabs=(GiftTab('bag','背包',bag_items(45)),)))
+        APP.processEvents()
+        self.popup.scroll.verticalScrollBar().setValue(300)
+        self.popup.set_state(replace(self.state,tabs=(GiftTab('bag','背包',bag_items(2)),)))
+        for width in (400,250,400):
+            with self.subTest(width=width):
+                self.popup.resize(width,340);APP.processEvents();APP.processEvents()
+                cards=self.popup._cards
+                self.assertEqual(len(cards),2)
+                slot=(self.popup.scroll.viewport().width()-3*(self.popup.columns-1))/self.popup.columns
+                self.assertLessEqual(abs(cards[0].width()-slot),1,
+                    'refresh must retain empty column slots rather than stretching two cards across the bag')
+                self.assertEqual(cards[0].y(),0)
+                self.assertEqual(cards[1].y(),0)
+                self.assertLessEqual(abs(cards[1].x()-(slot+3)),1)
+                self.assertEqual(self.popup.scroll.verticalScrollBar().value(),0)
+
+    def test_resize_reflow_keeps_equal_cells_and_packed_rows_after_large_bag(self):
+        items=tuple(replace(self.single,key=f'bag:{i}',source='bag',bag_id=i+1,stock=3) for i in range(45))
+        self.popup.set_state(replace(self.state,tabs=(GiftTab('bag','背包',items),)))
+        APP.processEvents()
+        self.popup.set_state(replace(self.state,tabs=(GiftTab('bag','背包',items[:9]),)))
+        for width in (250,400,300,400):
+            self.popup.resize(width,340);APP.processEvents();APP.processEvents()
+            columns=self.popup.columns
+            self.assertEqual(self.popup.grid.count(),9)
+            for index,card in enumerate(self.popup._cards):
+                self.assertEqual(card.y(),93*(index//columns))
+                self.assertEqual(self.popup.grid.itemAtPosition(index//columns,index%columns).widget(),card)
+                self.assertLessEqual(abs(card.width()-self.popup._cards[0].width()),1)
+
+    def test_disabled_gift_exposes_its_reason_on_the_card_without_a_tooltip(self):
+        disabled=replace(self.single,disabled_reason='盲盒流程暂不支持，请在 B 站直播间投喂')
+        self.popup.set_state(replace(self.state,tabs=(GiftTab('main','礼物',(disabled,)),)))
+        APP.processEvents()
+        card=self.popup._cards[0]
+        self.assertFalse(card.isEnabled())
+        self.assertIn('盲盒',card.price_label.text())
+        self.assertEqual(card.accessibleDescription(),disabled.disabled_reason)
+        self.assertIn('B 站',card.toolTip())
+        card.click();self.assertEqual(self.sent,[])
+
     def upgrade_card(self):
         catalog=normalize_catalog(upgrade_payload(),'90001')
         self.popup.set_state(replace(self.state,tabs=catalog.tabs))

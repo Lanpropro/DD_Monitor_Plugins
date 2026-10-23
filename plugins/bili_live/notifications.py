@@ -38,7 +38,7 @@ class NotificationReporter:
         text = ('【' + label + '】' if label else '') + str(message)
         login = needs_login(message) if login_required is None else bool(login_required)
         action = None
-        if login:
+        if login and callable(getattr(self._context, 'request_login', None)):
             text += '，点击此处重新登录'
 
             def action():
@@ -55,4 +55,3 @@ class NotificationReporter:
         if callable(log):
             log(text)
         return False
-

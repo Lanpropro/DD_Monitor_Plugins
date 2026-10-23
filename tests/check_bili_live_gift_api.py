@@ -7,6 +7,34 @@ from bili_live_fixtures import config,room_payload,bag_payload,guard_payload,upg
 from ddm_plugin_bili_live import gift_api as api
 
 class ReadTests(unittest.TestCase):
+    def test_anonymous_blind_box_and_server_disabled_gift_explain_their_own_restrictions(self):
+        # Minimal public roomGiftList metadata observed in both 21452505 and
+        # 22637261, 2026-10-23. No account or live request is used by this test.
+        data=room_payload()
+        data['gift_config']['base_config']=[
+            config(32251,name='心动盲盒',price=15000,gift_type=6),
+            config(36081,name='九秋飞仙',price=3000000,max_send_limit=66)]
+        data['gift_config']['room_config']=[]
+        data['gift_data']['room_gift_list']['gold_list']=[
+            {'gift_id':32251,'gift_scene':None,'special':{'special_type':0,'is_use':1,'tips':''}},
+            {'gift_id':36081,'gift_scene':{'scene':'default_gift','pay_type':'send_gift'},
+             'special':{'special_type':0,'is_use':0,'tips':'网络异常，请稍后再试'}}]
+        items={i.gift_id:i for i in api.normalize_catalog(data,'21452505').tabs[0].items}
+        self.assertIn('盲盒',items[32251].disabled_reason)
+        self.assertIn('B 站',items[32251].disabled_reason)
+        self.assertEqual(items[36081].disabled_reason,'网络异常，请稍后再试')
+        # An ordinary route becomes usable only when the fresh server response
+        # grants permission. A client-side gift ID allowlist must not override it.
+        data['gift_data']['room_gift_list']['gold_list'][1]['special']['is_use']=1
+        unlocked=api.normalize_catalog(data,'21452505').tabs[0].items[-1]
+        self.assertFalse(unlocked.disabled_reason)
+        for item in items.values():
+            with self.subTest(gift=item.name),patch.object(api.requests,'post') as post:
+                with self.assertRaises(api.GiftSendError):
+                    api.send_gift(api.GiftTarget('21452505',123,456),item,1,
+                        cookies={'SESSDATA':'fake','bili_jct':'fake'},wallet=99999999,still_current=lambda:True)
+                post.assert_not_called()
+
     def test_upgrade_gifts_keep_their_identity_price_and_quantity_rules(self):
         data=upgrade_payload()
         data['gift_config']['room_config']=[{'id':35640,'price':1700}]

@@ -1,14 +1,15 @@
 """Raw image cache and visible-only QMovie playback, without account cookies."""
 from collections import deque
 import hashlib
+import math
 import os
 from pathlib import Path
 import tempfile
 import threading
 from urllib.parse import urlsplit
 import requests
-from PySide6.QtCore import QObject,QSize,Qt,Signal,Slot
-from PySide6.QtGui import QImage,QMovie,QPixmap
+from PySide6.QtCore import QEvent,QObject,QSize,Qt,Signal,Slot
+from PySide6.QtGui import QImage,QImageReader,QMovie,QPixmap
 from PySide6.QtWidgets import QLabel
 from .workers import Request,start_worker
 
@@ -95,25 +96,56 @@ class GiftMediaLoader(QObject):
 class GiftImageLabel(QLabel):
     def __init__(self,parent=None):
         super().__init__(parent)
-        self.movie=None;self._playing=True;self._path=''
+        self.movie=None;self._playing=True;self._path='';self._fallback_path='';self._dpr=0
         self.setAlignment(Qt.AlignCenter)
         self.setFixedSize(40,40)
 
-    def set_file(self,path):
-        if path==self._path:return
-        self._path=path
+    def set_file(self,path,*,fallback_path=''):
+        if (path,fallback_path,self.devicePixelRatioF())==(self._path,self._fallback_path,self._dpr):return
+        self._path,self._fallback_path=path,fallback_path
+        self._render_file()
+
+    def _render_file(self):
+        self._dpr=self.devicePixelRatioF()
         if self.movie:
             self.movie.stop();self.movie.setFileName('');self.movie.deleteLater();self.movie=None
         self.clear()
-        if not path:return
-        movie=QMovie(path,parent=self)
-        if movie.isValid() and movie.frameCount()>1:
-            movie.setCacheMode(QMovie.CacheAll);movie.setScaledSize(QSize(40,40))
-            self.movie=movie;self.setMovie(movie);self.set_playing(self._playing)
+        if not self._path:return
+        target=QSize(math.ceil(self.width()*self._dpr),math.ceil(self.height()*self._dpr))
+        path=self._path
+        native=QImageReader(path).size()
+        fallback=QImageReader(self._fallback_path).size() if self._fallback_path else QSize()
+        # A low-resolution animation must not replace a sharper static original
+        # when the current display needs more pixels than the GIF contains.
+        if native.isValid() and fallback.isValid():
+            scale=min(target.width()/native.width(),target.height()/native.height())
+            fallback_scale=min(target.width()/fallback.width(),target.height()/fallback.height())
+            if scale>1 and fallback_scale<scale:path=self._fallback_path;native=fallback
+        reader=QImageReader(path)
+        animated=reader.supportsAnimation() and reader.imageCount()>1
+        del reader
+        if animated:
+            movie=QMovie(path,parent=self)
+            movie.setCacheMode(QMovie.CacheAll)
+            movie.setScaledSize(native.scaled(target,Qt.KeepAspectRatio))
+            self.movie=movie;movie.frameChanged.connect(self._show_frame)
+            movie.jumpToFrame(0);self._show_frame();self.set_playing(self._playing)
         else:
-            movie.deleteLater()
             pixmap=QPixmap(path)
-            if not pixmap.isNull():self.setPixmap(pixmap.scaled(40,40,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+            if not pixmap.isNull():
+                pixmap=pixmap.scaled(target,Qt.KeepAspectRatio,Qt.SmoothTransformation)
+                pixmap.setDevicePixelRatio(self._dpr);self.setPixmap(pixmap)
+
+    def _show_frame(self,*args):
+        if self.movie:
+            frame=self.movie.currentPixmap()
+            frame.setDevicePixelRatio(self._dpr);self.setPixmap(frame)
+
+    def event(self,event):
+        handled=super().event(event)
+        if event.type()==QEvent.DevicePixelRatioChange and hasattr(self,'_path'):
+            self._render_file()
+        return handled
 
     def set_playing(self,playing):
         self._playing=bool(playing)

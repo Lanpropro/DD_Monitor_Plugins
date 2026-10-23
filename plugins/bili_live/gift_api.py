@@ -112,6 +112,8 @@ def _reason(config, room_id, source):
     # Its default_gift/send_gift path uses the same form as ordinary paid gifts.
     light_sign=(config.get('id',config.get('gift_id')) in (31164,34001) and special_type==3)
     attire=interactive and scene['scene']=='guard_attire' and special_type==15
+    if gift_type==6:
+        return '盲盒流程暂不支持，请在 B 站直播间投喂'
     if config.get('interactive_pay') or gift_type or kind or special_type and not (light_sign or attire):
         return '暂不支持特殊礼物流程'
     bound=config.get('bind_roomid') or config.get('room_id') or 0

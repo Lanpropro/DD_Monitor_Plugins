@@ -5,7 +5,7 @@ import time
 from PySide6.QtCore import QEvent,QPoint,QRect,QSize,Qt,QTimer,Signal
 from PySide6.QtGui import QCursor,QPainter,QPen
 from PySide6.QtWidgets import (QGridLayout,QHBoxLayout,QLabel,QLineEdit,
-    QMessageBox,QPushButton,QScrollArea,QSizePolicy,QTabBar,QVBoxLayout,QWidget)
+    QMessageBox,QPushButton,QScrollArea,QSizePolicy,QSpacerItem,QTabBar,QVBoxLayout,QWidget)
 from ddm import config,theme
 from .emoticons import _style_button
 from .gift_api import find_gift,format_battery
@@ -47,12 +47,21 @@ class GiftCard(QPushButton):
         row.addWidget(self.image,0,Qt.AlignHCenter)
         self.name_label=QLabel(item.name);self.name_label.setMinimumWidth(0)
         self.name_label.setAlignment(Qt.AlignCenter);self.name_label.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.price_label=QLabel(f'库存 {item.stock}' if item.source=='bag' else f'{format_battery(item.price)} 电池')
+        self._price_text=item.disabled_reason or (f'库存 {item.stock}' if item.source=='bag' else f'{format_battery(item.price)} 电池')
+        self.price_label=QLabel(self._price_text)
+        for label in (self.name_label,self.price_label):
+            label.setMinimumWidth(0);label.setSizePolicy(QSizePolicy.Ignored,QSizePolicy.Preferred)
+        self.setAccessibleDescription(item.disabled_reason)
         self.price_label.setAlignment(Qt.AlignCenter);self.price_label.setAttribute(Qt.WA_TransparentForMouseEvents)
         row.addWidget(self.name_label);row.addWidget(self.price_label)
         expiry=time.strftime('%Y-%m-%d %H:%M',time.localtime(item.expires_at)) if item.expires_at else '无到期时间'
         self.setToolTip(item.disabled_reason or (f'{item.name}：库存 {item.stock}，{expiry}' if item.source=='bag' else item.name))
         self.clicked.connect(lambda:self.chosen.emit(self))
+    def resizeEvent(self,event):
+        super().resizeEvent(event)
+        if hasattr(self,'price_label'):
+            for label,text in ((self.name_label,self.item.name),(self.price_label,self._price_text)):
+                label.setText(label.fontMetrics().elidedText(text,Qt.ElideRight,max(0,self.width()-4)))
     def enterEvent(self,event):
         self.inspected.emit(self)
         super().enterEvent(event)
@@ -128,6 +137,9 @@ class GiftQuantityPopup(AnchoredPopup):
         # The parent picker owns outside clicks; clicking the gift again must
         # reach its second-click action before this child is dismissed.
         return False
+
+class _GiftSlot(QSpacerItem):
+    def isEmpty(self):return False
 
 class GiftPopup(AnchoredPopup):
     sendRequested=Signal(str,int)
@@ -228,11 +240,26 @@ class GiftPopup(AnchoredPopup):
                 card.setEnabled(not item.disabled_reason and not self.state.sending and
                     item.source in ('gold','bag') and (item.source=='bag' or self.state.spendable_wallet is not None))
                 self._cards.append(card)
-        self._arrange()
+        self._arrange();self.scroll.verticalScrollBar().setValue(0)
     def _arrange(self):
         self.columns=max(1,min(5,(self.scroll.viewport().width()+3)//70))
+        while self.grid.count():self.grid.takeAt(0)
+        # QGridLayout retains row/column metadata after takeAt(). Reserve all
+        # visible column slots, including empty bag slots, and clear old ones
+        # when a resize reduces the column count.
+        for column in range(max(self.grid.columnCount(),self.columns)):
+            active=column<self.columns
+            self.grid.setColumnStretch(column,1 if active else 0)
+            self.grid.setColumnMinimumWidth(column,56 if active else 0)
+        for row in range(self.grid.rowCount()):
+            self.grid.setRowStretch(row,0);self.grid.setRowMinimumHeight(row,0)
         for index,card in enumerate(self._cards):
             self.grid.addWidget(card,index//self.columns,index%self.columns);card.show()
+        if self._cards:
+            # Qt omits spacing around entirely empty columns. Zero-height
+            # placeholders preserve the same slots as a complete first row.
+            for column in range(len(self._cards),self.columns):
+                self.grid.addItem(_GiftSlot(56,0,QSizePolicy.Minimum,QSizePolicy.Fixed),0,column)
         self._media_timer.start(0)
     def _choose(self,card):
         if not card.isEnabled():return
@@ -290,9 +317,7 @@ class GiftPopup(AnchoredPopup):
                 if url:
                     urls.setdefault(url,[]).append(card)
                     gif=card.item.gif_url
-                    if gif and gif in self._loaded:
-                        card.image.set_file(self._loaded[gif])
-                    elif url in self._loaded:card.image.set_file(self._loaded[url])
+                    self._set_card_media(card)
                     if gif and gif!=url:urls.setdefault(gif,[]).append(card)
         if set(urls)!=set(self._media_urls):
             self._media_urls=urls
@@ -302,11 +327,14 @@ class GiftPopup(AnchoredPopup):
             pending=tuple(u for u in static if u in urls and u not in self._loaded)
             animations=tuple(u for u in urls if u not in static and u not in self._loaded)
             self.media.request(pending+animations,self._generation)
+    def _set_card_media(self,card):
+        static=self._loaded.get(card.item.image_url,'')
+        animation=self._loaded.get(card.item.gif_url,'')
+        if animation or static:card.image.set_file(animation or static,fallback_path=static)
     def _media_loaded(self,generation,url,path):
         if generation!=self._generation or not self.isVisible():return
         self._loaded[url]=path
-        for card in self._media_urls.get(url,()):
-            if url==card.item.gif_url or card.item.gif_url not in self._loaded:card.image.set_file(path)
+        for card in self._media_urls.get(url,()):self._set_card_media(card)
     def _media_failed(self,generation,url):
         if generation!=self._generation or not self.isVisible():return
         fallbacks=[]
