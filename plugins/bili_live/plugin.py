@@ -23,15 +23,16 @@ class BiliLive(api.Plugin):
 
     def _make_control(self, context):
         from .composer import DanmakuComposer
+        from .notifications import NotificationReporter
         class BiliControl(api.TileControl):
             def set_room(self, room):
-                self.widget.set_room(room.get('room_id') if room.get('platform', 'bilibili') == 'bilibili' else '')
+                self.widget.set_room(room.get('room_id') if room.get('platform', 'bilibili') == 'bilibili' else '',room=room)
                 context.invalidate_layout()
             def interaction_active(self):
                 return self.widget.interaction_active()
             def shutdown(self):
                 self.widget.shutdown()
-        control = BiliControl(DanmakuComposer(self.session, context.parent, coordinator=self.coordinator), minimum_width=90, preferred_width=240)
+        control = BiliControl(DanmakuComposer(self.session, context.parent, coordinator=self.coordinator, notifier=NotificationReporter(self.context)), minimum_width=90, preferred_width=240)
         self.controls.add(control)
         return control
 

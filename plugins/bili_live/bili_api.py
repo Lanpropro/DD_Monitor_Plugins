@@ -8,6 +8,12 @@ HEADERS = {'User-Agent': UA, 'Referer': 'https://live.bilibili.com/'}
 _device_lock = threading.Lock()
 _device = ''
 
+class BiliAPIError(ValueError):
+    def __init__(self,message,code=None):
+        super().__init__(message)
+        self.code=code
+        self.login_required=code in (-101,-111)
+
 def ensure_buvid3():
     global _device
     with _device_lock:
@@ -45,7 +51,7 @@ def api_result(response) -> dict:
     payload = response.json()
     if not isinstance(payload, dict) or payload.get("code") != 0:
         reason = (payload.get("message") or payload.get("msg")) if isinstance(payload, dict) else None
-        raise ValueError(str(reason or "B 站接口返回异常"))
+        raise BiliAPIError(str(reason or "B 站接口返回异常"),payload.get("code") if isinstance(payload,dict) else None)
     return payload
 
 

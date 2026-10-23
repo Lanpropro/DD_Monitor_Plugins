@@ -48,7 +48,7 @@ class DanmakuComposer(QWidget):
     deviceCookieReady = Signal()
     HEIGHT = 26
 
-    def __init__(self, session, parent=None, *, coordinator=None, catalog_cache=None):
+    def __init__(self, session, parent=None, *, coordinator=None, catalog_cache=None, notifier=None):
         super().__init__(parent)
         self.coordinator = coordinator if coordinator is not None else GiftCoordinator(self)
         self.gift_controller = self.gift_popup = None
@@ -71,6 +71,9 @@ class DanmakuComposer(QWidget):
         """)
         self._room_id = ""
         self._closing = False
+        self.notifier=notifier
+        self._room_info={}
+        self._gift_errors=()
         self._generation = self._revision = 0
         self._auth = self._auth_identity(self._cookies())
         self._pending = self._catalog_pending = None
@@ -135,6 +138,7 @@ class DanmakuComposer(QWidget):
         if self._closing:
             return
         self._closing = True
+        if self.notifier:self.notifier.close()
         if self.gift_popup:
             self.gift_popup.shutdown()
         if self.gift_controller:
@@ -176,8 +180,9 @@ class DanmakuComposer(QWidget):
             self._update_buttons()
         return cookies
 
-    def set_room(self, room_id):
+    def set_room(self, room_id, *, room=None):
         room_id = str(room_id or "")
+        self._room_info={**dict(room or {}),'room_id':room_id}
         if room_id != self._room_id:
             if self.gift_popup:
                 self.gift_popup.hide()
@@ -220,7 +225,7 @@ class DanmakuComposer(QWidget):
             return
         if not cookies.get("SESSDATA") or not cookies.get("bili_jct"):
             self._feedback("请先登录 B 站" if not cookies.get("SESSDATA") else
-                           "登录缺少 bili_jct，请退出 B 站账号后重新登录")
+                           "登录缺少 bili_jct，请退出 B 站账号后重新登录", error="请重新登录 B 站", login_required=True)
             return
         context = (*self._context(), self._revision, dm_type)
         self._pending = context
@@ -233,12 +238,14 @@ class DanmakuComposer(QWidget):
         worker.failed.connect(self._send_failed)
         self._start_request(worker)
 
-    def _feedback(self, text):
+    def _feedback(self, text, *, error=None, login_required=None):
         self.feedback.setText(text)
         self.feedback.setToolTip(text)
         self.feedback.setAccessibleDescription(text)
         self.edit.setToolTip(text)
         self.feedback.hide()
+        if error is not None and self.notifier:
+            if self.notifier.error(error,room=self._room_info,login_required=login_required):return
         if text and not self.busy and self.isVisible():
             self.feedback.adjustSize()
             anchor = self.edit.mapToGlobal(QPoint(0, 0))
@@ -270,7 +277,7 @@ class DanmakuComposer(QWidget):
     def _send_failed(self, context, error):
         self.deviceCookieReady.emit()
         if self._finish_send(context):
-            self._feedback(request_message(error, sending=True))
+            self._feedback(request_message(error, sending=True),error=error)
 
     def choose_emoticon(self, pkg_type, emote):
         if self._closing:
@@ -292,7 +299,7 @@ class DanmakuComposer(QWidget):
         if self._closing or not self.supported:
             return
         if not cookies.get("SESSDATA"):
-            self._feedback("请先登录 B 站后选择表情")
+            self._feedback("请先登录 B 站后选择表情",error="请先登录 B 站后选择表情",login_required=True)
             return
         if self.popup is None:
             self.popup = EmoticonPopup(self)
@@ -341,6 +348,11 @@ class DanmakuComposer(QWidget):
             return
         self._catalog_pending = None
         self.popup.set_error(request_message(error))
+        if getattr(error,'login_required',False):
+            self._catalog_key=None
+            self.popup.set_packages(preview_packages(self._packages or []))
+            self.popup.set_error(request_message(error))
+        self._feedback(request_message(error),error=error)
 
     def _cookies(self):
         snapshot = self.session.snapshot()
@@ -374,7 +386,7 @@ class DanmakuComposer(QWidget):
         if self._closing or not self.supported:
             return
         if not cookies.get('SESSDATA') or not cookies.get('bili_jct'):
-            self._feedback('请先登录 B 站' if not cookies.get('SESSDATA') else '登录缺少 bili_jct，请重新登录')
+            self._feedback('请先登录 B 站' if not cookies.get('SESSDATA') else '登录缺少 bili_jct，请重新登录',error='请重新登录 B 站',login_required=True)
             return
         self.feedback.hide()
         if self.popup:
@@ -382,7 +394,8 @@ class DanmakuComposer(QWidget):
         if self.gift_controller is None:
             self.gift_controller=GiftController(self.session,self.coordinator,self)
             self.gift_popup=GiftPopup(self)
-            self.gift_controller.stateChanged.connect(self.gift_popup.set_state)
+            self.gift_controller.stateChanged.connect(self._gift_state)
+            self.gift_controller.failed.connect(self._gift_failed)
             self.gift_controller.sent.connect(self.gift_popup.mark_sent)
             self.gift_popup.sendRequested.connect(self.gift_controller.send)
             self.gift_popup.refreshRequested.connect(self._refresh_gifts)
@@ -392,6 +405,18 @@ class DanmakuComposer(QWidget):
         self.gift_popup.open_at(self.gift_button)
         if self.gift_popup.isVisible():
             self.gift_controller.load()
+
+    def _gift_failed(self,message,uncertain):
+        if not self._closing:self._feedback(message,error=message)
+
+    def _gift_state(self,state):
+        if self._closing:return
+        self.gift_popup.set_state(state)
+        errors=(state.catalog_error,state.wallet_error,state.bag_error)
+        previous=self._gift_errors;self._gift_errors=errors
+        for index,message in enumerate(errors):
+            if message and (index>=len(previous) or message!=previous[index]):
+                self._feedback(message,error=message)
 
     def _refresh_gifts(self):
         if self.gift_controller:
