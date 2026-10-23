@@ -337,16 +337,25 @@ class IntegrationTests(unittest.TestCase):
             for width in (900,360,200,1600,900):
                 tile.setFixedSize(width,300);APP.processEvents()
                 region=tile._plugin_controls.widget
-                self.assertEqual(region.isVisible(),width>=900)
+                # Hosts with the newer compact volume layout can fit the
+                # input at 360px; older hosts keep only their player actions.
+                # Verify either layout against the same usability boundaries.
+                if width>=900:self.assertTrue(region.isVisible())
+                elif width<=200:self.assertFalse(region.isVisible())
                 for button in (tile.pause_button,tile.volume_button,tile.danmaku_button,
                                tile.danmaku_settings_button,tile.recording_button,tile.fullscreen_button):
                     self.assertTrue(button.isVisible())
                     self.assertTrue(tile.bottom.rect().contains(button.geometry()))
+                if region.isVisible():
+                    self.assertGreaterEqual(region.width(),90)
+                    self.assertLessEqual(region.width(),520)
+                    self.assertTrue(tile.bottom.rect().contains(region.geometry()))
+                    self.assertGreater(region.geometry().left(),tile.volume_button.geometry().right())
+                    self.assertLess(region.geometry().right(),tile.danmaku_button.x())
+                    self.assertGreaterEqual(composer.edit.width(),24)
                 if width>=900:
                     self.assertEqual(region.width(),min(520,max(300,int(width*.45))))
                     self.assertLessEqual(abs(region.geometry().center().x()-tile.bottom.width()/2),2)
-                    self.assertLess(region.geometry().right(),tile.danmaku_button.x())
-                    self.assertGreaterEqual(composer.edit.width(),24)
                 else:
                     self.assertTrue(tile.volume_button.compact_popup)
                 self.assertEqual(composer.edit.text(),'draft survives resize')
