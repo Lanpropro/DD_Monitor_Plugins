@@ -13,6 +13,7 @@ from . import bili_api as bili
 from .emoticons import EmoticonButton, EmoticonPopup, _style_button
 from .gift_popup import GiftButton, GiftPopup
 from .gift_controller import GiftController, GiftCoordinator
+from .catalog_cache import CatalogCache, preview_packages
 from .workers import Request, start_worker, request_message, _active_requests, wait_for_requests
 
 class DanmakuEdit(QLineEdit):
@@ -47,11 +48,12 @@ class DanmakuComposer(QWidget):
     deviceCookieReady = Signal()
     HEIGHT = 26
 
-    def __init__(self, session, parent=None, *, coordinator=None):
+    def __init__(self, session, parent=None, *, coordinator=None, catalog_cache=None):
         super().__init__(parent)
         self.coordinator = coordinator if coordinator is not None else GiftCoordinator(self)
         self.gift_controller = self.gift_popup = None
         self.session = session
+        self.catalog_cache = catalog_cache if catalog_cache is not None else CatalogCache()
         self._requests = set()
         self.session.changed.connect(self._session_changed)
         self.setObjectName("DanmakuComposer")
@@ -296,12 +298,17 @@ class DanmakuComposer(QWidget):
             self.popup = EmoticonPopup(self)
             self.popup.selected.connect(self._choose_cached_emoticon)
             self.popup.retryRequested.connect(self._reload_emoticons)
-        self.popup.open_at(self.emote_button)
+        if not force or not self.popup.isVisible():self.popup.open_at(self.emote_button)
         context = self._context()
         if not force and self._catalog_key == context and self._packages is not None:
             return
         if self._catalog_pending == context:
             return
+        if self._packages is None:
+            cached=self.catalog_cache.load(self._room_id,cookies)
+            if cached is not None:
+                self._packages=cached
+                self.popup.set_packages(preview_packages(cached))
         self.popup.set_loading()
         self._catalog_pending = context
         room_id = self._room_id
@@ -325,6 +332,7 @@ class DanmakuComposer(QWidget):
             return
         self._catalog_pending = None
         self._catalog_key, self._packages = context, packages
+        self.catalog_cache.save(self._room_id,self._cookies(),packages)
         self.popup.set_packages(packages)
 
     def _emoticons_failed(self, context, error):
