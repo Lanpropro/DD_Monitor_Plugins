@@ -306,7 +306,7 @@ class Decoder:
             with av.open(StreamInput(process.stdout), "r", format="nut",
                          options={"probesize": "65536", "analyzeduration": "100000"}) as container:
                 stream = container.streams.video[0]
-                stream.codec_context.thread_count = 2
+                stream.codec_context.thread_count = (4 if stream.width * stream.height >= 3840 * 2160 else 2)
                 stream.codec_context.thread_type = "AUTO"
                 self.history.codec = (stream.codec_context.name, stream.codec_context.extradata)
                 rate = stream.average_rate or stream.base_rate or stream.codec_context.framerate
@@ -337,6 +337,7 @@ class Decoder:
                             continue  # An invalid/missing source timestamp cannot establish time.
                         timestamp = (self.history.origin or 0) + pts
                         self.video_size = (frame.width, frame.height)
+                        self.history.video_size = self.video_size
                         sample = None
                         if pts + .0001 >= next_detail:
                             while next_detail <= pts + .0001:
