@@ -45,7 +45,14 @@ class EmoticonOrder(QObject):
 
     def arrange_packages(self, packages):
         ranks = {key: index for index, key in enumerate(self.orders.get('_tabs', []))}
-        return sorted(packages, key=lambda package: ranks.get(self.package_key(package), len(ranks)))
+        packages = list(packages)
+        ordered = iter(sorted(
+            (package for package in packages if self.package_key(package) in ranks),
+            key=lambda package: ranks[self.package_key(package)]))
+        # New room packages keep their server slots instead of following all
+        # previously sorted purchased packages. Only known tabs exchange slots.
+        return [next(ordered) if self.package_key(package) in ranks else package
+                for package in packages]
 
     def save_packages(self, packages):
         self._save('_tabs', [self.package_key(package) for package in packages])

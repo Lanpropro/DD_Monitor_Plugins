@@ -59,6 +59,55 @@ class OrderStorageTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name) / 'preferences' / 'emoticon_order.json'
 
+    def test_new_room_keeps_default_slot_among_reordered_purchased_packages(self):
+        order = order_type(self)(path=self.path)
+        emoji = dict(package('emoji'), pkg_type=3)
+        room_a, room_b = package('room A'), package('room B')
+        bought_a = dict(package('bought A'), pkg_type=5)
+        bought_b = dict(package('bought B'), pkg_type=5)
+        order.save_packages([emoji, room_a, bought_b, bought_a])
+        restarted = order_type(self)(path=self.path)
+        catalog = [emoji, room_b, bought_a, bought_b]
+
+        arranged = restarted.arrange_packages(catalog)
+
+        self.assertEqual([p['pkg_name'] for p in arranged],
+                         ['emoji', 'room B', 'bought B', 'bought A'])
+        self.assertEqual([p['pkg_name'] for p in catalog],
+                         ['emoji', 'room B', 'bought A', 'bought B'])
+
+    def test_unsorted_packages_retain_server_positions_without_saving_defaults(self):
+        order = order_type(self)(path=self.path)
+        packs = [package('A'), package('B'), package('C')]
+
+        self.assertEqual(order.arrange_packages(packs), packs)
+        self.assertEqual(order.orders, {})
+        self.assertFalse(self.path.exists())
+
+    def test_explicit_room_position_after_purchased_package_is_preserved(self):
+        order = order_type(self)(path=self.path)
+        emoji = dict(package('emoji'), pkg_type=3)
+        room = package('room')
+        bought = dict(package('bought'), pkg_type=5)
+        order.save_packages([emoji, bought, room])
+
+        self.assertEqual([p['pkg_name'] for p in order.arrange_packages([emoji, room, bought])],
+                         ['emoji', 'bought', 'room'])
+
+    def test_new_packages_keep_server_slots_before_between_and_after_saved_packages(self):
+        order = order_type(self)(path=self.path)
+        a, b, c = package('A'), package('B'), package('C')
+        order.save_packages([c, a])
+        for names, expected in [
+                (['B', 'A', 'C'], ['B', 'C', 'A']),
+                (['A', 'B', 'C'], ['C', 'B', 'A']),
+                (['A', 'C', 'B'], ['C', 'A', 'B'])]:
+            with self.subTest(names=names):
+                packs = {'A': a, 'B': b, 'C': c}
+                self.assertEqual(
+                    [p['pkg_name'] for p in order.arrange_packages([packs[name] for name in names])],
+                    expected)
+
     def test_restart_preserves_missing_room_packages_and_items(self):
         order = order_type(self)(path=self.path)
         a, b, c = package('A'), package('B'), package('C')
@@ -130,6 +179,33 @@ class PopupOrderTests(unittest.TestCase):
         for popup in self.popups:
             popup.deleteLater()
         APP.sendPostedEvents(None, QEvent.DeferredDelete)
+
+    def test_new_room_survives_shared_changes_drag_refresh_and_restart(self):
+        emoji = dict(package('emoji'), pkg_type=3)
+        room_a, room_b = package('room A'), package('room B')
+        bought_a = dict(package('bought A'), pkg_type=5)
+        bought_b = dict(package('bought B'), pkg_type=5)
+        self.order.save_packages([emoji, room_a, bought_b, bought_a])
+        first = self.popup([emoji, room_a, bought_a, bought_b])
+        catalog_b = [emoji, room_b, bought_a, bought_b]
+        second = self.popup(catalog_b)
+        self.assertEqual([p['pkg_name'] for p in second._packages],
+                         ['emoji', 'room B', 'bought B', 'bought A'])
+        second.tabs.setCurrentIndex(1)
+        self.order.save('2:room A', list(reversed(room_a['emoticons'])))
+        self.assertEqual([p['pkg_name'] for p in second._packages],
+                         ['emoji', 'room B', 'bought B', 'bought A'])
+
+        second.tabs.moveTab(3, 2)
+        self.assertEqual([p['pkg_name'] for p in first._packages],
+                         ['emoji', 'room A', 'bought A', 'bought B'])
+        second.set_packages(catalog_b)
+        self.assertEqual([p['pkg_name'] for p in second._packages],
+                         ['emoji', 'room B', 'bought A', 'bought B'])
+        self.assertEqual(second.tabs.tabData(second.tabs.currentIndex()), '2:room B')
+        restarted = order_type(self)(path=self.order.path)
+        self.assertEqual([p['pkg_name'] for p in restarted.arrange_packages(catalog_b)],
+                         ['emoji', 'room B', 'bought A', 'bought B'])
 
     def test_tab_drag_refresh_and_reopen_share_order_without_losing_selection(self):
         packs = [package('A'), package('B'), package('C')]
