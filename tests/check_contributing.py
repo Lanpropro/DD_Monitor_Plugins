@@ -15,7 +15,7 @@ class ContributionGuideTests(unittest.TestCase):
                      'git pull --ff-only origin develop',
                      'https://github.com/Lanpropro/DD_Monitor_Website', 'python tests/check_contributing.py',
                      'python tests/check_packages.py --host ../DD_Monitor_CE',
-                     '源码清单仍为 1.1'):
+                     '源码清单必须与公开附件一致'):
             with self.subTest(text=text):
                 self.assertIn(text, source)
 

@@ -10,8 +10,10 @@ from PySide6.QtGui import QImage
 
 try:
     import av
+    from av.video.reformatter import VideoReformatter
 except ImportError:
     av = None
+    VideoReformatter = None
 
 from .engine import History, np
 
@@ -26,8 +28,19 @@ class StreamInput:
         return self.pipe.read(size)
 
 
+_conversion = threading.local()
+
+
+def reformat_frame(frame, **options):
+    # VideoFrame.reformat caches on that frame only. Live frames are short-lived;
+    # keep one scaler per worker instead, without sharing mutable state across sources.
+    if not hasattr(_conversion, "reformatter"):
+        _conversion.reformatter = VideoReformatter()
+    return _conversion.reformatter.reformat(frame, **options)
+
+
 def image_from_frame(frame):
-    rgb = frame.reformat(format="bgra")
+    rgb = reformat_frame(frame, format="bgra")
     plane = rgb.planes[0]
     if np is None:
         return QImage(bytes(plane), rgb.width, rgb.height, plane.line_size, QImage.Format_ARGB32).copy()
@@ -66,6 +79,7 @@ class VideoHistory(History):
         super().__init__(**kwargs)
         self.packets = deque()
         self.codec = None
+        self.video_size = (0, 0)
         self.sequence = 0
         self.received_frames = 0
         self.details = deque()
@@ -306,10 +320,12 @@ class PictureReader:
                     decoded_until = None
                     codec = av.CodecContext.create(config[0], "r")
                     codec.extradata = config[1]
-                    codec.thread_count = 2
-                    # Seekable picture workers must release promptly on switch/close.
-                    # Frame-thread teardown can block the GUI when two are active.
-                    codec.thread_type = "SLICE"
+                    # UHD streams often have one slice per frame: SLICE then
+                    # serializes decoding even when a thread count is configured.
+                    width, height = history.video_size
+                    uhd = width * height >= 3840 * 2160
+                    codec.thread_count = 4 if uhd else 2
+                    codec.thread_type = "AUTO" if uhd else "SLICE"
                 owner = history
                 for packet in packets:
                     if self.cancelled.is_set():

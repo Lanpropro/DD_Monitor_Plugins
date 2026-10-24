@@ -44,6 +44,8 @@ def main():
                 assert manifest["id"] == plugin_id
                 assert manifest["name"] == display_names[plugin_id]
                 assert manifest["version"] == versions[plugin_id]
+                if plugin_id == 'match_sync':
+                    assert 'match_sync/fullscreen.py' in names, 'Fullscreen shell integration must ship with the viewer'
                 assert f"{plugin_id}-{manifest['version']}.zip" == path.name
                 assert archive.read(f"{plugin_id}/LICENSE") == (ROOT / "LICENSE").read_bytes()
                 for name in names:

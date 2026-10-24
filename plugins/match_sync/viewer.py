@@ -23,6 +23,7 @@ from ddm.dialogs import SHORTCUT_ACTIONS
 from ddm import config as config_module, motion, theme
 from .engine import route_pcm_s16_stereo, Alignment, Match, RATE, SafetyBuffer, LateBuffer, match_scenes, refine_match, mix_pcm, resample_pcm
 from .media import Chat, Decoder, PlatformChat
+from .fullscreen import mark_fullscreen
 
 COLORS = ("#38bdf8", "#fb7185", "#a78bfa", "#4ade80", "#fbbf24", "#fb923c")
 ROW_MIME = "application/x-ddm-match-sync-row"
@@ -86,6 +87,7 @@ class Canvas(QFrame):
         self.anchor = None
         self.image_rect = QRectF()
         self.setMinimumSize(320, 180)
+        self.setAttribute(Qt.WA_OpaquePaintEvent, True)
 
     def set_frame(self, item):
         key = item[0] if item is not None else None
@@ -97,6 +99,7 @@ class Canvas(QFrame):
         self.frame_key = key
         self.frame = item
         self.image = (item[1] if isinstance(item[1], QImage) else QImage.fromData(item[1])) if item is not None else QImage()
+        self._sync_opaque_paint()
         self.update()
 
     def show_at(self, decoder, timestamp):
@@ -121,6 +124,25 @@ class Canvas(QFrame):
                     and now - self.missing_since <= .15)
         return shared_wait or not retained
 
+    def _source_rect(self):
+        image = self.image
+        source = image.rect()
+        if self.zoom_crop:
+            rect = self.crop
+            source = QRect(round(rect.x() * image.width()), round(rect.y() * image.height()),
+                           max(1, round(rect.width() * image.width())),
+                           max(1, round(rect.height() * image.height()))).intersected(source)
+        return source
+
+    def _sync_opaque_paint(self):
+        covered = (not self.image.isNull() and
+                   self._source_rect().size().scaled(self.size(), Qt.KeepAspectRatio) == self.size())
+        self.setAttribute(Qt.WA_OpaquePaintEvent, not self.transparent_background or covered)
+
+    def resizeEvent(self, event):
+        self._sync_opaque_paint()
+        super().resizeEvent(event)
+
     def paintEvent(self, event):
         painter = QPainter(self)
         if not self.transparent_background:
@@ -132,12 +154,7 @@ class Canvas(QFrame):
             painter.drawText(self.rect(), Qt.AlignCenter, "将左侧关注栏卡片拖到这里，加入比赛二路")
             return
         image = self.image
-        source = image.rect()
-        if self.zoom_crop:
-            rect = self.crop
-            source = QRect(round(rect.x() * image.width()), round(rect.y() * image.height()),
-                           max(1, round(rect.width() * image.width())),
-                           max(1, round(rect.height() * image.height()))).intersected(source)
+        source = self._source_rect()
         size = source.size().scaled(self.size(), Qt.KeepAspectRatio)
         self.image_rect = QRectF((self.width() - size.width()) / 2,
                                 (self.height() - size.height()) / 2,
@@ -237,6 +254,7 @@ class AudioPump(QObject):
         self.feed = None
         self.snapshot = (1.0, ())
         self.played = 0
+        self.clock_snapshot = None
         self.timer = QTimer(self)
         self.timer.setInterval(10)
         self.timer.setTimerType(Qt.PreciseTimer)
@@ -253,6 +271,7 @@ class AudioPump(QObject):
         self.clock_segments.clear()
         self.correction = 0.0
         self.played = 0
+        self.clock_snapshot = None
         output = QMediaDevices.defaultAudioOutput()
         self.device_id = bytes(output.id())
         fmt = QAudioFormat()
@@ -285,21 +304,29 @@ class AudioPump(QObject):
             sink.stop()
             sink.deleteLater()
         self.device = None
+        self.clock_snapshot = None
 
     def clock(self):
-        with self.lock:
-            return self._clock()
+        # Audio mixing/device I/O can outlast a GUI frame. Reuse the last
+        # observed device position rather than queue the GUI behind that work.
+        if self.lock.acquire(blocking=False):
+            try:
+                self.clock_snapshot = self._clock()
+            finally:
+                self.lock.release()
+        value = self.clock_snapshot
+        return (time.monotonic() if value is None else value) + self.correction
 
     def _clock(self):
         if self.sink is None:
-            return time.monotonic() + self.correction
+            return time.monotonic()
         played = self.played if self.thread is not None else self.sink.processedUSecs() * RATE / 1_000_000
         while len(self.clock_segments) > 1 and self.clock_segments[0][1] <= played:
             self.clock_segments.popleft()
         if self.clock_segments:
             first, end, media, rate = self.clock_segments[0]
-            return self.anchor + media + min(max(0, played - first), end - first) / RATE * rate + self.correction
-        return self.anchor + played / RATE + self.correction
+            return self.anchor + media + min(max(0, played - first), end - first) / RATE * rate
+        return self.anchor + played / RATE
 
     def update_snapshot(self):
         # Widgets and room collections belong to the GUI thread. The output
@@ -329,6 +356,7 @@ class AudioPump(QObject):
             print(f"[二路音频] 供给间隔 {(now - self.last_fill) * 1000:.1f}ms", file=sys.stderr, flush=True)
         self.last_fill = now
         self.played = self.sink.processedUSecs() * RATE / 1_000_000
+        self.clock_snapshot = self._clock()
         rate, sources = self.snapshot
         for _ in range(3):
             if self.sink is None or self.device is None:
@@ -351,6 +379,7 @@ class AudioPump(QObject):
             self.clock_segments.append((self.written, self.written + written, self.media_written, actual_rate))
             self.media_written += written / RATE * actual_rate
             self.written += written
+        self.clock_snapshot = self._clock()
 
     def _device_changed(self):
         current = bytes(QMediaDevices.defaultAudioOutput().id())
@@ -502,6 +531,7 @@ class ComparisonPanel(QFrame):
                 canvas.waiting = waiting
             row.actual_position = canvas.frame_key
             if repaint:
+                canvas._sync_opaque_paint()
                 canvas.update()
             relative = shifts[room_id] - shifts.get(reference, 0)
             position = ("主画面基准" if room_id == reference else "与主画面偏移相同" if abs(relative) < .05 else
@@ -683,6 +713,7 @@ class RoomRow(QFrame):
         self.review_alignment = False
         self.awaiting_confirmation = False
         self.next_analysis = 0.0
+        self.search_failures = 0
         self.large_candidate = None
         self.correction_remaining = 0.0
         self.reset_pending = False
@@ -1307,9 +1338,11 @@ class Viewer(QDialog):
                                    "#MatchSync #TileVideo, #MatchSync #TileBottom { background: transparent; }"
                                    if self.skin_visible else "")
         self.canvas.transparent_background = self.skin_visible
+        self.canvas._sync_opaque_paint()
         self.canvas.update()
         for _card, _name, canvas, _state in self.comparison_panel.cards.values():
             canvas.transparent_background = self.skin_visible
+            canvas._sync_opaque_paint()
             canvas.update()
         self.settings_panel.update()
 
@@ -1375,39 +1408,39 @@ class Viewer(QDialog):
                     target.channel.setCurrentIndex(target.channel.currentIndex() + 1)
 
     def eventFilter(self, watched, event):
-        if event.type() in (QEvent.ShortcutOverride, QEvent.KeyPress):
+        kind = event.type()
+        if kind in (QEvent.ShortcutOverride, QEvent.KeyPress):
             action = self._shortcut_action(watched, event)
             if action is not None:
                 event.accept()
-                if event.type() == QEvent.KeyPress and not event.isAutoRepeat():
+                if kind == QEvent.KeyPress and not event.isAutoRepeat():
                     self._handle_shortcut(action)
                 return True
-        if watched is self.picture.cover and event.type() == QEvent.Show:
-            watched.hide()
-            return False
-        if (getattr(self, "controls", None) is not None
+        elif kind == QEvent.Show:
+            if watched is self.picture.cover or watched in self.hidden_host_widgets:
+                watched.hide()
+        elif (kind in (QEvent.DragEnter, QEvent.DragMove, QEvent.Drop)
+                and getattr(self, "controls", None) is not None
                 and watched in (self.controls.widget(), self.controls.viewport())
-                and event.type() in (QEvent.DragEnter, QEvent.DragMove, QEvent.Drop)
                 and isinstance(event.source(), RoomRow) and event.source().viewer is self
                 and event.mimeData().hasFormat(ROW_MIME)):
             point = watched.mapTo(self.controls.widget(), event.position().toPoint())
-            if event.type() == QEvent.Drop:
+            if kind == QEvent.Drop:
                 self.finish_row_drag(point)
             else:
                 self.preview_row_drag(point)
             event.acceptProposedAction()
             return True
-        if watched is self.picture.bottom and event.type() == QEvent.Resize:
-            QTimer.singleShot(0, self._layout_restore_control)
-        if event.type() == QEvent.FocusIn:
+        elif kind == QEvent.Resize:
+            if watched is self.picture.bottom:
+                QTimer.singleShot(0, self._layout_restore_control)
+            if self.embedded and watched is self.parentWidget():
+                self.setGeometry(watched.rect())
+        elif kind == QEvent.FocusIn:
             for key, row in self.rows.items():
                 if watched is row.delay:
                     self.show_comparison(key)
                     break
-        if watched in self.hidden_host_widgets and event.type() == QEvent.Show:
-            watched.hide()
-        if self.embedded and watched is self.parentWidget() and event.type() == QEvent.Resize:
-            self.setGeometry(watched.rect())
         return super().eventFilter(watched, event)
 
     def showEvent(self, event):
@@ -1626,6 +1659,7 @@ class Viewer(QDialog):
         row.recheck_alignment = False
         row.rematch_locally = local
         row.next_analysis = 0.0
+        row.search_failures = 0
         row.match_text = "正在重新对齐比赛画面"
         self.independent_shifts.pop(row.room_id, None)
         self.alignment.candidates.pop(row.room_id, None)
@@ -1968,13 +2002,20 @@ class Viewer(QDialog):
             return
         if not self.rows:
             return
-        dialog = QDialog(self.window())
+        dialog = QDialog(self.window(), Qt.Window | Qt.FramelessWindowHint)
+        dialog.setScreen(self.picture.screen())
         dialog.setWindowTitle("比赛二路主画面")
+        dialog.settings = self.context.window.settings
         dialog._fullscreen_tile = self.picture
         dialog._fullscreen_cursor = FullscreenCursor(dialog)
         sizes = self.body_split.sizes()
-        QVBoxLayout(dialog).addWidget(self.picture)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.picture)
+        fullscreen_hwnd = None
         def restore(_result):
+            if fullscreen_hwnd is not None:
+                mark_fullscreen(fullscreen_hwnd, False)
             dialog._fullscreen_cursor.stop()
             self.body_split.insertWidget(0, self.picture)
             self.body_split.setSizes(sizes)
@@ -1983,6 +2024,11 @@ class Viewer(QDialog):
         dialog.finished.connect(restore)
         self.fullscreen_dialog = dialog
         dialog.showFullScreen()
+        if sys.platform == 'win32' and QApplication.platformName() == 'windows':
+            fullscreen_hwnd = int(dialog.winId())
+            mark_fullscreen(fullscreen_hwnd, True)
+        dialog.raise_()
+        dialog.activateWindow()
         dialog._fullscreen_cursor.start()
 
     def _stop_recording(self):
@@ -2045,6 +2091,7 @@ class Viewer(QDialog):
                 row.match_failures = 0
                 row.alignment_started = time.monotonic()
                 row.next_analysis = 0.0
+                row.search_failures = 0
             for row in self.rows.values():
                 row.delay.blockSignals(True)
                 row.delay.setValue(0)
@@ -2120,7 +2167,7 @@ class Viewer(QDialog):
         row.awaiting_confirmation = False
         row.mix_gain = 0.0
         row.rematch_locally = False
-        row.next_analysis = time.monotonic() + 2
+        row.next_analysis = max(row.next_analysis, time.monotonic() + 2)
         row.match_failures = 0
         row.alignment_started = time.monotonic()
         row.match_text = reason + "；后台继续重新搜索"
@@ -2223,6 +2270,8 @@ class Viewer(QDialog):
         row.match_failures = 0
         row.alignment_started = time.monotonic()
         row.recheck_alignment = False
+        row.search_failures = 0
+        row.next_analysis = 0.0
         if self.alignment.manual_locked:
             row.match_text = "手动时间已锁定；勾选自动对齐可解除"
         row.pending.clear()
@@ -2878,6 +2927,15 @@ class Viewer(QDialog):
                 row.next_analysis = time.monotonic() + 2
                 row.refresh_status()
                 continue
+            if not row.match_confirmed and (match.lag is None or match.confidence < .65):
+                # Once detailed matching has enough history, repeated failed
+                # searches need fresh evidence, not another scan every 500 ms.
+                details = getattr(getattr(row.decoder, 'history', None), 'details', ())
+                if len(details) >= 80:
+                    row.search_failures = min(3, row.search_failures + 1)
+                    row.next_analysis = time.monotonic() + 2 ** row.search_failures
+            else:
+                row.search_failures = 0
             if match.lag is not None and match.confidence >= .65 and abs(match.lag) > 15:
                 changed = (row.user_confirmed and row.user_confirmed_lag is not None and abs(match.lag - row.user_confirmed_lag) > 3
                            and not row.needs_epoch_samples)

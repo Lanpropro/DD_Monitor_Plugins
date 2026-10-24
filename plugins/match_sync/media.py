@@ -13,7 +13,7 @@ from PySide6.QtGui import QImage
 from ddm import bili, danmaku, recording
 from ddm.auto_quality import AUTO_QUALITY
 from .engine import FPS, Sample, SIGNATURE_BITS, np
-from .video import av, VideoHistory, PictureReader, StreamInput
+from .video import av, VideoHistory, PictureReader, StreamInput, reformat_frame
 
 FRAME_TIMEOUT = 8.0
 
@@ -63,8 +63,8 @@ def scene_feature(image, crop, size=(16, 16)):
 def frame_sample(frame, timestamp, crop, size):
     width, height = size
     selected = crop != (0, 0, 1, 1)
-    gray = (frame.reformat(format="gray") if selected else
-            frame.reformat(width=min(width, frame.width), height=min(height, frame.height), format="gray"))
+    gray = (reformat_frame(frame, format="gray") if selected else
+            reformat_frame(frame, width=min(width, frame.width), height=min(height, frame.height), format="gray"))
     plane = gray.planes[0]
     image = QImage(memoryview(plane), gray.width, gray.height, plane.line_size, QImage.Format_Grayscale8)
     if selected:
@@ -306,7 +306,7 @@ class Decoder:
             with av.open(StreamInput(process.stdout), "r", format="nut",
                          options={"probesize": "65536", "analyzeduration": "100000"}) as container:
                 stream = container.streams.video[0]
-                stream.codec_context.thread_count = 2
+                stream.codec_context.thread_count = (4 if stream.width * stream.height >= 3840 * 2160 else 2)
                 stream.codec_context.thread_type = "AUTO"
                 self.history.codec = (stream.codec_context.name, stream.codec_context.extradata)
                 rate = stream.average_rate or stream.base_rate or stream.codec_context.framerate
@@ -337,6 +337,7 @@ class Decoder:
                             continue  # An invalid/missing source timestamp cannot establish time.
                         timestamp = (self.history.origin or 0) + pts
                         self.video_size = (frame.width, frame.height)
+                        self.history.video_size = self.video_size
                         sample = None
                         if pts + .0001 >= next_detail:
                             while next_detail <= pts + .0001:
