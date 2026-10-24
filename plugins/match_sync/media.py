@@ -13,7 +13,7 @@ from PySide6.QtGui import QImage
 from ddm import bili, danmaku, recording
 from ddm.auto_quality import AUTO_QUALITY
 from .engine import FPS, Sample, SIGNATURE_BITS, np
-from .video import av, VideoHistory, PictureReader, StreamInput
+from .video import av, VideoHistory, PictureReader, StreamInput, reformat_frame
 
 FRAME_TIMEOUT = 8.0
 
@@ -63,8 +63,8 @@ def scene_feature(image, crop, size=(16, 16)):
 def frame_sample(frame, timestamp, crop, size):
     width, height = size
     selected = crop != (0, 0, 1, 1)
-    gray = (frame.reformat(format="gray") if selected else
-            frame.reformat(width=min(width, frame.width), height=min(height, frame.height), format="gray"))
+    gray = (reformat_frame(frame, format="gray") if selected else
+            reformat_frame(frame, width=min(width, frame.width), height=min(height, frame.height), format="gray"))
     plane = gray.planes[0]
     image = QImage(memoryview(plane), gray.width, gray.height, plane.line_size, QImage.Format_Grayscale8)
     if selected:
