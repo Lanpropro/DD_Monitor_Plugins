@@ -31,6 +31,7 @@ def main():
     parser.add_argument('--fixtures', type=Path)
     parser.add_argument('--size', default='1280x720')
     parser.add_argument('--soak', action='store_true', help='Run only automatic matching with comparison enabled')
+    parser.add_argument('--click-on-search', action='store_true', help='Open settings during each coarse search')
     parser.add_argument('--seconds', type=float, default=30)
     parser.add_argument('--warmup', type=float, default=65)
     parser.add_argument('--output', type=Path, required=True)
@@ -63,9 +64,12 @@ def main():
     phase = ['warmup']
     pending = []
     stop = threading.Event()
+    search_click = threading.Event()
+    search_started = [0.0]
     report = {'qt': QtCore.qVersion(), 'python': sys.executable,
               'plugin': str(module.__file__), 'host': str(host), 'phases': {},
               'source_sha256': hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest(),
+              'engine_sha256': hashlib.sha256((ROOT / 'plugins/match_sync/engine.py').read_bytes()).hexdigest(),
               'warmup_seconds': args.warmup, 'phase_seconds': args.seconds, 'size': args.size}
     phases = ((True, True),) if args.soak else ((True, False), (False, False), (True, True), (False, True))
     denied_network = []
@@ -97,7 +101,10 @@ def main():
         def __init__(self, *a, **kw):
             self.posted = pending[0] if pending else None
             self.painted = False
+            started = time.perf_counter()
             super().__init__(*a, **kw)
+            self.constructed = time.perf_counter()
+            record('settings_construct_ms', (self.constructed - started) * 1000)
 
         def paintEvent(self, event):
             super().paintEvent(event)
@@ -106,6 +113,7 @@ def main():
                 if self.posted is not None:
                     record('settings_first_paint_ms', (time.perf_counter() - self.posted[0]) * 1000)
                     record('scheduled_click_first_paint_ms', (time.perf_counter() - self.posted[1]) * 1000)
+                    record('settings_after_construct_ms', (time.perf_counter() - self.constructed) * 1000)
                 QTimer.singleShot(40, self.reject)
 
     class InputProbe(QObject):
@@ -117,6 +125,9 @@ def main():
     def measured(function, label):
         def call(*a, **kw):
             started = time.perf_counter()
+            if label == 'match' and args.click_on_search:
+                search_started[0] = started
+                search_click.set()
             result = function(*a, **kw)
             record(label + '_ms', (time.perf_counter() - started) * 1000)
             if label == 'match':
@@ -132,6 +143,36 @@ def main():
         denied_network.append(True)
         raise AssertionError('Network access is forbidden in this benchmark')
 
+    main_canvas = [None]
+    last_frame = [None]
+    set_frame = module.Canvas.set_frame
+    audio_fill = module.AudioPump._fill
+    audio_clock = module.AudioPump.clock
+
+    def observe_frame(canvas, item):
+        before = canvas.presented
+        result = set_frame(canvas, item)
+        if canvas is main_canvas[0] and canvas.presented != before:
+            now = time.perf_counter()
+            if last_frame[0] is not None:
+                record('main_frame_gap_ms', (now - last_frame[0]) * 1000)
+            last_frame[0] = now
+        return result
+
+    def observe_fill(pump):
+        now = time.perf_counter()
+        if pump.last_fill is not None:
+            record('audio_supply_gap_ms', (now - pump.last_fill) * 1000)
+        if pump.sink is not None and pump.written:
+            record('audio_idle_before_refill', int(pump.sink.state().name == 'IdleState'))
+        return audio_fill(pump)
+
+    def observe_clock(pump):
+        result = audio_clock(pump)
+        if pump.last_fill is not None:
+            record('device_clock_age_ms', (time.perf_counter() - pump.last_fill) * 1000)
+        return result
+
     with tempfile.TemporaryDirectory(prefix='ddm_input_', ignore_cleanup_errors=True) as root, ExitStack() as stack:
         root = Path(root)
         duration = int(args.warmup + len(phases) * args.seconds + 30)
@@ -140,6 +181,11 @@ def main():
         sources = {}
         for index, effect in enumerate(('null', 'hflip', 'vflip'), 1):
             source = fixtures / f'{args.size}-{duration}-{index}.mkv'
+            if not source.exists():
+                longer = [path for path in fixtures.glob(f'{args.size}-*-{index}.mkv')
+                          if int(path.stem.split('-')[1]) >= duration]
+                if longer:
+                    source = sorted(longer)[0]
             if not source.exists():
                 print(f'Generating {source.name}', flush=True)
                 subprocess.run([str(args.ffmpeg), '-hide_banner', '-loglevel', 'error', '-nostdin',
@@ -168,8 +214,12 @@ def main():
         stack.enter_context(patch.object(module, 'refine_match', measured(module.refine_match, 'refine')))
         stack.enter_context(patch.object(module.Viewer, 'render', measured(module.Viewer.render, 'render')))
         stack.enter_context(patch.object(module.RoomRow, 'refresh_status', measured(module.RoomRow.refresh_status, 'row_status')))
+        stack.enter_context(patch.object(module.Canvas, 'set_frame', observe_frame))
+        stack.enter_context(patch.object(module.AudioPump, '_fill', observe_fill))
+        stack.enter_context(patch.object(module.AudioPump, 'clock', observe_clock))
         context = plugins.PluginContext(window.plugins, 'responsiveness')
         viewer = module.Viewer(context, {})
+        main_canvas[0] = viewer.canvas
         viewer.sources.update(sources)
         button = window.sidebar.settings_button
         probe = InputProbe(button)
@@ -192,11 +242,21 @@ def main():
         def clicks():
             sequence = 0
             while True:
-                interval = (1.7, 2.1, 2.4, 1.9, 2.2)[sequence % 5]
-                sequence += 1
-                scheduled = time.perf_counter() + interval
-                if stop.wait(interval):
-                    break
+                if args.click_on_search:
+                    if not search_click.wait(.1):
+                        if stop.is_set():
+                            break
+                        continue
+                    search_click.clear()
+                    scheduled = search_started[0]
+                    if stop.is_set():
+                        break
+                else:
+                    interval = (1.7, 2.1, 2.4, 1.9, 2.2)[sequence % 5]
+                    sequence += 1
+                    scheduled = time.perf_counter() + interval
+                    if stop.wait(interval):
+                        break
                 if pending:
                     continue
                 point = QPointF(button.rect().center())
@@ -233,7 +293,11 @@ def main():
             heartbeat.start()
             progress.start()
             loop = QtCore.QEventLoop()
-            QTimer.singleShot(int(args.warmup * 1000), loop.quit)
+            duration_timer = QTimer()
+            duration_timer.setSingleShot(True)
+            duration_timer.setTimerType(Qt.PreciseTimer)
+            duration_timer.timeout.connect(loop.quit)
+            duration_timer.start(int(args.warmup * 1000))
             loop.exec()
             assert viewer.render_timer.isActive() and viewer.match_timer.isActive()
             assert viewer.audio.thread is not None, 'A real audio output is required'
@@ -249,21 +313,27 @@ def main():
                 phase[0] = f'match_{automatic}_compare_{comparison}'
                 cpu, wall = time.process_time(), time.perf_counter()
                 presented = viewer.canvas.presented
-                QTimer.singleShot(int(args.seconds * 1000), loop.quit)
+                duration_timer.start(int(args.seconds * 1000))
                 loop.exec()
                 elapsed = time.perf_counter() - wall
                 report['phases'][phase[0]] = {name: summary(values) for name, values in metrics.get(phase[0], {}).items()}
                 report['phases'][phase[0]]['cpu_cores'] = round((time.process_time() - cpu) / elapsed, 3)
                 report['phases'][phase[0]]['main_fps'] = round((viewer.canvas.presented - presented) / elapsed, 2)
+                report['phases'][phase[0]]['elapsed_seconds'] = round(elapsed, 3)
                 assert not any(row.match_confirmed for key, row in viewer.rows.items()
                                if key != viewer.alignment.reference), 'Unrelated fixtures must not align'
                 print(json.dumps({phase[0]: report['phases'][phase[0]]}), flush=True)
                 if args.soak:
                     settings = report['phases'][phase[0]]['settings_first_paint_ms']
-                    assert settings['count'] >= args.seconds / 3, 'Too few actual settings clicks'
+                    assert settings['count'] >= args.seconds / (12 if args.click_on_search else 3), 'Too few actual settings clicks'
                     assert settings['p95'] < 200 and settings['max'] < 500, settings
                     scheduled = report['phases'][phase[0]]['scheduled_click_first_paint_ms']
                     assert scheduled['p95'] < 200 and scheduled['max'] < 500, scheduled
+                    assert viewer.audio.device is not None and viewer.audio.sink is not None
+                    assert report['phases'][phase[0]]['main_fps'] >= 45
+                    assert report['phases'][phase[0]]['main_frame_gap_ms']['max'] < 200
+                    assert report['phases'][phase[0]]['device_clock_age_ms']['max'] < 100
+                    assert report['phases'][phase[0]]['audio_idle_before_refill']['max'] == 0
             assert not denied_network, 'An isolated path attempted network access'
         finally:
             stop.set()

@@ -1407,39 +1407,39 @@ class Viewer(QDialog):
                     target.channel.setCurrentIndex(target.channel.currentIndex() + 1)
 
     def eventFilter(self, watched, event):
-        if event.type() in (QEvent.ShortcutOverride, QEvent.KeyPress):
+        kind = event.type()
+        if kind in (QEvent.ShortcutOverride, QEvent.KeyPress):
             action = self._shortcut_action(watched, event)
             if action is not None:
                 event.accept()
-                if event.type() == QEvent.KeyPress and not event.isAutoRepeat():
+                if kind == QEvent.KeyPress and not event.isAutoRepeat():
                     self._handle_shortcut(action)
                 return True
-        if watched is self.picture.cover and event.type() == QEvent.Show:
-            watched.hide()
-            return False
-        if (getattr(self, "controls", None) is not None
+        elif kind == QEvent.Show:
+            if watched is self.picture.cover or watched in self.hidden_host_widgets:
+                watched.hide()
+        elif (kind in (QEvent.DragEnter, QEvent.DragMove, QEvent.Drop)
+                and getattr(self, "controls", None) is not None
                 and watched in (self.controls.widget(), self.controls.viewport())
-                and event.type() in (QEvent.DragEnter, QEvent.DragMove, QEvent.Drop)
                 and isinstance(event.source(), RoomRow) and event.source().viewer is self
                 and event.mimeData().hasFormat(ROW_MIME)):
             point = watched.mapTo(self.controls.widget(), event.position().toPoint())
-            if event.type() == QEvent.Drop:
+            if kind == QEvent.Drop:
                 self.finish_row_drag(point)
             else:
                 self.preview_row_drag(point)
             event.acceptProposedAction()
             return True
-        if watched is self.picture.bottom and event.type() == QEvent.Resize:
-            QTimer.singleShot(0, self._layout_restore_control)
-        if event.type() == QEvent.FocusIn:
+        elif kind == QEvent.Resize:
+            if watched is self.picture.bottom:
+                QTimer.singleShot(0, self._layout_restore_control)
+            if self.embedded and watched is self.parentWidget():
+                self.setGeometry(watched.rect())
+        elif kind == QEvent.FocusIn:
             for key, row in self.rows.items():
                 if watched is row.delay:
                     self.show_comparison(key)
                     break
-        if watched in self.hidden_host_widgets and event.type() == QEvent.Show:
-            watched.hide()
-        if self.embedded and watched is self.parentWidget() and event.type() == QEvent.Resize:
-            self.setGeometry(watched.rect())
         return super().eventFilter(watched, event)
 
     def showEvent(self, event):

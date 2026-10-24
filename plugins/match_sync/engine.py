@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import threading
+import time
 from array import array
 from collections import defaultdict, deque
 from dataclasses import dataclass
@@ -101,16 +102,22 @@ def match_scenes(reference: list[Sample], other: list[Sample], *, focused=False)
     else:
         comparisons = ((a, b, ((a.signature ^ b.signature) & dynamic).bit_count() / bits)
                        for a in reference if a.texture >= 4 for b in other if b.texture >= 4)
-    for a, b, distance in comparisons:
+    for index, (a, b, distance) in enumerate(comparisons):
+        if index % 512 == 0:
+            # Qt also needs the GIL to dispatch input and paint. Yield during
+            # candidate-heavy background scans without dropping any evidence.
+            time.sleep(0)
         if distance <= 0.20:
             lag = b.time - a.time
             if abs(lag) <= HISTORY_SECONDS - 5:
                 key = round(lag * 2)
                 # Overlapping buckets keep jitter at a half-second edge together.
+                pair = (a, b, distance, lag)
                 for nearby in (key - 1, key, key + 1):
-                    groups[nearby].append((a, b, distance, lag))
+                    groups[nearby].append(pair)
     ranked = []
     for key, pairs in groups.items():
+        time.sleep(0)
         lag = median(p[3] for p in pairs)
         end = min(reference[-1].time, other[-1].time - lag)
         pairs = [p for p in pairs if abs(p[3] - lag) <= .35 and p[0].time >= end - 8]

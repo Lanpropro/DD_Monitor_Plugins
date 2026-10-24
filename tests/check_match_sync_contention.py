@@ -2,12 +2,37 @@
 import argparse
 import os
 from pathlib import Path
+import random
 import sys
 import tempfile
 import threading
 import time
 import types
 from unittest.mock import patch
+
+
+def search_check():
+    from dataclasses import replace
+    from plugins_user._match_sync.engine import Sample, match_scenes
+    randomizer = random.Random(24)
+    source = [Sample(100 + i * .2, randomizer.getrandbits(512), 20, randomizer.randbytes(256))
+              for i in range(300)]
+    for lag in (5.3, -4.2):
+        other = [replace(sample, time=sample.time + lag) for sample in source]
+        result = match_scenes(source, other)
+        assert result.lag is not None and abs(result.lag - lag) < 1e-8, result
+        assert result.confidence > .8
+    # Similar backgrounds make almost all 90,000 frame pairs eligible. Preserve
+    # the prior rejection and candidate ordering while reducing allocations.
+    randomizer = random.Random(24)
+    base = [randomizer.randrange(40, 216) for _ in range(256)]
+    def samples(offset):
+        return [Sample(100 + i * .2 + offset, randomizer.getrandbits(64), 20,
+                       bytes(min(255, max(0, value + randomizer.randrange(-18, 19))) for value in base))
+                for i in range(300)]
+    result = match_scenes(samples(0), samples(.03))
+    assert result.lag is None and result.confidence == 0, result
+    assert tuple(round(value, 2) for value in result.candidates) == (-54.97, 54.83), result
 
 
 def clock_check(module, parent):
@@ -111,11 +136,12 @@ def main():
     try:
         clock_check(module, host)
         scheduling_check(module, plugins, host)
+        search_check()
     finally:
         host.close()
         app.processEvents()
         app.shutdown()
-    print('PASS: busy audio cannot queue the GUI clock; failed search backs off per feed and resets on retry/reconnect')
+    print('PASS: GUI clock contention, retry/reconnect backoff, matching sign and dense-candidate ambiguity preserved')
 
 
 if __name__ == '__main__':
