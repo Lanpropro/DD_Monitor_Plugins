@@ -253,6 +253,7 @@ class AudioPump(QObject):
         self.feed = None
         self.snapshot = (1.0, ())
         self.played = 0
+        self.clock_snapshot = None
         self.timer = QTimer(self)
         self.timer.setInterval(10)
         self.timer.setTimerType(Qt.PreciseTimer)
@@ -269,6 +270,7 @@ class AudioPump(QObject):
         self.clock_segments.clear()
         self.correction = 0.0
         self.played = 0
+        self.clock_snapshot = None
         output = QMediaDevices.defaultAudioOutput()
         self.device_id = bytes(output.id())
         fmt = QAudioFormat()
@@ -301,21 +303,29 @@ class AudioPump(QObject):
             sink.stop()
             sink.deleteLater()
         self.device = None
+        self.clock_snapshot = None
 
     def clock(self):
-        with self.lock:
-            return self._clock()
+        # Audio mixing/device I/O can outlast a GUI frame. Reuse the last
+        # observed device position rather than queue the GUI behind that work.
+        if self.lock.acquire(blocking=False):
+            try:
+                self.clock_snapshot = self._clock()
+            finally:
+                self.lock.release()
+        value = self.clock_snapshot
+        return (time.monotonic() if value is None else value) + self.correction
 
     def _clock(self):
         if self.sink is None:
-            return time.monotonic() + self.correction
+            return time.monotonic()
         played = self.played if self.thread is not None else self.sink.processedUSecs() * RATE / 1_000_000
         while len(self.clock_segments) > 1 and self.clock_segments[0][1] <= played:
             self.clock_segments.popleft()
         if self.clock_segments:
             first, end, media, rate = self.clock_segments[0]
-            return self.anchor + media + min(max(0, played - first), end - first) / RATE * rate + self.correction
-        return self.anchor + played / RATE + self.correction
+            return self.anchor + media + min(max(0, played - first), end - first) / RATE * rate
+        return self.anchor + played / RATE
 
     def update_snapshot(self):
         # Widgets and room collections belong to the GUI thread. The output
@@ -345,6 +355,7 @@ class AudioPump(QObject):
             print(f"[二路音频] 供给间隔 {(now - self.last_fill) * 1000:.1f}ms", file=sys.stderr, flush=True)
         self.last_fill = now
         self.played = self.sink.processedUSecs() * RATE / 1_000_000
+        self.clock_snapshot = self._clock()
         rate, sources = self.snapshot
         for _ in range(3):
             if self.sink is None or self.device is None:
@@ -367,6 +378,7 @@ class AudioPump(QObject):
             self.clock_segments.append((self.written, self.written + written, self.media_written, actual_rate))
             self.media_written += written / RATE * actual_rate
             self.written += written
+        self.clock_snapshot = self._clock()
 
     def _device_changed(self):
         current = bytes(QMediaDevices.defaultAudioOutput().id())
@@ -700,6 +712,7 @@ class RoomRow(QFrame):
         self.review_alignment = False
         self.awaiting_confirmation = False
         self.next_analysis = 0.0
+        self.search_failures = 0
         self.large_candidate = None
         self.correction_remaining = 0.0
         self.reset_pending = False
@@ -1645,6 +1658,7 @@ class Viewer(QDialog):
         row.recheck_alignment = False
         row.rematch_locally = local
         row.next_analysis = 0.0
+        row.search_failures = 0
         row.match_text = "正在重新对齐比赛画面"
         self.independent_shifts.pop(row.room_id, None)
         self.alignment.candidates.pop(row.room_id, None)
@@ -2064,6 +2078,7 @@ class Viewer(QDialog):
                 row.match_failures = 0
                 row.alignment_started = time.monotonic()
                 row.next_analysis = 0.0
+                row.search_failures = 0
             for row in self.rows.values():
                 row.delay.blockSignals(True)
                 row.delay.setValue(0)
@@ -2139,7 +2154,7 @@ class Viewer(QDialog):
         row.awaiting_confirmation = False
         row.mix_gain = 0.0
         row.rematch_locally = False
-        row.next_analysis = time.monotonic() + 2
+        row.next_analysis = max(row.next_analysis, time.monotonic() + 2)
         row.match_failures = 0
         row.alignment_started = time.monotonic()
         row.match_text = reason + "；后台继续重新搜索"
@@ -2242,6 +2257,8 @@ class Viewer(QDialog):
         row.match_failures = 0
         row.alignment_started = time.monotonic()
         row.recheck_alignment = False
+        row.search_failures = 0
+        row.next_analysis = 0.0
         if self.alignment.manual_locked:
             row.match_text = "手动时间已锁定；勾选自动对齐可解除"
         row.pending.clear()
@@ -2897,6 +2914,15 @@ class Viewer(QDialog):
                 row.next_analysis = time.monotonic() + 2
                 row.refresh_status()
                 continue
+            if not row.match_confirmed and (match.lag is None or match.confidence < .65):
+                # Once detailed matching has enough history, repeated failed
+                # searches need fresh evidence, not another scan every 500 ms.
+                details = getattr(getattr(row.decoder, 'history', None), 'details', ())
+                if len(details) >= 80:
+                    row.search_failures = min(3, row.search_failures + 1)
+                    row.next_analysis = time.monotonic() + 2 ** row.search_failures
+            else:
+                row.search_failures = 0
             if match.lag is not None and match.confidence >= .65 and abs(match.lag) > 15:
                 changed = (row.user_confirmed and row.user_confirmed_lag is not None and abs(match.lag - row.user_confirmed_lag) > 3
                            and not row.needs_epoch_samples)
