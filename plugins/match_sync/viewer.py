@@ -86,6 +86,7 @@ class Canvas(QFrame):
         self.anchor = None
         self.image_rect = QRectF()
         self.setMinimumSize(320, 180)
+        self.setAttribute(Qt.WA_OpaquePaintEvent, True)
 
     def set_frame(self, item):
         key = item[0] if item is not None else None
@@ -97,6 +98,7 @@ class Canvas(QFrame):
         self.frame_key = key
         self.frame = item
         self.image = (item[1] if isinstance(item[1], QImage) else QImage.fromData(item[1])) if item is not None else QImage()
+        self._sync_opaque_paint()
         self.update()
 
     def show_at(self, decoder, timestamp):
@@ -121,6 +123,25 @@ class Canvas(QFrame):
                     and now - self.missing_since <= .15)
         return shared_wait or not retained
 
+    def _source_rect(self):
+        image = self.image
+        source = image.rect()
+        if self.zoom_crop:
+            rect = self.crop
+            source = QRect(round(rect.x() * image.width()), round(rect.y() * image.height()),
+                           max(1, round(rect.width() * image.width())),
+                           max(1, round(rect.height() * image.height()))).intersected(source)
+        return source
+
+    def _sync_opaque_paint(self):
+        covered = (not self.image.isNull() and
+                   self._source_rect().size().scaled(self.size(), Qt.KeepAspectRatio) == self.size())
+        self.setAttribute(Qt.WA_OpaquePaintEvent, not self.transparent_background or covered)
+
+    def resizeEvent(self, event):
+        self._sync_opaque_paint()
+        super().resizeEvent(event)
+
     def paintEvent(self, event):
         painter = QPainter(self)
         if not self.transparent_background:
@@ -132,12 +153,7 @@ class Canvas(QFrame):
             painter.drawText(self.rect(), Qt.AlignCenter, "将左侧关注栏卡片拖到这里，加入比赛二路")
             return
         image = self.image
-        source = image.rect()
-        if self.zoom_crop:
-            rect = self.crop
-            source = QRect(round(rect.x() * image.width()), round(rect.y() * image.height()),
-                           max(1, round(rect.width() * image.width())),
-                           max(1, round(rect.height() * image.height()))).intersected(source)
+        source = self._source_rect()
         size = source.size().scaled(self.size(), Qt.KeepAspectRatio)
         self.image_rect = QRectF((self.width() - size.width()) / 2,
                                 (self.height() - size.height()) / 2,
@@ -502,6 +518,7 @@ class ComparisonPanel(QFrame):
                 canvas.waiting = waiting
             row.actual_position = canvas.frame_key
             if repaint:
+                canvas._sync_opaque_paint()
                 canvas.update()
             relative = shifts[room_id] - shifts.get(reference, 0)
             position = ("主画面基准" if room_id == reference else "与主画面偏移相同" if abs(relative) < .05 else
@@ -1307,9 +1324,11 @@ class Viewer(QDialog):
                                    "#MatchSync #TileVideo, #MatchSync #TileBottom { background: transparent; }"
                                    if self.skin_visible else "")
         self.canvas.transparent_background = self.skin_visible
+        self.canvas._sync_opaque_paint()
         self.canvas.update()
         for _card, _name, canvas, _state in self.comparison_panel.cards.values():
             canvas.transparent_background = self.skin_visible
+            canvas._sync_opaque_paint()
             canvas.update()
         self.settings_panel.update()
 
