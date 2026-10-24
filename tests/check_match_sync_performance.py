@@ -13,7 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', type=Path, required=True)
-    checks = ('selfcheck_match_sync_multistream.py', 'selfcheck_match_sync_comparison.py')
+    checks = ('selfcheck_match_sync_multistream.py', 'selfcheck_match_sync_comparison.py',
+              'selfcheck_match_sync_video.py')
     parser.add_argument('--check', choices=checks)
     args = parser.parse_args()
     host = args.host.resolve()
