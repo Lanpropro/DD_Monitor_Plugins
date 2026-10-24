@@ -10,7 +10,7 @@ import struct
 import time
 import uuid
 import zlib
-from urllib.parse import parse_qsl, unquote, urlsplit
+from urllib.parse import parse_qsl, unquote, urljoin, urlsplit
 
 import requests
 from streamlink import Streamlink
@@ -85,8 +85,52 @@ def huya_follow_request(session, method, uid, target):
 
 
 class LiveQualityPlatform(api.Platform):
+    share_hosts = ()
+
     def __init__(self):
         self._qualities = {}                  # 只保存档位元数据，不保存带签名的地址
+
+    def _share_url(self, text):
+        parts = urlsplit(str(text or "").strip())
+        if parts.hostname not in self.share_hosts:
+            return ""
+        if (parts.scheme not in ("http", "https") or parts.username or parts.password or
+                parts.port not in (None, 80, 443) or not parts.path.strip("/")):
+            raise ValueError(f"请使用{self.label}官方直播分享链接")
+        return parts._replace(fragment="").geturl()
+
+    def _resolve_share_input(self, text):
+        """后台返回规范输入及分享页房间数据；界面的 normalize 不联网。"""
+        current = self._share_url(text)
+        if not current:
+            return text, None
+        seen = set()
+        for _ in range(4):
+            if not self._share_url(current):
+                return self.normalize(current), None
+            if current in seen:
+                raise ValueError("分享链接循环跳转，请重新复制直播间链接")
+            seen.add(current)
+            with requests.get(current, headers={"User-Agent": "Mozilla/5.0"},
+                    timeout=(3, 5), allow_redirects=False, stream=True) as response:
+                response.raise_for_status()
+                target = response.headers.get("Location", "")
+                if response.status_code in (301, 302, 303, 307, 308) and target:
+                    current = urljoin(current, target)
+                    # 在请求下一跳之前检查平台、协议、凭证和端口。
+                    parts = urlsplit(current)
+                    if (parts.scheme not in ("http", "https") or
+                            parts.hostname not in (*self.hosts, *self.share_hosts)):
+                        raise ValueError("分享链接没有指向对应平台的直播间")
+                    self.normalize(current)
+                else:
+                    return self._share_page_room(current, response)
+        if not self._share_url(current):
+            return self.normalize(current), None
+        raise ValueError("分享链接跳转过多，请使用完整直播间链接")
+
+    def _share_page_room(self, url, response):
+        raise ValueError("分享链接未指向可识别的直播间，请重新复制直播间链接")
 
     def room_quality_options(self, room_id: str) -> list[dict]:
         return [{key: value for key, value in item.items() if key in ("qn", "desc", "label")} for item in
@@ -108,6 +152,8 @@ class LiveQualityPlatform(api.Platform):
 
 class HuyaPlatform(LiveQualityPlatform):
     kind = "huya"
+    share_hosts = ("hy.fan",)
+    hosts = ("www.huya.com", "huya.com", "m.huya.com")
     label = "虎牙"
     room_input_hint = "虎牙直播间链接"
     playback_mode = "stream"
@@ -255,18 +301,19 @@ class HuyaPlatform(LiveQualityPlatform):
             return True
         try:
             parts = urlsplit(text)
-            return parts.scheme in ("http", "https") and parts.hostname in (
-                "www.huya.com", "huya.com", "m.huya.com")
+            return parts.scheme in ("http", "https") and parts.hostname in (*self.hosts, *self.share_hosts)
         except ValueError:
             return False
 
     def normalize(self, room_id: str) -> str:
         text = str(room_id or "").strip()
+        if share := self._share_url(text):
+            return share
         raw = text[5:] if text.startswith("huya:") else text
         if "://" in raw:
             parts = urlsplit(raw)
             if (parts.scheme not in ("http", "https") or
-                    parts.hostname not in ("www.huya.com", "huya.com", "m.huya.com") or
+                    parts.hostname not in self.hosts or
                     parts.username or parts.password or parts.port not in (None, 80, 443)):
                 raise ValueError("请使用虎牙官方直播间链接")
             raw = parts.path.strip("/")
@@ -337,6 +384,7 @@ class HuyaPlatform(LiveQualityPlatform):
         return session, parser, streams
 
     def room_info(self, room_id: str) -> api.RoomInfo:
+        room_id, _share = self._resolve_share_input(room_id)
         canonical = self.normalize(room_id)
         raw = canonical.split(":", 1)[1]
         try:
@@ -462,12 +510,14 @@ class NumericLivePlatform(LiveQualityPlatform):
             return True
         try:
             parts = urlsplit(text)
-            return parts.scheme in ("http", "https") and parts.hostname in self.hosts
+            return parts.scheme in ("http", "https") and parts.hostname in (*self.hosts, *self.share_hosts)
         except ValueError:
             return False
 
     def normalize(self, room_id: str) -> str:
         text = str(room_id or "").strip()
+        if share := self._share_url(text):
+            return share
         raw = text[len(self.kind) + 1:] if text.startswith(self.kind + ":") else text
         if "://" in raw:
             parts = urlsplit(raw)
@@ -549,6 +599,7 @@ class NumericLivePlatform(LiveQualityPlatform):
 
 class DouyuPlatform(NumericLivePlatform):
     kind = "douyu"
+    share_hosts = ("s.douyu.com",)
     label = "斗鱼"
     room_input_hint = "斗鱼直播间链接"
     hosts = ("www.douyu.com", "douyu.com", "m.douyu.com")
@@ -646,6 +697,7 @@ class DouyuPlatform(NumericLivePlatform):
             return response.json()["room"]
 
     def room_info(self, room_id: str) -> api.RoomInfo:
+        room_id, _share = self._resolve_share_input(room_id)
         canonical = self.normalize(room_id)
         raw = canonical.split(":", 1)[1]
         try:
@@ -769,6 +821,7 @@ class DouyuPlatform(NumericLivePlatform):
 
 class DouyinPlatform(NumericLivePlatform):
     kind = "douyin"
+    share_hosts = ("v.douyin.com", "webcast.amemv.com")
     label = "抖音"
     room_input_hint = "抖音直播间链接"
     profile_browser_init_script = (Path(__file__).parent / "douyin_profile.js").read_text(encoding="utf-8")
@@ -1021,7 +1074,9 @@ class DouyinPlatform(NumericLivePlatform):
                 continue
             room = data["room"]
             owner = room.get("owner") or {}
-            if str(room.get("idStr")) != internal or str(owner.get("idStr")) != uid:
+            owner_uid = str(owner.get("idStr") or "")
+            if (str(room.get("idStr")) != internal or
+                    (uid and owner_uid != uid) or not re.fullmatch(r"[1-9][0-9]{0,19}", owner_uid)):
                 continue
             rid = str(owner.get("webRid") or "")
             if not re.fullmatch(r"[0-9]{1,20}", rid) or type(room.get("status")) is not int:
@@ -1030,7 +1085,7 @@ class DouyinPlatform(NumericLivePlatform):
             qualities = stream.get("liveCoreSdkData", {}).get("pullData", {}).get("options", {}).get("qualities", [])
             return {"id_str": internal, "status": room["status"], "title": room.get("title", ""),
                     "ttwid": visitor if isinstance(visitor, str) else "",
-                    "owner": {"id_str": uid, "web_rid": rid, "nickname": owner.get("nickname", ""),
+                    "owner": {"id_str": owner_uid, "web_rid": rid, "nickname": owner.get("nickname", ""),
                               "avatar_thumb": {"url_list": (owner.get("avatarThumb") or {}).get("urlList", [])}},
                     "cover": {"url_list": (room.get("cover") or {}).get("urlList", [])},
                     "stream_url": {"flv_pull_url": stream.get("flvPullUrl") or {},
@@ -1069,11 +1124,24 @@ class DouyinPlatform(NumericLivePlatform):
             return room_ids[0]
         return path
 
+    def _share_page_room(self, url, response):
+        parts = urlsplit(url)
+        match = re.fullmatch(r"/(?:douyin/)?webcast/reflow/([1-9][0-9]{0,19})/?", parts.path)
+        if parts.hostname != "webcast.amemv.com" or match is None:
+            return super()._share_page_room(url, response)
+        # 复用官网分享页解析，并核对当场直播 ID；返回的是主播固定 webRid。
+        response.encoding = "utf-8"
+        room = self._share_info(response.text, match[1], "", response.cookies.get("ttwid"))
+        canonical = self.normalize("douyin:" + room["owner"]["web_rid"])
+        self._anchor_uids[canonical] = room["owner"]["id_str"]
+        return canonical, room
+
     def room_info(self, room_id: str) -> api.RoomInfo:
+        room_id, share = self._resolve_share_input(room_id)
         canonical = self.normalize(room_id)
         raw = canonical.split(":", 1)[1]
         try:
-            info = self.room_data(canonical)
+            info = {"room": share} if share is not None else self.room_data(canonical)
             room = info["room"]
             owner = room.get("owner") or info.get("anchor") or {}
             return api.RoomInfo(room_id=canonical, uname=owner.get("nickname") or f"抖音 · {raw}",
