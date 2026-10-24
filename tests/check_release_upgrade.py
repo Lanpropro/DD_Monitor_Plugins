@@ -73,7 +73,29 @@ def main():
         assert read_manifest(str(target), "domestic_live")["version"] == "1.2"
         assert (target / "user-data.txt").read_bytes() == b"preserve 1.1 data"
         assert (target / "plugin.py").read_bytes() == (ROOT / "plugins/domestic_live/plugin.py").read_bytes()
-    print("PASS: 1.0 plugins upgrade to current versions; domestic 1.1 -> 1.2; source and user data preserved")
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        old_zip = root / 'match_sync-1.3.zip'
+        paths = subprocess.check_output(['git', 'ls-tree', '-r', '--name-only', 'match-sync-v1.3',
+            '--', 'plugins/match_sync'], cwd=ROOT, text=True).splitlines()
+        with zipfile.ZipFile(old_zip, 'w') as archive:
+            for source in paths:
+                data = subprocess.check_output(['git', 'show', 'match-sync-v1.3:' + source], cwd=ROOT)
+                archive.writestr(source.removeprefix('plugins/'), data)
+        manager = PluginManager(plugins_dir=str(root / 'plugins'), enabled=[])
+        manager.install_zip(str(old_zip))
+        target = root / 'plugins/match_sync'
+        assert read_manifest(str(target), 'match_sync')['version'] == '1.3'
+        assert not (target / 'fullscreen.py').exists()
+        (target / 'user-data.txt').write_bytes(b'preserve 1.3 settings')
+        stage(manager, str(ROOT / 'dist' / ('match_sync-' + versions['match_sync'] + '.zip')),
+              'match_sync', versions['match_sync'])
+        apply_pending(manager)
+        assert read_manifest(str(target), 'match_sync')['version'] == versions['match_sync']
+        for name in ('viewer.py', 'fullscreen.py'):
+            assert (target / name).read_bytes() == (ROOT / 'plugins/match_sync' / name).read_bytes()
+        assert (target / 'user-data.txt').read_bytes() == b'preserve 1.3 settings'
+    print("PASS: old plugins upgrade to current versions, including match_sync 1.3; source and user data preserved")
 
 
 if __name__ == "__main__":
