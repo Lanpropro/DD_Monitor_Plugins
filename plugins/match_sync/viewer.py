@@ -23,6 +23,7 @@ from ddm.dialogs import SHORTCUT_ACTIONS
 from ddm import config as config_module, motion, theme
 from .engine import route_pcm_s16_stereo, Alignment, Match, RATE, SafetyBuffer, LateBuffer, match_scenes, refine_match, mix_pcm, resample_pcm
 from .media import Chat, Decoder, PlatformChat
+from .fullscreen import mark_fullscreen
 
 COLORS = ("#38bdf8", "#fb7185", "#a78bfa", "#4ade80", "#fbbf24", "#fb923c")
 ROW_MIME = "application/x-ddm-match-sync-row"
@@ -2001,13 +2002,20 @@ class Viewer(QDialog):
             return
         if not self.rows:
             return
-        dialog = QDialog(self.window())
+        dialog = QDialog(self.window(), Qt.Window | Qt.FramelessWindowHint)
+        dialog.setScreen(self.picture.screen())
         dialog.setWindowTitle("比赛二路主画面")
+        dialog.settings = self.context.window.settings
         dialog._fullscreen_tile = self.picture
         dialog._fullscreen_cursor = FullscreenCursor(dialog)
         sizes = self.body_split.sizes()
-        QVBoxLayout(dialog).addWidget(self.picture)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.picture)
+        fullscreen_hwnd = None
         def restore(_result):
+            if fullscreen_hwnd is not None:
+                mark_fullscreen(fullscreen_hwnd, False)
             dialog._fullscreen_cursor.stop()
             self.body_split.insertWidget(0, self.picture)
             self.body_split.setSizes(sizes)
@@ -2016,6 +2024,11 @@ class Viewer(QDialog):
         dialog.finished.connect(restore)
         self.fullscreen_dialog = dialog
         dialog.showFullScreen()
+        if sys.platform == 'win32' and QApplication.platformName() == 'windows':
+            fullscreen_hwnd = int(dialog.winId())
+            mark_fullscreen(fullscreen_hwnd, True)
+        dialog.raise_()
+        dialog.activateWindow()
         dialog._fullscreen_cursor.start()
 
     def _stop_recording(self):

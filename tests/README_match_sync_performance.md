@@ -6,6 +6,11 @@
 检查设置的绘制／布局事件不会查询插件控件，并保留快捷键、焦点、尺寸和隐藏宿主路由。
 宿主需要可用的 libmpv、PySide6、PyAV 和 NumPy。
 
+`check_match_sync_fullscreen.py --host <宿主目录>` 检查全屏窗口类型、显示器、
+Windows Shell 标记及切换/Esc/停止/关闭的还原，并验证 COM 成功/失败路径的引用和初始化配对。
+默认离屏；`--native-api` 仅创建隐藏 HWND，实际调用 ITaskbarList2 标记/撤销，不弹出全屏测试窗口。
+隐藏窗口测试不能证明可见任务栏遮挡已验收，仍需真实桌面全屏复测。
+
 ```powershell
 python tests/check_match_sync_contention.py --host ../DD_Monitor_CE
 python tests/check_match_sync_responsiveness.py --host <宿主测试工作树> --mpv-dir <libmpv所在目录> --ffmpeg <ffmpeg.exe> --output <结果.json>
