@@ -1,5 +1,9 @@
 # 二路插件响应性回归
 
+`check_match_sync_independent.py --host <宿主目录>` 使用合成缓存与 PCM 验证副路
+独立播放：无偏移、零偏移、已有偏移、声音开关、暂停、主路隔离、旧匹配结果、
+重连和返回同步。离屏运行，禁止联网，不打开音频设备或真实直播。
+
 `check_match_sync_contention.py --host <宿主目录>` 检查音频供给持锁时 GUI
 读取时钟不等待，并检查失败搜索的逐路 2/4/8 秒退避、手动重试和重连重置，以及
 候选密集场景的歧义拒绝及候选顺序。`check_match_sync_event_filter.py --host <宿主目录>`
