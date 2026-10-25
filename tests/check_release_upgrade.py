@@ -53,26 +53,28 @@ def main():
         assert len(manager.plugins) == 3 and not manager.skipped
         assert all(plugin.version == versions[plugin.context.name] for plugin in manager.plugins)
         manager.unload()
-    with tempfile.TemporaryDirectory() as directory:
-        root = Path(directory)
-        old_zip = root / "domestic_live-1.1.zip"
-        paths = subprocess.check_output(["git", "ls-tree", "-r", "--name-only", "v1.1",
-            "--", "plugins/domestic_live"], cwd=ROOT, text=True).splitlines()
-        with zipfile.ZipFile(old_zip, "w") as archive:
-            for source in paths:
-                data = subprocess.check_output(["git", "show", "v1.1:" + source], cwd=ROOT)
-                archive.writestr(source.removeprefix("plugins/"), data)
-        manager = PluginManager(plugins_dir=str(root / "plugins"), enabled=[])
-        manager.install_zip(str(old_zip))
-        target = root / "plugins/domestic_live"
-        assert read_manifest(str(target), "domestic_live")["version"] == "1.1"
-        (target / "user-data.txt").write_bytes(b"preserve 1.1 data")
-        stage(manager, str(ROOT / "dist" / "domestic_live-1.2.zip"), "domestic_live", "1.2")
-        assert read_manifest(str(target), "domestic_live")["version"] == "1.1"
-        apply_pending(manager)
-        assert read_manifest(str(target), "domestic_live")["version"] == "1.2"
-        assert (target / "user-data.txt").read_bytes() == b"preserve 1.1 data"
-        assert (target / "plugin.py").read_bytes() == (ROOT / "plugins/domestic_live/plugin.py").read_bytes()
+    for old_version, ref in (("1.1", "v1.1"), ("1.2", "domestic-live-v1.2")):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old_zip = root / f"domestic_live-{old_version}.zip"
+            paths = subprocess.check_output(["git", "ls-tree", "-r", "--name-only", ref,
+                "--", "plugins/domestic_live"], cwd=ROOT, text=True).splitlines()
+            with zipfile.ZipFile(old_zip, "w") as archive:
+                for source in paths:
+                    data = subprocess.check_output(["git", "show", ref + ":" + source], cwd=ROOT)
+                    archive.writestr(source.removeprefix("plugins/"), data)
+            manager = PluginManager(plugins_dir=str(root / "plugins"), enabled=[])
+            manager.install_zip(str(old_zip))
+            target = root / "plugins/domestic_live"
+            assert read_manifest(str(target), "domestic_live")["version"] == old_version
+            (target / "user-data.txt").write_bytes(b"preserve previous data")
+            current = versions["domestic_live"]
+            stage(manager, str(ROOT / "dist" / f"domestic_live-{current}.zip"), "domestic_live", current)
+            assert read_manifest(str(target), "domestic_live")["version"] == old_version
+            apply_pending(manager)
+            assert read_manifest(str(target), "domestic_live")["version"] == current
+            assert (target / "user-data.txt").read_bytes() == b"preserve previous data"
+            assert (target / "plugin.py").read_bytes() == (ROOT / "plugins/domestic_live/plugin.py").read_bytes()
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         old_zip = root / 'match_sync-1.3.zip'
@@ -95,7 +97,7 @@ def main():
         for name in ('viewer.py', 'fullscreen.py'):
             assert (target / name).read_bytes() == (ROOT / 'plugins/match_sync' / name).read_bytes()
         assert (target / 'user-data.txt').read_bytes() == b'preserve 1.3 settings'
-    print("PASS: old plugins upgrade to current versions, including match_sync 1.3; source and user data preserved")
+    print("PASS: old plugins upgrade to current versions, including domestic 1.1/1.2 and match_sync 1.3; source and user data preserved")
 
 
 if __name__ == "__main__":
