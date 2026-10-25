@@ -84,6 +84,30 @@ class IntegrationTests(unittest.TestCase):
     def composer(self,tile=None):
         tile=tile or self.window.wall.tiles[0]
         return next(e.control.widget for e in tile._plugin_controls.entries if e.owner=='bili_live')
+    def test_host_enter_focus_and_fullscreen_input_survive_plugin_update(self):
+        composer=self.composer();tile=self.window.wall.tiles[0]
+        tile.pause_button.setFocus();APP.processEvents()
+        with patch.object(self.window,'_tile_under_cursor',return_value=tile):
+            self.assertTrue(self.window._handle_shortcut('Return'))
+        self.assertTrue(composer.edit.hasFocus())
+        composer.edit.setText('keep draft')
+        self.window._fullscreen_tile=tile
+        try:
+            outside=tile.mapToGlobal(QPoint(-100,-100))
+            with patch('ddm.fullscreen_cursor.QCursor.pos',return_value=outside), \
+                    patch('ddm.widgets.QCursor.pos',return_value=outside):
+                self.window._fullscreen_cursor.update_cursor()
+                tile._hide_controls_if_outside()
+            self.assertEqual(tile._bar_target,0.0)
+            self.assertTrue(composer.edit.hasFocus())
+            self.assertEqual(composer.edit.text(),'keep draft')
+        finally:
+            self.window._fullscreen_cursor.stop()
+            self.window._fullscreen_tile=None
+        composer.edit.clearFocus();composer.edit.setEnabled(False)
+        self.assertFalse(tile._plugin_controls.entries[0].control.focus_input())
+        composer.edit.setEnabled(True)
+
     def test_installed_upgrade_picker_posts_selected_gift_once(self):
         from unittest.mock import Mock
         catalog=self.api.normalize_catalog(upgrade_payload(),'90001')

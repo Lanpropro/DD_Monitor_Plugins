@@ -25,6 +25,8 @@ class Notices:
 
 class FeedbackTests(unittest.TestCase):
     def setUp(self):
+        media=patch('ddm_plugin_bili_live.gift_media.GiftMediaLoader.request')
+        media.start();self.addCleanup(media.stop)
         session.set_login_cookies('fake','csrf','device-test');self.notices=Notices()
         self.widget=DanmakuComposer(session,notifier=self.notices)
         self.widget.set_room('101',room={'room_id':'101','uname':'测试主播','title':'直播间标题'})

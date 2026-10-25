@@ -74,13 +74,31 @@ class ComposerTests(unittest.TestCase):
         self.addCleanup(self.cleanup)
 
     def cleanup(self):
+        import shiboken6
+        self.composer.shutdown()
         from ddm_plugin_bili_live.composer import _active_requests
         for worker in list(_active_requests):
             worker.wait(3000)
         APP.processEvents()
         self.composer.close()
+        self.composer.deleteLater()
+        APP.sendPostedEvents(None, QEvent.DeferredDelete)
+        self.assertFalse(shiboken6.isValid(self.composer))
         session.set_login_cookies(*self.saved)
         APP.processEvents()
+
+    def test_held_enter_does_not_repeat_failed_send(self):
+        self.composer.edit.setText('retained draft')
+        with patch.object(bili, 'send_danmaku', side_effect=ValueError('synthetic rejection')) as send:
+            QTest.keyClick(self.composer.edit, Qt.Key_Return)
+            settle(lambda: not self.composer.busy)
+            self.assertEqual(send.call_count, 1)
+            for key in (Qt.Key_Return, Qt.Key_Enter):
+                APP.sendEvent(self.composer.edit, QKeyEvent(
+                    QEvent.KeyPress, key, Qt.NoModifier, '', True))
+                APP.processEvents()
+            self.assertEqual(send.call_count, 1)
+            self.assertEqual(self.composer.edit.text(), 'retained draft')
 
     def test_success_clears_only_the_sending_rooms_draft(self):
         from ddm_plugin_bili_live.composer import DanmakuComposer
@@ -297,7 +315,7 @@ class ComposerTests(unittest.TestCase):
             self.composer.emote_button.click()
             popup = self.composer.popup
             settle(lambda: any((b.text() == '[doge]' for b in popup.findChildren(QToolButton))))
-            self.assertEqual([popup.tabs.tabText(i) for i in range(popup.tabs.count())], ['小表情', '主播表情'])
+            self.assertEqual([popup.tabs.tabToolTip(i) for i in range(popup.tabs.count())], ['小表情', '主播表情'])
             popup.tabs.setCurrentIndex(1)
             settle(lambda: any((b.text() == '锁定' for b in popup.findChildren(QToolButton))))
             buttons = popup.findChildren(QToolButton)

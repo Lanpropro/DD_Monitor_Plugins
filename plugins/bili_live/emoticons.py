@@ -151,6 +151,30 @@ class _EmoticonImageLoader(QThread):
                 self.loaded.emit(self.generation, url, pixmap)
 
 
+def _emoji_category_icon():
+    pixmap = QPixmap(48, 48)
+    pixmap.setDevicePixelRatio(2)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.translate(12, 12)
+    pen = QPen(theme.qcolor(theme.TEXT2), 1.7)
+    pen.setCapStyle(Qt.RoundCap)
+    painter.setPen(pen)
+    painter.setBrush(Qt.NoBrush)
+    painter.drawEllipse(QRectF(-8, -8, 16, 16))
+    smile = QPainterPath(QPointF(-3.6, 1.8))
+    smile.quadTo(0, 6, 3.6, 1.8)
+    painter.drawPath(smile)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(theme.qcolor(theme.TEXT2))
+    for x in (-3, 3):
+        painter.drawEllipse(QPointF(x, -2.3), .9, .9)
+    painter.end()
+    return QIcon(pixmap)
+
+
+
 class EmoticonTabs(QTabBar):
     """包名和封面共用固定方形位置，异步换图时不重排分类。"""
 
@@ -343,6 +367,9 @@ class EmoticonPopup(AnchoredPopup):
             if package["pkg_type"] == 3 and name.lower() == "emoji":
                 name = "表情"
             index = self.tabs.addTab(name)
+            if package['pkg_type'] == 3:
+                self.tabs.setTabIcon(index, _emoji_category_icon())
+                self.tabs.setTabText(index, '')
             self.tabs.setTabData(index, self.order.package_key(package))
             self.tabs.setTabToolTip(index, name)
             self.tabs.setAccessibleTabName(index, name)
@@ -359,6 +386,11 @@ class EmoticonPopup(AnchoredPopup):
         self.tabs.blockSignals(False)
         self.tabs.setVisible(bool(self._packages))
         self._select_package(self.tabs.currentIndex())
+
+    def refresh_theme(self):
+        for index, package in enumerate(self._packages):
+            if package['pkg_type'] == 3:
+                self.tabs.setTabIcon(index, _emoji_category_icon())
 
     def _tab_moved(self, source, target):
         self._packages.insert(target, self._packages.pop(source))

@@ -35,6 +35,22 @@ def buttons(popup):
 
 class EmoticonTabTests(unittest.TestCase):
 
+    def test_standard_category_uses_local_icon_in_both_themes(self):
+        from ddm import theme
+        self.popup.set_packages([package('emoji',0),package('主播表情',0,2)])
+        images=[]
+        try:
+            for mode in ('dark','light'):
+                theme.apply(mode);APP.processEvents()
+                self.assertFalse(self.popup.tabs.tabIcon(0).isNull())
+                self.assertEqual(self.popup.tabs.tabText(0),'')
+                self.assertEqual(self.popup.tabs.tabToolTip(0),'表情')
+                self.assertEqual(self.popup.tabs.accessibleTabName(0),'表情')
+                self.assertEqual(self.popup.tabs.tabText(1),'主播表情')
+                images.append(self.popup.tabs.tabIcon(0).pixmap(24,24).toImage())
+            self.assertNotEqual(images[0],images[1],'local category icon must follow the theme')
+        finally:theme.apply('dark')
+
     def test_refresh_retains_loaded_icons_selection_and_scroll_until_result(self):
         with patch.object(image_api,'_load_image',side_effect=self.load):
             packs=[package('第一包'),package('保留',80)]
@@ -92,7 +108,7 @@ class EmoticonTabTests(unittest.TestCase):
             self.popup.set_packages([package('小表情'), package('主播表情', kind=2), package('未知', kind=8)])
             tabs = self.popup.findChild(QTabBar)
             self.assertIsNotNone(tabs, '每个支持的表情包应有独立 Tab')
-            self.assertEqual([tabs.tabText(i) for i in range(tabs.count())], ['小表情', '主播表情'])
+            self.assertEqual([tabs.tabToolTip(i) for i in range(tabs.count())], ['小表情', '主播表情'])
             settle(lambda: len(buttons(self.popup)) == 2 and all((not b.icon().isNull() for b in buttons(self.popup))))
             self.assertEqual({b.text() for b in buttons(self.popup)}, {'[小表情-0]', '[小表情-1]'})
             self.assertEqual({url for url, _ in self.calls}, {'https://example.invalid/小表情-0.png', 'https://example.invalid/小表情-1.png'})
@@ -155,7 +171,8 @@ class EmoticonTabTests(unittest.TestCase):
             before = sizes()
             self.assertEqual(len(set(before)), 1, '包名长度不应改变分类按钮的尺寸')
             self.assertTrue(all((width == height for width, height in before)), '分类入口应是方形')
-            self.assertEqual(self.popup.tabs.tabText(0), '表情')
+            self.assertEqual(self.popup.tabs.tabText(0), '')
+            self.assertEqual(self.popup.tabs.tabToolTip(0), '表情')
             self.release.set()
             settle(lambda: not _active_requests)
             self.assertFalse(self.popup.tabs.tabIcon(1).isNull())
@@ -236,12 +253,14 @@ class EmoticonTabTests(unittest.TestCase):
             return self.load(url, subdir)
         with patch.object(image_api, '_load_image', side_effect=load):
             self.popup.set_packages(packs)
-            self.assertEqual([self.popup.tabs.tabText(i) for i in range(4)], ['表情', '通用表情', '主播表情', '装扮表情'], '先显示包名，再逐张替换封面')
-            self.assertTrue(all((self.popup.tabs.tabIcon(i).isNull() for i in range(4))))
+            self.assertEqual([self.popup.tabs.tabText(i) for i in range(4)], ['', '通用表情', '主播表情', '装扮表情'], '普通表情使用本地图标，其他包先显示名称再替换封面')
+            self.assertFalse(self.popup.tabs.tabIcon(0).isNull())
+            self.assertTrue(all((self.popup.tabs.tabIcon(i).isNull() for i in range(1,4))))
             self.release.set()
             settle(lambda: not _active_requests)
-            self.assertEqual(self.popup.tabs.tabText(0), '表情')
-            self.assertTrue(self.popup.tabs.tabIcon(0).isNull())
+            self.assertEqual(self.popup.tabs.tabText(0), '')
+            self.assertEqual(self.popup.tabs.tabToolTip(0), '表情')
+            self.assertFalse(self.popup.tabs.tabIcon(0).isNull())
             for index, name in ((1, '通用表情'), (2, '主播表情'), (3, '装扮表情')):
                 self.assertFalse(self.popup.tabs.tabIcon(index).isNull(), '未选中的表情包也需要封面导航')
                 self.assertEqual(self.popup.tabs.tabText(index), '')

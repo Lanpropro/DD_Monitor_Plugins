@@ -1,6 +1,7 @@
 """Bilibili interaction entry using public host hooks only."""
 import os
 import weakref
+from PySide6.QtCore import Qt
 from ddm import plugins as api
 
 __path__ = [os.path.dirname(__file__)]
@@ -30,6 +31,11 @@ class BiliLive(api.Plugin):
                 context.invalidate_layout()
             def interaction_active(self):
                 return self.widget.interaction_active()
+            def focus_input(self):
+                if not self.widget.edit.isEnabled():
+                    return False
+                self.widget.edit.setFocus(Qt.ShortcutFocusReason)
+                return True
             def shutdown(self):
                 self.widget.shutdown()
         control = BiliControl(DanmakuComposer(self.session, context.parent, coordinator=self.coordinator, notifier=NotificationReporter(self.context)), minimum_width=90, preferred_width=240)
