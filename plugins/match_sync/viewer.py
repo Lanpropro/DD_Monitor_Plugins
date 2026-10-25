@@ -804,6 +804,7 @@ class RoomRow(QFrame):
         self.realign.setToolTip("重新匹配本路比赛画面，不重启直播流，不改变其他路已确认偏移。")
         self.realign.clicked.connect(lambda: viewer.retry_alignment(room_id))
         self.independent = QPushButton("独立播放")
+        self.independent.setSizePolicy(policy)
         self.independent.setCheckable(True)
         self.independent.setToolTip("独立播放本路声音、画面与弹幕，不等待对齐；再次点击恢复同步。声音开关和音量仍然有效。")
         self.independent.toggled.connect(lambda enabled: viewer.set_independent(room_id, enabled))

@@ -50,6 +50,13 @@ def main():
                 for frame in range(1000, 1201):
                     row.decoder.history.append(frame / 10, image)
             peer = viewer.rows['2']
+            viewer.resize(1600, 900)
+            viewer.show()
+            app.processEvents()
+            app.processEvents()
+            buttons = [row.independent for row in viewer.rows.values()]
+            assert max(button.x() for button in buttons) - min(button.x() for button in buttons) <= 1, \
+                'Hidden main button must reserve its control column'
             for lag in (None, 0.0, 3.0):
                 peer.independent.blockSignals(True)
                 peer.independent.setChecked(False)
