@@ -1,5 +1,9 @@
 # 二路插件响应性回归
 
+`check_match_sync_audio_probe.py` 验证开发工具的正负声音偏移、增益与噪声、
+无关/被淹没声音、静音及周期歧义。仅合成数据，不启用运行时声音匹配或 OCR；
+调查结论见 [无比赛画面对齐](../docs/development/match-sync-commentary-alignment.md)。
+
 `check_match_sync_recording.py --host <宿主目录> --output <work/test-artifacts下的目录>`
 生成并解码 H264/HEVC 本地素材（含 B 帧），验证视频复制、三条具名 AAC 音轨、
 440/880Hz 声音隔离、250ms 偏移校正、缺失音轨静音、停止封装及断线模板保护；
