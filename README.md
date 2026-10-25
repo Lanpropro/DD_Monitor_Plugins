@@ -40,6 +40,8 @@ YouTube 已结束的直播可保留关注，但不会将录像当作正在直播
 
 ## 开发与打包
 
+新插件作者可通过[投稿表单](https://github.com/Lanpropro/DD_Monitor_Plugins/issues/new?template=plugin-submission.yml)提交资料和公开 Release ZIP，**无需自己创建 PR**。检查、安全审核和维护者上架步骤见[新插件投稿](SUBMISSIONS.md)。源码贡献仍支持下面的原有流程。
+
 分支、PR、提交整理和验证流程见[开发与贡献指南](CONTRIBUTING.md)。
 
 目录 `plugins/<ID>/` 包含 `plugin.json`、`plugin.py`、README 和所需资源。
