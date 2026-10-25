@@ -64,11 +64,19 @@ def main():
             assert not viewer.rewind(9) and not viewer.replay_seconds
             assert viewer.rewind(5)
             assert abs(viewer.canvas.frame_key - 109) < .11
-            assert all(abs(viewer.shifts()[key] - (shift - 5)) < 1e-8 for key, shift in baseline.items())
+            assert viewer.shifts() == baseline, 'The live alignment timeline must continue independently'
+            assert all(abs(viewer.playback_shifts()[key] - (shift - 5)) < 1e-8 for key, shift in baseline.items())
             assert viewer.live.isEnabled()
             lags = dict(viewer.alignment.lags)
-            viewer._matched(viewer.generation, {'2': module.Match(9, 1, 'queued', refined=True)})
+            with patch.object(viewer.alignment, 'accept', return_value=False) as accept:
+                viewer._matched(viewer.generation, {'2': module.Match(2, 1, 'live match', refined=True)})
+                assert accept.called, 'Automatic live matching must continue during replay'
             assert viewer.alignment.lags == lags
+            viewer.matching = False
+            with patch.object(module.threading, 'Thread') as thread:
+                viewer.analyse()
+                assert thread.return_value.start.called, 'Replay must still schedule live analysis'
+            viewer.matching = False
             now[0] += .3
             with patch.object(viewer.panel, 'add_event') as chat:
                 viewer.render()
@@ -101,10 +109,57 @@ def main():
                     row.decoder.history.append(frame / 10, image)
             viewer.render()
             assert not viewer.replay_seconds
+            # A simulated 720-second receive session exposes an absolute 10-minute slider.
+            from collections import deque
+            from plugins_user._match_sync.engine import History, Sample
+            now[0] = 1000
+            for key, row in viewer.rows.items():
+                row.decoder.history = History(seconds=660, byte_limit=64 * 1024 * 1024)
+                for stamp in range(300, 1001):
+                    row.decoder.history.append(stamp, image)
+                row.decoder.history.details = deque(Sample(stamp, stamp, 10) for stamp in range(940, 1001))
+                row.match_confirmed = row.user_confirmed = True
+                row.awaiting_confirmation = False
+                row.was_isolated = False
+                row.sync_state, row.mix_gain = '已同步', 1
+            viewer.alignment.lags = {'1': 0, '2': 2}
+            viewer.rendered_shifts.clear()
+            viewer.render()
+            assert viewer.replay_available() == 600
+            assert not viewer.seek_replay(601)
+            assert viewer.seek_replay(600)
+            assert viewer.replay.minimum() == -600 and viewer.replay.value() == -600
+            assert viewer.replay_position.text() == '-10:00'
+            assert abs(viewer.canvas.frame_key - 394) < .1
+            viewer.replay.setValue(-120)
+            assert viewer.replay_seconds == 120 and abs(viewer.canvas.frame_key - 874) < .1
+            viewer.matching = False
+            for row in viewer.rows.values():
+                row.next_analysis = 0
+            with patch.object(module.threading, 'Thread') as thread, \
+                    patch.object(module, 'refine_match', return_value=module.Match(2, 1, 'live fixture', refined=True)) as refine:
+                viewer.analyse()
+                thread.call_args.kwargs['target']()
+                assert any(args.args[1] and args.args[1][-1].time >= 990 for args in refine.call_args_list), \
+                    'Matching must inspect current live frames, not the 120-second-old canvas'
+            # Incoming media and automatic alignment both advance while viewing the past.
+            now[0] += 5
+            for row in viewer.rows.values():
+                for stamp in range(1001, 1006):
+                    row.decoder.history.append(stamp, image)
+            viewer.render()
+            assert viewer.rows['1'].decoder.history.latest()[0] == 1005
+            assert abs(viewer.canvas.frame_key - 879) < .1
+            viewer.replay_range.setCurrentIndex(viewer.replay_range.findData(1))
+            assert viewer.replay_limit == 1 and viewer.replay_seconds == 60
+            assert viewer.replay.minimum() == -60
+            viewer.return_live()
+            viewer.render()
+            assert viewer.replay.value() == 0 and abs(viewer.canvas.frame_key - 999) < .1
         finally:
             viewer.close()
             host.close()
-    print('PASS: shared replay boundary, picture/PCM/chat offsets, immutable chat, stale match, live return and expiry')
+    print('PASS: picture/PCM/chat replay, 10-minute slider, range setting, live ingest/alignment during replay, return and expiry')
 
 
 if __name__ == '__main__':

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import math
+import mmap
+import tempfile
 import threading
 import time
 from array import array
@@ -271,9 +273,14 @@ def refine_match(match: Match, reference: list[Sample], other: list[Sample], *, 
 class AudioRing:
     """Stereo S16 PCM indexed by media sample, with zero-filled missing ranges."""
 
-    def __init__(self, seconds: float = HISTORY_SECONDS):
+    def __init__(self, seconds: float = HISTORY_SECONDS, disk=False):
         self.capacity = max(1, int(seconds * RATE))
-        self.data = bytearray(self.capacity * 4)
+        self.file = tempfile.TemporaryFile(prefix='ddm-audio-') if disk else None
+        if self.file is not None:
+            self.file.truncate(self.capacity * 4)
+            self.data = mmap.mmap(self.file.fileno(), self.capacity * 4)
+        else:
+            self.data = bytearray(self.capacity * 4)
         self.end = 0
         self.lock = threading.RLock()
 
@@ -323,7 +330,7 @@ class AudioRing:
 
 class History:
     def __init__(self, seconds: float = HISTORY_SECONDS,
-                 byte_limit: int = FRAME_BYTES_LIMIT):
+                 byte_limit: int = FRAME_BYTES_LIMIT, disk_audio=False):
         self.seconds = seconds
         self.byte_limit = byte_limit
         self.frames = deque()
@@ -331,7 +338,7 @@ class History:
         self.byte_size = 0
         self.origin: float | None = None
         self.lock = threading.RLock()
-        self.audio = AudioRing(seconds)
+        self.audio = AudioRing(seconds, disk=disk_audio)
 
     def append(self, timestamp: float, jpeg: bytes, sample: Sample | None = None):
         with self.lock:

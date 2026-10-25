@@ -13,7 +13,8 @@ from PySide6.QtGui import QImage
 from ddm import bili, danmaku, recording
 from ddm.auto_quality import AUTO_QUALITY
 from .engine import FPS, Sample, SIGNATURE_BITS, np
-from .video import av, VideoHistory, PictureReader, StreamInput, reformat_frame, recording_template
+from .video import (av, VideoHistory, PictureReader, StreamInput, reformat_frame, recording_template,
+                    REPLAY_HISTORY_SECONDS, REPLAY_BYTES_LIMIT)
 
 FRAME_TIMEOUT = 8.0
 
@@ -108,7 +109,7 @@ class Decoder:
         self.source_url = ""
         self.source_headers = {}
         self.events = Events()
-        self.history = VideoHistory()
+        self.history = VideoHistory(disk=True, seconds=REPLAY_HISTORY_SECONDS, byte_limit=REPLAY_BYTES_LIMIT)
         self.playback_timestamp = None
         self.pictures = PictureReader()
         self.video_size = (0, 0)
@@ -237,7 +238,7 @@ class Decoder:
                     previous = (self.history.segment_at(self.playback_timestamp)
                                 if self.playback_timestamp is not None else None) or self.history
                     previous.previous = None
-                    self.history = VideoHistory()
+                    self.history = VideoHistory(disk=True, seconds=REPLAY_HISTORY_SECONDS, byte_limit=REPLAY_BYTES_LIMIT)
                     self.history.previous = previous
                     self.events.reset.emit()
                 self._capture(executable, url, headers)
@@ -353,7 +354,7 @@ class Decoder:
                                 if crop_generation == self.crop_generation:
                                     with self.history.lock:
                                         self.history.details.append(detail)
-                                        while self.history.details and timestamp - self.history.details[0].time > self.history.seconds:
+                                        while self.history.details and timestamp - self.history.details[0].time > self.history.analysis_seconds:
                                             self.history.details.popleft()
                                     if pts + .0001 >= next_sample:
                                         next_sample = pts + .5

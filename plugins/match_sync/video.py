@@ -5,6 +5,7 @@ from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 import threading
+import tempfile
 import time
 
 from PySide6.QtGui import QImage
@@ -16,7 +17,42 @@ except ImportError:
     av = None
     VideoReformatter = None
 
-from .engine import History, np
+from .engine import FRAME_BYTES_LIMIT, HISTORY_SECONDS, AudioRing, History, np
+
+REPLAY_SECONDS = 600
+REPLAY_HISTORY_SECONDS = REPLAY_SECONDS + 60
+REPLAY_BYTES_LIMIT = 2 * 1024 * 1024 * 1024
+
+
+class PacketFile:
+    """One temporary GOP; readers retain ownership until decoding completes."""
+    def __init__(self):
+        self.file = tempfile.TemporaryFile(prefix='ddm-video-')
+        self.lock = threading.Lock()
+
+    def append(self, data):
+        with self.lock:
+            offset = self.file.seek(0, 2)
+            self.file.write(data)
+            return DiskPacketData(self, offset, len(data))
+
+
+@dataclass(frozen=True)
+class DiskPacketData:
+    owner: PacketFile
+    offset: int
+    size: int
+
+    def __len__(self):
+        return self.size
+
+    def __bytes__(self):
+        with self.owner.lock:
+            self.owner.file.seek(self.offset)
+            data = self.owner.file.read(self.size)
+        if len(data) != self.size:
+            raise OSError('Incomplete cached video packet')
+        return data
 
 
 class StreamInput:
@@ -66,7 +102,7 @@ def image_from_frame(frame):
 @dataclass(frozen=True)
 class EncodedPacket:
     sequence: int
-    data: bytes
+    data: bytes | DiskPacketData
     pts: int | None
     dts: int | None
     duration: int
@@ -78,7 +114,7 @@ class EncodedPacket:
         return float((self.pts if self.pts is not None else self.dts or 0) * self.time_base)
 
     def decode_packet(self):
-        packet = av.Packet(self.data)
+        packet = av.Packet(bytes(self.data))
         packet.pts, packet.dts = self.pts, self.dts
         packet.duration, packet.time_base = self.duration, self.time_base
         return packet
@@ -87,8 +123,21 @@ class EncodedPacket:
 class VideoHistory(History):
     """Retain complete GOPs under the existing time/byte limits, without JPEG."""
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, disk=False, **kwargs):
+        warning = ''
+        try:
+            super().__init__(disk_audio=disk, **kwargs)
+        except OSError:
+            if not disk:
+                raise
+            disk = False
+            kwargs.update(seconds=HISTORY_SECONDS, byte_limit=FRAME_BYTES_LIMIT)
+            super().__init__(**kwargs)
+            warning = '磁盘缓存不可用，临时使用最近 60 秒内存缓存'
+        self.cache_warning = warning
+        self.disk = disk
+        self.packet_file = None
+        self.analysis_seconds = min(self.seconds, HISTORY_SECONDS)
         self.packets = deque()
         self.codec = None
         self.stream_template = None
@@ -99,6 +148,14 @@ class VideoHistory(History):
         self.pending_frames = deque()
         self.previous = None
         self.intervals = deque()
+
+    def use_memory_cache(self):
+        self.disk = False
+        self.packet_file = None
+        self.seconds = HISTORY_SECONDS
+        self.byte_limit = FRAME_BYTES_LIMIT
+        self.audio = AudioRing(HISTORY_SECONDS)
+        self.cache_warning = '磁盘缓存不可用，临时使用最近 60 秒内存缓存'
 
     def _track(self, timestamp):
         if not self.intervals or timestamp - self.intervals[-1][1] > .25:
@@ -171,7 +228,15 @@ class VideoHistory(History):
 
     def append_packet(self, packet):
         with self.lock:
-            record = EncodedPacket(self.sequence, bytes(packet), packet.pts, packet.dts,
+            data = bytes(packet)
+            if self.disk:
+                try:
+                    if packet.is_keyframe or self.packet_file is None:
+                        self.packet_file = PacketFile()
+                    data = self.packet_file.append(data)
+                except OSError:
+                    self.use_memory_cache()
+            record = EncodedPacket(self.sequence, data, packet.pts, packet.dts,
                                    packet.duration, packet.time_base, packet.is_keyframe)
             self.sequence += 1
             if not self.packets and not record.keyframe:
@@ -206,7 +271,7 @@ class VideoHistory(History):
             self.received_frames += 1
             if sample is not None:
                 self.samples.append(sample)
-            while self.samples and timestamp - self.samples[0].time > self.seconds:
+            while self.samples and timestamp - self.samples[0].time > self.analysis_seconds:
                 self.samples.popleft()
 
     def packet_range(self, sequence, target):
