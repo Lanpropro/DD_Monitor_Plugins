@@ -1,0 +1,75 @@
+"""Synthetic fixtures following the public roomGiftList schema."""
+def config(gift_id=1, **changes):
+    return dict({'id':gift_id,'name':'Gift','price':5200,'coin_type':'gold',
+        'count_map':[{'num':n} for n in (1,10,100,520)], 'diy_count_map':1,
+        'max_send_limit':1000,'gif':'https://example.invalid/gift.gif',
+        'img_basic':'https://example.invalid/gift.png'},**changes)
+
+def room_payload():
+    return {'gift_data':{'room_gift_list':{'gold_list':[
+        {'gift_id':1,'position':2,'special':{'is_use':1}},
+        {'gift_id':2,'position':1,'special':{'is_use':1}}]},
+        'tab_list':[{'tab_id':9,'tab_name':'Fans','position':1,'list':[
+            {'gift_id':3,'position':1,'special':{'is_use':0,'tips':'locked'}}]}],
+        'max_send_gift':500},
+        'gift_config':{'base_config':{'list':[config(),config(2,name='Second'),config(3),config(99)]},
+        'room_config':[{'id':1,'name':'Room gift','price':105}]}}
+
+def bag_payload():
+    return {'list':[{'gift_id':1,'gift_num':10,'bag_id':701,'expire_at':2000},
+        {'gift_id':1,'gift_num':2,'bag_id':702,'expire_at':3000}],
+        'gift_config':[config(1)]}
+
+def guard_payload(*,scene='guard_gift',unlocked=True):
+    """Public room 21452505, 2026-10-18: direct guard gift / attire schema."""
+    data=room_payload()
+    attire=scene=='guard_attire'
+    ident=34527 if attire else 34636
+    data['gift_config']['base_config']['list']=[config(ident,
+        name='干杯之旅' if attire else '舰长一号',price=10000 if attire else 198000,
+        type=0,gift_type=0,count_map=[{'num':1}],diy_count_map=0,
+        rule='可把航海形象展示在直播间' if attire else '')]
+    data['gift_config']['room_config']=[]
+    data['gift_data']['tab_list']=[]
+    data['gift_data']['room_gift_list']['gold_list']=[{'gift_id':ident,
+        'special':{'special_type':15 if attire else 0,'is_use':int(unlocked),'tips':'请先开通大航海'},
+        'gift_scene':{'scene':scene,'pay_type':'interactive_pay','hide_price':False}}]
+    return data
+
+
+def upgrade_payload():
+    """Public room 21452505, 2026-10-21: upgrade_gift and independent counts."""
+    data=room_payload()
+    data['gift_config']['base_config']['list']=[
+        config(35638,name='送花花',price=1000,count_map=[{'num':1}],diy_count_map=0),
+        config(35641,name='真好听',price=1000,count_map=[{'num':1}],diy_count_map=0),
+        config(35640,name='贴贴',price=1500,count_map=[{'num':1}],diy_count_map=0),
+        config(35639,name='摸摸头',price=1500)]
+    data['gift_config']['room_config']=[]
+    data['gift_data']['tab_list']=[]
+    data['gift_data']['room_gift_list']['gold_list']=[{'gift_id':35638,'position':1,
+        'special':{'special_type':0,'is_use':1},
+        'gift_scene':{'scene':'default_gift','pay_type':'send_gift','hide_price':False},
+        'upgrade_gift':[
+            {'gift_id':35641,'alias':'真好听','desc':'+0电池','locked':False,'lock_tip':''},
+            {'gift_id':35640,'alias':'贴贴','desc':'+5电池','locked':False,'lock_tip':''},
+            {'gift_id':35639,'alias':'摸摸头','desc':'+5电池','locked':False,'lock_tip':''}]}]
+    return data
+
+
+def blind_payload():
+    """Public room 21452505, 2026-10-23: regular paid blind-box metadata."""
+    data=room_payload()
+    data['gift_data']['max_send_gift']=5000
+    data['gift_config']['base_config']['list']=[
+        config(32251,name='心动盲盒',price=15000,type=0,gift_type=6,
+            count_map=[{'num':n} for n in (1,10,50)],diy_count_map=0,max_send_limit=5000),
+        config(35206,name='幸运盲盒',price=5000,type=0,gift_type=6,
+            count_map=[{'num':n} for n in (1,10,50)],diy_count_map=0,max_send_limit=5000)]
+    data['gift_config']['room_config']=[]
+    data['gift_data']['tab_list']=[]
+    data['gift_data']['room_gift_list']['gold_list']=[
+        {'gift_id':32251,'special':{'special_type':0,'is_use':1,'tips':''},'gift_scene':None},
+        {'gift_id':35206,'special':{'special_type':0,'is_use':1,'tips':''},
+            'gift_scene':{'scene':'default_gift','pay_type':'send_gift','hide_price':False}}]
+    return data

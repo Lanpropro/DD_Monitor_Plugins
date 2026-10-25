@@ -30,7 +30,7 @@ def main():
     assert f"match_sync-{match_version}.zip" in match_readme
     notes = ROOT / f"RELEASE-match-sync-v{match_version}.md"
     assert notes.read_text(encoding="utf-8").startswith(f"# 比赛二路同步 v{match_version}\n")
-    display_names = {"domestic_live": "国内直播平台", "global_live": "海外直播平台", "match_sync": "比赛二路同步"}
+    display_names = {"domestic_live": "国内直播平台", "global_live": "海外直播平台", "match_sync": "比赛二路同步", "bili_live": "B站直播互动"}
     with tempfile.TemporaryDirectory() as directory:
         manager = PluginManager(plugins_dir=directory, enabled=[])
         for path in build():
@@ -44,6 +44,9 @@ def main():
                 assert manifest["id"] == plugin_id
                 assert manifest["name"] == display_names[plugin_id]
                 assert manifest["version"] == versions[plugin_id]
+                if plugin_id == 'bili_live':
+                    assert manifest['author'] == 'reon-nynes'
+                    assert manifest['min_app_version'] == '0.5.1'
                 if plugin_id == 'match_sync':
                     assert 'match_sync/fullscreen.py' in names, 'Fullscreen shell integration must ship with the viewer'
                 assert f"{plugin_id}-{manifest['version']}.zip" == path.name
@@ -55,7 +58,7 @@ def main():
             assert manager.install_zip(str(path)) == plugin_id
         assert not manager.plugins  # 安装阶段不执行插件代码
         manager.load()
-        assert len(manager.plugins) == 3 and not manager.skipped
+        assert len(manager.plugins) == len(versions) and not manager.skipped
         assert all(plugin.version == versions[plugin.context.name] for plugin in manager.plugins)
         assert set(manager.platforms) == {"huya", "douyu", "douyin", "twitch", "youtube"}
         assert all(platform.room_input_hint for platform in manager.platforms.values())
@@ -63,7 +66,7 @@ def main():
         assert '__ddmDouyinProfile' in manager.platforms['douyin'].profile_browser_init_script
         assert manager._platform_owner["huya"] == "domestic_live"
         assert manager._platform_owner["youtube"] == "global_live"
-        assert {entry["id"] for entry in manager.catalog()} == {"domestic_live", "global_live", "match_sync"}
+        assert {entry["id"] for entry in manager.catalog()} == set(versions)
         assert all(entry["name"] == display_names[entry["id"]] for entry in manager.catalog())
         assert all(entry["version"] == versions[entry["id"]] for entry in manager.catalog())
         manager.unload()
