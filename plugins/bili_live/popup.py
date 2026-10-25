@@ -183,7 +183,7 @@ def picker_style():
         QToolButton#EmoticonButton:disabled, QPushButton#GiftCard:disabled {{color:{theme.TEXT3};}}
         QPushButton#GiftCard QLabel {{color:{theme.TEXT1};font-size:11px;}}
         QPushButton#GiftCard:disabled QLabel {{color:{theme.TEXT3};}}
-        QTabBar::tab {{color:{theme.TEXT2}; background:transparent; padding:4px 8px;
+        QTabBar#GiftTabs::tab {{color:{theme.TEXT2}; background:transparent; padding:4px 8px;
             margin:2px; border:1px solid {theme.BORDER}; border-radius:{theme.RADIUS_SM}px;}}
-        QTabBar::tab:selected {{color:{theme.TEXT1};background:{theme.CONTENT_HOVER};border-color:{theme.ACCENT};}}
+        QTabBar#GiftTabs::tab:selected {{color:{theme.TEXT1};background:{theme.CONTENT_HOVER};border-color:{theme.ACCENT};}}
     '''

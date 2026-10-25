@@ -169,7 +169,7 @@ class GiftPopup(AnchoredPopup):
         self.refresh_button.setFixedSize(48,theme.TILE_CONTROL_HEIGHT)
         self.refresh_button.clicked.connect(self.refreshRequested);header.addWidget(self.refresh_button)
         row.addLayout(header);self.status=QLabel();self.status.setWordWrap(True);row.addWidget(self.status)
-        self.tabs=QTabBar();self.tabs.setExpanding(False);self.tabs.setUsesScrollButtons(True)
+        self.tabs=QTabBar();self.tabs.setObjectName('GiftTabs');self.tabs.setExpanding(False);self.tabs.setUsesScrollButtons(True)
         self.tabs.currentChanged.connect(self._tab_changed);row.addWidget(self.tabs)
         self.scroll=QScrollArea();self.scroll.setWidgetResizable(True);self.scroll.setFrameShape(QScrollArea.NoFrame)
         row.addWidget(self.scroll,1)

@@ -5,10 +5,10 @@ import threading
 from collections import OrderedDict
 from concurrent.futures import Future
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap, QRegion
+from PySide6.QtGui import QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QApplication, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton,
-    QScrollArea, QSizePolicy, QStyle, QStyleOptionTab, QStylePainter, QTabBar, QToolButton,
+    QApplication, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu, QProxyStyle, QPushButton,
+    QScrollArea, QSizePolicy, QStyle, QStyleOptionTab, QTabBar, QToolButton,
     QVBoxLayout, QWidget, QWidgetAction,
 )
 
@@ -175,42 +175,47 @@ def _emoji_category_icon():
 
 
 
+class _CenteredTabStyle(QProxyStyle):
+    def drawControl(self, element, option, painter, widget=None):
+        if element == QStyle.CE_TabBarTab and isinstance(option, QStyleOptionTab):
+            selected = bool(option.state & QStyle.State_Selected)
+            painter.save()
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setPen(QPen(theme.qcolor(theme.ACCENT if selected else theme.BORDER), 1))
+            painter.setBrush(theme.qcolor(theme.ACCENT_SOFT) if selected else Qt.NoBrush)
+            painter.drawRoundedRect(QRectF(option.rect).adjusted(2.5, 2.5, -2.5, -2.5),
+                                    theme.RADIUS_SM, theme.RADIUS_SM)
+            if not option.icon.isNull():
+                rect = QRect(QPoint(), option.iconSize)
+                rect.moveCenter(option.rect.center())
+                mode = QIcon.Normal if option.state & QStyle.State_Enabled else QIcon.Disabled
+                option.icon.paint(painter, rect, Qt.AlignCenter, mode,
+                                  QIcon.On if selected else QIcon.Off)
+            else:
+                painter.setPen(theme.qcolor(theme.ACCENT if selected else theme.TEXT2))
+                text = option.fontMetrics.elidedText(option.text, Qt.ElideRight, option.rect.width() - 8)
+                painter.drawText(option.rect.adjusted(4, 0, -4, 0), Qt.AlignCenter, text)
+            painter.restore()
+            return
+        super().drawControl(element, option, painter, widget)
+
+
 class EmoticonTabs(QTabBar):
     """包名和封面共用固定方形位置，异步换图时不重排分类。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # Keep Qt's native drag painting (including its moving-tab snapshot).
+        # Style both the stationary tab and its drag snapshot identically.
+        self._centered_style = _CenteredTabStyle()
+        self._centered_style.setParent(self)
+        self.setStyle(self._centered_style)
 
     def tabSizeHint(self, index):
         return QSize(40, 40)
 
     def minimumTabSizeHint(self, index):
         return self.tabSizeHint(index)
-
-    def paintEvent(self, event):
-        painter = QStylePainter(self)
-        region = QRegion(self.rect())
-        for name in ("ScrollLeftButton", "ScrollRightButton"):
-            arrow = self.findChild(QToolButton, name)
-            if arrow is not None and arrow.isVisible():
-                region = region.subtracted(QRegion(arrow.geometry()))
-        painter.setClipRegion(region)
-        selected = self.currentIndex()
-        # 与原生 Tab 一样最后绘制选中项，边框、焦点及悬停仍由主题样式负责。
-        order = [index for index in range(self.count()) if index != selected]
-        if selected >= 0:
-            order.append(selected)
-        for index in order:
-            option = QStyleOptionTab()
-            self.initStyleOption(option, index)
-            icon = QIcon(option.icon)
-            option.text = option.fontMetrics.elidedText(option.text, self.elideMode(), option.rect.width() - 8)
-            option.icon = QIcon()
-            painter.drawControl(QStyle.CE_TabBarTab, option)
-            if not icon.isNull():
-                # 原生图标布局会给旁边的文字留空，纯封面需单独按方形中心绘制。
-                rect = QRect(QPoint(), self.iconSize())
-                rect.moveCenter(option.rect.center())
-                mode = QIcon.Normal if option.state & QStyle.State_Enabled else QIcon.Disabled
-                icon.paint(painter, rect, Qt.AlignCenter, mode,
-                           QIcon.On if index == selected else QIcon.Off)
 
 
 class EmoticonPopup(AnchoredPopup):
@@ -229,11 +234,6 @@ class EmoticonPopup(AnchoredPopup):
                 border-color: {theme.ACCENT};}}
             #EmoticonButton:disabled {{color: {theme.TEXT3};}}
             #EmoticonTabs {{background: transparent; font-size: {theme.FONT_CAPTION}px;}}
-            #EmoticonTabs::tab {{color: {theme.TEXT2}; background: transparent;
-                padding: 0; margin: 2px; border: 1px solid {theme.BORDER};
-                border-radius: {theme.RADIUS_SM}px;}}
-            #EmoticonTabs::tab:selected {{color: {theme.TEXT1}; background: {theme.CONTENT_HOVER};
-                border-color: {theme.ACCENT};}}
         """)
         holder = QWidget(self)
         layout = QVBoxLayout(holder)

@@ -11,8 +11,8 @@ os.environ['DDM_NO_SAVE'] = '1'
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bili_live_support import session
-from PySide6.QtCore import QEvent, Qt
-from PySide6.QtGui import QInputMethodEvent, QKeyEvent, QImage, QColor
+from PySide6.QtCore import QEvent, Qt, QMimeData, QPoint, QPointF
+from PySide6.QtGui import QInputMethodEvent, QKeyEvent, QDragEnterEvent, QDragMoveEvent, QDropEvent, QImage, QColor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLineEdit, QToolButton
 from ddm import theme
@@ -86,6 +86,27 @@ class ComposerTests(unittest.TestCase):
         self.assertFalse(shiboken6.isValid(self.composer))
         session.set_login_cookies(*self.saved)
         APP.processEvents()
+
+    def test_room_and_tile_drags_do_not_insert_room_ids(self):
+        edit=self.composer.edit;edit.setText('keep my draft')
+        for format in ('application/x-ddm-room','application/x-ddm-nav','application/x-ddm-tile'):
+            with self.subTest(format=format):
+                mime=QMimeData();mime.setData(format,b'101');mime.setText('101')
+                for event in (QDragEnterEvent(QPoint(3,3),Qt.CopyAction,mime,Qt.LeftButton,Qt.NoModifier),
+                              QDragMoveEvent(QPoint(3,3),Qt.CopyAction,mime,Qt.LeftButton,Qt.NoModifier),
+                              QDropEvent(QPointF(3,3),Qt.CopyAction,mime,Qt.LeftButton,Qt.NoModifier)):
+                    APP.sendEvent(edit,event)
+                    self.assertFalse(event.isAccepted())
+                    self.assertEqual(edit.text(),'keep my draft')
+
+    def test_ordinary_text_drag_is_still_accepted(self):
+        edit=self.composer.edit;edit.clear()
+        mime=QMimeData();mime.setText('ordinary text')
+        enter=QDragEnterEvent(QPoint(3,3),Qt.CopyAction,mime,Qt.LeftButton,Qt.NoModifier)
+        APP.sendEvent(edit,enter);self.assertTrue(enter.isAccepted())
+        drop=QDropEvent(QPointF(3,3),Qt.CopyAction,mime,Qt.LeftButton,Qt.NoModifier)
+        APP.sendEvent(edit,drop)
+        self.assertTrue(drop.isAccepted());self.assertEqual(edit.text(),'ordinary text')
 
     def test_held_enter_does_not_repeat_failed_send(self):
         self.composer.edit.setText('retained draft')

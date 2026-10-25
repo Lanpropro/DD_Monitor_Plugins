@@ -10,8 +10,8 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 os.environ['DDM_NO_SAVE'] = '1'
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bili_live_support import session
-from PySide6.QtCore import QEvent, QTimer, Qt
-from PySide6.QtGui import QColor, QImage
+from PySide6.QtCore import QEvent, QTimer, Qt, QPoint, QPointF
+from PySide6.QtGui import QColor, QImage, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QTabBar, QToolButton
 from ddm_plugin_bili_live import emoticons as image_api
@@ -195,6 +195,43 @@ class EmoticonTabTests(unittest.TestCase):
             self.assertLessEqual(abs(left_gap - right_gap), 1, '整个五列网格应水平居中')
             self.assertGreater(left_gap, 0)
             self.assertEqual(self.popup.grid.itemAtPosition(2, 0).widget().x(), first.x(), '不足一行时仍与上方网格列对齐')
+
+    def test_dragged_category_icon_moves_without_a_stationary_copy(self):
+        marker=QColor('#fe007f')
+        packs=[package('dragged',0,2),package('neighbor',0,2)]
+        for index,pack in enumerate(packs):pack['current_cover']=f'https://example.invalid/drag-{index}.png'
+        def image(url,subdir):
+            result=QImage(48,48,QImage.Format_ARGB32)
+            result.fill(marker if url.endswith('0.png') else QColor('#00ff00'))
+            return result
+        with patch.object(image_api,'_load_image',side_effect=image):
+            self.popup.set_packages(packs)
+            settle(lambda:all(not self.popup.tabs.tabIcon(i).isNull() for i in range(2)))
+            tabs=self.popup.tabs
+            def bounds(color=marker):
+                shot=tabs.grab().toImage();dpr=shot.devicePixelRatioF()
+                xs=[x/dpr for x in range(shot.width()) for y in range(shot.height())
+                    if shot.pixelColor(x,y)==color]
+                self.assertTrue(xs)
+                return min(xs),max(xs)
+            before=bounds();neighbor_before=bounds(QColor('#00ff00'))
+            start=tabs.tabRect(0).center();target=start+QPoint(12,0)
+            QTest.mousePress(tabs,Qt.LeftButton,pos=start)
+            try:
+                APP.sendEvent(tabs,QMouseEvent(QEvent.MouseMove,QPointF(target),
+                    QPointF(tabs.mapToGlobal(target)),Qt.NoButton,Qt.LeftButton,Qt.NoModifier))
+                APP.processEvents();after=bounds()
+                self.assertAlmostEqual(after[0]-before[0],12,delta=2)
+                self.assertAlmostEqual(after[1]-before[1],12,delta=2)
+                target=start+QPoint(40,0)
+                APP.sendEvent(tabs,QMouseEvent(QEvent.MouseMove,QPointF(target),
+                    QPointF(tabs.mapToGlobal(target)),Qt.NoButton,Qt.LeftButton,Qt.NoModifier))
+                QTest.qWait(300)
+                self.assertEqual(self.popup._packages[0]['pkg_name'],'neighbor')
+                neighbor_after=bounds(QColor('#00ff00'))
+                self.assertAlmostEqual(neighbor_after[0]-neighbor_before[0],-40,delta=2)
+                self.assertAlmostEqual(neighbor_after[1]-neighbor_before[1],-40,delta=2)
+            finally:QTest.mouseRelease(tabs,Qt.LeftButton,pos=target)
 
     def test_cover_pixels_are_centered_in_square_tabs(self):
         marker = QColor('#fe007f')

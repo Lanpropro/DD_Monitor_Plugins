@@ -24,6 +24,11 @@ class DanmakuEdit(QLineEdit):
         self._composing = False
 
     def event(self, event):
+        if event.type() in (QEvent.DragEnter, QEvent.DragMove, QEvent.Drop):
+            if any(event.mimeData().hasFormat(format) for format in (
+                    'application/x-ddm-room', 'application/x-ddm-nav', 'application/x-ddm-tile')):
+                event.ignore()
+                return True
         if event.type() == QEvent.ShortcutOverride and not (
                 event.modifiers() & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)):
             event.accept()
