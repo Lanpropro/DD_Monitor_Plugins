@@ -429,14 +429,20 @@ class PlatformLogoControl(QObject):
 
     def eventFilter(self, watched, event):
         if event.type() == QEvent.Show and isinstance(watched, SettingsDialog):
-            if watched.plugin_page.manager is self.context.manager:
+            manager = (watched._plugin_manager if hasattr(watched, "_plugin_manager") else
+                       watched.plugin_page.manager)
+            if manager is self.context.manager:
                 page = watched.general_page
                 if page.findChild(QCheckBox, self.name) is None:
+                    anchor = next((page._checks[key] for key in ("sidebar_platform_logos", "live_alert")
+                                   if key in page._checks), None)
+                    if anchor is None:
+                        return False
+                    grid = page.layout().itemAt(1).layout()
+                    row = grid.getItemPosition(grid.indexOf(anchor))[0] + 1
                     check = QCheckBox(self.label, page)
                     check.setObjectName(self.name)
                     check.setChecked(self.enabled)
-                    grid = page.layout().itemAt(1).layout()
-                    row = grid.getItemPosition(grid.indexOf(page._checks["live_alert"]))[0] + 1
                     for index in range(grid.count() - 1, -1, -1):
                         old_row, column, rows, columns = grid.getItemPosition(index)
                         if old_row >= row:
