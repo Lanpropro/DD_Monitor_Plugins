@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 import threading
 import time
@@ -29,6 +30,17 @@ class StreamInput:
 
 
 _conversion = threading.local()
+
+
+@contextmanager
+def recording_template(history, container):
+    with history.lock:
+        history.stream_template = container.streams.video[0]
+    try:
+        yield
+    finally:
+        with history.lock:
+            history.stream_template = None
 
 
 def reformat_frame(frame, **options):
@@ -79,6 +91,7 @@ class VideoHistory(History):
         super().__init__(**kwargs)
         self.packets = deque()
         self.codec = None
+        self.stream_template = None
         self.video_size = (0, 0)
         self.sequence = 0
         self.received_frames = 0
