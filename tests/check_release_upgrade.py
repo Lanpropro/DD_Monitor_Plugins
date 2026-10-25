@@ -54,28 +54,31 @@ def main():
         assert len(manager.plugins) == len(versions) and not manager.skipped
         assert all(plugin.version == versions[plugin.context.name] for plugin in manager.plugins)
         manager.unload()
-    for old_version, ref in (("1.1", "v1.1"), ("1.2", "domestic-live-v1.2")):
+    for plugin_id, old_version, ref in (("domestic_live", "1.1", "v1.1"),
+            ("domestic_live", "1.2", "domestic-live-v1.2"),
+            ("domestic_live", "1.3", "domestic-live-v1.3"),
+            ("global_live", "1.1", "global-live-v1.1")):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            old_zip = root / f"domestic_live-{old_version}.zip"
+            old_zip = root / f"{plugin_id}-{old_version}.zip"
             paths = subprocess.check_output(["git", "ls-tree", "-r", "--name-only", ref,
-                "--", "plugins/domestic_live"], cwd=ROOT, text=True).splitlines()
+                "--", "plugins/" + plugin_id], cwd=ROOT, text=True).splitlines()
             with zipfile.ZipFile(old_zip, "w") as archive:
                 for source in paths:
                     data = subprocess.check_output(["git", "show", ref + ":" + source], cwd=ROOT)
                     archive.writestr(source.removeprefix("plugins/"), data)
             manager = PluginManager(plugins_dir=str(root / "plugins"), enabled=[])
             manager.install_zip(str(old_zip))
-            target = root / "plugins/domestic_live"
-            assert read_manifest(str(target), "domestic_live")["version"] == old_version
+            target = root / "plugins" / plugin_id
+            assert read_manifest(str(target), plugin_id)["version"] == old_version
             (target / "user-data.txt").write_bytes(b"preserve previous data")
-            current = versions["domestic_live"]
-            stage(manager, str(ROOT / "dist" / f"domestic_live-{current}.zip"), "domestic_live", current)
-            assert read_manifest(str(target), "domestic_live")["version"] == old_version
+            current = versions[plugin_id]
+            stage(manager, str(ROOT / "dist" / f"{plugin_id}-{current}.zip"), plugin_id, current)
+            assert read_manifest(str(target), plugin_id)["version"] == old_version
             apply_pending(manager)
-            assert read_manifest(str(target), "domestic_live")["version"] == current
+            assert read_manifest(str(target), plugin_id)["version"] == current
             assert (target / "user-data.txt").read_bytes() == b"preserve previous data"
-            assert (target / "plugin.py").read_bytes() == (ROOT / "plugins/domestic_live/plugin.py").read_bytes()
+            assert (target / "plugin.py").read_bytes() == (ROOT / "plugins" / plugin_id / "plugin.py").read_bytes()
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         old_zip = root / 'match_sync-1.3.zip'
@@ -98,7 +101,7 @@ def main():
         for name in ('viewer.py', 'fullscreen.py'):
             assert (target / name).read_bytes() == (ROOT / 'plugins/match_sync' / name).read_bytes()
         assert (target / 'user-data.txt').read_bytes() == b'preserve 1.3 settings'
-    print("PASS: old plugins upgrade to current versions, including domestic 1.1/1.2 and match_sync 1.3; source and user data preserved")
+    print("PASS: old plugins upgrade to current versions, including domestic 1.1/1.2/1.3, global 1.1 and match_sync 1.3; source and user data preserved")
 
 
 if __name__ == "__main__":
