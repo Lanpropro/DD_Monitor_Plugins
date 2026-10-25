@@ -70,6 +70,7 @@ $env:DDM_NO_SAVE = '1'
 $env:QT_QPA_PLATFORM = 'offscreen'
 python tests/check_huya_high_resolution.py --host ../DD_Monitor_CE
 python tests/check_huya_playback_auth.py --host ../DD_Monitor_CE
+python tests/check_platform_logo_settings.py --host ../DD_Monitor_CE
 python tests/check_domestic_share_links.py --host ../DD_Monitor_CE
 python -m compileall -q plugins tests tools
 ```
