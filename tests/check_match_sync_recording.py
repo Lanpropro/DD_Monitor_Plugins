@@ -45,7 +45,7 @@ def main():
                     output.mux(packet)
             for packet in stream.encode(None):
                 output.mux(packet)
-        main_history = VideoHistory()
+        main_history = VideoHistory(disk=True, seconds=660)
         main_history.set_origin(1000)
         source_container = av.open(str(source))
         stream = source_container.streams.video[0]
