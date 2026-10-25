@@ -9,7 +9,7 @@
 
 | 插件 | ID | 版本 | 支持平台 |
 | --- | --- | --- | --- |
-| [国内直播平台](plugins/domestic_live/README.md) | `domestic_live` | 1.2 | 提供虎牙、斗鱼、抖音的主播，直播流解析 |
+| [国内直播平台](plugins/domestic_live/README.md) | `domestic_live` | 1.3 | 提供虎牙、斗鱼、抖音的主播，直播流解析 |
 | [海外直播平台](plugins/global_live/README.md) | `global_live` | 1.1 | 提供Twitch、YouTube平台的主播，直播流解析 |
 | [比赛二路同步](plugins/match_sync/README.md) | `match_sync` | 1.4 | 提供保持单一直播流情况下的多路混音，合并弹幕观看 |
 
@@ -52,7 +52,9 @@ python tools/build_plugins.py
 python tests/check_packages.py --host ../DD_Monitor_CE
 ```
 
-输出为 `dist/domestic_live-1.2.zip` 、`dist/global_live-1.1.zip` 和 `dist/match_sync-1.4.zip`，上传到 Releases。
+输出为 `dist/domestic_live-1.3.zip` 、`dist/global_live-1.1.zip` 和 `dist/match_sync-1.4.zip`。
+每个插件单独发布：国内使用 `domestic-live-v<版本>`，海外使用 `global-live-v<版本>`，二路使用 `match-sync-v<版本>`；同一个 Release 不混放不同插件的 ZIP。
+`plugin-catalog.json` 是汇总在线更新信息的目录，可以列出各插件独立 Release 的地址。
 构建只读取 Git 跟踪文件，并将许可与来源说明放入每个安装包。
 各插件 README 中的播放、预览和弹幕集成测试在软件源码仓库执行，需先安装对应插件。
 
