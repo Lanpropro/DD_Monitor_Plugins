@@ -725,6 +725,7 @@ class RoomRow(QFrame):
         self.quality = int(preferences.get("quality", 10000 if self.platform is not None else 250))
         self.actual_quality = 0
         self.pending = deque(maxlen=2000)
+        self.chat_history = deque(maxlen=20000)
         self.color = preferences.get("color", color)
         if self.color not in COLORS:
             self.color = color
@@ -1110,6 +1111,8 @@ class Viewer(QDialog):
         self.admitted_rooms = set()
         self.rendered_shifts = {}
         self.relative_rates = {}
+        self.replay_seconds = 0.0
+        self.replay_shifts = None
         self.shift_reference = None
         self.shift_updated = None
         self.generation = 0
@@ -1187,6 +1190,14 @@ class Viewer(QDialog):
         heading.addWidget(self.buffer_reserve)
         heading.addWidget(self.minimize_settings)
         self.picture = Tile({})
+        self.replay = QPushButton("回看…")
+        self.replay.setToolTip("在各路共同保留的缓存内回看，画面、声音和弹幕一起回退。")
+        self.replay.clicked.connect(self._choose_replay)
+        self.live = QPushButton("返回直播")
+        self.live.setEnabled(False)
+        self.live.clicked.connect(self.return_live)
+        for button in (self.replay, self.live):
+            self.picture.bottom.layout().insertWidget(0, button)
         self.restore_settings.setParent(self.picture.bottom)
         self.restore_settings.setObjectName("TileCtrl")
         self.restore_settings.setFixedHeight(26)
@@ -1682,6 +1693,7 @@ class Viewer(QDialog):
         row.refresh_status()
 
     def retry_alignment(self, room_id):
+        self.return_live()
         if not self.running or room_id not in self.rows or self.rows[room_id].decoder is None:
             self.notice.setText("请先播放直播间，再重新对齐比赛画面")
             return
@@ -1712,6 +1724,7 @@ class Viewer(QDialog):
         self.analyse()
 
     def _delay_changed(self, *_args):
+        self.return_live()
         key = next((key for key, row in self.rows.items() if row.delay is self.sender()), "")
         if self.alignment.automatic:
             value = self.rows[key].delay.value()
@@ -1834,6 +1847,7 @@ class Viewer(QDialog):
             self.input.clear()
 
     def add_room(self, text, preferences=None):
+        self.return_live()
         try:
             room_id = parse_room(text, self.context.manager)
         except ValueError as error:
@@ -1883,6 +1897,7 @@ class Viewer(QDialog):
             row.main_button.setChecked(room_id == selected)
             row.realign.setVisible(self.automatic.isChecked() and room_id != selected)
         if selected != self.alignment.reference:
+            self.return_live()
             self.late_buffer = LateBuffer(self.reserve_seconds)
             self.late_notice.hide()
             for current in self.rows.values():
@@ -2088,6 +2103,7 @@ class Viewer(QDialog):
         self.rematch_admit.clear()
 
     def _automatic_changed(self, *_args):
+        self.return_live()
         for row in self.rows.values():
             row.independent.blockSignals(True)
             row.independent.setChecked(False)
@@ -2141,6 +2157,7 @@ class Viewer(QDialog):
         self.changed()
 
     def remove_room(self, room_id):
+        self.return_live()
         row = self.rows.pop(room_id)
         self.rematch_rooms.discard(room_id)
         self.rematch_admit.discard(room_id)
@@ -2166,6 +2183,8 @@ class Viewer(QDialog):
         self.changed()
 
     def target_shifts(self):
+        if self.replay_shifts is not None:
+            return {key: value - self.replay_seconds for key, value in self.replay_shifts.items()}
         shifts = self.alignment.shifts({key: 0 if self.alignment.automatic else row.delay.value()
                                        for key, row in self.rows.items() if key not in self.independent_shifts})
         reference = self.alignment.reference
@@ -2177,6 +2196,7 @@ class Viewer(QDialog):
         return shifts
 
     def set_independent(self, room_id, enabled):
+        self.return_live()
         row = self.rows[room_id]
         if enabled:
             self.independent_shifts[room_id] = self.shifts().get(room_id, 0)
@@ -2195,6 +2215,8 @@ class Viewer(QDialog):
         self.render()
 
     def _independent_positions(self, clock):
+        if self.replay_seconds:
+            return
         for key, row in self.rows.items():
             if not row.independent.isChecked() or row.decoder is None:
                 continue
@@ -2241,6 +2263,11 @@ class Viewer(QDialog):
         return self.target_shifts()
 
     def _smooth_shifts(self, wanted):
+        if self.replay_seconds:
+            self.rendered_shifts = dict(wanted)
+            self.relative_rates.clear()
+            self.shift_reference = self.alignment.reference
+            return dict(wanted)
         now = time.monotonic()
         dt = max(0, min(.1, now - self.shift_updated)) if self.shift_updated is not None else 0
         self.shift_updated = now
@@ -2457,7 +2484,78 @@ class Viewer(QDialog):
                 if latest is not None and arrival and 0 <= now - arrival <= 3:
                     # Messages arrive in wall time; playback follows decoded frame time.
                     received = latest[0] + now - arrival
-            row.pending.append((received, dict(event)))
+            saved = (received, dict(event))
+            row.pending.append(saved)
+            row.chat_history.append(saved)
+            bounds = decoder.history.bounds() if decoder is not None else None
+            if bounds:
+                while row.chat_history and row.chat_history[0][0] < bounds[0]:
+                    row.chat_history.popleft()
+
+    def replay_available(self):
+        if not self.running:
+            return 0.0
+        clock = self.audio.clock()
+        shifts = self.shifts()
+        available = []
+        for key, row in self.rows.items():
+            if row.decoder is None or row.paused or row.sync_state != "已同步":
+                continue
+            target = clock + shifts[key]
+            bounds = row.decoder.history.bounds_at(target)
+            if bounds and bounds[0] <= target <= bounds[1]:
+                available.append(target - bounds[0])
+        main = self.rows.get(self.alignment.reference)
+        return max(0, min(available)) if available and main is not None and main.sync_state == "已同步" else 0.0
+
+    def _choose_replay(self):
+        available = int(self.replay_available())
+        if available < 1:
+            self.notice.setText("各路共同保留的缓存不足 1 秒，暂时无法回看")
+            return
+        seconds, accepted = QInputDialog.getInt(self, "整组回看", "回退秒数", min(10, available), 1, available)
+        if accepted:
+            self.rewind(seconds)
+
+    def _reset_chat_position(self):
+        self.panel.clear()
+        self.overlay_pending.clear()
+        if self.video_danmaku is not None:
+            self.video_danmaku.clear()
+        clock, shifts = self.audio.clock(), self.shifts()
+        for key, row in self.rows.items():
+            target = clock + shifts[key]
+            row.pending = deque(((stamp, dict(event)) for stamp, event in row.chat_history
+                                 if stamp >= target), maxlen=20000)
+
+    def rewind(self, seconds):
+        if seconds <= 0 or seconds > self.replay_available():
+            return False
+        if self.replay_shifts is None:
+            self.replay_shifts = self.shifts()
+        self.replay_seconds += seconds
+        self.analysis_serial += 1
+        self.matching = False
+        self.rendered_shifts.clear()
+        self.shift_reference = None
+        self.relative_rates.clear()
+        self.playback_rate = 1.0
+        self.sync_waiting = False
+        self.live.setEnabled(True)
+        self._reset_chat_position()
+        self.render()
+        self.audio.update_snapshot()
+        return True
+
+    def return_live(self):
+        if not self.replay_seconds:
+            return
+        self.replay_seconds = 0.0
+        self.replay_shifts = None
+        self.rendered_shifts.clear()
+        self.shift_reference = None
+        self.live.setEnabled(False)
+        self._reset_chat_position()
 
     def _recover_clock(self, clock, shifts):
         now = time.monotonic()
@@ -2589,7 +2687,7 @@ class Viewer(QDialog):
             fresh = not arrival or now - arrival <= 3
             target = clock + shifts[key]
             available = bounds is not None and bounds[0] <= target <= bounds[1] - .05
-            if self.alignment.automatic and key != self.alignment.reference and key not in self.independent_shifts:
+            if self.alignment.automatic and not self.replay_seconds and key != self.alignment.reference and key not in self.independent_shifts:
                 if not available and row.match_confirmed and not row.paused and (row.sync_state == "已同步" or row.was_isolated):
                     row.recheck_alignment = True
                 elif fresh and available and row.recheck_alignment:
@@ -2779,7 +2877,15 @@ class Viewer(QDialog):
                 if retained is None or clock + shifts[key] >= retained[1] - .06 or previous.frame_at(clock + shifts[key]) is None:
                     current.decoder.history.previous = None
                     self._reset(current, current.decoder)
-        clock = self._recover_clock(clock, shifts)
+        if self.replay_seconds:
+            main = self.rows.get(self.alignment.reference)
+            target = clock + shifts.get(self.alignment.reference, 0)
+            bounds = main.decoder.history.bounds_at(target) if main is not None and main.decoder is not None else None
+            if bounds is None or not bounds[0] <= target <= bounds[1]:
+                self.return_live()
+                shifts = self._smooth_shifts(self.target_shifts())
+        else:
+            clock = self._recover_clock(clock, shifts)
         row = self.rows.get(self.alignment.reference)
         if row is not None and row.decoder is not None and not row.paused:
             frame = self.canvas.show_at(row.decoder, clock + shifts[row.room_id])
@@ -2805,6 +2911,8 @@ class Viewer(QDialog):
                 mode = ("自动对齐已开启" if self.alignment.automatic else
                         "自动对齐已关闭；手动偏移")
                 self.notice.setText(f"主画面：{row.label()} · 本地播放延后约 {delay:.1f} 秒 · {mode}")
+                if self.replay_seconds:
+                    self.notice.setText(f"整组回看 · 比直播进度晚约 {self.replay_seconds:.1f} 秒 · 可点击返回直播")
         if self.compare.isChecked():
             self.comparison_panel.render(clock, shifts)
         self._update_sync_health(clock, shifts)
@@ -2837,8 +2945,9 @@ class Viewer(QDialog):
                 if not row.pending or row.pending[0][0] > target:
                     break
                 received, event = row.pending.popleft()
-                if clock - received > 120:
+                if target - received > 120:
                     continue
+                event = dict(event)
                 event["medal"] = {}
                 event["uname"] = f"【{row.label()}】 {event.get('uname') or ''}"
                 event["source_label"] = row.label()
@@ -2872,7 +2981,7 @@ class Viewer(QDialog):
                 reader.configure(megabytes * 1024 * 1024, getattr(row.decoder, "fps", 30), active=visible)
 
     def analyse(self):
-        if not self.running or not self.alignment.automatic or self.matching:
+        if not self.running or not self.alignment.automatic or self.matching or self.replay_seconds:
             return
         row = self.rows.get(self.alignment.reference)
         if row is None or row.decoder is None:
@@ -2982,7 +3091,7 @@ class Viewer(QDialog):
 
     def _matched(self, epoch, results):
         self.matching = False
-        if not self.running or epoch != self.generation or not self.alignment.automatic:
+        if not self.running or epoch != self.generation or not self.alignment.automatic or self.replay_seconds:
             return
         for room_id, match in results.items():
             row = self.rows.get(room_id)
@@ -3227,6 +3336,7 @@ class Viewer(QDialog):
         row.actual_position = None
         row.join.hide()
         row.pending.clear()
+        row.chat_history.clear()
         row.video_text = "已停止"
         row.chat_text = "弹幕已停止"
         row.match_text = "等待画面"
@@ -3234,6 +3344,7 @@ class Viewer(QDialog):
         row.refresh_status()
 
     def stop(self):
+        self.return_live()
         self.analysis_serial += 1
         self.late_buffer = LateBuffer(self.reserve_seconds)
         self.late_notice.hide()
