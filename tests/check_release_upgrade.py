@@ -48,9 +48,10 @@ def main():
             assert read_manifest(str(target), plugin_id)["version"] == versions[plugin_id]
             assert (target / "user-data.txt").read_bytes() == b"preserve user data"
             assert (target / "plugin.py").read_bytes() == (ROOT / "plugins" / plugin_id / "plugin.py").read_bytes()
-        manager.enabled = {"domestic_live", "global_live", "match_sync"}
+        manager.install_zip(str(ROOT / 'dist/bili_live-1.0.zip'))
+        manager.enabled = set(versions)
         manager.load()
-        assert len(manager.plugins) == 3 and not manager.skipped
+        assert len(manager.plugins) == len(versions) and not manager.skipped
         assert all(plugin.version == versions[plugin.context.name] for plugin in manager.plugins)
         manager.unload()
     for old_version, ref in (("1.1", "v1.1"), ("1.2", "domestic-live-v1.2")):

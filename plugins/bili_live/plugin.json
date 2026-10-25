@@ -1,0 +1,13 @@
+{
+  "id": "bili_live",
+  "name": "B站直播互动",
+  "version": "1.0",
+  "description": "逐格发送弹幕、表情与直播礼物；使用本体登录。",
+  "host_capabilities": [
+    "tile_controls",
+    "credential_snapshots",
+    "conditional_credentials"
+  ],
+  "author": "reon-nynes",
+  "min_app_version": "0.5.1"
+}
