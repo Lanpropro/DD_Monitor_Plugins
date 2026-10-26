@@ -1241,6 +1241,24 @@ class DouyinPlatform(NumericLivePlatform):
             info = self._page_info(response.text)
             visitor = response.cookies.get("ttwid")
             info["ttwid"] = visitor if isinstance(visitor, str) else ""
+        except (requests.RequestException, RuntimeError, ValueError, KeyError, TypeError):
+            logger = getattr(self, "_diagnostic_log", None)
+            if logger is not None:
+                content_type = response.headers.get("Content-Type", "").split(";", 1)[0].lower()
+                content_type = content_type if content_type in ("text/html", "application/json", "text/plain") else "other"
+                encoding = response.headers.get("Content-Encoding", "").lower()
+                encoding = encoding if encoding in ("", "gzip", "deflate", "br", "zstd") else "other"
+                host = urlsplit(response.url or "").hostname
+                host = host if host in self.hosts else "other"
+                page = response.text
+                markers = {name: name in page for name in
+                           ("__pace_f", "roomStore", "streamStore", "__rsc_f", "RENDER_DATA")}
+                markers["verification_text"] = any(word in page.lower() for word in
+                    ("验证码", "verifycenter", "captcha"))
+                logger(f"[Issue13-test3] 阶段=page_response 房间={canonical} HTTP={response.status_code} "
+                       f"类型={content_type} 编码={encoding or 'none'} 字节数={len(response.content)} "
+                       f"最终主机={host} 跳转次数={len(response.history)} 标记={json.dumps(markers)}")
+            raise
         finally:
             response.close()
         owner = info["room"].get("owner") or info.get("anchor") or {}
@@ -1465,6 +1483,7 @@ class LivePlatformsPlugin(api.Plugin):
         return " <- ".join(reasons)
 
     def _enable_diagnostics(self, context, platform):
+        platform._diagnostic_log = context.log
         for operation in ("room_info", "play_url"):
             original = getattr(platform, operation)
 
@@ -1480,12 +1499,102 @@ class LivePlatformsPlugin(api.Plugin):
                     room = canonical if re.fullmatch(r"[a-z]+:[A-Za-z0-9_-]{1,80}", canonical) else "分享链接或无效输入"
                     mapped = (f" UID映射={'有' if platform._anchor_uids.get(canonical) else '无'}"
                               if platform.kind == "douyin" else "")
-                    context.log(f"[Issue13-test2] 平台={platform.kind} 阶段={_operation} 房间={room}"
+                    context.log(f"[Issue13-test3] 平台={platform.kind} 阶段={_operation} 房间={room}"
                                 f"{mapped} 耗时={time.monotonic() - started:.1f}s "
                                 f"原因={self._diagnostic_reason(error)}")
                     raise
 
             setattr(platform, operation, diagnosed)
+
+    @staticmethod
+    def _player_error_category(prefix, text):
+        lower = text.lower()
+        status = re.search(r"HTTP(?:/\d(?:\.\d)?| error)?\s+([45]\d\d)", text, re.IGNORECASE)
+        if status:
+            return "HTTP_" + status[1]
+        if any(word in lower for word in ("certificate", "tls", "ssl")):
+            return "TLS_OR_CERTIFICATE"
+        if any(word in lower for word in ("getaddrinfo", "resolve", "name or service not known")):
+            return "DNS"
+        if "timed out" in lower or "timeout" in lower:
+            return "TIMEOUT"
+        if prefix.startswith(("vd", "ffmpeg/video")) or "decoder" in lower or "hwdec" in lower:
+            return "VIDEO_DECODE"
+        if prefix.startswith("vo") or any(word in lower for word in ("direct3d", "d3d11", "swapchain")):
+            return "VIDEO_OUTPUT"
+        if prefix.startswith("ao") or "wasapi" in lower:
+            return "AUDIO_OUTPUT"
+        if "invalid data" in lower or prefix.startswith("demux"):
+            return "DEMUX_OR_FORMAT"
+        if any(word in lower for word in ("connection", "network", "failed to open", "protocol")):
+            return "NETWORK_OR_OPEN"
+        return "OTHER_MPV_ERROR"
+
+    def _detach_player_diagnostic(self, tile):
+        record = self._diagnostic_players.pop(tile, None)
+        if record is None:
+            return
+        try:
+            record["core"].unregister_event_callback(record["callback"])
+        except (ValueError, RuntimeError):
+            pass
+        try:
+            record["player"].stateChanged.disconnect(record["state_callback"])
+        except (RuntimeError, TypeError):
+            pass
+
+    def on_event(self, event, payload):
+        if not getattr(self, "_diagnostic_enabled", False):
+            return
+        if event == api.EVENT_CLOSING:
+            for tile in list(self._diagnostic_players):
+                self._detach_player_diagnostic(tile)
+            return
+        tile = payload.get("tile")
+        if event == api.EVENT_TILE_STOPPED:
+            self._detach_player_diagnostic(tile)
+            return
+        if event != api.EVENT_STREAM_RESOLVED:
+            return
+        source = payload.get("source")
+        room = str(getattr(source, "room_id", ""))
+        if not re.fullmatch(r"(?:huya|douyu|douyin):[A-Za-z0-9_-]{1,80}", room):
+            return
+        context = self.context
+        player = getattr(context.window, "players", {}).get(tile)
+        core = getattr(player, "player", None)
+        if core is None or not callable(getattr(core, "register_event_callback", None)):
+            context.log(f"[Issue13-test3] 阶段=player_attach 房间={room} 结果=播放器不支持事件观察")
+            return
+        previous = self._diagnostic_players.get(tile)
+        if previous and previous["core"] is core:
+            previous["room"] = room
+            previous["seen"].clear()
+            return
+        self._detach_player_diagnostic(tile)
+        record = {"core": core, "player": player, "room": room, "seen": set()}
+
+        def callback(event):
+            if event.event_id.value != 2:  # libmpv LOG_MESSAGE；只观察现有 error 日志，不改变日志级别。
+                return
+            data = event.data
+            if data.level not in ("error", "fatal"):
+                return
+            category = self._player_error_category(data.prefix, data.text)
+            if category not in record["seen"]:
+                record["seen"].add(category)
+                context.log(f"[Issue13-test3] 阶段=player_error 房间={record['room']} 类别={category}")
+
+        def state_callback(state):
+            if state in ("playing", "buffering", "error"):
+                mode = player.decode_mode if player.decode_mode in ("auto", "none", "d3d11va", "nvdec", "dxva2") else "other"
+                context.log(f"[Issue13-test3] 阶段=player_state 房间={record['room']} 状态={state} 解码方式={mode}")
+
+        record.update(callback=callback, state_callback=state_callback)
+        core.register_event_callback(callback)
+        player.stateChanged.connect(state_callback)
+        self._diagnostic_players[tile] = record
+        context.log(f"[Issue13-test3] 阶段=player_attach 房间={room} 结果=已开始观察播放器")
 
     def on_load(self, context: api.PluginContext) -> None:
         huya = HuyaPlatform()
@@ -1502,13 +1611,18 @@ class LivePlatformsPlugin(api.Plugin):
         context.register_platform(douyin)
         # 仅专项测试包启用；正式清单名称不触发诊断，不改变查询或取流结果。
         if "Issue #13" in self.name:
+            self._diagnostic_enabled = True
+            self._diagnostic_players = {}
             for platform in (huya, douyu, douyin):
                 self._enable_diagnostics(context, platform)
-            context.log("[Issue13-test2] 诊断已启用；查询和取流失败记录到本体 logs，不记录凭证或请求地址")
+            context.log("[Issue13-test3] 诊断已启用；记录响应特征与播放器错误类别，不记录正文、凭证或请求地址")
         if QApplication.instance() is not None and context.window is not None:
             self._logo_control = PlatformLogoControl(context, ("bilibili", "huya", "douyu", "douyin"), "显示国内平台 Logo")
 
     def on_unload(self):
+        for tile in list(getattr(self, "_diagnostic_players", {})):
+            self._detach_player_diagnostic(tile)
+        self._diagnostic_enabled = False
         if getattr(self, "_logo_control", None) is not None:
             self._logo_control.detach()
             self._logo_control = None

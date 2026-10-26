@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
@@ -229,6 +230,94 @@ class LookupTests(unittest.TestCase):
                 self.provider.room_info('https://user:private@evil.invalid/?token=private')
         self.assertNotIn('private', context.log.call_args.args[0])
         self.assertIn('无效输入', context.log.call_args.args[0])
+
+    def test_response_features_do_not_log_body_headers_or_query(self):
+        logger = Mock()
+        self.provider._diagnostic_log = logger
+        reply = response(text='<html>private cookie captcha __rsc_f</html>')
+        reply.url = 'https://live.douyin.com/439082987915?private=secret'
+        reply.headers.update({'Content-Type': 'text/html; private=secret', 'Set-Cookie': 'private-secret'})
+        with patch.object(module.requests, 'get', return_value=reply):
+            with self.assertRaises(RuntimeError):
+                self.provider.room_info(self.canonical)
+        message = logger.call_args.args[0]
+        self.assertIn('HTTP=200', message)
+        self.assertIn('类型=text/html', message)
+        self.assertIn('字节数=', message)
+        self.assertIn('"__rsc_f": true', message)
+        self.assertIn('"verification_text": true', message)
+        self.assertNotIn('private', message)
+        self.assertNotIn('secret', message)
+        self.assertNotIn('https://', message)
+        self.assertNotIn('<html>', message)
+
+    def test_response_features_are_opt_in(self):
+        self.assertFalse(hasattr(self.provider, '_diagnostic_log'))
+        with patch.object(module.requests, 'get', return_value=response(text='missing')):
+            with self.assertRaises(RuntimeError):
+                self.provider.room_info(self.canonical)
+
+    def test_player_categories_do_not_repeat_raw_messages(self):
+        plugin = module.LivePlatformsPlugin()
+        examples = [('ffmpeg', 'HTTP error 403 Forbidden private-url', 'HTTP_403'),
+            ('ffmpeg', 'TLS handshake failed private-host', 'TLS_OR_CERTIFICATE'),
+            ('ffmpeg', 'Connection timed out private-url', 'TIMEOUT'),
+            ('ffmpeg', 'Failed to resolve private-host', 'DNS'),
+            ('vd', 'Cannot initialize decoder private', 'VIDEO_DECODE'),
+            ('vo/gpu', 'D3D11 failed private', 'VIDEO_OUTPUT'),
+            ('ao/wasapi', 'Cannot initialize private', 'AUDIO_OUTPUT'),
+            ('demux', 'Invalid data private', 'DEMUX_OR_FORMAT'),
+            ('stream', 'Failed to open private', 'NETWORK_OR_OPEN'),
+            ('cplayer', 'private unknown failure', 'OTHER_MPV_ERROR')]
+        for prefix, text, expected in examples:
+            self.assertEqual(plugin._player_error_category(prefix, text), expected)
+
+    def test_player_observers_follow_room_and_detach_without_changing_playback(self):
+        plugin = module.LivePlatformsPlugin()
+        tile = object()
+        core = Mock(spec=['register_event_callback', 'unregister_event_callback'])
+        signal = Mock(spec=['connect', 'disconnect'])
+        player = SimpleNamespace(player=core, stateChanged=signal, decode_mode='d3d11va')
+        context = SimpleNamespace(window=SimpleNamespace(players={tile: player}), log=Mock())
+        plugin.context = context
+        plugin._diagnostic_enabled = True
+        plugin._diagnostic_players = {}
+        source = SimpleNamespace(room_id='huya:199300')
+        payload = {'tile': tile, 'source': source}
+        plugin.on_event(module.api.EVENT_STREAM_RESOLVED, payload)
+        callback = core.register_event_callback.call_args.args[0]
+        state_callback = signal.connect.call_args.args[0]
+        event = SimpleNamespace(event_id=SimpleNamespace(value=2), data=SimpleNamespace(
+            level='error', prefix='ffmpeg', text='HTTP error 403 private-cookie signed-url'))
+        callback(event)
+        callback(event)
+        self.assertEqual(sum('player_error' in c.args[0] for c in context.log.call_args_list), 1)
+        state_callback('error')
+        plugin.on_event(module.api.EVENT_STREAM_RESOLVED, payload)
+        core.register_event_callback.assert_called_once()
+        signal.connect.assert_called_once()
+        source.room_id = 'huya:dank1ng'
+        plugin.on_event(module.api.EVENT_STREAM_RESOLVED, payload)
+        callback(event)
+        self.assertIn('huya:dank1ng', context.log.call_args.args[0])
+        all_messages = '\n'.join(call.args[0] for call in context.log.call_args_list)
+        self.assertIn('HTTP_403', all_messages)
+        self.assertIn('解码方式=d3d11va', all_messages)
+        self.assertNotIn('private', all_messages)
+        self.assertNotIn('signed-url', all_messages)
+        self.assertIs(payload['tile'], tile)
+        self.assertEqual(player.decode_mode, 'd3d11va')
+        plugin.on_event(module.api.EVENT_TILE_STOPPED, {'tile': tile})
+        core.unregister_event_callback.assert_called_once_with(callback)
+        signal.disconnect.assert_called_once_with(state_callback)
+        self.assertEqual(plugin._diagnostic_players, {})
+
+    def test_formal_plugin_does_not_observe_player_events(self):
+        plugin = module.LivePlatformsPlugin()
+        context = Mock()
+        plugin.context = context
+        plugin.on_event(module.api.EVENT_STREAM_RESOLVED, {'source': object()})
+        context.log.assert_not_called()
 
 
 if __name__ == '__main__':
