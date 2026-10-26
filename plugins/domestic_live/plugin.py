@@ -475,24 +475,57 @@ class HuyaPlatform(LiveQualityPlatform):
                 if url in seen:
                     continue
                 seen.add(url)
-                if len(seen) > 3:
-                    break
                 try:
-                    with requests.get(url, headers=headers, stream=True, timeout=(4, 6)) as response:
-                        response.raise_for_status()
-                        if next(response.iter_content(7), b"") != b"#EXTM3U":
-                            continue
-                        qn = getattr(stream, "ddm_quality", 10000)
-                        restricted = any(item["qn"] == qn and item.get("restricted") for item in
-                                         self._qualities.get(room_id, []))
-                        if restricted and not self._verify_4k(response.url, headers):
-                            continue
-                        return response.url, qn if isinstance(qn, int) else 10000, "huya", headers
+                    playable = self._probe_hls(url, headers)
+                    if not playable:
+                        continue
+                    qn = getattr(stream, "ddm_quality", 10000)
+                    restricted = any(item["qn"] == qn and item.get("restricted") for item in
+                                     self._qualities.get(room_id, []))
+                    if restricted and not self._verify_4k(playable, headers):
+                        continue
+                    return playable, qn if isinstance(qn, int) else 10000, "huya", headers
                 except requests.RequestException:
                     continue
             raise RuntimeError("虎牙所选画质未能获取可播放视频，请重试或手动选择其他画质")
         finally:
             session.http.close()
+
+    @staticmethod
+    def _probe_hls(url, headers):
+        """播放列表可读不代表分片可读；只探测一个分片，不下载或保存整段直播。"""
+        current, original = url, ""
+        for _ in range(2):
+            with requests.get(current, headers=headers, stream=True, timeout=(4, 6)) as response:
+                response.raise_for_status()
+                chunks, length = [], 0
+                for chunk in response.iter_content(4096):
+                    chunks.append(chunk)
+                    length += len(chunk)
+                    if length > 128 * 1024:
+                        return ""
+                text = b"".join(chunks).decode("utf-8-sig", errors="replace")
+                if not text.startswith("#EXTM3U"):
+                    return ""
+                current = response.url
+                original = original or current
+            lines = [line.strip() for line in text.splitlines() if line.strip()]
+            media = next((urljoin(current, line) for line in lines if not line.startswith("#")), "")
+            parts = urlsplit(media)
+            if parts.scheme not in ("http", "https") or parts.username or parts.password:
+                return ""
+            if any(line.startswith("#EXT-X-STREAM-INF:") for line in lines):
+                current = media
+                continue
+            if not any(line.startswith("#EXTINF:") for line in lines):
+                return ""
+            with requests.get(media, headers=headers, stream=True, timeout=(4, 6)) as response:
+                response.raise_for_status()
+                prefix = next(response.iter_content(512), b"").lstrip().lower()
+                if prefix and not prefix.startswith((b"<html", b"<!doctype", b"<?xml")):
+                    return original
+            return ""
+        return ""
 
     def room_url(self, room_id: str) -> str:
         canonical = self.normalize(room_id)
@@ -1241,7 +1274,7 @@ class DouyinPlatform(NumericLivePlatform):
             info = self._page_info(response.text)
             visitor = response.cookies.get("ttwid")
             info["ttwid"] = visitor if isinstance(visitor, str) else ""
-        except (requests.RequestException, RuntimeError, ValueError, KeyError, TypeError):
+        except (requests.RequestException, RuntimeError, ValueError, KeyError, TypeError) as page_error:
             logger = getattr(self, "_diagnostic_log", None)
             if logger is not None:
                 content_type = response.headers.get("Content-Type", "").split(";", 1)[0].lower()
@@ -1255,10 +1288,19 @@ class DouyinPlatform(NumericLivePlatform):
                            ("__pace_f", "roomStore", "streamStore", "__rsc_f", "RENDER_DATA")}
                 markers["verification_text"] = any(word in page.lower() for word in
                     ("验证码", "verifycenter", "captcha"))
-                logger(f"[Issue13-test3] 阶段=page_response 房间={canonical} HTTP={response.status_code} "
+                logger(f"[平台诊断] 阶段=page_response 房间={canonical} HTTP={response.status_code} "
                        f"类型={content_type} 编码={encoding or 'none'} 字节数={len(response.content)} "
                        f"最终主机={host} 跳转次数={len(response.history)} 标记={json.dumps(markers)}")
-            raise
+            # 正文格式不兼容时使用独立的公开数据入口，不重复请求同一张网页。
+            if response.status_code == 200:
+                try:
+                    visitor = response.cookies.get("ttwid")
+                    info = self._room_enter(canonical, visitor if isinstance(visitor, str) else "")
+                except (requests.RequestException, RuntimeError, ValueError, KeyError, TypeError) as error:
+                    raise DouyinLookupError(str(self._lookup_error("直播间网页", page_error))
+                        + "；公开接口回退也失败：" + str(self._lookup_error("房间接口", error))) from error
+            else:
+                raise
         finally:
             response.close()
         owner = info["room"].get("owner") or info.get("anchor") or {}
@@ -1274,6 +1316,38 @@ class DouyinPlatform(NumericLivePlatform):
         if re.fullmatch(r"[0-9]{1,20}", owner_uid):
             self._anchor_uids[canonical] = owner_uid
         return info
+
+    def _room_enter(self, canonical, visitor=""):
+        raw = self.normalize(canonical).split(":", 1)[1]
+        with requests.get("https://live.douyin.com/webcast/room/web/enter/",
+                params={"aid": 6383, "app_name": "douyin_web", "live_id": 1,
+                        "device_platform": "web", "web_rid": raw},
+                headers={"User-Agent": "Mozilla/5.0", "Referer": "https://live.douyin.com/"},
+                cookies={"ttwid": visitor} if visitor else {}, timeout=(4, 8)) as response:
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict) or payload.get("status_code") != 0:
+                raise DouyinLookupError("抖音公开房间接口未返回有效资料，请稍后重试")
+            data = payload.get("data") or {}
+            if not isinstance(data, dict):
+                raise DouyinLookupError("抖音公开房间接口资料格式异常")
+            rooms = data.get("data") or []
+            if not isinstance(rooms, list):
+                raise DouyinLookupError("抖音公开房间接口资料格式异常")
+            for room in rooms:
+                if not isinstance(room, dict):
+                    continue
+                owner = room.get("owner") or data.get("user") or {}
+                if not isinstance(owner, dict):
+                    continue
+                uid = str(owner.get("id_str") or owner.get("id") or "")
+                if (str(owner.get("web_rid") or "") != raw or
+                        not re.fullmatch(r"[1-9][0-9]{0,19}", uid) or
+                        type(room.get("status")) is not int or not room.get("id_str")):
+                    continue
+                return {"room": dict(room, owner=owner),
+                        "ttwid": response.cookies.get("ttwid") or visitor}
+        raise DouyinLookupError("抖音公开房间接口没有返回身份匹配的房间，未导入其他主播")
 
     async def room_data_async(self, session, room_id):
         # 弹幕使用可取消的异步请求，共用关注/视频的身份校验与分享页解析。
@@ -1499,7 +1573,7 @@ class LivePlatformsPlugin(api.Plugin):
                     room = canonical if re.fullmatch(r"[a-z]+:[A-Za-z0-9_-]{1,80}", canonical) else "分享链接或无效输入"
                     mapped = (f" UID映射={'有' if platform._anchor_uids.get(canonical) else '无'}"
                               if platform.kind == "douyin" else "")
-                    context.log(f"[Issue13-test3] 平台={platform.kind} 阶段={_operation} 房间={room}"
+                    context.log(f"[平台诊断] 平台={platform.kind} 阶段={_operation} 房间={room}"
                                 f"{mapped} 耗时={time.monotonic() - started:.1f}s "
                                 f"原因={self._diagnostic_reason(error)}")
                     raise
@@ -1559,12 +1633,13 @@ class LivePlatformsPlugin(api.Plugin):
         source = payload.get("source")
         room = str(getattr(source, "room_id", ""))
         if not re.fullmatch(r"(?:huya|douyu|douyin):[A-Za-z0-9_-]{1,80}", room):
+            self._detach_player_diagnostic(tile)
             return
         context = self.context
         player = getattr(context.window, "players", {}).get(tile)
         core = getattr(player, "player", None)
         if core is None or not callable(getattr(core, "register_event_callback", None)):
-            context.log(f"[Issue13-test3] 阶段=player_attach 房间={room} 结果=播放器不支持事件观察")
+            context.log(f"[平台诊断] 阶段=player_attach 房间={room} 结果=播放器不支持事件观察")
             return
         previous = self._diagnostic_players.get(tile)
         if previous and previous["core"] is core:
@@ -1583,18 +1658,18 @@ class LivePlatformsPlugin(api.Plugin):
             category = self._player_error_category(data.prefix, data.text)
             if category not in record["seen"]:
                 record["seen"].add(category)
-                context.log(f"[Issue13-test3] 阶段=player_error 房间={record['room']} 类别={category}")
+                context.log(f"[平台诊断] 阶段=player_error 房间={record['room']} 类别={category}")
 
         def state_callback(state):
             if state in ("playing", "buffering", "error"):
                 mode = player.decode_mode if player.decode_mode in ("auto", "none", "d3d11va", "nvdec", "dxva2") else "other"
-                context.log(f"[Issue13-test3] 阶段=player_state 房间={record['room']} 状态={state} 解码方式={mode}")
+                context.log(f"[平台诊断] 阶段=player_state 房间={record['room']} 状态={state} 解码方式={mode}")
 
         record.update(callback=callback, state_callback=state_callback)
         core.register_event_callback(callback)
         player.stateChanged.connect(state_callback)
         self._diagnostic_players[tile] = record
-        context.log(f"[Issue13-test3] 阶段=player_attach 房间={room} 结果=已开始观察播放器")
+        context.log(f"[平台诊断] 阶段=player_attach 房间={room} 结果=已开始观察播放器")
 
     def on_load(self, context: api.PluginContext) -> None:
         huya = HuyaPlatform()
@@ -1609,13 +1684,11 @@ class LivePlatformsPlugin(api.Plugin):
             douyin.restore_follow_rooms([{"room_id": rid, "anchor_uid": uid} for rid, uid in saved.items()])
         douyin._context = context
         context.register_platform(douyin)
-        # 仅专项测试包启用；正式清单名称不触发诊断，不改变查询或取流结果。
-        if "Issue #13" in self.name:
-            self._diagnostic_enabled = True
-            self._diagnostic_players = {}
-            for platform in (huya, douyu, douyin):
-                self._enable_diagnostics(context, platform)
-            context.log("[Issue13-test3] 诊断已启用；记录响应特征与播放器错误类别，不记录正文、凭证或请求地址")
+        self._diagnostic_enabled = True
+        self._diagnostic_players = {}
+        for platform in (huya, douyu, douyin):
+            self._enable_diagnostics(context, platform)
+        context.log("[平台诊断] 已启用；记录失败响应特征与播放器错误类别，不记录正文、凭证或请求地址")
         if QApplication.instance() is not None and context.window is not None:
             self._logo_control = PlatformLogoControl(context, ("bilibili", "huya", "douyu", "douyin"), "显示国内平台 Logo")
 

@@ -115,7 +115,7 @@ class LookupTests(unittest.TestCase):
                 self.provider.room_info(self.canonical)
         self.assertIn('超时', str(caught.exception))
         self.assertIn('回退也失败', str(caught.exception))
-        self.assertEqual(get.call_count, 1)
+        self.assertEqual(get.call_count, 2)
 
     def read_accounts(self, users, **fields):
         session = Mock(get=Mock(return_value=response(payload=dict(
@@ -307,6 +307,8 @@ class LookupTests(unittest.TestCase):
         self.assertNotIn('signed-url', all_messages)
         self.assertIs(payload['tile'], tile)
         self.assertEqual(player.decode_mode, 'd3d11va')
+        source.room_id = '123'  # 格子改播 B 站时不能继续归因到上一个虎牙房间。
+        plugin.on_event(module.api.EVENT_STREAM_RESOLVED, payload)
         plugin.on_event(module.api.EVENT_TILE_STOPPED, {'tile': tile})
         core.unregister_event_callback.assert_called_once_with(callback)
         signal.disconnect.assert_called_once_with(state_callback)
@@ -318,6 +320,89 @@ class LookupTests(unittest.TestCase):
         plugin.context = context
         plugin.on_event(module.api.EVENT_STREAM_RESOLVED, {'source': object()})
         context.log.assert_not_called()
+
+    def test_missing_page_falls_back_to_public_api_and_preserves_identity(self):
+        payload = {'status_code': 0, 'data': {'data': [{
+            'id_str': '90001', 'status': 2, 'title': 'API room',
+            'owner': {'id_str': '101', 'web_rid': '439082987915', 'nickname': 'API anchor'}}]}}
+        with patch.object(module.requests, 'get', side_effect=[
+                response(text='no room data'), response(payload=payload)]) as get:
+            info = self.provider.room_info(self.canonical)
+        self.assertEqual(info.uname, 'API anchor')
+        self.assertTrue(info.live)
+        self.assertEqual(self.provider._anchor_uids[self.canonical], '101')
+        self.assertEqual(get.call_count, 2)
+        self.assertEqual(get.call_args.kwargs['params']['web_rid'], '439082987915')
+        self.assertEqual(get.call_args.kwargs['cookies'], {})
+        payload['data']['data'][0]['owner']['web_rid'] = '999'
+        self.provider._anchor_uids.clear()
+        with patch.object(module.requests, 'get', side_effect=[response(text='missing'), response(payload=payload)]):
+            with self.assertRaisesRegex(RuntimeError, '身份匹配'):
+                self.provider.room_info(self.canonical)
+        self.assertEqual(self.provider._anchor_uids, {})
+
+    def test_public_api_failure_is_not_an_empty_or_offline_success(self):
+        for payload in ({'status_code': 8}, {'status_code': 0, 'data': []},
+                {'status_code': 0, 'data': {'data': []}},
+                {'status_code': 0, 'data': {'data': [{'status': 2, 'id_str': '1', 'owner': []}]}}):
+            with self.subTest(payload=payload), patch.object(module.requests, 'get',
+                    side_effect=[response(text='missing'), response(payload=payload)]):
+                with self.assertRaises(RuntimeError):
+                    self.provider.room_info(self.canonical)
+
+    def test_huya_manifest_with_forbidden_segment_uses_next_cdn_same_quality(self):
+        provider = module.HuyaPlatform()
+        session = SimpleNamespace(http=SimpleNamespace(headers={'User-Agent': 'fixture'}, close=Mock()))
+        streams = {name: SimpleNamespace(ddm_quality=1014000, to_url=lambda name=name:
+            'https://' + name + '.test/live.m3u8') for name in ('first', 'second')}
+        def reply(url, text='', status=200):
+            result = response(text=text, status=status)
+            result.url = url
+            return result
+        replies = [reply('https://first.test/live.m3u8', '#EXTM3U\n#EXTINF:2,\nsegment.ts'),
+                   reply('https://first.test/segment.ts', status=403),
+                   reply('https://second.test/live.m3u8', '#EXTM3U\n#EXTINF:2,\nsegment.ts'),
+                   reply('https://second.test/segment.ts', 'Gfixture-media')]
+        with patch.object(provider, '_streams', return_value=(session, None, streams)), patch.object(
+                module.requests, 'get', side_effect=replies) as get:
+            result = provider.play_url('huya:199300', 1014000)
+        self.assertEqual(result[:3], ('https://second.test/live.m3u8', 1014000, 'huya'))
+        self.assertEqual(get.call_count, 4)
+        self.assertTrue(all('cookies' not in call.kwargs for call in get.call_args_list))
+        session.http.close.assert_called_once()
+
+    def test_huya_probe_rejects_empty_or_html_media_and_follows_master(self):
+        def reply(url, text):
+            result = response(text=text)
+            result.url = url
+            return result
+        url = 'https://cdn.test/live.m3u8'
+        for text in ('', '<html>error</html>'):
+            with patch.object(module.requests, 'get', side_effect=[
+                    reply(url, '#EXTM3U\n#EXTINF:2,\nmedia.ts'), reply('https://cdn.test/media.ts', text)]):
+                self.assertFalse(module.HuyaPlatform._probe_hls(url, {}))
+        with patch.object(module.requests, 'get', side_effect=[
+                reply(url, '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=4000000\nvariant.m3u8'),
+                reply('https://cdn.test/variant.m3u8', '#EXTM3U\n#EXTINF:2,\nmedia.ts'),
+                reply('https://cdn.test/media.ts', 'Gfixture-media')]):
+            self.assertEqual(module.HuyaPlatform._probe_hls(url, {}), url)
+
+    def test_huya_does_not_discard_a_working_fourth_cdn(self):
+        provider = module.HuyaPlatform()
+        session = SimpleNamespace(http=SimpleNamespace(headers={'User-Agent': 'fixture'}, close=Mock()))
+        streams = {str(i): SimpleNamespace(ddm_quality=10000, to_url=lambda i=i:
+            f'https://cdn{i}.test/live.m3u8') for i in range(4)}
+        replies = []
+        for i in range(4):
+            reply = response(text='#EXTM3U' if i < 3 else '#EXTM3U\n#EXTINF:2,\nmedia.ts')
+            reply.url = f'https://cdn{i}.test/live.m3u8'
+            replies.append(reply)
+        segment = response(text='Gfixture-media')
+        segment.url = 'https://cdn3.test/media.ts'
+        replies.append(segment)
+        with patch.object(provider, '_streams', return_value=(session, None, streams)), patch.object(
+                module.requests, 'get', side_effect=replies):
+            self.assertEqual(provider.play_url('huya:199300')[0], 'https://cdn3.test/live.m3u8')
 
 
 if __name__ == '__main__':
