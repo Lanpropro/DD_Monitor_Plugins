@@ -909,6 +909,7 @@ class DouyinPlatform(NumericLivePlatform):
     def __init__(self):
         super().__init__()
         self._anchor_uids = {}
+        self._profile_additions = {}
         self._context = None
 
     def restore_follow_rooms(self, rooms):
@@ -988,6 +989,22 @@ class DouyinPlatform(NumericLivePlatform):
             raise RuntimeError("官网暂未返回可用的直播记录，请在主播开播时重试，或使用直播间完整链接")
         canonical = self.normalize("douyin:" + room["web_rid"])
         self._anchor_uids[canonical] = str(uid)
+        return canonical
+
+    def profile_room_from_page(self, user, cancelled):
+        canonical = self.profile_room(user["uid"], cancelled, web_rid=user.get("web_rid", ""))
+        if not canonical or cancelled():
+            return ""
+        if user.get("web_rid"):
+            # 官网已确认主播和固定房间号；添加阶段不再依赖另一条匿名 HTTP 请求。
+            status = user.get("status")
+            info = api.RoomInfo(room_id=canonical, platform=self.kind,
+                uname=user.get("nickname") or f"抖音 · {user['web_rid']}",
+                title=user.get("title") or "抖音直播间", live=status == 2,
+                face=self._image_url(user.get("avatar")), cover_url=self._image_url(user.get("cover")),
+                extra={"playback_mode": "stream", "live_known": type(status) is int,
+                       "anchor_uid": str(user["uid"])})
+            self._profile_additions[canonical] = (time.monotonic(), info)
         return canonical
 
     def follow_rooms(self, session, cancelled, *, accounts_only=False) -> list:
@@ -1216,6 +1233,9 @@ class DouyinPlatform(NumericLivePlatform):
             room_id, share = self._resolve_share_input(room_id)
             canonical = self.normalize(room_id)
             raw = canonical.split(":", 1)[1]
+            initial = self._profile_additions.pop(canonical, None)
+            if initial is not None and time.monotonic() - initial[0] < 60:
+                return initial[1]
             info = {"room": share} if share is not None else self.room_data(canonical)
             room = info["room"]
             owner = room.get("owner") or info.get("anchor") or {}

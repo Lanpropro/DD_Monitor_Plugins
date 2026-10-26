@@ -43,6 +43,36 @@ class LookupTests(unittest.TestCase):
             self.assertNotIn('auth', get.call_args.kwargs)
             self.assertEqual(set(get.call_args.kwargs['cookies']), {'__ac_nonce'})
 
+    def test_profile_add_uses_verified_page_once_when_http_is_unavailable(self):
+        user = {'uid': '101', 'web_rid': '439082987915', 'nickname': 'profile anchor',
+                'status': 2, 'title': 'profile live',
+                'avatar': {'url_list': ['https://p.douyinpic.com/avatar.jpg']}}
+        with patch.object(module.requests, 'get', side_effect=requests.Timeout):
+            canonical = self.provider.profile_room_from_page(user, lambda: False)
+            result = self.provider.room_info(canonical)
+            self.assertEqual(result.uname, 'profile anchor')
+            self.assertEqual(result.title, 'profile live')
+            self.assertTrue(result.live)
+            self.assertTrue(result.extra['live_known'])
+            self.assertEqual(result.extra['anchor_uid'], '101')
+            self.assertEqual(result.face, 'https://p.douyinpic.com/avatar.jpg')
+            # 正常刷新仍查询实际状态，不能永久用主页快照冒充成功。
+            with self.assertRaises(RuntimeError):
+                self.provider.room_info(canonical)
+
+    def test_profile_snapshot_unknown_status_expiry_and_cancellation(self):
+        user = {'uid': '101', 'web_rid': '439082987915'}
+        canonical = self.provider.profile_room_from_page(user, lambda: False)
+        self.assertFalse(self.provider.room_info(canonical).extra['live_known'])
+        with patch.object(module.time, 'monotonic', return_value=1):
+            self.provider.profile_room_from_page(user, lambda: False)
+        with patch.object(module.time, 'monotonic', return_value=62), patch.object(
+                module.requests, 'get', side_effect=requests.Timeout):
+            with self.assertRaises(RuntimeError):
+                self.provider.room_info(canonical)
+        self.assertEqual(self.provider.profile_room_from_page(user, lambda: True), '')
+        self.assertFalse(self.provider._profile_additions)
+
     def test_bad_tail_chunk_does_not_hide_valid_room(self):
         malformed = '<script>self.__pace_f.push([2,' + json.dumps('2:{"roomStore":null}') + ']);</script>'
         self.assertEqual(self.provider._page_info(page() + malformed)['room']['status'], 2)

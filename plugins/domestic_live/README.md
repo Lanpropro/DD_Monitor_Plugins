@@ -228,6 +228,8 @@
 房间资料、视频和弹幕共用主播身份与官方分享页数据，不再因直播网页要求验证而阻断已读取的关注。
 弹幕握手携带官网返回的访客凭证，资料读取仍可及时取消。
 缓存只保留主播身份和房间信息，不保留 Cookie、签名请求地址或直播流地址。
+个人主页添加在配套本体支持下，沿用官网已确认身份和房间号的卡片资料，避免添加时再次匿名请求失败。
+该资料仅供一次添加使用，60 秒后失效；后续状态刷新和播放仍请求实时资料。
 本体仓库 `python dev/selfcheck_douyin_restart_cache.py` 验证加密保存、独立实例恢复、账号隔离和退出清理；
 `python dev/selfcheck_douyin_room_source.py` 验证分享页资料、当前内场 ID、直播状态与正常取流入口。
 本体仓库 `python dev/selfcheck_douyin_ui_follows.py` 使用本地 HTTP 和真实 WebEngine，
