@@ -94,6 +94,7 @@ class LookupTests(unittest.TestCase):
         for error, expected in ((requests.Timeout('secret-cookie'), '超时'),
                 (requests.exceptions.SSLError('secret-cookie'), '安全连接'),
                 (requests.ConnectionError('secret-cookie'), '连接失败'),
+                (requests.exceptions.JSONDecodeError('secret-cookie', 'secret-body', 0), '不是有效 JSON'),
                 (requests.HTTPError('secret-cookie', response=response(status=403)), 'HTTP 403'),
                 (requests.HTTPError('secret-cookie', response=response(status=429)), 'HTTP 429')):
             with self.subTest(expected=expected), patch.object(module.requests, 'get', side_effect=error):

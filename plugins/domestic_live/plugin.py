@@ -1239,6 +1239,8 @@ class DouyinPlatform(NumericLivePlatform):
                       else f"请求失败（HTTP {status}），请稍后重试")
         elif isinstance(error, requests.exceptions.SSLError):
             detail = "安全连接失败，请检查系统时间及网络代理设置"
+        elif isinstance(error, json.JSONDecodeError):
+            detail = "返回内容不是有效 JSON 资料，请稍后重试；持续失败时请反馈插件版本与失败时间"
         elif isinstance(error, requests.RequestException):
             detail = "连接失败，请检查网络或代理设置后重试"
         else:
