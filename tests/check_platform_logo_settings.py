@@ -68,7 +68,8 @@ def main():
                 rows = [grid.getItemPosition(grid.indexOf(check))[0] for check in checks]
                 assert rows == [grid.getItemPosition(grid.indexOf(anchor))[0] + 1,
                                 grid.getItemPosition(grid.indexOf(anchor))[0] + 2]
-                widgets = [grid.itemAt(i).widget() for i in range(grid.count()) if grid.itemAt(i).widget()]
+                widgets = [grid.itemAt(i).widget() for i in range(grid.count())
+                           if grid.itemAt(i).widget() and not grid.itemAt(i).widget().isHidden()]
                 for index, first in enumerate(widgets):
                     assert not any(first.geometry().intersects(other.geometry()) for other in widgets[index + 1:]), \
                         'General grid controls overlap'
