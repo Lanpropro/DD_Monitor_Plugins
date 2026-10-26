@@ -315,12 +315,35 @@ class LookupTests(unittest.TestCase):
         signal.disconnect.assert_called_once_with(state_callback)
         self.assertEqual(plugin._diagnostic_players, {})
 
-    def test_formal_plugin_does_not_observe_player_events(self):
+    def test_unloaded_plugin_ignores_player_events(self):
         plugin = module.LivePlatformsPlugin()
         context = Mock()
         plugin.context = context
         plugin.on_event(module.api.EVENT_STREAM_RESOLVED, {'source': object()})
         context.log.assert_not_called()
+
+    def test_verification_response_has_existing_browser_recovery_instructions(self):
+        with patch.object(module.requests, 'get', side_effect=[
+                response(text='<html>captcha verifycenter</html>'), response(text='not JSON')]) as get:
+            with self.assertRaisesRegex(RuntimeError, '主播个人主页') as caught:
+                self.provider.room_info(self.canonical)
+        self.assertIn('官网页面完成验证', str(caught.exception))
+        self.assertTrue(all(call.kwargs['headers']['User-Agent'] == module.useragents.DEFAULT
+                            for call in get.call_args_list))
+        self.assertNotEqual(module.useragents.DEFAULT, 'Mozilla/5.0')
+
+    def test_verified_uid_mapping_survives_normal_app_close(self):
+        self.provider.restore_follow_rooms([{'room_id': self.canonical, 'anchor_uid': '101'}])
+        context = SimpleNamespace(platform=Mock(return_value=self.provider), set_setting=Mock())
+        self.provider._context = context
+        plugin = module.LivePlatformsPlugin()
+        plugin.context = context
+        plugin.on_event(module.api.EVENT_CLOSING, {})
+        context.set_setting.assert_called_once_with('douyin_room_owners', {self.canonical: '101'})
+        restored = provider_type()
+        saved = context.set_setting.call_args.args[1]
+        restored.restore_follow_rooms([{'room_id': rid, 'anchor_uid': uid} for rid, uid in saved.items()])
+        self.assertEqual(restored._anchor_uids, self.provider._anchor_uids)
 
     def test_missing_page_falls_back_to_public_api_and_preserves_identity(self):
         payload = {'status_code': 0, 'data': {'data': [{

@@ -14,6 +14,7 @@ from urllib.parse import parse_qsl, unquote, urljoin, urlsplit
 
 import requests
 from streamlink import Streamlink
+from streamlink.plugin.api import useragents
 from streamlink.exceptions import PluginError
 from streamlink.plugins.huya import Huya
 from streamlink.plugins.douyu import Douyu
@@ -1268,7 +1269,7 @@ class DouyinPlatform(NumericLivePlatform):
     def _room_page(self, canonical, session=None, *, expected_uid=""):
         getter = session.http.get if session is not None else requests.get
         response = getter(self.room_url(canonical), headers={
-            "User-Agent": "Mozilla/5.0", "Referer": "https://live.douyin.com/"},
+            "User-Agent": useragents.DEFAULT, "Referer": "https://live.douyin.com/"},
             cookies={"__ac_nonce": uuid.uuid4().hex[:21]}, timeout=(4, 8))
         try:
             response.raise_for_status()
@@ -1299,6 +1300,11 @@ class DouyinPlatform(NumericLivePlatform):
                     visitor = response.cookies.get("ttwid")
                     info = self._room_enter(canonical, visitor if isinstance(visitor, str) else "")
                 except (requests.RequestException, RuntimeError, ValueError, KeyError, TypeError) as error:
+                    page = response.text
+                    if (any(word in page.lower() for word in ("验证码", "verifycenter", "captcha")) and
+                            not any(marker in page for marker in ("roomStore", "__rsc_f", "RENDER_DATA"))):
+                        raise DouyinLookupError("抖音页面包含验证相关内容，未返回直播资料。请在软件内使用主播个人主页链接添加，"
+                            "或重新读取抖音关注，并在官网页面完成验证后重试。") from error
                     raise DouyinLookupError(str(self._lookup_error("直播间网页", page_error))
                         + "；公开接口回退也失败：" + str(self._lookup_error("房间接口", error))) from error
             else:
@@ -1324,7 +1330,7 @@ class DouyinPlatform(NumericLivePlatform):
         with requests.get("https://live.douyin.com/webcast/room/web/enter/",
                 params={"aid": 6383, "app_name": "douyin_web", "live_id": 1,
                         "device_platform": "web", "web_rid": raw},
-                headers={"User-Agent": "Mozilla/5.0", "Referer": "https://live.douyin.com/"},
+                headers={"User-Agent": useragents.DEFAULT, "Referer": "https://live.douyin.com/"},
                 cookies={"ttwid": visitor} if visitor else {}, timeout=(4, 8)) as response:
             response.raise_for_status()
             payload = response.json()
@@ -1620,6 +1626,11 @@ class LivePlatformsPlugin(api.Plugin):
             pass
 
     def on_event(self, event, payload):
+        if event == api.EVENT_CLOSING and self.context is not None:
+            platform = self.context.platform("douyin")
+            if platform is not None:
+                # 关闭事件位于主线程；持久化已确认的映射，不在网络线程读取界面或写配置。
+                platform.restore_follow_rooms([])
         if not getattr(self, "_diagnostic_enabled", False):
             return
         if event == api.EVENT_CLOSING:
