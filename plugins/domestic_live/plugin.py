@@ -1442,6 +1442,51 @@ class PlatformLogoControl(QObject):
 
 
 class LivePlatformsPlugin(api.Plugin):
+    @staticmethod
+    def _diagnostic_reason(error):
+        """仅记录错误类别；原始异常可能带签名 URL、代理密码和 Cookie。"""
+        reasons, seen = [], set()
+        while error is not None and id(error) not in seen and len(reasons) < 5:
+            seen.add(id(error))
+            detail = type(error).__name__
+            if isinstance(error, requests.HTTPError) and error.response is not None:
+                detail += f"(HTTP {error.response.status_code})"
+            elif isinstance(error, requests.exceptions.SSLError):
+                detail += "(证书校验失败)" if "CERTIFICATE_VERIFY_FAILED" in str(error) else "(TLS连接失败)"
+            elif isinstance(error, requests.exceptions.ProxyError):
+                detail += "(代理连接失败)"
+            elif isinstance(error, requests.ConnectionError):
+                if any(token in str(error) for token in ("getaddrinfo failed", "NameResolutionError")):
+                    detail += "(域名解析失败)"
+            elif isinstance(error, DouyinLookupError):
+                detail += f"({error.user_message})"
+            reasons.append(detail)
+            error = error.__cause__ or error.__context__
+        return " <- ".join(reasons)
+
+    def _enable_diagnostics(self, context, platform):
+        for operation in ("room_info", "play_url"):
+            original = getattr(platform, operation)
+
+            def diagnosed(*args, _original=original, _operation=operation, **kwargs):
+                started = time.monotonic()
+                try:
+                    return _original(*args, **kwargs)
+                except Exception as error:  # noqa: BLE001
+                    try:
+                        canonical = platform.normalize(args[0] if args else kwargs.get("room_id", ""))
+                    except (ValueError, TypeError):
+                        canonical = ""
+                    room = canonical if re.fullmatch(r"[a-z]+:[A-Za-z0-9_-]{1,80}", canonical) else "分享链接或无效输入"
+                    mapped = (f" UID映射={'有' if platform._anchor_uids.get(canonical) else '无'}"
+                              if platform.kind == "douyin" else "")
+                    context.log(f"[Issue13-test2] 平台={platform.kind} 阶段={_operation} 房间={room}"
+                                f"{mapped} 耗时={time.monotonic() - started:.1f}s "
+                                f"原因={self._diagnostic_reason(error)}")
+                    raise
+
+            setattr(platform, operation, diagnosed)
+
     def on_load(self, context: api.PluginContext) -> None:
         huya = HuyaPlatform()
         huya._context = context
@@ -1455,6 +1500,11 @@ class LivePlatformsPlugin(api.Plugin):
             douyin.restore_follow_rooms([{"room_id": rid, "anchor_uid": uid} for rid, uid in saved.items()])
         douyin._context = context
         context.register_platform(douyin)
+        # 仅专项测试包启用；正式清单名称不触发诊断，不改变查询或取流结果。
+        if "Issue #13" in self.name:
+            for platform in (huya, douyu, douyin):
+                self._enable_diagnostics(context, platform)
+            context.log("[Issue13-test2] 诊断已启用；查询和取流失败记录到本体 logs，不记录凭证或请求地址")
         if QApplication.instance() is not None and context.window is not None:
             self._logo_control = PlatformLogoControl(context, ("bilibili", "huya", "douyu", "douyin"), "显示国内平台 Logo")
 

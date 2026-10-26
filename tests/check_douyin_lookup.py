@@ -192,6 +192,44 @@ class LookupTests(unittest.TestCase):
         with patch.object(self.provider, 'account_info', return_value={'uid': '42'}):
             self.assertEqual(self.provider.follow_accounts(session, lambda: session.get.called), [])
 
+    def test_diagnostics_preserve_results_and_exceptions_without_secrets(self):
+        plugin = module.LivePlatformsPlugin()
+        context = Mock()
+        error = RuntimeError('private signed URL')
+        error.__cause__ = requests.exceptions.SSLError('private CERTIFICATE_VERIFY_FAILED cookie')
+        with patch.object(self.provider, 'room_info', side_effect=error), patch.object(
+                self.provider, 'play_url', return_value=('private-stream-url', 10000, 'douyin', {})):
+            plugin._enable_diagnostics(context, self.provider)
+            self.assertEqual(self.provider.play_url(self.canonical)[0], 'private-stream-url')
+            context.log.assert_not_called()
+            with self.assertRaises(RuntimeError) as caught:
+                self.provider.room_info(self.canonical)
+            self.assertIs(caught.exception, error)
+            message = context.log.call_args.args[0]
+            self.assertIn('room_info', message)
+            self.assertIn(self.canonical, message)
+            self.assertIn('UID映射=无', message)
+            self.assertIn('证书校验失败', message)
+            self.assertNotIn('private', message)
+            self.assertNotIn('cookie', message)
+
+    def test_diagnostic_categories_and_invalid_link_redaction(self):
+        plugin = module.LivePlatformsPlugin()
+        for error, expected in ((requests.exceptions.ProxyError('private-proxy-password'), '代理连接失败'),
+                (requests.ConnectionError('private getaddrinfo failed'), '域名解析失败'),
+                (requests.HTTPError('private', response=response(status=403)), 'HTTP 403'),
+                (requests.Timeout('private'), 'Timeout')):
+            result = plugin._diagnostic_reason(error)
+            self.assertIn(expected, result)
+            self.assertNotIn('private', result)
+        context = Mock()
+        with patch.object(self.provider, 'room_info', side_effect=ValueError('private-link')):
+            plugin._enable_diagnostics(context, self.provider)
+            with self.assertRaises(ValueError):
+                self.provider.room_info('https://user:private@evil.invalid/?token=private')
+        self.assertNotIn('private', context.log.call_args.args[0])
+        self.assertIn('无效输入', context.log.call_args.args[0])
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
