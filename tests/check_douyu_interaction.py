@@ -846,7 +846,8 @@ class ReceiveTests(unittest.TestCase):
         self.assertTrue(self.events[0]["self_sent"])
         self.assertFalse(self.events[1]["self_sent"])
         self.jar.set("acf_uid", "24", domain=".douyu.com", path="/")
-        self.broadcast()
+        with patch.object(receive.time, "monotonic", return_value=self.client._identity_deadline + .01):
+            self.broadcast()
         self.assertFalse(self.events[-1]["self_sent"])
 
     def test_confirmed_send_visible_without_public_broadcast_and_boxed(self):
@@ -910,6 +911,95 @@ class ReceiveTests(unittest.TestCase):
         self.client.receive_confirmed("douyu:9999", self.receipt)
         self.broadcast()
         self.assertEqual(len(self.events), 2)
+
+    def test_bursts_do_not_repeatedly_load_credentials_on_gui_thread(self):
+        with patch.object(self.platform, "_playback_cookies", return_value=self.jar) as load:
+            with patch.object(receive.time, "monotonic", return_value=100):
+                for index in range(1000):
+                    self.broadcast("42", str(index))
+            self.assertEqual(load.call_count, 1)
+            self.assertEqual(len(self.events), 1000)
+            self.assertTrue(all(event["self_sent"] for event in self.events))
+            self.jar.clear()
+            with patch.object(receive.time, "monotonic", return_value=101.01):
+                self.broadcast()
+            self.assertEqual(load.call_count, 2)
+            self.assertFalse(self.events[-1]["self_sent"])
+
+    def test_real_tcp_server_requires_ping_reply_to_continue_chat(self):
+        async def scenario():
+            received, closed = asyncio.Event(), asyncio.Event()
+            replies = []
+            async def serve(reader, writer):
+                buffer = bytearray()
+                try:
+                    while chunk := await reader.read(4096):
+                        buffer.extend(chunk)
+                        for event in api.douyu_messages(buffer):
+                            if event.get("type") == "loginreq":
+                                writer.write(api.packet({"type": "loginres"}))
+                            elif event.get("type") == "joingroup":
+                                writer.write(api.packet({"type": "pingreq", "tick": "first"}))
+                            elif event.get("type") == "pingres":
+                                replies.append(event.get("tick"))
+                                writer.write(api.packet({"type": "chatmsg", "uid": "42", "txt": event["tick"]}))
+                                if event["tick"] == "first":
+                                    writer.write(api.packet({"type": "pingreq", "tick": "second"}))
+                                else:
+                                    received.set()
+                        await writer.drain()
+                finally:
+                    writer.close()
+                    await writer.wait_closed()
+                    closed.set()
+            server = await asyncio.start_server(serve, "127.0.0.1", 0)
+            connect = asyncio.open_connection
+            async def redirect(_host, _port):
+                return await connect("127.0.0.1", server.sockets[0].getsockname()[1])
+            task = None
+            try:
+                with patch.object(receive.asyncio, "open_connection", redirect):
+                    task = asyncio.create_task(self.client._douyu())
+                    await asyncio.wait_for(received.wait(), 1)
+                    for _ in range(10):
+                        if len(self.events) == 2:
+                            break
+                        await asyncio.sleep(.005)
+                    self.assertEqual([event["text"] for event in self.events], ["first", "second"])
+                    self.assertEqual(replies, ["first", "second"])
+            finally:
+                if task is not None:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                await asyncio.wait_for(closed.wait(), 1)
+                server.close()
+                await server.wait_closed()
+        asyncio.run(scenario())
+
+    def test_server_ping_is_answered_immediately_and_keeps_receiving(self):
+        login = api.packet({"type": "loginres"})
+        first = api.packet({"type": "pingreq", "tick": "1793118592460"})
+        second = api.packet({"type": "pingreq", "tick": "next/@"})
+        chat = api.packet({"type": "chatmsg", "uid": "42", "txt": "after ping", "nn": "用户"})
+        chunks = iter([login + first[:8], first[8:], second, chat, b""])
+        writer = SimpleNamespace(write=Mock(), drain=AsyncMock(), close=Mock(), wait_closed=AsyncMock())
+        def sent():
+            return api.douyu_messages(bytearray(b"".join(call.args[0] for call in writer.write.call_args_list)))
+        async def read(_size):
+            chunk = next(chunks)
+            if chunk == second:
+                self.assertTrue(any(event == {"type": "pingres", "tick": "1793118592460"} for event in sent()),
+                                "Must answer ping before waiting for another read or heartbeat")
+            if chunk == chat:
+                self.assertTrue(any(event == {"type": "pingres", "tick": "next/@"} for event in sent()))
+            return chunk
+        with patch.object(receive.asyncio, "open_connection", new=AsyncMock(return_value=(SimpleNamespace(read=read), writer))):
+            with self.assertRaises(OSError):
+                asyncio.run(self.client._douyu())
+        APP.processEvents()
+        self.assertEqual([event["text"] for event in self.events], ["after ping"])
+        self.assertEqual(sum(event.get("type") == "joingroup" for event in sent()), 1)
+        self.assertEqual(sum(event.get("type") == "pingres" for event in sent()), 2)
 
     def test_split_packets_canonical_room_and_subscription_survive(self):
         packet = api.packet({"type": "loginres"}) + api.packet({"type": "chatmsg", "uid": "42", "txt": "hello", "nn": "用户"})

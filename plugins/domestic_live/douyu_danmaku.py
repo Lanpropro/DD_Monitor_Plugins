@@ -7,7 +7,7 @@ from PySide6.QtCore import QObject, Signal
 
 from ddm.live_danmaku import (LiveDanmakuClient, douyu_packet, douyu_messages,
                               DOUYU_HEARTBEAT, DOUYU_RECEIVE_TIMEOUT)
-from .douyu_interaction import web_cookies
+from .douyu_interaction import packet, web_cookies
 
 
 class ChatRelay(QObject):
@@ -28,6 +28,8 @@ class DouyuDanmakuClient(LiveDanmakuClient):
         self.canonical_room = self.room_id
         self._broadcasts = deque(maxlen=256)
         self._receipts = deque(maxlen=256)
+        self._own_uid = ""
+        self._identity_deadline = 0.0
         self.broadcast.connect(self.receive_broadcast)
         relay_for(platform).confirmed.connect(self.receive_confirmed)
 
@@ -49,8 +51,14 @@ class DouyuDanmakuClient(LiveDanmakuClient):
             return
         if uid and self._match(self._receipts, uid, text):
             return
-        cookies = web_cookies(self.platform._playback_cookies(), self.room_id)
-        own = bool(uid) and uid == cookies.get("acf_uid")
+        # Parsing (and on saved sessions decrypting) cookies for every chat
+        # blocks the GUI during bursts; identity alone may lag by at most 1s.
+        now = time.monotonic()
+        if now >= self._identity_deadline:
+            cookies = web_cookies(self.platform._playback_cookies(), self.room_id)
+            self._own_uid = cookies.get("acf_uid", "")
+            self._identity_deadline = now + 1.0
+        own = bool(uid) and uid == self._own_uid
         self._broadcasts.append((time.monotonic(), uid, text))
         self.message.emit({"kind": "danmaku", "uid": uid, "uname": data.get("nn", ""),
                            "text": text, "self_sent": own, "delivery": "broadcast"})
@@ -107,6 +115,10 @@ class DouyuDanmakuClient(LiveDanmakuClient):
                         authenticated = True
                         self._connected = True
                         self.status.emit("已连接")
+                    elif data.get("type") == "pingreq":
+                        # Server probes are independent of our periodic mrkl.
+                        writer.write(packet({"type": "pingres", "tick": data.get("tick", "")}))
+                        await writer.drain()
                     elif data.get("type") == "error":
                         raise ValueError("Douyu server rejected subscription")
                     elif data.get("type") == "chatmsg" and data.get("txt"):
