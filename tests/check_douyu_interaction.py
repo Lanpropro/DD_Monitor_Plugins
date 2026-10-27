@@ -950,7 +950,10 @@ class ReceiveTests(unittest.TestCase):
                         await writer.drain()
                 finally:
                     writer.close()
-                    await writer.wait_closed()
+                    try:
+                        await writer.wait_closed()
+                    except OSError:
+                        pass
                     closed.set()
             server = await asyncio.start_server(serve, "127.0.0.1", 0)
             connect = asyncio.open_connection
@@ -975,6 +978,86 @@ class ReceiveTests(unittest.TestCase):
                 server.close()
                 await server.wait_closed()
         asyncio.run(scenario())
+
+    def test_silent_socket_times_out_and_close_cannot_block_reconnect(self):
+        async def scenario():
+            first = True
+            async def read(_size):
+                nonlocal first
+                if first:
+                    first = False
+                    return api.packet({"type": "loginres"})
+                await asyncio.Future()
+            async def stuck_close():
+                await asyncio.Future()
+            writer = SimpleNamespace(write=Mock(), drain=AsyncMock(), close=Mock(),
+                wait_closed=stuck_close, transport=Mock())
+            with patch.object(receive.asyncio, "open_connection", new=AsyncMock(return_value=(SimpleNamespace(read=read), writer))), \
+                    patch.object(receive, "DOUYU_HEARTBEAT", .01), \
+                    patch.object(receive, "DOUYU_RECEIVE_TIMEOUT", .04), \
+                    patch.object(receive, "DOUYU_CLOSE_TIMEOUT", .01):
+                with self.assertRaisesRegex(ValueError, "Douyu response timeout"):
+                    await asyncio.wait_for(self.client._douyu(), .3)
+            sent = api.douyu_messages(bytearray(b"".join(call.args[0] for call in writer.write.call_args_list)))
+            self.assertGreaterEqual(sum(event.get("type") == "mrkl" for event in sent), 2)
+            writer.transport.abort.assert_called_once()
+        asyncio.run(scenario())
+
+    def test_quiet_room_stays_connected_when_heartbeat_replies_continue(self):
+        async def scenario():
+            closed = asyncio.Event()
+            heartbeats = []
+            async def serve(reader, writer):
+                buffer = bytearray()
+                try:
+                    while chunk := await reader.read(4096):
+                        buffer.extend(chunk)
+                        for event in api.douyu_messages(buffer):
+                            if event.get("type") == "loginreq":
+                                writer.write(api.packet({"type": "loginres"}))
+                            elif event.get("type") == "mrkl":
+                                heartbeats.append(event)
+                                writer.write(api.packet({"type": "mrkl"}))
+                        await writer.drain()
+                finally:
+                    writer.close()
+                    try:
+                        await writer.wait_closed()
+                    except OSError:
+                        pass
+                    closed.set()
+            server = await asyncio.start_server(serve, "127.0.0.1", 0)
+            connect = asyncio.open_connection
+            async def redirect(_host, _port):
+                return await connect("127.0.0.1", server.sockets[0].getsockname()[1])
+            task = None
+            try:
+                with patch.object(receive.asyncio, "open_connection", redirect), \
+                        patch.object(receive, "DOUYU_HEARTBEAT", .03), \
+                        patch.object(receive, "DOUYU_RECEIVE_TIMEOUT", .2):
+                    task = asyncio.create_task(self.client._douyu())
+                    await asyncio.sleep(.45)
+                    self.assertFalse(task.done(), f"Quiet chat must stay connected: {task.exception() if task.done() else None}, replies={len(heartbeats)}")
+                    self.assertGreaterEqual(len(heartbeats), 4)
+                    self.assertEqual(self.events, [])
+            finally:
+                if task is not None:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                await asyncio.wait_for(closed.wait(), 1)
+                server.close()
+                await server.wait_closed()
+        asyncio.run(scenario())
+
+    def test_reconnect_reuses_resolved_real_room_without_another_http_lookup(self):
+        writer = SimpleNamespace(write=Mock(), drain=AsyncMock(), close=Mock(), wait_closed=AsyncMock())
+        with patch.object(receive.asyncio, "open_connection", new=AsyncMock(return_value=(SimpleNamespace(read=AsyncMock(return_value=b"")), writer))):
+            for attempt in range(2):
+                with self.assertRaises(OSError):
+                    asyncio.run(self.client._douyu(attempt))
+        self.platform.room_info.assert_called_once_with("douyu:9999")
+        sent = api.douyu_messages(bytearray(b"".join(call.args[0] for call in writer.write.call_args_list)))
+        self.assertTrue(all(event["roomid"] == "8888" for event in sent if event.get("type") == "loginreq"))
 
     def test_server_ping_is_answered_immediately_and_keeps_receiving(self):
         login = api.packet({"type": "loginres"})

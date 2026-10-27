@@ -5,9 +5,13 @@ from collections import deque
 
 from PySide6.QtCore import QObject, Signal
 
-from ddm.live_danmaku import (LiveDanmakuClient, douyu_packet, douyu_messages,
-                              DOUYU_HEARTBEAT, DOUYU_RECEIVE_TIMEOUT)
+from ddm.live_danmaku import LiveDanmakuClient, douyu_packet, douyu_messages
 from .douyu_interaction import packet, web_cookies
+
+
+DOUYU_HEARTBEAT = 5.0
+DOUYU_RECEIVE_TIMEOUT = 12.0
+DOUYU_CLOSE_TIMEOUT = 1.0
 
 
 class ChatRelay(QObject):
@@ -26,6 +30,7 @@ class DouyuDanmakuClient(LiveDanmakuClient):
     def __init__(self, room_id, platform, parent=None):
         super().__init__(room_id, platform, parent)
         self.canonical_room = self.room_id
+        self._resolved_room = None
         self._broadcasts = deque(maxlen=256)
         self._receipts = deque(maxlen=256)
         self._own_uid = ""
@@ -75,11 +80,13 @@ class DouyuDanmakuClient(LiveDanmakuClient):
     # Same public subscription as the host, retaining UID before normalisation.
     async def _douyu(self, retries=0):
         # The public URL can be a vanity number; subscription requires the actual room.
-        info = await asyncio.to_thread(self.platform.room_info, self.room_id)
-        if self._stopped.is_set():
-            return
-        raw = self.platform.normalize(info.room_id).split(":", 1)[1]
-        self.canonical_room = "douyu:" + raw
+        if self._resolved_room is None:
+            info = await asyncio.to_thread(self.platform.room_info, self.room_id)
+            if self._stopped.is_set():
+                return
+            self._resolved_room = self.platform.normalize(info.room_id).split(":", 1)[1]
+            self.canonical_room = "douyu:" + self._resolved_room
+        raw = self._resolved_room
         reader, writer = await asyncio.wait_for(asyncio.open_connection(
             "danmuproxy.douyu.com", 8601 + retries % 2), 5)
         try:
@@ -125,4 +132,7 @@ class DouyuDanmakuClient(LiveDanmakuClient):
                         self.broadcast.emit(data)
         finally:
             writer.close()
-            await writer.wait_closed()
+            try:
+                await asyncio.wait_for(writer.wait_closed(), DOUYU_CLOSE_TIMEOUT)
+            except (OSError, asyncio.TimeoutError):
+                writer.transport.abort()
