@@ -257,6 +257,14 @@ class DouyuAPI:
             _check_cancel(cancelled)
             return GiftPanel(gifts, tabs, wallet, error)
 
+    def wallet(self, room, cancelled=lambda: False):
+        room = room_number(room)
+        _check_cancel(cancelled)
+        with self._session(room) as session:
+            wallet = wallet_data(self._read(session, BASE + "/lapi/member/api/getInfo", params={"client_type": 0}))
+        _check_cancel(cancelled)
+        return wallet
+
     def _account(self, session, cancelled, *, timeout=(4, 8)):
         _check_cancel(cancelled)
         payload = self._read(session, BASE + "/lapi/member/api/getInfo", params={"client_type": 0}, timeout=timeout)

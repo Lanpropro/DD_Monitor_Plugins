@@ -24,7 +24,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import aiohttp
 import requests
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QInputMethodEvent, QKeyEvent
+from PySide6.QtGui import QHideEvent, QInputMethodEvent, QKeyEvent
 from PySide6.QtWidgets import QApplication, QWidget
 from PySide6.QtTest import QTest
 from ddm.plugins import PluginManager
@@ -156,6 +156,14 @@ class APITests(unittest.TestCase):
         panel = client.gift_panel("douyu:9999")
         self.assertEqual(panel.wallet, api.Wallet(0, 214))
         self.assertEqual(len(panel.gifts), 1)
+        self.assertEqual(session.get.call_args.args[0], api.BASE + "/lapi/member/api/getInfo")
+        session.post.assert_not_called()
+
+    def test_wallet_only_refresh_does_not_fetch_gift_catalog(self):
+        client, session = self.client()
+        session.get.side_effect = [response({"error": 0, "msg": {"gold": 100, "silver": 214}})]
+        self.assertEqual(client.wallet("9999"), api.Wallet(100, 214))
+        session.get.assert_called_once()
         self.assertEqual(session.get.call_args.args[0], api.BASE + "/lapi/member/api/getInfo")
         session.post.assert_not_called()
 
@@ -596,6 +604,58 @@ class UITests(unittest.TestCase):
         popup.set_panel(panel)
         self.assertEqual(popup.tabs.tabData(popup.tabs.currentIndex()), 2)
 
+    def test_wallet_update_keeps_gift_cards_selection_quantity_and_category(self):
+        popup = ui.GiftPopup(self.widget)
+        self.widget.popup = popup
+        gift = api.gift_catalog(catalog())[0]
+        tabs = (api.GiftTab(1, "礼物", (gift,)), api.GiftTab(2, "特权", (gift,)))
+        popup.set_panel(api.GiftPanel((gift,), tabs, api.Wallet(200, 214)))
+        popup.tabs.setCurrentIndex(1)
+        popup.choose(gift)
+        popup.quantity.setValue(6)
+        card = popup.grid.itemAt(0).widget()
+        with patch.object(popup, "set_gifts") as rebuild, patch.object(popup, "stop_images") as stop:
+            popup.set_panel(api.GiftPanel((gift,), tabs, api.Wallet(300, 114)))
+            rebuild.assert_not_called()
+            stop.assert_not_called()
+        self.assertIs(popup.grid.itemAt(0).widget(), card)
+        self.assertIs(popup.selected, gift)
+        self.assertEqual(popup.quantity.value(), 6)
+        self.assertEqual(popup.tabs.tabData(popup.tabs.currentIndex()), 2)
+        self.assertIn("鱼丸：114", popup.wallet_label.text())
+
+    def test_temporarily_hiding_picker_does_not_cancel_retained_images(self):
+        popup = ui.GiftPopup(self.widget)
+        self.widget.popup = popup
+        reply = Mock()
+        popup.images.add(reply)
+        popup.hideEvent(QHideEvent())
+        reply.abort.assert_not_called()
+        self.widget.shutdown()
+        reply.abort.assert_called_once()
+
+    def test_balance_completion_does_not_clear_another_tile_send_lock(self):
+        popup = ui.GiftPopup(self.widget)
+        self.widget.popup = popup
+        self.owner.sending = True
+        self.widget.completed(object(), (self.widget.snapshot(), "wallet", "", dict(self.widget.room)), api.Wallet(100, 214))
+        self.assertTrue(self.owner.sending)
+        self.assertEqual(popup.wallet, api.Wallet(100, 214))
+        self.owner.context.notify.assert_not_called()
+
+    def test_wallet_error_keeps_cards_and_does_not_report_send_failure(self):
+        popup = ui.GiftPopup(self.widget)
+        self.widget.popup = popup
+        gift = api.gift_catalog(catalog())[0]
+        popup.set_panel(api.GiftPanel((gift,), (api.GiftTab(1, "礼物", (gift,)),), api.Wallet(100, 214)))
+        popup.choose(gift)
+        card = popup.grid.itemAt(0).widget()
+        self.widget.completed(object(), (self.widget.snapshot(), "wallet", "", dict(self.widget.room)), api.InteractionError("余额暂不可用"))
+        self.assertIs(popup.grid.itemAt(0).widget(), card)
+        self.assertIs(popup.selected, gift)
+        self.assertEqual(popup.wallet_label.text(), "余额：未知")
+        self.owner.context.notify.assert_not_called()
+
     def test_zero_balance_disables_confirm_and_keeps_card_inspectable(self):
         popup = ui.GiftPopup(self.widget)
         self.widget.popup = popup
@@ -631,10 +691,68 @@ class UITests(unittest.TestCase):
     def test_gift_success_refreshes_visible_balance_without_notification(self):
         popup = ui.GiftPopup(self.widget)
         self.widget.popup = popup
-        with patch.object(popup, "isVisible", return_value=True), patch.object(self.widget, "load_gifts") as refresh:
+        with patch.object(popup, "isVisible", return_value=True), \
+                patch.object(self.widget, "refresh_wallet") as refresh, patch.object(self.widget, "load_gifts") as catalog_refresh:
             self.widget.completed(object(), (self.widget.snapshot(), "gift", "", dict(self.widget.room)), {})
             refresh.assert_called_once()
+            catalog_refresh.assert_not_called()
         self.owner.context.notify.assert_not_called()
+
+    def test_gift_confirmation_has_clear_transaction_fields_and_safe_default(self):
+        gift = api.Gift(7, "100鱼丸", 100, "YUWAN", 0, 10)
+        room = {"room_id": "douyu:6979222", "uname": "玩机器、Machine <主播>"}
+        dialog = ui.GiftConfirmDialog(room, gift, 1, api.Wallet(0, 214), self.parent)
+        try:
+            self.assertEqual(dialog.recipient.text(), room["uname"])
+            self.assertEqual(dialog.recipient.textFormat(), Qt.PlainText)
+            self.assertEqual(dialog.room_label.text(), "斗鱼房间 6979222")
+            self.assertEqual(dialog.gift_label.text(), "100鱼丸")
+            self.assertEqual(dialog.quantity_label.text(), "1")
+            self.assertEqual(dialog.cost_label.text(), "100 鱼丸")
+            self.assertEqual(dialog.cancel.text(), "取消")
+            self.assertEqual(dialog.confirm.text(), "确认赠送")
+            self.assertTrue(dialog.cancel.isDefault())
+            self.assertFalse(dialog.confirm.autoDefault())
+        finally:
+            dialog.deleteLater()
+
+    def test_cancelled_confirmation_never_sends(self):
+        popup = ui.GiftPopup(self.widget)
+        self.widget.popup = popup
+        gift = api.gift_catalog(catalog())[0]
+        popup.set_gifts((gift,))
+        popup.choose(gift)
+        with patch.object(ui.GiftConfirmDialog, "exec", return_value=ui.QDialog.Rejected), \
+                patch.object(self.widget, "send_gift") as send:
+            popup.confirm()
+            send.assert_not_called()
+
+    def test_account_change_during_confirmation_prevents_spending(self):
+        popup = ui.GiftPopup(self.widget)
+        self.widget.popup = popup
+        gift = api.gift_catalog(catalog())[0]
+        popup.set_gifts((gift,))
+        popup.choose(gift)
+        def accept_after_account_change():
+            self.owner.platform._playback_cookies = lambda: requests.cookies.RequestsCookieJar()
+            return ui.QDialog.Accepted
+        with patch.object(ui.GiftConfirmDialog, "exec", side_effect=accept_after_account_change), \
+                patch.object(self.widget, "send_gift") as send:
+            popup.confirm()
+            send.assert_not_called()
+
+    def test_accepted_confirmation_sends_exact_captured_selection_once(self):
+        popup = ui.GiftPopup(self.widget)
+        self.widget.popup = popup
+        gift = api.gift_catalog(catalog())[0]
+        popup.set_gifts((gift,))
+        popup.choose(gift)
+        popup.quantity.setValue(3)
+        key = self.widget.snapshot()
+        with patch.object(ui.GiftConfirmDialog, "exec", return_value=ui.QDialog.Accepted), \
+                patch.object(self.widget, "send_gift") as send:
+            popup.confirm()
+            send.assert_called_once_with(gift, 3, key)
 
     def test_cross_tile_send_does_not_start_second_request(self):
         self.owner.sending = True

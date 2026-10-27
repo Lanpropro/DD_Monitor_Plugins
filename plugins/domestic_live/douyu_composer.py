@@ -7,8 +7,8 @@ import requests
 from PySide6.QtCore import QEvent, Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QPainter, QPen, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
-from PySide6.QtWidgets import (QGridLayout, QHBoxLayout,
-    QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
+from PySide6.QtWidgets import (QDialog, QFrame, QGridLayout, QHBoxLayout,
+    QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy,
     QSpinBox, QTabBar, QVBoxLayout, QWidget)
 
 from ddm import plugins as api, theme
@@ -129,11 +129,81 @@ class DanmakuEdit(QLineEdit):
         super().keyPressEvent(event)
 
 
+class GiftConfirmDialog(QDialog):
+    def __init__(self, room, gift, count, wallet, parent=None):
+        super().__init__(parent)
+        self.setObjectName("DouyuGiftConfirm")
+        self.setWindowTitle("确认赠送礼物")
+        self.setMinimumWidth(400)
+        self.setMaximumWidth(500)
+        self.setStyleSheet(f"""
+            QDialog#DouyuGiftConfirm {{background:{theme.ELEVATED};}}
+            QLabel {{color:{theme.TEXT1}; font-size:{theme.FONT_CONTROL}px;}}
+            QLabel#GiftConfirmTitle {{font-size:18px; font-weight:600;}}
+            QLabel#GiftConfirmRecipient {{font-size:15px; font-weight:600;}}
+            QLabel#GiftConfirmMuted {{color:{theme.TEXT3};}}
+            QLabel#GiftConfirmCost {{color:{theme.ACCENT}; font-size:18px; font-weight:600;}}
+            QFrame#GiftConfirmDetails {{background:{theme.CONTENT}; border:1px solid {theme.BORDER}; border-radius:8px;}}
+            QPushButton {{min-height:32px; min-width:84px; padding:0 14px;
+                border:1px solid {theme.BORDER_STRONG}; border-radius:8px; color:{theme.TEXT1};}}
+            QPushButton:hover {{background:{theme.CONTENT_HOVER};}}
+            QPushButton#GiftConfirmSubmit {{background:{theme.ACCENT}; color:#04161f; border:none;}}
+        """)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(12)
+        def label(text, name=""):
+            widget = QLabel(str(text))
+            widget.setTextFormat(Qt.PlainText)
+            widget.setWordWrap(True)
+            widget.setObjectName(name)
+            return widget
+        layout.addWidget(label("确认赠送", "GiftConfirmTitle"))
+        recipient = QVBoxLayout()
+        recipient.setSpacing(4)
+        recipient.addWidget(label("赠送给", "GiftConfirmMuted"))
+        self.recipient = label(room.get("uname") or "主播", "GiftConfirmRecipient")
+        recipient.addWidget(self.recipient)
+        self.room_label = label("斗鱼房间 " + room_number(room.get("room_id")), "GiftConfirmMuted")
+        recipient.addWidget(self.room_label)
+        layout.addLayout(recipient)
+        details = QFrame()
+        details.setObjectName("GiftConfirmDetails")
+        grid = QGridLayout(details)
+        grid.setContentsMargins(14, 12, 14, 12)
+        grid.setHorizontalSpacing(24)
+        grid.setVerticalSpacing(10)
+        self.gift_label, self.quantity_label = label(gift.name), label(str(count))
+        self.cost_label = label(gift.cost(count), "GiftConfirmCost")
+        rows = [("礼物", self.gift_label), ("数量", self.quantity_label), ("本次消费", self.cost_label)]
+        if wallet is not None:
+            amount = f"{format_yuchi(wallet.yuchi)} 鱼翅" if gift.currency == "YUCHI" else f"{wallet.yuwan} 鱼丸"
+            rows.append(("当前余额", label(amount)))
+        for index, (title, value) in enumerate(rows):
+            grid.addWidget(label(title, "GiftConfirmMuted"), index, 0)
+            grid.addWidget(value, index, 1)
+        grid.setColumnStretch(1, 1)
+        layout.addWidget(details)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        self.cancel = QPushButton("取消")
+        self.cancel.setDefault(True)
+        self.cancel.clicked.connect(self.reject)
+        self.confirm = QPushButton("确认赠送")
+        self.confirm.setObjectName("GiftConfirmSubmit")
+        self.confirm.setAutoDefault(False)
+        self.confirm.clicked.connect(self.accept)
+        buttons.addWidget(self.cancel)
+        buttons.addWidget(self.confirm)
+        layout.addLayout(buttons)
+
+
 class GiftPopup(AnchoredPopup):
     def __init__(self, composer):
         super().__init__(composer)
         self.composer, self.selected = composer, None
         self.wallet = None
+        self._wallet_error = ""
         self._tabs = ()
         self.network = QNetworkAccessManager(self)
         self.images = set()
@@ -204,23 +274,33 @@ class GiftPopup(AnchoredPopup):
         self.tabs.currentChanged.connect(self.select_tab)
 
     def set_panel(self, panel):
-        previous = self.tabs.tabData(self.tabs.currentIndex())
-        self._tabs, self.wallet = panel.tabs, panel.wallet
-        self.wallet_label.setText("余额：未知" if self.wallet is None else
-            f"鱼丸：{self.wallet.yuwan}　鱼翅：{format_yuchi(self.wallet.yuchi)}")
-        self.wallet_label.setToolTip(panel.wallet_error)
-        self.tabs.blockSignals(True)
-        while self.tabs.count():
-            self.tabs.removeTab(0)
-        for tab in self._tabs:
-            index = self.tabs.addTab(tab.name)
-            self.tabs.setTabData(index, tab.id)
-        selected = next((i for i, tab in enumerate(self._tabs) if tab.id == previous), 0)
-        self.tabs.setCurrentIndex(selected)
-        self.tabs.blockSignals(False)
-        self.select_tab(selected)
-        if panel.wallet_error:
-            self.status.setText(panel.wallet_error)
+        if (panel.tabs != self._tabs or self.tabs.count() != len(panel.tabs) or
+                not panel.tabs and self.grid.count()):
+            previous = self.tabs.tabData(self.tabs.currentIndex())
+            self._tabs = panel.tabs
+            self.tabs.blockSignals(True)
+            while self.tabs.count():
+                self.tabs.removeTab(0)
+            for tab in self._tabs:
+                index = self.tabs.addTab(tab.name)
+                self.tabs.setTabData(index, tab.id)
+            selected = next((i for i, tab in enumerate(self._tabs) if tab.id == previous), 0)
+            self.tabs.setCurrentIndex(selected)
+            self.tabs.blockSignals(False)
+            self.select_tab(selected)
+        self.set_wallet(panel.wallet, panel.wallet_error)
+
+    def set_wallet(self, wallet, error=""):
+        self.wallet = wallet
+        self.wallet_label.setText("余额：未知" if wallet is None else
+            f"鱼丸：{wallet.yuwan}　鱼翅：{format_yuchi(wallet.yuchi)}")
+        self.wallet_label.setToolTip(error)
+        if error:
+            self.status.setText(error)
+        elif self._wallet_error and self.status.text() == self._wallet_error:
+            self.status.setText("选择礼物后确认数量与消费金额")
+        self._wallet_error = error
+        self.update_total()
 
     def select_tab(self, index):
         self.set_gifts(self._tabs[index].items if 0 <= index < len(self._tabs) else ())
@@ -272,9 +352,9 @@ class GiftPopup(AnchoredPopup):
             reply.deleteLater()
         self.images.clear()
 
-    def hideEvent(self, event):
+    def shutdown(self):
         self.stop_images()
-        super().hideEvent(event)
+        super().shutdown()
 
     def choose(self, gift):
         self.selected = gift
@@ -299,13 +379,12 @@ class GiftPopup(AnchoredPopup):
             return
         count = self.quantity.value()
         key = self.composer.snapshot()
-        room = self.composer.room
-        question = QMessageBox(QMessageBox.Question, "确认赠送斗鱼礼物",
-            f"向 {room.get('uname') or '主播'}（{key[0]}）赠送\n{gift.name} × {count}\n消费：{gift.cost(count)}",
-            QMessageBox.Yes | QMessageBox.No, self)
-        question.setTextFormat(Qt.PlainText)
-        question.setDefaultButton(QMessageBox.No)
-        if question.exec() == QMessageBox.Yes and key == self.composer.snapshot():
+        question = GiftConfirmDialog(dict(self.composer.room), gift, count, self.wallet, self.composer.window())
+        try:
+            accepted = question.exec() == QDialog.Accepted
+        finally:
+            question.deleteLater()
+        if accepted and key == self.composer.snapshot():
             self.composer.send_gift(gift, count, key)
 
 class DouyuComposer(QWidget):
@@ -391,11 +470,11 @@ class DouyuComposer(QWidget):
     def start(self, kind, operation, *, key=None):
         if self.closing or self.pending is not None:
             return
-        if self.owner.sending and kind != "catalog":
+        if self.owner.sending and kind in ("text", "gift"):
             self.feedback("已有斗鱼发送请求正在处理，请等待结果")
             return
         key = key or self.snapshot()
-        if kind != "catalog":
+        if kind in ("text", "gift"):
             self.owner.sending = True
         request = Request((key, kind, self.edit.text(), dict(self.room)), operation)
         self.pending = request
@@ -403,7 +482,7 @@ class DouyuComposer(QWidget):
         self.update_controls()
         if self.popup:
             self.popup.send.setEnabled(False)
-            self.popup.spinner.set_busy(kind == "catalog")
+            self.popup.spinner.set_busy(kind in ("catalog", "wallet"))
             if kind == "catalog":
                 self.popup.wallet = None
                 self.popup.wallet_label.setText("余额：读取中…")
@@ -432,7 +511,7 @@ class DouyuComposer(QWidget):
 
     def completed(self, request, info, value):
         key, kind, draft, room = info
-        if kind != "catalog":
+        if kind in ("text", "gift"):
             self.owner.sending = False
         if self.pending is request:
             self.pending = None
@@ -443,10 +522,13 @@ class DouyuComposer(QWidget):
         if self.popup:
             self.popup.spinner.set_busy(False)
         if key != self.snapshot():
-            if kind != "catalog":
+            if kind in ("text", "gift"):
                 self.owner.context.notify(f"【斗鱼 {room.get('room_id', '')}】账号或房间已变化，请在原直播间核对发送结果", rooms=(room,))
             return
-        if isinstance(value, Exception):
+        if kind == "wallet":
+            if self.popup:
+                self.popup.set_wallet(None, str(value)) if isinstance(value, Exception) else self.popup.set_wallet(value)
+        elif isinstance(value, Exception):
             log = getattr(self.owner.context, "log", None)
             if callable(log):
                 log(f"[斗鱼互动] 房间={key[0]} 阶段=failed 耗时={time.monotonic() - request.started_at:.2f}s")
@@ -464,7 +546,7 @@ class DouyuComposer(QWidget):
         if self.popup:
             self.popup.update_total()
             if kind == "gift" and not isinstance(value, Exception) and self.popup.isVisible():
-                self.load_gifts()
+                self.refresh_wallet()
 
     def send_text(self):
         text = self.edit.text().strip()
@@ -484,6 +566,11 @@ class DouyuComposer(QWidget):
         key = self.snapshot()
         client = DouyuAPI(self.owner.platform._playback_cookies())
         self.start("catalog", lambda cancelled, progress: client.gift_panel(key[0], cancelled), key=key)
+
+    def refresh_wallet(self):
+        key = self.snapshot()
+        client = DouyuAPI(self.owner.platform._playback_cookies())
+        self.start("wallet", lambda cancelled, progress: client.wallet(key[0], cancelled), key=key)
 
     def send_gift(self, gift, count, key):
         if key != self.snapshot():
