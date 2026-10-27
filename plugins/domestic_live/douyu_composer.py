@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (QGridLayout, QHBoxLayout,
     QSpinBox, QTabBar, QVBoxLayout, QWidget)
 
 from ddm import plugins as api, theme
-from .douyu_interaction import DouyuAPI, InteractionError, LoginRequired, room_number
+from .douyu_interaction import DouyuAPI, GiftPanel, InteractionError, LoginRequired, format_yuchi, room_number
 from .interaction_popup import AnchoredPopup, RefreshSpinner, picker_style
 
 
@@ -133,6 +133,8 @@ class GiftPopup(AnchoredPopup):
     def __init__(self, composer):
         super().__init__(composer)
         self.composer, self.selected = composer, None
+        self.wallet = None
+        self._tabs = ()
         self.network = QNetworkAccessManager(self)
         self.images = set()
         self.setObjectName("DouyuGiftPopup")
@@ -143,7 +145,12 @@ class GiftPopup(AnchoredPopup):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(5)
         title = QHBoxLayout()
-        title.addWidget(QLabel("斗鱼礼物"), 1)
+        self.wallet_label = QLabel("余额：读取中…")
+        self.wallet_label.setTextFormat(Qt.PlainText)
+        self.wallet_label.setWordWrap(True)
+        self.wallet_label.setMinimumWidth(0)
+        self.wallet_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        title.addWidget(self.wallet_label, 1)
         self.spinner = RefreshSpinner()
         title.addWidget(self.spinner)
         refresh = QPushButton("刷新")
@@ -156,11 +163,12 @@ class GiftPopup(AnchoredPopup):
         self.status.setTextFormat(Qt.PlainText)
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
-        tabs = QTabBar()
-        tabs.setObjectName("GiftTabs")
-        tabs.setExpanding(False)
-        tabs.addTab("礼物")
-        layout.addWidget(tabs)
+        self.tabs = QTabBar()
+        self.tabs.setObjectName("GiftTabs")
+        self.tabs.setExpanding(False)
+        self.tabs.setUsesScrollButtons(True)
+        self.tabs.addTab("礼物")
+        layout.addWidget(self.tabs)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
@@ -178,15 +186,41 @@ class GiftPopup(AnchoredPopup):
         row = QHBoxLayout()
         row.addWidget(QLabel("数量"))
         self.quantity = QSpinBox()
+        self.quantity.setFixedSize(80, theme.TILE_CONTROL_HEIGHT)
         self.quantity.setRange(1, 9999)
         self.quantity.valueChanged.connect(self.update_total)
         row.addWidget(self.quantity)
+        row.addStretch(1)
         self.send = QPushButton("确认赠送")
         style_button(self.send)
+        self.send.setFixedSize(96, theme.TILE_CONTROL_HEIGHT)
         self.send.setEnabled(False)
         self.send.clicked.connect(self.confirm)
-        row.addWidget(self.send, 1)
+        row.addWidget(self.send)
         layout.addLayout(row)
+        self.tabs.currentChanged.connect(self.select_tab)
+
+    def set_panel(self, panel):
+        previous = self.tabs.tabData(self.tabs.currentIndex())
+        self._tabs, self.wallet = panel.tabs, panel.wallet
+        self.wallet_label.setText("余额：未知" if self.wallet is None else
+            f"鱼丸：{self.wallet.yuwan}　鱼翅：{format_yuchi(self.wallet.yuchi)}")
+        self.wallet_label.setToolTip(panel.wallet_error)
+        self.tabs.blockSignals(True)
+        while self.tabs.count():
+            self.tabs.removeTab(0)
+        for tab in self._tabs:
+            index = self.tabs.addTab(tab.name)
+            self.tabs.setTabData(index, tab.id)
+        selected = next((i for i, tab in enumerate(self._tabs) if tab.id == previous), 0)
+        self.tabs.setCurrentIndex(selected)
+        self.tabs.blockSignals(False)
+        self.select_tab(selected)
+        if panel.wallet_error:
+            self.status.setText(panel.wallet_error)
+
+    def select_tab(self, index):
+        self.set_gifts(self._tabs[index].items if 0 <= index < len(self._tabs) else ())
 
     def set_gifts(self, gifts):
         self.spinner.set_busy(False)
@@ -207,7 +241,7 @@ class GiftPopup(AnchoredPopup):
             self.grid.addWidget(button, index // 5, index % 5)
             if gift.image:
                 self.load_image(button, gift.image)
-        self.status.setText("选择礼物后确认数量与消费金额" if gifts else "当前房间没有可显示的礼物")
+        self.status.setText("选择礼物后确认数量与消费金额" if gifts else "当前分类暂无礼物")
         self.summary.setText("请选择礼物")
 
     def load_image(self, button, url):
@@ -250,11 +284,14 @@ class GiftPopup(AnchoredPopup):
     def update_total(self):
         gift = self.selected
         self.summary.setText(f"{gift.name} × {self.quantity.value()} · {gift.cost(self.quantity.value())}" if gift else "请选择礼物")
-        self.send.setEnabled(gift is not None and self.composer.pending is None)
+        affordable = gift is None or self.wallet is None or gift.price * self.quantity.value() <= (
+            self.wallet.yuchi if gift.currency == "YUCHI" else self.wallet.yuwan)
+        self.send.setEnabled(gift is not None and not gift.disabled and affordable and self.composer.pending is None)
+        self.send.setToolTip("余额不足" if not affordable else "核对主播、数量和金额后确认赠送")
 
     def confirm(self):
         gift = self.selected
-        if gift is None or self.composer.pending is not None:
+        if gift is None or self.composer.pending is not None or not self.send.isEnabled():
             return
         count = self.quantity.value()
         key = self.composer.snapshot()
@@ -326,7 +363,7 @@ class DouyuComposer(QWidget):
                 self.pending.cancelled.set()
             if self.popup:
                 self.popup.hide()
-                self.popup.set_gifts(())
+                self.popup.set_panel(GiftPanel((), ()))
             self.edit.clear()
         self.room = dict(room)
         supported = room.get("platform") == "douyu"
@@ -363,6 +400,9 @@ class DouyuComposer(QWidget):
         if self.popup:
             self.popup.send.setEnabled(False)
             self.popup.spinner.set_busy(kind == "catalog")
+            if kind == "catalog":
+                self.popup.wallet = None
+                self.popup.wallet_label.setText("余额：读取中…")
         request.result.connect(self.completed)
         request.phase.connect(self.progress)
         request.finished.connect(lambda: self.owner.retire(request), Qt.QueuedConnection)
@@ -407,8 +447,10 @@ class DouyuComposer(QWidget):
             if callable(log):
                 log(f"[斗鱼互动] 房间={key[0]} 阶段=failed 耗时={time.monotonic() - request.started_at:.2f}s")
             self.feedback(str(value), login_required=isinstance(value, LoginRequired))
+            if kind == "catalog" and self.popup:
+                self.popup.wallet_label.setText("余额：未知")
         elif kind == "catalog":
-            self.popup.set_gifts(value)
+            self.popup.set_panel(value)
         else:
             if kind == "text" and self.edit.text() == draft:
                 self.edit.clear()
@@ -417,6 +459,8 @@ class DouyuComposer(QWidget):
                 self.popup.status.setText("礼物已赠送")
         if self.popup:
             self.popup.update_total()
+            if kind == "gift" and not isinstance(value, Exception) and self.popup.isVisible():
+                self.load_gifts()
 
     def send_text(self):
         text = self.edit.text().strip()
@@ -435,7 +479,7 @@ class DouyuComposer(QWidget):
     def load_gifts(self):
         key = self.snapshot()
         client = DouyuAPI(self.owner.platform._playback_cookies())
-        self.start("catalog", lambda cancelled, progress: client.catalog(key[0], cancelled), key=key)
+        self.start("catalog", lambda cancelled, progress: client.gift_panel(key[0], cancelled), key=key)
 
     def send_gift(self, gift, count, key):
         if key != self.snapshot():

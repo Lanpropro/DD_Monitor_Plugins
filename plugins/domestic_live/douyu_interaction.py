@@ -5,6 +5,7 @@ No request that could send a message or spend currency is retried.
 """
 import asyncio
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 import re
@@ -77,7 +78,71 @@ class Gift:
 
     def cost(self, count=1):
         value = self.price * count
-        return f"{value / 100:g} 鱼翅" if self.currency == "YUCHI" else f"{value} 鱼丸"
+        return f"{format_yuchi(value)} 鱼翅" if self.currency == "YUCHI" else f"{value} 鱼丸"
+
+
+def format_yuchi(value):
+    whole, fraction = divmod(value, 100)
+    return str(whole) if not fraction else f"{whole}.{fraction:02d}".rstrip("0")
+
+
+@dataclass(frozen=True)
+class GiftTab:
+    id: int
+    name: str
+    items: tuple
+
+
+@dataclass(frozen=True)
+class Wallet:
+    yuchi: int  # hundredths of a fish fin, matching priceInfo.price
+    yuwan: int
+
+
+@dataclass(frozen=True)
+class GiftPanel:
+    gifts: tuple
+    tabs: tuple
+    wallet: Wallet | None = None
+    wallet_error: str = ""
+
+
+def wallet_data(payload):
+    if not isinstance(payload, dict) or str(payload.get("error")) != "0" or not isinstance(payload.get("msg"), dict):
+        raise LoginRequired("请先登录斗鱼后查看余额")
+    data = payload["msg"]
+    gold = data.get("gold")
+    if isinstance(gold, dict):
+        gold = gold.get("gold")
+    def amount(value):
+        try:
+            number = Decimal(str(value))
+            if isinstance(value, bool) or not number.is_finite() or number < 0 or number != number.to_integral_value():
+                raise ValueError()
+            return int(number)
+        except (InvalidOperation, ValueError):
+            raise InteractionError("斗鱼余额数据格式已变化，请刷新重试") from None
+    return Wallet(amount(gold), amount(data.get("silver")))
+
+
+def gift_tabs(payload, gifts):
+    data = api_data(payload)
+    metadata = data.get("tabs", [])
+    tabs = []
+    for item in metadata if isinstance(metadata, list) else []:
+        if isinstance(item, dict) and type(item.get("id")) is int and item["id"] > 0 and not any(t[0] == item["id"] for t in tabs):
+            tabs.append((item["id"], str(item.get("name") or item["id"])))
+    if not tabs:
+        return (GiftTab(1, "礼物", tuple(gifts)),)
+    memberships = {item.get("id"): item.get("tabIds", []) for item in data["giftList"] if isinstance(item, dict)}
+    known = {tab[0] for tab in tabs}
+    result = {key: [] for key, name in tabs}
+    for gift in gifts:
+        ids = memberships.get(gift.id)
+        destinations = {key for key in ids if type(key) is int and key in known} if isinstance(ids, list) else set()
+        for key in destinations or {tabs[0][0]}:
+            result[key].append(gift)
+    return tuple(GiftTab(key, name, tuple(result[key])) for key, name in tabs)
 
 
 def gift_catalog(payload):
@@ -173,6 +238,24 @@ class DouyuAPI:
         _check_cancel(cancelled)
         with self._session(room) as session:
             return gift_catalog(self._read(session, GIFTS, params={"rid": room}))
+
+    def gift_panel(self, room, cancelled=lambda: False):
+        room = room_number(room)
+        _check_cancel(cancelled)
+        with self._session(room) as session:
+            payload = self._read(session, GIFTS, params={"rid": room})
+            gifts = gift_catalog(payload)
+            tabs = gift_tabs(payload, gifts)
+            _check_cancel(cancelled)
+            wallet, error = None, ""
+            try:
+                wallet = wallet_data(self._read(session, BASE + "/lapi/member/api/getInfo", params={"client_type": 0}))
+            except InteractionError as failure:
+                error = str(failure)
+            except (requests.RequestException, ValueError):
+                error = "余额读取失败，请刷新重试"
+            _check_cancel(cancelled)
+            return GiftPanel(gifts, tabs, wallet, error)
 
     def _account(self, session, cancelled, *, timeout=(4, 8)):
         _check_cancel(cancelled)

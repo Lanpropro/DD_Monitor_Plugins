@@ -123,6 +123,59 @@ class APITests(unittest.TestCase):
             {"type": "image/png", "src": "https://foreign.invalid/gift.png"}]
         self.assertEqual(api.gift_catalog(payload)[0].image, "")
 
+    def test_categories_keep_official_order_memberships_and_empty_tabs(self):
+        payload = catalog(tabIds=[1, 4])
+        payload["data"]["tabs"] = [{"id": 1, "name": "礼物"}, {"id": 2, "name": "特权"},
+                                    {"id": 4, "name": "钻粉"}, {"id": 5, "name": "粉丝团"}]
+        gifts = api.gift_catalog(payload)
+        tabs = api.gift_tabs(payload, gifts)
+        self.assertEqual([tab.name for tab in tabs], ["礼物", "特权", "钻粉", "粉丝团"])
+        self.assertEqual([len(tab.items) for tab in tabs], [1, 0, 1, 0])
+        self.assertIs(tabs[0].items[0], tabs[2].items[0])
+
+    def test_unknown_category_membership_stays_visible_in_first_tab(self):
+        payload = catalog(tabIds=[999])
+        payload["data"]["tabs"] = [{"id": 1, "name": "礼物"}]
+        gifts = api.gift_catalog(payload)
+        self.assertEqual(api.gift_tabs(payload, gifts)[0].items, gifts)
+
+    def test_wallet_supports_header_gold_object_and_exact_decimal_display(self):
+        wallet = api.wallet_data({"error": 0, "msg": {"gold": {"gold": "1234", "ngb": 900}, "silver": "214"}})
+        self.assertEqual(wallet, api.Wallet(1234, 214))
+        self.assertEqual(api.format_yuchi(wallet.yuchi), "12.34")
+        self.assertEqual(api.wallet_data({"error": 0, "msg": {"gold": "0", "silver": 0}}), api.Wallet(0, 0))
+
+    def test_missing_wallet_is_not_reported_as_zero(self):
+        for msg in ({"silver": 5}, {"gold": 0}, {"gold": -1, "silver": 0}, {"gold": True, "silver": 0}):
+            with self.assertRaises(api.InteractionError):
+                api.wallet_data({"error": 0, "msg": msg})
+
+    def test_panel_reads_balance_over_http_without_new_gateway_login(self):
+        client, session = self.client()
+        session.get.side_effect = [response(catalog()), response({"error": 0, "msg": {"gold": 0, "silver": 214}})]
+        panel = client.gift_panel("douyu:9999")
+        self.assertEqual(panel.wallet, api.Wallet(0, 214))
+        self.assertEqual(len(panel.gifts), 1)
+        self.assertEqual(session.get.call_args.args[0], api.BASE + "/lapi/member/api/getInfo")
+        session.post.assert_not_called()
+
+    def test_balance_failure_does_not_discard_public_gifts(self):
+        client, session = self.client()
+        session.get.side_effect = [response(catalog()), requests.Timeout("private detail")]
+        panel = client.gift_panel("9999")
+        self.assertEqual(len(panel.gifts), 1)
+        self.assertIsNone(panel.wallet)
+        self.assertIn("余额读取失败", panel.wallet_error)
+        self.assertNotIn("private", panel.wallet_error)
+
+    def test_panel_cancellation_after_catalog_prevents_account_read(self):
+        client, session = self.client()
+        session.get.side_effect = [response(catalog())]
+        cancelled = iter([False, True])
+        with self.assertRaises(api.InteractionError):
+            client.gift_panel("9999", lambda: next(cancelled))
+        self.assertEqual(session.get.call_count, 1)
+
     def test_cancel_after_account_reads_never_spends(self):
         client, session = self.client()
         calls = [False, True]
@@ -522,6 +575,63 @@ class UITests(unittest.TestCase):
             popup.quantity.setValue(2)
             self.assertIn("0.2 鱼翅", popup.summary.text())
             send.assert_not_called()
+
+    def test_panel_categories_switch_without_leaking_selection(self):
+        popup = ui.GiftPopup(self.widget)
+        self.widget.popup = popup
+        gift = api.gift_catalog(catalog())[0]
+        panel = api.GiftPanel((gift,), (api.GiftTab(1, "礼物", (gift,)), api.GiftTab(2, "特权", ())), api.Wallet(200, 214))
+        popup.set_panel(panel)
+        self.assertEqual([popup.tabs.tabText(i) for i in range(popup.tabs.count())], ["礼物", "特权"])
+        self.assertIn("鱼丸：214", popup.wallet_label.text())
+        self.assertIn("鱼翅：2", popup.wallet_label.text())
+        popup.choose(gift)
+        popup.tabs.setCurrentIndex(1)
+        self.assertEqual(popup.grid.count(), 0)
+        self.assertIsNone(popup.selected)
+        self.assertFalse(popup.send.isEnabled())
+        popup.set_panel(panel)
+        self.assertEqual(popup.tabs.tabData(popup.tabs.currentIndex()), 2)
+
+    def test_zero_balance_disables_confirm_and_keeps_card_inspectable(self):
+        popup = ui.GiftPopup(self.widget)
+        self.widget.popup = popup
+        gift = api.gift_catalog(catalog())[0]
+        popup.set_panel(api.GiftPanel((gift,), (api.GiftTab(1, "礼物", (gift,)),), api.Wallet(0, 214)))
+        popup.choose(gift)
+        self.assertFalse(popup.send.isEnabled())
+        self.assertEqual(popup.send.toolTip(), "余额不足")
+        with patch.object(self.widget, "send_gift") as send:
+            popup.confirm()
+            send.assert_not_called()
+        self.assertTrue(popup.grid.itemAt(0).widget().isEnabled())
+
+    def test_balance_failure_shows_unknown_and_room_change_clears_balance(self):
+        popup = ui.GiftPopup(self.widget)
+        self.widget.popup = popup
+        popup.set_panel(api.GiftPanel((), (), None, "余额读取失败"))
+        self.assertEqual(popup.wallet_label.text(), "余额：未知")
+        popup.set_panel(api.GiftPanel((), (), api.Wallet(100, 214)))
+        self.widget.set_room({"room_id": "douyu:100", "platform": "douyu"})
+        self.assertIsNone(popup.wallet)
+        self.assertEqual(popup.tabs.count(), 0)
+        self.assertEqual(popup.wallet_label.text(), "余额：未知")
+
+    def test_gift_confirm_button_has_bili_control_height_and_bounded_width(self):
+        popup = ui.GiftPopup(self.widget)
+        self.widget.popup = popup
+        self.assertEqual(popup.send.height(), ui.theme.TILE_CONTROL_HEIGHT)
+        self.assertEqual(popup.send.width(), 96)
+        self.assertEqual(popup.send.objectName(), "TileCtrl")
+        self.assertEqual(popup.quantity.height(), popup.send.height())
+
+    def test_gift_success_refreshes_visible_balance_without_notification(self):
+        popup = ui.GiftPopup(self.widget)
+        self.widget.popup = popup
+        with patch.object(popup, "isVisible", return_value=True), patch.object(self.widget, "load_gifts") as refresh:
+            self.widget.completed(object(), (self.widget.snapshot(), "gift", "", dict(self.widget.room)), {})
+            refresh.assert_called_once()
+        self.owner.context.notify.assert_not_called()
 
     def test_cross_tile_send_does_not_start_second_request(self):
         self.owner.sending = True
