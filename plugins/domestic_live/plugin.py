@@ -29,6 +29,11 @@ from ddm.dialogs import SettingsDialog
 from ddm import plugins as api
 from ddm.live_danmaku import tars_bytes, tars_fields, tars_int
 
+__path__ = [os.path.dirname(__file__)]
+__package__ = __name__
+if __spec__ is not None:
+    __spec__.submodule_search_locations = __path__
+
 
 def huya_string(tag, value):
     data = str(value).encode("utf-8")
@@ -1681,6 +1686,8 @@ class LivePlatformsPlugin(api.Plugin):
             pass
 
     def on_event(self, event, payload):
+        if event == api.EVENT_CLOSING and getattr(self, "_douyu_interaction", None) is not None:
+            self._douyu_interaction.shutdown()
         if (event == api.EVENT_STREAM_FAILED and self.context is not None and payload.get("source_url")
                 and getattr(self, "_diagnostic_enabled", False)):
             room = str((payload.get("room") or {}).get("room_id") or "")
@@ -1752,6 +1759,9 @@ class LivePlatformsPlugin(api.Plugin):
         douyu = DouyuPlatform()
         douyu._context = context
         context.register_platform(douyu)
+        if callable(getattr(context, "register_tile_control", None)) and hasattr(api, "TileControl"):
+            from .douyu_composer import DouyuInteraction
+            self._douyu_interaction = DouyuInteraction(context, douyu)
         douyin = DouyinPlatform()
         saved = context.setting("douyin_room_owners", {})
         if isinstance(saved, dict):
@@ -1767,6 +1777,9 @@ class LivePlatformsPlugin(api.Plugin):
             self._logo_control = PlatformLogoControl(context, ("bilibili", "huya", "douyu", "douyin"), "显示国内平台 Logo")
 
     def on_unload(self):
+        if getattr(self, "_douyu_interaction", None) is not None:
+            self._douyu_interaction.shutdown()
+            self._douyu_interaction = None
         for tile in list(getattr(self, "_diagnostic_players", {})):
             self._detach_player_diagnostic(tile)
         self._diagnostic_enabled = False

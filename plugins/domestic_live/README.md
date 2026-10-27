@@ -1,5 +1,27 @@
 # 国内直播平台 v1.4
 
+## 开发中：斗鱼直播互动（尚未发布）
+
+斗鱼格子底栏新增输入框、礼物和发送按钮；仍由 `domestic_live` 提供，不依赖安装 B 站互动插件。输入框高度、窄格隐藏发送按钮、礼物网格与数量/消费确认沿用 B 站互动的布局。发送失败保留草稿；切换房间、账号或关闭时取消未提交请求，旧请求的结果不会清空新草稿。同一插件同时只处理一笔发送。
+
+- 礼物列表：读取当前房间礼物和默认皮肤，显示鱼翅/鱼丸价格及数量。特殊业务礼物保留说明，转由官网处理。
+- 赠送：使用本体已有斗鱼账号，确认主播、房间、礼物、数量和金额后，重新检查礼物资料再提交一次；超时或响应不明确时提示到官网核对消费，不自动重试。
+- 弹幕：使用与匿名接收连接分开的互动网关，核对服务端登录账号并等待 `chatres` 回执；仅发出数据或收到房间回显不会显示成功。当前实现是直连协议试验，尚未完成新版 `livreq`/`lsigreq` 握手适配；遇到此校验明确报错，不尝试绕过。
+- 验证限制：离线请求/生命周期检查通过；匿名真实礼物列表与网关发现接口可读取。本机互动 WSS 出现 TLS 握手失败，**未验证真实登录账号发送弹幕或赠送礼物成功**，不能作为已完成适配或正式可用版本发布。没有读取真实账号或自动向直播间发送测试内容。
+- 本次不新增虎牙和抖音互动；现有抖音添加/播放与虎牙维护逻辑不变。
+
+当前接口依据为 [斗鱼官方房间页](https://www.douyu.com/9999) 动态载入的官方网页模块：
+
+- [模块声明](https://shark2.douyucdn.cn/front-publish/smf-live-activity-common-pendant-master/service-module-declaration_nc_7b2629f.js) 中的 `live.playerAsideModule.ChatSendServices`、`live.common.GiftDataServices`、`live.common.GiftSendServices`。
+- `live-next-player-aside_8e1b74f.js` 的 `nodeCombine`，以及 `common_45f6fa6.js` 的登录数据与礼物目录；`toolbar` 模块的 `GiftEpics.sendGiftYC` 使用 `POST /japi/gift/donate/mainsite/v3`（`giftId/giftCount/roomId/skinId/bizExt`）。CSRF 使用 `acf_ccn` Cookie 对应的 `ctn`。
+- [当前礼物列表](https://gift.douyucdn.cn/api/gift/v5/web/list?rid=9999) 使用 v5 的 `basicInfo`、`priceInfo`、`defaultSkinId`、`skinData` 和 `onceLimit`，不是旧版礼物结构。
+
+离线检查（临时账号与替身请求，不读取个人配置）：
+
+```powershell
+python tests/check_douyu_interaction.py --host ../DD_Monitor_CE
+```
+
 ## 开发中：抖音添加与关注读取
 
 - 已知主播接口异常时，回退到固定直播间网页；回退仍核对房间及主播身份，不将未知状态当成下播。

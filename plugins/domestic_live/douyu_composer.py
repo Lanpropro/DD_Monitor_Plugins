@@ -1,0 +1,417 @@
+"""Per-tile Douyu interaction controls, owned by domestic_live."""
+import threading
+import weakref
+
+import requests
+from PySide6.QtCore import QEvent, QPoint, QSize, Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
+from PySide6.QtWidgets import (QApplication, QDialog, QGridLayout, QHBoxLayout,
+    QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
+    QSpinBox, QToolButton, QVBoxLayout, QWidget)
+
+from ddm import plugins as api, theme
+from .douyu_interaction import DouyuAPI, InteractionError, room_number
+
+
+class Request(QThread):
+    result = Signal(object, object, object)
+
+    def __init__(self, key, operation):
+        super().__init__()
+        self.key, self.operation = key, operation
+        self.cancelled = threading.Event()
+
+    def run(self):
+        try:
+            value = self.operation(self.cancelled.is_set)
+        except Exception as error:
+            value = error if isinstance(error, InteractionError) else InteractionError(
+                "斗鱼网络请求失败，请稍后重试" if isinstance(error, requests.RequestException)
+                else "斗鱼互动请求失败，请刷新后重试")
+        self.result.emit(self, self.key, value)
+
+
+class DanmakuEdit(QLineEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.composing = False
+
+    def inputMethodEvent(self, event):
+        self.composing = bool(event.preeditString())
+        super().inputMethodEvent(event)
+
+    def event(self, event):
+        if event.type() == QEvent.ShortcutOverride and not event.modifiers() & (
+                Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier):
+            event.accept()
+            return True
+        return super().event(event)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter) and (self.composing or event.isAutoRepeat()):
+            event.accept()
+            return
+        if event.key() == Qt.Key_Escape:
+            self.clearFocus()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
+class GiftPopup(QDialog):
+    def __init__(self, composer):
+        super().__init__(composer.window(), Qt.Tool | Qt.FramelessWindowHint)
+        self.composer, self.selected = composer, None
+        self.network = QNetworkAccessManager(self)
+        self.images = set()
+        self.setObjectName("DouyuGiftPopup")
+        self.setWindowTitle("斗鱼礼物")
+        self.setFixedSize(360, 330)
+        self.setStyleSheet(f"""
+            #DouyuGiftPopup {{background:{theme.ELEVATED}; color:{theme.TEXT1};
+                border:1px solid {theme.BORDER}; border-radius:8px;}}
+            QLabel {{color:{theme.TEXT1}; font-size:12px;}}
+            QPushButton, QToolButton {{background:transparent; color:{theme.TEXT1};
+                border:1px solid {theme.BORDER}; border-radius:4px; padding:4px 6px;}}
+            QPushButton:hover, QPushButton:focus, QToolButton:hover, QToolButton:focus, QToolButton:checked {{
+                background:{theme.CONTENT_HOVER}; border-color:{theme.ACCENT};}}
+            QPushButton:disabled, QToolButton:disabled {{color:{theme.TEXT3};}}
+            QScrollArea {{background:transparent; border:none;}}
+            QWidget#DouyuGiftCards {{background:transparent;}}
+        """)
+        layout = QVBoxLayout(self)
+        title = QHBoxLayout()
+        title.addWidget(QLabel("斗鱼礼物"), 1)
+        refresh = QPushButton("刷新")
+        refresh.clicked.connect(composer.load_gifts)
+        title.addWidget(refresh)
+        close = QPushButton("关闭")
+        close.clicked.connect(self.hide)
+        title.addWidget(close)
+        layout.addLayout(title)
+        self.status = QLabel("点击刷新获取当前直播间礼物")
+        self.status.setTextFormat(Qt.PlainText)
+        self.status.setWordWrap(True)
+        layout.addWidget(self.status)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        cards = QWidget()
+        cards.setObjectName("DouyuGiftCards")
+        self.grid = QGridLayout(cards)
+        scroll.setWidget(cards)
+        layout.addWidget(scroll, 1)
+        self.summary = QLabel("请选择礼物")
+        self.summary.setTextFormat(Qt.PlainText)
+        layout.addWidget(self.summary)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("数量"))
+        self.quantity = QSpinBox()
+        self.quantity.setRange(1, 9999)
+        self.quantity.valueChanged.connect(self.update_total)
+        row.addWidget(self.quantity)
+        self.send = QPushButton("确认赠送")
+        self.send.setEnabled(False)
+        self.send.clicked.connect(self.confirm)
+        row.addWidget(self.send, 1)
+        layout.addLayout(row)
+
+    def set_gifts(self, gifts):
+        self.stop_images()
+        self.selected = None
+        self.send.setEnabled(False)
+        while self.grid.count():
+            item = self.grid.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        for index, gift in enumerate(gifts):
+            button = QToolButton()
+            button.setText(f"{gift.name}\n{gift.cost()}")
+            button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+            button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            button.setMinimumWidth(0)
+            button.setMinimumHeight(86)
+            button.setCheckable(True)
+            button.setProperty("gift_id", gift.id)
+            button.setToolTip(gift.disabled or gift.name)
+            button.setEnabled(not gift.disabled)
+            button.clicked.connect(lambda checked=False, gift=gift: self.choose(gift))
+            self.grid.addWidget(button, index // 4, index % 4)
+            if gift.image:
+                self.load_image(button, gift.image)
+        self.status.setText("选择礼物后确认数量与消费金额" if gifts else "当前房间没有可显示的礼物")
+        self.summary.setText("请选择礼物")
+
+    def load_image(self, button, url):
+        request = QNetworkRequest(QUrl(url))
+        request.setTransferTimeout(5000)
+        request.setAttribute(QNetworkRequest.RedirectPolicyAttribute, QNetworkRequest.ManualRedirectPolicy)
+        reply = self.network.get(request)
+        self.images.add(reply)
+        reply.readyRead.connect(lambda: reply.abort() if reply.bytesAvailable() > 1024 * 1024 else None)
+        def finished():
+            self.images.discard(reply)
+            if reply.error() == QNetworkReply.NoError:
+                image = QPixmap()
+                if image.loadFromData(bytes(reply.readAll())):
+                    button.setIcon(QIcon(image))
+                    button.setIconSize(QSize(36, 36))
+            reply.deleteLater()
+        reply.finished.connect(finished)
+
+    def stop_images(self):
+        for reply in tuple(self.images):
+            reply.finished.disconnect()
+            reply.readyRead.disconnect()
+            reply.abort()
+            reply.deleteLater()
+        self.images.clear()
+
+    def hideEvent(self, event):
+        self.stop_images()
+        super().hideEvent(event)
+
+    def choose(self, gift):
+        self.selected = gift
+        for index in range(self.grid.count()):
+            button = self.grid.itemAt(index).widget()
+            button.setChecked(button.property("gift_id") == gift.id)
+        self.quantity.setMaximum(gift.maximum)
+        self.quantity.setValue(1)
+        self.update_total()
+
+    def update_total(self):
+        gift = self.selected
+        self.summary.setText(f"{gift.name} × {self.quantity.value()} · {gift.cost(self.quantity.value())}" if gift else "请选择礼物")
+        self.send.setEnabled(gift is not None and self.composer.pending is None)
+
+    def confirm(self):
+        gift = self.selected
+        if gift is None or self.composer.pending is not None:
+            return
+        count = self.quantity.value()
+        key = self.composer.snapshot()
+        room = self.composer.room
+        question = QMessageBox(QMessageBox.Question, "确认赠送斗鱼礼物",
+            f"向 {room.get('uname') or '主播'}（{key[0]}）赠送\n{gift.name} × {count}\n消费：{gift.cost(count)}",
+            QMessageBox.Yes | QMessageBox.No, self)
+        question.setTextFormat(Qt.PlainText)
+        question.setDefaultButton(QMessageBox.No)
+        if question.exec() == QMessageBox.Yes and key == self.composer.snapshot():
+            self.composer.send_gift(gift, count, key)
+
+    def open_at(self, anchor):
+        bounds = anchor.screen().availableGeometry()
+        point = anchor.mapToGlobal(QPoint(anchor.width() // 2, 0))
+        x = max(bounds.left(), min(point.x() - self.width() // 2, bounds.right() - self.width() + 1))
+        y = point.y() - self.height() - 6
+        if y < bounds.top():
+            y = min(bounds.bottom() - self.height() + 1, point.y() + anchor.height() + 6)
+        self.move(x, y)
+        self.show()
+        self.raise_()
+
+
+class DouyuComposer(QWidget):
+    def __init__(self, owner, parent=None):
+        super().__init__(parent)
+        self.owner, self.room = owner, {}
+        self.pending = self.popup = None
+        self.closing = False
+        self.identity_timer = QTimer(self)
+        self.identity_timer.setInterval(250)
+        self.identity_timer.timeout.connect(self.check_identity)
+        self.setFixedHeight(26)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setStyleSheet(f"QLineEdit {{padding:3px 6px; font-size:{theme.FONT_CONTROL}px;}}")
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
+        self.edit = DanmakuEdit()
+        self.edit.setPlaceholderText("输入斗鱼弹幕，Enter 发送")
+        self.edit.setAccessibleName("发送到当前斗鱼直播间的弹幕")
+        self.edit.setMaxLength(100)
+        self.edit.setMinimumWidth(0)
+        self.edit.returnPressed.connect(self.send_text)
+        row.addWidget(self.edit, 1)
+        self.gifts = QPushButton("礼物")
+        self.gifts.setToolTip("选择斗鱼礼物并确认赠送")
+        self.gifts.setFixedSize(40, 26)
+        self.gifts.clicked.connect(self.open_gifts)
+        row.addWidget(self.gifts)
+        self.send = QPushButton("发送")
+        self.send.setFixedSize(44, 26)
+        self.send.clicked.connect(self.send_text)
+        row.addWidget(self.send)
+        self.hide()
+
+    def resizeEvent(self, event):
+        self.send.setVisible(self.width() >= 176)
+        super().resizeEvent(event)
+
+    def snapshot(self):
+        jar = self.owner.platform._playback_cookies()
+        identity = tuple(sorted((c.domain, c.path, c.name, c.value) for c in jar))
+        return self.room.get("room_id", ""), identity
+
+    def set_room(self, room):
+        if room != self.room:
+            if self.pending:
+                self.pending.cancelled.set()
+            if self.popup:
+                self.popup.hide()
+                self.popup.set_gifts(())
+            self.edit.clear()
+        self.room = dict(room)
+        supported = room.get("platform") == "douyu"
+        try:
+            room_number(room.get("room_id"))
+        except InteractionError:
+            supported = False
+        self.setVisible(supported)
+
+    def feedback(self, message):
+        room = dict(self.room)
+        self.owner.context.notify(f"【{room.get('uname') or '斗鱼'}（{room.get('room_id', '')}）】{message}",
+                                  rooms=(room,), kind="info")
+        self.edit.setToolTip(message)
+        if self.popup:
+            self.popup.status.setText(message)
+
+    def start(self, kind, operation, *, key=None):
+        if self.closing or self.pending is not None:
+            return
+        if self.owner.sending and kind != "catalog":
+            self.feedback("已有斗鱼发送请求正在处理，请等待结果")
+            return
+        key = key or self.snapshot()
+        if kind != "catalog":
+            self.owner.sending = True
+        request = Request((key, kind, self.edit.text(), dict(self.room)), operation)
+        self.pending = request
+        self.owner.requests.add(request)
+        self.setEnabled(False)
+        if self.popup:
+            self.popup.send.setEnabled(False)
+        request.result.connect(self.completed)
+        request.finished.connect(lambda: self.owner.retire(request), Qt.QueuedConnection)
+        self.identity_timer.start()
+        request.start()
+
+    def check_identity(self):
+        if self.pending is not None and self.pending.key[0] != self.snapshot():
+            self.pending.cancelled.set()
+
+    def completed(self, request, info, value):
+        key, kind, draft, room = info
+        if kind != "catalog":
+            self.owner.sending = False
+        if self.pending is request:
+            self.pending = None
+            self.identity_timer.stop()
+        if self.closing:
+            return
+        self.setEnabled(True)
+        if key != self.snapshot():
+            if kind != "catalog":
+                self.owner.context.notify(f"【斗鱼 {room.get('room_id', '')}】账号或房间已变化，请在原直播间核对发送结果", rooms=(room,))
+            return
+        if isinstance(value, Exception):
+            self.feedback(str(value))
+        elif kind == "catalog":
+            self.popup.set_gifts(value)
+        else:
+            if kind == "text" and self.edit.text() == draft:
+                self.edit.clear()
+            self.feedback("弹幕已发送" if kind == "text" else "礼物已赠送")
+        if self.popup:
+            self.popup.update_total()
+
+    def send_text(self):
+        text = self.edit.text().strip()
+        if not text:
+            return
+        key = self.snapshot()
+        client = DouyuAPI(self.owner.platform._playback_cookies())
+        self.start("text", lambda cancelled: client.send_text(key[0], text, cancelled), key=key)
+
+    def open_gifts(self):
+        if self.popup is None:
+            self.popup = GiftPopup(self)
+        self.popup.open_at(self.gifts)
+        self.load_gifts()
+
+    def load_gifts(self):
+        key = self.snapshot()
+        client = DouyuAPI(self.owner.platform._playback_cookies())
+        self.start("catalog", lambda cancelled: client.catalog(key[0], cancelled), key=key)
+
+    def send_gift(self, gift, count, key):
+        if key != self.snapshot():
+            return
+        client = DouyuAPI(self.owner.platform._playback_cookies())
+        self.start("gift", lambda cancelled: client.send_gift(key[0], gift, count, cancelled), key=key)
+
+    def interaction_active(self):
+        return self.edit.hasFocus() or bool(self.popup and self.popup.isVisible())
+
+    def hideEvent(self, event):
+        if self.popup:
+            self.popup.hide()
+        super().hideEvent(event)
+
+    def shutdown(self):
+        self.closing = True
+        self.identity_timer.stop()
+        if self.pending:
+            self.pending.cancelled.set()
+        if self.popup:
+            self.popup.close()
+            self.popup.deleteLater()
+            self.popup = None
+
+
+class DouyuInteraction:
+    def __init__(self, context, platform):
+        self.context, self.platform = context, platform
+        self.controls = weakref.WeakSet()
+        self.requests = set()
+        self.sending = False
+        context.register_tile_control("douyu_interaction", self.make_control, priority=100)
+
+    def make_control(self, context):
+        class Control(api.TileControl):
+            def set_room(self, room):
+                self.widget.set_room(room)
+                context.invalidate_layout()
+
+            def interaction_active(self):
+                return self.widget.interaction_active()
+
+            def focus_input(self):
+                if not self.widget.isVisible() or not self.widget.isEnabled():
+                    return False
+                self.widget.edit.setFocus(Qt.ShortcutFocusReason)
+                return True
+
+            def shutdown(self):
+                self.widget.shutdown()
+
+        widget = DouyuComposer(self, context.parent)
+        self.controls.add(widget)
+        return Control(widget, minimum_width=90, preferred_width=240)
+
+    def retire(self, request):
+        request.wait()
+        self.requests.discard(request)
+        request.deleteLater()
+
+    def shutdown(self):
+        for widget in tuple(self.controls):
+            widget.shutdown()
+        for request in tuple(self.requests):
+            request.cancelled.set()
+        for request in tuple(self.requests):
+            request.wait()
+        self.requests.clear()
