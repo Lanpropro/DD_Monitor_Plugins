@@ -13,6 +13,7 @@ from unittest.mock import Mock, patch
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
 parser.add_argument("--host", type=Path, required=True)
+parser.add_argument("--plugins-dir", type=Path, help="Check the host's installed development plugins")
 args = parser.parse_args()
 sys.path.insert(0, str(args.host.resolve()))
 os.environ["DDM_NO_SAVE"] = "1"
@@ -26,7 +27,7 @@ from PySide6.QtWidgets import QApplication, QWidget
 from ddm.plugins import PluginManager
 
 APP = QApplication.instance() or QApplication([])
-MANAGER = PluginManager(plugins_dir=str(ROOT / "plugins"), enabled=["domestic_live"])
+MANAGER = PluginManager(plugins_dir=str(args.plugins_dir or ROOT / "plugins"), enabled=["domestic_live"])
 MANAGER.load()
 assert "douyu" in MANAGER.platforms, MANAGER.summary
 api = importlib.import_module("ddm_plugin_domestic_live.douyu_interaction")

@@ -2,6 +2,8 @@
 
 ## 开发中：斗鱼直播互动（尚未发布）
 
+人工验收直接使用本体仓库根目录 `run.cmd`。将本分支已提交的 `plugins/domestic_live` 源码同步到根目录 `plugins_user/domestic_live`，重启后确认名称为“国内直播平台（斗鱼互动开发版）”；后续测试继续同步开发版，不另制测试 ZIP。此安装副本留在本机，不提交个人账号或配置，也不表示正式发布或维护 PR 已合并。
+
 斗鱼格子底栏新增输入框、礼物和发送按钮；仍由 `domestic_live` 提供，不依赖安装 B 站互动插件。输入框高度、窄格隐藏发送按钮、礼物网格与数量/消费确认沿用 B 站互动的布局。发送失败保留草稿；切换房间、账号或关闭时取消未提交请求，旧请求的结果不会清空新草稿。同一插件同时只处理一笔发送。
 
 - 礼物列表：读取当前房间礼物和默认皮肤，显示鱼翅/鱼丸价格及数量。特殊业务礼物保留说明，转由官网处理。
@@ -20,6 +22,8 @@
 
 ```powershell
 python tests/check_douyu_interaction.py --host ../DD_Monitor_CE
+# 同时检查根目录实际安装的开发副本
+python tests/check_douyu_interaction.py --host ../DD_Monitor_CE --plugins-dir ../DD_Monitor_CE/plugins_user
 ```
 
 ## 开发中：抖音添加与关注读取
