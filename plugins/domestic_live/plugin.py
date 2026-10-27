@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import struct
+import threading
 import time
 import uuid
 import zlib
@@ -162,6 +163,25 @@ class HuyaPlatform(LiveQualityPlatform):
     account_cookie_domain = "huya.com"
     follow_login_url = "https://www.huya.com/?evt_fe=login"
     follow_cookie_domain = "huya.com"
+
+    def __init__(self):
+        super().__init__()
+        self._failed_cdns = {}
+        self._cdn_lock = threading.Lock()
+
+    def report_playback_failure(self, room_id, url, reason):
+        if reason not in ("HTTP_401", "HTTP_403", "HTTP_404", "HTTP_410", "HTTP_502", "HTTP_503", "HTTP_504", "STALL",
+                          "Timeout", "ReadTimeout", "ConnectionError", "SSLError"):
+            return
+        canonical = self.normalize(room_id)
+        host = urlsplit(url).hostname or ""
+        if not re.fullmatch(r"[A-Za-z0-9.-]{1,253}", host):
+            return
+        with self._cdn_lock:
+            self._failed_cdns.setdefault(canonical, {})[host] = time.monotonic()
+        logger = getattr(self, "_diagnostic_log", None)
+        if logger is not None:
+            logger(f"[平台诊断] 阶段=source_rejected 房间={canonical} CDN={host} 原因={reason} 避让秒数=60")
 
     def _playback_cookies(self):
         jar = requests.cookies.RequestsCookieJar()
@@ -470,6 +490,13 @@ class HuyaPlatform(LiveQualityPlatform):
             # HLS 分片交给 FFmpeg 转封装，避免旧 VLC 处理虎牙 FLV 时间戳时停帧。
             # 不写 Cookie、不保存带签名的 URL。
             candidates = list(streams.values())
+            now = time.monotonic()
+            with self._cdn_lock:
+                failures = {host: stamp for host, stamp in self._failed_cdns.get(self.normalize(room_id), {}).items()
+                            if now - stamp < 60}
+                self._failed_cdns[self.normalize(room_id)] = failures
+            # 已在播放中失败的线路排在其他线路后；全部失败时仍允许新签名的有界尝试。
+            candidates.sort(key=lambda stream: failures.get(urlsplit(stream.to_url()).hostname, float("-inf")))
             seen = set()
             for stream in candidates:
                 url = stream.to_url()
@@ -485,8 +512,16 @@ class HuyaPlatform(LiveQualityPlatform):
                                      self._qualities.get(room_id, []))
                     if restricted and not self._verify_4k(playable, headers):
                         continue
+                    logger = getattr(self, "_diagnostic_log", None)
+                    if logger is not None:
+                        logger(f"[平台诊断] 阶段=source_selected 房间={self.normalize(room_id)} "
+                               f"CDN={urlsplit(playable).hostname} 画质={qn} 避让线路数={len(failures)}")
                     return playable, qn if isinstance(qn, int) else 10000, "huya", headers
-                except requests.RequestException:
+                except requests.RequestException as error:
+                    logger = getattr(self, "_diagnostic_log", None)
+                    if logger is not None:
+                        logger(f"[平台诊断] 阶段=source_probe 房间={self.normalize(room_id)} "
+                               f"CDN={urlsplit(url).hostname} 原因={LivePlatformsPlugin._diagnostic_reason(error)}")
                     continue
             raise RuntimeError("虎牙所选画质未能获取可播放视频，请重试或手动选择其他画质")
         finally:
@@ -1646,6 +1681,12 @@ class LivePlatformsPlugin(api.Plugin):
             pass
 
     def on_event(self, event, payload):
+        if (event == api.EVENT_STREAM_FAILED and self.context is not None and payload.get("source_url")
+                and getattr(self, "_diagnostic_enabled", False)):
+            room = str((payload.get("room") or {}).get("room_id") or "")
+            if room.startswith("huya:"):
+                self.context.platform("huya").report_playback_failure(
+                    room, payload["source_url"], payload.get("reason"))
         if event == api.EVENT_CLOSING and self.context is not None:
             platform = self.context.platform("douyin")
             if platform is not None:

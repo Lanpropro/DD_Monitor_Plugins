@@ -458,6 +458,41 @@ class LookupTests(unittest.TestCase):
                 module.requests, 'get', side_effect=replies):
             self.assertEqual(provider.play_url('huya:199300')[0], 'https://cdn3.test/live.m3u8')
 
+    def test_huya_playback_rejection_changes_cdn_but_not_other_rooms(self):
+        provider = module.HuyaPlatform()
+        session = SimpleNamespace(http=SimpleNamespace(headers={'User-Agent': 'fixture'}, close=Mock()))
+        streams = {name: SimpleNamespace(ddm_quality=10000, to_url=lambda name=name:
+            'https://' + name + '.test/live.m3u8?signature=private') for name in ('first', 'second')}
+        logs = provider._diagnostic_log = Mock()
+        with patch.object(provider, '_streams', return_value=(session, None, streams)), patch.object(
+                provider, '_probe_hls', side_effect=lambda url, headers: url), patch.object(
+                module.time, 'monotonic', return_value=10):
+            first = provider.play_url('huya:123')[0]
+            provider.report_playback_failure('huya:123', first, 'HTTP_403')
+            self.assertIn('second.test', provider.play_url('huya:123')[0])
+            self.assertIn('first.test', provider.play_url('huya:456')[0])
+            provider.report_playback_failure('huya:123', first, 'VIDEO_DECODE')
+        with patch.object(provider, '_streams', return_value=(session, None, streams)), patch.object(
+                provider, '_probe_hls', side_effect=lambda url, headers: url), patch.object(
+                module.time, 'monotonic', return_value=71):
+            self.assertIn('first.test', provider.play_url('huya:123')[0])
+        self.assertNotIn('private', str(logs.call_args_list))
+        self.assertNotIn('signature=', str(logs.call_args_list))
+
+    def test_huya_player_failure_event_is_forwarded_only_while_loaded(self):
+        plugin = module.LivePlatformsPlugin()
+        provider = module.HuyaPlatform()
+        plugin.context = SimpleNamespace(platform=lambda kind: provider)
+        plugin._diagnostic_enabled = True
+        payload = {'room': {'room_id': 'huya:123'}, 'source_url': 'https://bad.test/live?private',
+                   'reason': 'HTTP_403'}
+        plugin.on_event(module.api.EVENT_STREAM_FAILED, payload)
+        self.assertIn('bad.test', provider._failed_cdns['huya:123'])
+        provider._failed_cdns.clear()
+        plugin._diagnostic_enabled = False
+        plugin.on_event(module.api.EVENT_STREAM_FAILED, payload)
+        self.assertFalse(provider._failed_cdns)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
