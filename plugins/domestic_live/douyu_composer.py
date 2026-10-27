@@ -3,15 +3,80 @@ import threading
 import weakref
 
 import requests
-from PySide6.QtCore import QEvent, QPoint, QSize, Qt, QThread, QTimer, QUrl, Signal
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtCore import QEvent, Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtGui import QPainter, QPen, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
-from PySide6.QtWidgets import (QApplication, QDialog, QGridLayout, QHBoxLayout,
+from PySide6.QtWidgets import (QGridLayout, QHBoxLayout,
     QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
-    QSpinBox, QToolButton, QVBoxLayout, QWidget)
+    QSpinBox, QTabBar, QVBoxLayout, QWidget)
 
 from ddm import plugins as api, theme
 from .douyu_interaction import DouyuAPI, InteractionError, LoginRequired, room_number
+from .interaction_popup import AnchoredPopup, RefreshSpinner, picker_style
+
+
+def style_button(button, *, diameter=None):
+    # Match bili_live's TileCtrl buttons without requiring that plugin installed.
+    button.setObjectName("TileCtrl")
+    button.setStyleSheet("""
+        QPushButton#TileCtrl:disabled {background:transparent; color:palette(tooltip-text);}
+        QPushButton#TileCtrl:focus {border:1px solid palette(highlight);}
+    """)
+    if diameter is not None:
+        button.setFixedSize(diameter, diameter)
+        button.setStyleSheet(button.styleSheet() +
+            f"QPushButton#TileCtrl {{border-radius:{diameter // 2}px; padding:0;}}")
+    button.setCursor(Qt.PointingHandCursor)
+    button.setAutoDefault(False)
+
+
+class GiftButton(QPushButton):
+    def __init__(self):
+        super().__init__()
+        style_button(self, diameter=24)
+        self.setAccessibleName("选择直播间礼物")
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.translate(self.width() / 2, self.height() / 2)
+        painter.scale(.875, .875)
+        color = theme.TEXT2 if self.isEnabled() else theme.TEXT4
+        if self.isEnabled() and self.underMouse():
+            color = theme.ACCENT if theme.is_light() else theme.BG
+        painter.setPen(QPen(theme.qcolor(color), 1.6))
+        painter.drawRect(-7, -2, 14, 9)
+        painter.drawRect(-8, -5, 16, 4)
+        painter.drawLine(0, -5, 0, 7)
+        painter.drawEllipse(-5, -9, 5, 4)
+        painter.drawEllipse(0, -9, 5, 4)
+
+
+class GiftCard(QPushButton):
+    def __init__(self, gift):
+        super().__init__()
+        self.setObjectName("GiftCard")
+        self.setAccessibleName(gift.name)
+        self.setMinimumWidth(56)
+        self.setFixedHeight(90)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        row = QVBoxLayout(self)
+        row.setContentsMargins(2, 2, 2, 2)
+        row.setSpacing(1)
+        self.image = QLabel()
+        self.image.setFixedSize(42, 42)
+        self.image.setAlignment(Qt.AlignCenter)
+        row.addWidget(self.image, 0, Qt.AlignHCenter)
+        for text in (gift.name, gift.cost()):
+            label = QLabel(text)
+            label.setAlignment(Qt.AlignCenter)
+            label.setTextFormat(Qt.PlainText)
+            label.setMinimumWidth(0)
+            label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+            label.setAttribute(Qt.WA_TransparentForMouseEvents)
+            row.addWidget(label)
+        self.image.setAttribute(Qt.WA_TransparentForMouseEvents)
 
 
 class Request(QThread):
@@ -49,7 +114,9 @@ class DanmakuEdit(QLineEdit):
         return super().event(event)
 
     def keyPressEvent(self, event):
-        if event.key() in (Qt.Key_Return, Qt.Key_Enter) and (self.composing or event.isAutoRepeat()):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            if not self.composing and not event.isAutoRepeat() and not self.isReadOnly():
+                self.returnPressed.emit()
             event.accept()
             return
         if event.key() == Qt.Key_Escape:
@@ -59,46 +126,47 @@ class DanmakuEdit(QLineEdit):
         super().keyPressEvent(event)
 
 
-class GiftPopup(QDialog):
+class GiftPopup(AnchoredPopup):
     def __init__(self, composer):
-        super().__init__(composer.window(), Qt.Tool | Qt.FramelessWindowHint)
+        super().__init__(composer)
         self.composer, self.selected = composer, None
         self.network = QNetworkAccessManager(self)
         self.images = set()
         self.setObjectName("DouyuGiftPopup")
         self.setWindowTitle("斗鱼礼物")
-        self.setFixedSize(360, 330)
-        self.setStyleSheet(f"""
-            #DouyuGiftPopup {{background:{theme.ELEVATED}; color:{theme.TEXT1};
-                border:1px solid {theme.BORDER}; border-radius:8px;}}
-            QLabel {{color:{theme.TEXT1}; font-size:12px;}}
-            QPushButton, QToolButton {{background:transparent; color:{theme.TEXT1};
-                border:1px solid {theme.BORDER}; border-radius:4px; padding:4px 6px;}}
-            QPushButton:hover, QPushButton:focus, QToolButton:hover, QToolButton:focus, QToolButton:checked {{
-                background:{theme.CONTENT_HOVER}; border-color:{theme.ACCENT};}}
-            QPushButton:disabled, QToolButton:disabled {{color:{theme.TEXT3};}}
-            QScrollArea {{background:transparent; border:none;}}
-            QWidget#DouyuGiftCards {{background:transparent;}}
-        """)
+        self.resize(400, 340)
+        self.setStyleSheet(picker_style())
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(5)
         title = QHBoxLayout()
         title.addWidget(QLabel("斗鱼礼物"), 1)
+        self.spinner = RefreshSpinner()
+        title.addWidget(self.spinner)
         refresh = QPushButton("刷新")
+        style_button(refresh)
+        refresh.setFixedSize(48, theme.TILE_CONTROL_HEIGHT)
         refresh.clicked.connect(composer.load_gifts)
         title.addWidget(refresh)
-        close = QPushButton("关闭")
-        close.clicked.connect(self.hide)
-        title.addWidget(close)
         layout.addLayout(title)
         self.status = QLabel("点击刷新获取当前直播间礼物")
         self.status.setTextFormat(Qt.PlainText)
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        tabs = QTabBar()
+        tabs.setObjectName("GiftTabs")
+        tabs.setExpanding(False)
+        tabs.addTab("礼物")
+        layout.addWidget(tabs)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
         cards = QWidget()
         cards.setObjectName("DouyuGiftCards")
         self.grid = QGridLayout(cards)
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setSpacing(3)
+        self.grid.setAlignment(Qt.AlignTop)
         scroll.setWidget(cards)
         layout.addWidget(scroll, 1)
         self.summary = QLabel("请选择礼物")
@@ -111,12 +179,14 @@ class GiftPopup(QDialog):
         self.quantity.valueChanged.connect(self.update_total)
         row.addWidget(self.quantity)
         self.send = QPushButton("确认赠送")
+        style_button(self.send)
         self.send.setEnabled(False)
         self.send.clicked.connect(self.confirm)
         row.addWidget(self.send, 1)
         layout.addLayout(row)
 
     def set_gifts(self, gifts):
+        self.spinner.set_busy(False)
         self.stop_images()
         self.selected = None
         self.send.setEnabled(False)
@@ -125,18 +195,13 @@ class GiftPopup(QDialog):
             if item.widget():
                 item.widget().deleteLater()
         for index, gift in enumerate(gifts):
-            button = QToolButton()
-            button.setText(f"{gift.name}\n{gift.cost()}")
-            button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-            button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            button.setMinimumWidth(0)
-            button.setMinimumHeight(86)
+            button = GiftCard(gift)
             button.setCheckable(True)
             button.setProperty("gift_id", gift.id)
             button.setToolTip(gift.disabled or gift.name)
             button.setEnabled(not gift.disabled)
             button.clicked.connect(lambda checked=False, gift=gift: self.choose(gift))
-            self.grid.addWidget(button, index // 4, index % 4)
+            self.grid.addWidget(button, index // 5, index % 5)
             if gift.image:
                 self.load_image(button, gift.image)
         self.status.setText("选择礼物后确认数量与消费金额" if gifts else "当前房间没有可显示的礼物")
@@ -154,8 +219,7 @@ class GiftPopup(QDialog):
             if reply.error() == QNetworkReply.NoError:
                 image = QPixmap()
                 if image.loadFromData(bytes(reply.readAll())):
-                    button.setIcon(QIcon(image))
-                    button.setIconSize(QSize(36, 36))
+                    button.image.setPixmap(image.scaled(42, 42, Qt.KeepAspectRatio, Qt.SmoothTransformation))
             reply.deleteLater()
         reply.finished.connect(finished)
 
@@ -200,18 +264,6 @@ class GiftPopup(QDialog):
         if question.exec() == QMessageBox.Yes and key == self.composer.snapshot():
             self.composer.send_gift(gift, count, key)
 
-    def open_at(self, anchor):
-        bounds = anchor.screen().availableGeometry()
-        point = anchor.mapToGlobal(QPoint(anchor.width() // 2, 0))
-        x = max(bounds.left(), min(point.x() - self.width() // 2, bounds.right() - self.width() + 1))
-        y = point.y() - self.height() - 6
-        if y < bounds.top():
-            y = min(bounds.bottom() - self.height() + 1, point.y() + anchor.height() + 6)
-        self.move(x, y)
-        self.show()
-        self.raise_()
-
-
 class DouyuComposer(QWidget):
     def __init__(self, owner, parent=None):
         super().__init__(parent)
@@ -235,16 +287,26 @@ class DouyuComposer(QWidget):
         self.edit.setMinimumWidth(0)
         self.edit.returnPressed.connect(self.send_text)
         row.addWidget(self.edit, 1)
-        self.gifts = QPushButton("礼物")
+        self.gifts = GiftButton()
         self.gifts.setToolTip("选择斗鱼礼物并确认赠送")
-        self.gifts.setFixedSize(40, 26)
         self.gifts.clicked.connect(self.open_gifts)
         row.addWidget(self.gifts)
         self.send = QPushButton("发送")
+        style_button(self.send)
+        self.send.setFocusPolicy(Qt.NoFocus)
         self.send.setFixedSize(44, 26)
         self.send.clicked.connect(self.send_text)
         row.addWidget(self.send)
+        self.edit.textChanged.connect(self.update_controls)
+        self.update_controls()
         self.hide()
+
+    def update_controls(self):
+        busy = self.pending is not None
+        self.edit.setReadOnly(busy)
+        self.send.setEnabled(not busy and bool(self.edit.text().strip()))
+        self.send.setText("…" if busy else "发送")
+        self.gifts.setEnabled(not busy)
 
     def resizeEvent(self, event):
         self.send.setVisible(self.width() >= 176)
@@ -294,9 +356,10 @@ class DouyuComposer(QWidget):
         request = Request((key, kind, self.edit.text(), dict(self.room)), operation)
         self.pending = request
         self.owner.requests.add(request)
-        self.setEnabled(False)
+        self.update_controls()
         if self.popup:
             self.popup.send.setEnabled(False)
+            self.popup.spinner.set_busy(kind == "catalog")
         request.result.connect(self.completed)
         request.finished.connect(lambda: self.owner.retire(request), Qt.QueuedConnection)
         self.identity_timer.start()
@@ -315,7 +378,9 @@ class DouyuComposer(QWidget):
             self.identity_timer.stop()
         if self.closing:
             return
-        self.setEnabled(True)
+        self.update_controls()
+        if self.popup:
+            self.popup.spinner.set_busy(False)
         if key != self.snapshot():
             if kind != "catalog":
                 self.owner.context.notify(f"【斗鱼 {room.get('room_id', '')}】账号或房间已变化，请在原直播间核对发送结果", rooms=(room,))
@@ -327,7 +392,9 @@ class DouyuComposer(QWidget):
         else:
             if kind == "text" and self.edit.text() == draft:
                 self.edit.clear()
-            self.feedback("弹幕已发送" if kind == "text" else "礼物已赠送")
+            self.edit.setToolTip("")
+            if kind == "gift" and self.popup:
+                self.popup.status.setText("礼物已赠送")
         if self.popup:
             self.popup.update_total()
 
@@ -370,8 +437,7 @@ class DouyuComposer(QWidget):
         if self.pending:
             self.pending.cancelled.set()
         if self.popup:
-            self.popup.close()
-            self.popup.deleteLater()
+            self.popup.shutdown()
             self.popup = None
 
 

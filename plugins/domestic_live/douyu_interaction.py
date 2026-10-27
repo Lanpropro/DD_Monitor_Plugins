@@ -256,7 +256,8 @@ async def send_chat(server, room, uid, text, cookies, cancelled, *, client_facto
         async with asyncio.timeout(16):
             async with client_factory(timeout=aiohttp.ClientTimeout(total=16)) as client:
                 async with client.ws_connect(f"wss://{server['domain']}:{server['port']}/",
-                        origin=BASE, max_msg_size=4 * 1024 * 1024, ssl=chat_ssl_context()) as ws:
+                        origin=BASE, max_msg_size=4 * 1024 * 1024, ssl=chat_ssl_context(),
+                        timeout=aiohttp.ClientWSTimeout(ws_close=0.25)) as ws:
                     _check_cancel(cancelled)
                     await ws.send_bytes(packet(login))
                     async for message in ws:
@@ -264,6 +265,7 @@ async def send_chat(server, room, uid, text, cookies, cancelled, *, client_facto
                         if message.type != aiohttp.WSMsgType.BINARY:
                             raise InteractionError("斗鱼互动连接已中断")
                         buffer.extend(message.data)
+                        sent_before_packet = sent
                         for event in douyu_messages(buffer):
                             kind = event.get("type")
                             if kind == "loginres":
@@ -276,9 +278,15 @@ async def send_chat(server, room, uid, text, cookies, cancelled, *, client_facto
                                         "sender": uid, "dy": did, "col": 0, "pe": 0, "ifs": 0,
                                         "nc": 0, "dat": 0, "rev": 0}))
                             elif kind == "chatres" and sent:
+                                # This frame was received before writing the
+                                # message; it cannot acknowledge that write.
+                                if not sent_before_packet:
+                                    continue
+                                if event.get("rid", room) != room or event.get("txt", text) not in (text, text.replace("\\", "\\\\")):
+                                    continue
                                 if event.get("res") != "0":
                                     raise InteractionError("斗鱼拒绝弹幕，请到官网查看禁言、频率或账号限制")
-                                return "弹幕已发送"
+                                return "斗鱼已返回发送回执"
                             elif kind in ("error", "livres", "lsigres"):
                                 raise InteractionError("弹幕发送结果未确认，请在直播间核对后再试" if sent else
                                     "斗鱼互动网关需要新版校验，当前直连接口尚未适配，请在官网发送")

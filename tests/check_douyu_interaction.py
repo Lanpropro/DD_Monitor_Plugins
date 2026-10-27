@@ -25,6 +25,7 @@ import requests
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QInputMethodEvent, QKeyEvent
 from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtTest import QTest
 from ddm.plugins import PluginManager
 
 APP = QApplication.instance() or QApplication([])
@@ -210,7 +211,8 @@ class FakeSocket:
     def __aiter__(self):
         async def messages():
             for event in self.events:
-                yield SimpleNamespace(type=aiohttp.WSMsgType.BINARY, data=api.packet(event))
+                yield SimpleNamespace(type=aiohttp.WSMsgType.BINARY,
+                                      data=event if isinstance(event, bytes) else api.packet(event))
         return messages()
 
 
@@ -236,6 +238,7 @@ class ChatTests(unittest.TestCase):
             def ws_connect(self, *args, **kwargs):
                 assert kwargs["ssl"].verify_mode == ssl.CERT_REQUIRED
                 assert kwargs["ssl"].check_hostname
+                assert kwargs["timeout"].ws_close <= 0.25
                 return socket
         return asyncio.run(api.send_chat({"domain": "wsproxy.douyu.com", "port": 6673},
             "9999", "42", "hello/@", cookies if cookies is not None else
@@ -244,7 +247,7 @@ class ChatTests(unittest.TestCase):
 
     def test_send_waits_for_matching_login_and_ack(self):
         self.assertEqual(self.send([{"type": "loginres", "userid": "42"},
-                                    {"type": "chatres", "res": "0"}]), "弹幕已发送")
+                                    {"type": "chatres", "res": "0"}]), "斗鱼已返回发送回执")
         self.assertEqual([e["type"] for e in self.socket.sent], ["loginreq", "chatmessage"])
         self.assertEqual(self.socket.sent[1]["content"], "hello/@")
 
@@ -282,6 +285,17 @@ class ChatTests(unittest.TestCase):
     def test_server_refusal_keeps_failure(self):
         with self.assertRaisesRegex(api.InteractionError, "拒绝弹幕"):
             self.send([{"type": "loginres", "userid": "42"}, {"type": "chatres", "res": "308"}])
+
+    def test_login_batch_notice_cannot_acknowledge_later_write(self):
+        batch = api.packet({"type": "loginres", "userid": "42"}) + api.packet({"type": "chatres", "res": "0"})
+        with self.assertRaisesRegex(api.InteractionError, "未确认"):
+            self.send([batch])
+
+    def test_other_room_or_text_ack_cannot_claim_delivery(self):
+        for reply in ({"type": "chatres", "res": "0", "rid": "100"},
+                      {"type": "chatres", "res": "0", "txt": "another message"}):
+            with self.assertRaisesRegex(api.InteractionError, "未确认"):
+                self.send([{"type": "loginres", "userid": "42"}, reply])
 
 
 class UITests(unittest.TestCase):
@@ -329,6 +343,70 @@ class UITests(unittest.TestCase):
         self.widget.completed(object(), (self.widget.snapshot(), "text", "keep", dict(self.widget.room)),
                               api.InteractionError("not sent"))
         self.assertEqual(self.widget.edit.text(), "keep")
+
+    def test_success_clears_draft_without_notification(self):
+        self.widget.edit.setText("sent")
+        self.widget.completed(object(), (self.widget.snapshot(), "text", "sent", dict(self.widget.room)),
+                              "斗鱼已返回发送回执")
+        self.assertEqual(self.widget.edit.text(), "")
+        self.owner.context.notify.assert_not_called()
+
+    def test_gift_success_does_not_raise_notification(self):
+        self.widget.completed(object(), (self.widget.snapshot(), "gift", "", dict(self.widget.room)), {})
+        self.owner.context.notify.assert_not_called()
+
+    def test_enter_and_keypad_enter_reach_send(self):
+        self.parent.show()
+        self.widget.show()
+        self.widget.edit.setText("native Enter")
+        self.widget.edit.setFocus()
+        APP.processEvents()
+        with patch.object(self.widget, "start") as start:
+            QTest.keyClick(self.widget.edit, Qt.Key_Return)
+            self.assertEqual(start.call_count, 1)
+            QTest.keyClick(self.widget.edit, Qt.Key_Enter)
+            self.assertEqual(start.call_count, 2)
+
+    def test_committed_ime_enter_sends_after_candidate_confirmation(self):
+        self.widget.edit.inputMethodEvent(QInputMethodEvent("拼", []))
+        commit = QInputMethodEvent()
+        commit.setCommitString("拼")
+        self.widget.edit.inputMethodEvent(commit)
+        with patch.object(self.widget, "start") as start:
+            QTest.keyClick(self.widget.edit, Qt.Key_Return)
+            start.assert_called_once()
+
+    def test_pending_send_keeps_focus_and_releases_for_next_enter(self):
+        self.parent.show()
+        self.widget.show()
+        self.parent.activateWindow()
+        self.widget.edit.setText("first")
+        self.widget.edit.setFocus()
+        APP.processEvents()
+        with patch.object(ui.Request, "start"):
+            self.widget.send_text()
+        request = self.widget.pending
+        self.assertTrue(self.widget.isEnabled())
+        self.assertTrue(self.widget.edit.isReadOnly())
+        self.assertTrue(self.widget.edit.hasFocus())
+        self.widget.completed(request, request.key, "斗鱼已返回发送回执")
+        self.assertFalse(self.widget.edit.isReadOnly())
+        self.assertTrue(self.widget.edit.hasFocus())
+        self.widget.edit.setText("second")
+        with patch.object(self.widget, "start") as start:
+            QTest.keyClick(self.widget.edit, Qt.Key_Return)
+            start.assert_called_once()
+        self.owner.requests.discard(request)
+        request.deleteLater()
+
+    def test_picker_and_buttons_use_bili_visual_primitives(self):
+        popup = ui.GiftPopup(self.widget)
+        self.widget.popup = popup
+        self.assertIsInstance(popup, ui.AnchoredPopup)
+        self.assertEqual(popup.size().width(), 400)
+        self.assertEqual(self.widget.gifts.size().width(), 24)
+        self.assertEqual(self.widget.send.objectName(), "TileCtrl")
+        self.assertEqual(popup.styleSheet(), ui.picker_style())
 
     def test_expired_login_action_opens_douyu_reauthentication(self):
         self.widget.completed(object(), (self.widget.snapshot(), "text", "keep", dict(self.widget.room)),
