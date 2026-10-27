@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (QDialog, QFrame, QGridLayout, QHBoxLayout,
 from ddm import plugins as api, theme
 from .douyu_interaction import DouyuAPI, GiftPanel, InteractionError, LoginRequired, format_yuchi, room_number
 from .interaction_popup import AnchoredPopup, RefreshSpinner, picker_style
+from .douyu_danmaku import relay_for
 
 
 def style_button(button, *, diameter=None):
@@ -259,10 +260,23 @@ class GiftPopup(AnchoredPopup):
         row = QHBoxLayout()
         row.addWidget(QLabel("数量"))
         self.quantity = QSpinBox()
-        self.quantity.setFixedSize(80, theme.TILE_CONTROL_HEIGHT)
+        self.quantity.setFixedSize(60, theme.TILE_CONTROL_HEIGHT)
+        self.quantity.setButtonSymbols(QSpinBox.NoButtons)
+        self.quantity.setAccessibleName("礼物数量")
+        self.quantity.setToolTip("输入数量，或使用减号与加号调整")
         self.quantity.setRange(1, 9999)
         self.quantity.valueChanged.connect(self.update_total)
+        self.decrease = QPushButton("−")
+        self.increase = QPushButton("+")
+        for button, title, step in ((self.decrease, "减少礼物数量", -1), (self.increase, "增加礼物数量", 1)):
+            style_button(button)
+            button.setFixedSize(26, theme.TILE_CONTROL_HEIGHT)
+            button.setToolTip(title)
+            button.setAccessibleName(title)
+            button.clicked.connect(lambda checked=False, step=step: self.quantity.stepBy(step))
+        row.addWidget(self.decrease)
         row.addWidget(self.quantity)
+        row.addWidget(self.increase)
         row.addStretch(1)
         self.send = QPushButton("确认赠送")
         style_button(self.send)
@@ -272,6 +286,7 @@ class GiftPopup(AnchoredPopup):
         row.addWidget(self.send)
         layout.addLayout(row)
         self.tabs.currentChanged.connect(self.select_tab)
+        self.update_total()
 
     def set_panel(self, panel):
         if (panel.tabs != self._tabs or self.tabs.count() != len(panel.tabs) or
@@ -367,6 +382,8 @@ class GiftPopup(AnchoredPopup):
 
     def update_total(self):
         gift = self.selected
+        self.decrease.setEnabled(self.quantity.value() > self.quantity.minimum())
+        self.increase.setEnabled(self.quantity.value() < self.quantity.maximum())
         self.summary.setText(f"{gift.name} × {self.quantity.value()} · {gift.cost(self.quantity.value())}" if gift else "请选择礼物")
         affordable = gift is None or self.wallet is None or gift.price * self.quantity.value() <= (
             self.wallet.yuchi if gift.currency == "YUCHI" else self.wallet.yuwan)
@@ -391,6 +408,7 @@ class DouyuComposer(QWidget):
     def __init__(self, owner, parent=None):
         super().__init__(parent)
         self.owner, self.room = owner, {}
+        self.chat_relay = relay_for(owner.platform)
         self.pending = self.popup = None
         self.closing = False
         self.identity_timer = QTimer(self)
@@ -399,7 +417,9 @@ class DouyuComposer(QWidget):
         self.setFixedHeight(26)
         self.setMinimumWidth(0)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setStyleSheet(f"QLineEdit {{padding:3px 6px; font-size:{theme.FONT_CONTROL}px;}}")
+        self.setObjectName("DanmakuComposer")
+        self.setStyleSheet(f"QLineEdit {{padding:3px 6px; font-size:{theme.FONT_CONTROL}px; "
+                          f"color:{theme.TEXT1}; placeholder-text-color:{theme.TEXT3};}}")
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(4)
@@ -538,8 +558,12 @@ class DouyuComposer(QWidget):
         elif kind == "catalog":
             self.popup.set_panel(value)
         else:
-            if kind == "text" and self.edit.text() == draft:
-                self.edit.clear()
+            if kind == "text":
+                from .douyu_interaction import ChatReceipt
+                if isinstance(value, ChatReceipt):
+                    self.chat_relay.confirmed.emit(key[0], value)
+                if self.edit.text() == draft:
+                    self.edit.clear()
             self.edit.setToolTip("")
             if kind == "gift" and self.popup:
                 self.popup.status.setText("礼物已赠送")

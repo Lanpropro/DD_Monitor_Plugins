@@ -24,7 +24,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import aiohttp
 import requests
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QHideEvent, QInputMethodEvent, QKeyEvent
+from PySide6.QtGui import QHideEvent, QInputMethodEvent, QKeyEvent, QPalette
 from PySide6.QtWidgets import QApplication, QWidget
 from PySide6.QtTest import QTest
 from ddm.plugins import PluginManager
@@ -35,6 +35,7 @@ MANAGER.load()
 assert "douyu" in MANAGER.platforms, MANAGER.summary
 api = importlib.import_module("ddm_plugin_domestic_live.douyu_interaction")
 ui = importlib.import_module("ddm_plugin_domestic_live.douyu_composer")
+receive = importlib.import_module("ddm_plugin_domestic_live.douyu_danmaku")
 
 
 def catalog(*, price=10, gift_type=0, **changes):
@@ -214,7 +215,7 @@ class APITests(unittest.TestCase):
             {"domain": "wsproxy.douyu.com", "port": 6671}]}})
         phases = []
         with patch.object(api, "send_chat", new=AsyncMock(return_value="ack")) as send:
-            self.assertEqual(client.send_text("9999", "hello", progress=phases.append), "ack")
+            self.assertEqual(client.send_text("9999", "hello", progress=phases.append), api.ChatReceipt("42", "我", "hello"))
             self.assertLessEqual(send.call_args.kwargs["timeout"], api.CHAT_SEND_TIMEOUT)
             self.assertGreater(send.call_args.kwargs["timeout"], 0)
         self.assertEqual(phases, ["account", "gateway"])
@@ -428,6 +429,50 @@ class UITests(unittest.TestCase):
         self.parent.close()
         self.parent.deleteLater()
         APP.processEvents()
+
+    def test_quantity_has_visible_increment_decrement_and_limits(self):
+        popup = ui.GiftPopup(self.widget)
+        self.widget.popup = popup
+        gift = api.Gift(1, "赞", 10, "YUCHI", 0, 3)
+        popup.choose(gift)
+        self.assertEqual(popup.quantity.buttonSymbols(), ui.QSpinBox.NoButtons)
+        self.assertFalse(popup.decrease.isEnabled())
+        self.assertEqual(popup.increase.text(), "+")
+        self.assertEqual(popup.decrease.text(), "−")
+        popup.increase.click()
+        self.assertEqual(popup.quantity.value(), 2)
+        popup.increase.click()
+        self.assertFalse(popup.increase.isEnabled())
+        popup.decrease.click()
+        self.assertEqual(popup.quantity.value(), 2)
+        self.assertIn("减少", popup.decrease.toolTip())
+        self.assertIn("增加", popup.increase.accessibleName())
+
+    def test_composer_text_and_placeholder_follow_live_theme_switch(self):
+        from ddm import theme
+        try:
+            for mode in ("dark", "light", "dark"):
+                theme.apply(mode)
+                self.widget.show()
+                self.widget.edit.ensurePolished()
+                APP.processEvents()
+                palette = self.widget.edit.palette()
+                self.assertEqual(palette.color(QPalette.Text), theme.qcolor(theme.TEXT1))
+                self.assertEqual(palette.color(QPalette.PlaceholderText), theme.qcolor(theme.TEXT3))
+        finally:
+            theme.apply("dark")
+
+    def test_only_acknowledged_current_room_text_reaches_receiver(self):
+        received = Mock()
+        self.widget.chat_relay.confirmed.connect(received)
+        key = self.widget.snapshot()
+        receipt = api.ChatReceipt("42", "测试用户", "hello")
+        self.widget.completed(object(), (key, "text", "hello", dict(self.widget.room)), api.InteractionError("timeout"))
+        received.assert_not_called()
+        self.widget.completed(object(), (("douyu:123", key[1]), "text", "hello", {}), receipt)
+        received.assert_not_called()
+        self.widget.completed(object(), (key, "text", "hello", dict(self.widget.room)), receipt)
+        received.assert_called_once_with("douyu:9999", receipt)
 
     def test_unsupported_rooms_hidden(self):
         self.widget.set_room({"room_id": "huya:9999", "platform": "huya"})
@@ -773,6 +818,113 @@ class UITests(unittest.TestCase):
         with patch.object(self.widget.edit, "returnPressed") as signal:
             self.widget.edit.keyPressEvent(QKeyEvent(QKeyEvent.KeyPress, Qt.Key_Return, Qt.NoModifier))
             signal.emit.assert_not_called()
+
+
+class ReceiveTests(unittest.TestCase):
+    def setUp(self):
+        self.jar = cookie_jar()
+        self.jar.set("acf_uid", "42", domain=".douyu.com", path="/")
+        self.platform = SimpleNamespace(normalize=lambda value: "douyu:" + str(value).removeprefix("douyu:"),
+            _playback_cookies=lambda: self.jar, room_info=Mock(return_value=SimpleNamespace(room_id="douyu:8888")))
+        self.client = receive.DouyuDanmakuClient("9999", self.platform)
+        self.events = []
+        self.client.message.connect(self.events.append)
+        self.receipt = api.ChatReceipt("42", "用户", "hello")
+
+    def tearDown(self):
+        self.client.stop()
+        self.client.deleteLater()
+        APP.processEvents()
+
+    def broadcast(self, uid="42", text="hello"):
+        self.client.receive_broadcast({"uid": uid, "txt": text, "nn": "用户"})
+
+    def test_broadcast_preserves_uid_and_marks_only_current_user(self):
+        self.broadcast()
+        self.broadcast("24")
+        self.assertEqual(self.events[0]["uid"], "42")
+        self.assertTrue(self.events[0]["self_sent"])
+        self.assertFalse(self.events[1]["self_sent"])
+        self.jar.set("acf_uid", "24", domain=".douyu.com", path="/")
+        self.broadcast()
+        self.assertFalse(self.events[-1]["self_sent"])
+
+    def test_confirmed_send_visible_without_public_broadcast_and_boxed(self):
+        receive.relay_for(self.platform).confirmed.emit("douyu:9999", self.receipt)
+        self.assertEqual(len(self.events), 1)
+        self.assertTrue(self.events[0]["self_sent"])
+        self.assertEqual(self.events[0]["delivery"], "send_receipt")
+
+
+    def test_confirmed_event_uses_shared_bilibili_outline_renderer(self):
+        from ddm.video_danmaku import VideoDanmaku
+        self.client.receive_confirmed("douyu:9999", self.receipt)
+        overlay = VideoDanmaku()
+        overlay.resize(640, 360)
+        overlay.enabled = overlay.active = True
+        overlay.show()
+        APP.processEvents()
+        try:
+            with patch.object(VideoDanmaku, "_draw_self_sent_box", wraps=VideoDanmaku._draw_self_sent_box) as draw:
+                self.assertTrue(overlay.add_event(self.events[0]))
+                draw.assert_called_once()
+            self.assertTrue(overlay.comments[0].self_sent)
+        finally:
+            overlay.close()
+            overlay.deleteLater()
+
+    def test_receipt_then_public_broadcast_emits_once(self):
+        self.client.receive_confirmed("douyu:9999", self.receipt)
+        self.broadcast()
+        self.assertEqual(len(self.events), 1)
+
+    def test_public_broadcast_then_receipt_emits_once(self):
+        self.broadcast()
+        self.client.receive_confirmed("douyu:9999", self.receipt)
+        self.assertEqual(len(self.events), 1)
+        self.assertTrue(self.events[0]["self_sent"])
+
+    def test_identical_messages_from_others_and_repeated_sends_not_lost(self):
+        for _ in range(2):
+            self.client.receive_confirmed("douyu:9999", self.receipt)
+        self.broadcast("24")
+        self.broadcast()
+        self.broadcast()
+        self.assertEqual(len(self.events), 3)
+
+    def test_busy_room_does_not_evict_pending_own_receipt(self):
+        self.client.receive_confirmed("douyu:9999", self.receipt)
+        for number in range(400):
+            self.broadcast("24", str(number))
+        self.broadcast()
+        self.assertEqual(len(self.events), 401)
+
+    def test_old_match_expires_and_stop_or_other_room_cannot_echo(self):
+        with patch.object(receive.time, "monotonic", return_value=0):
+            self.client.receive_confirmed("douyu:9999", self.receipt)
+        with patch.object(receive.time, "monotonic", return_value=31):
+            self.broadcast()
+        self.assertEqual(len(self.events), 2)
+        self.client.receive_confirmed("douyu:123", self.receipt)
+        self.client.stop()
+        self.client.receive_confirmed("douyu:9999", self.receipt)
+        self.broadcast()
+        self.assertEqual(len(self.events), 2)
+
+    def test_split_packets_canonical_room_and_subscription_survive(self):
+        packet = api.packet({"type": "loginres"}) + api.packet({"type": "chatmsg", "uid": "42", "txt": "hello", "nn": "用户"})
+        reader = SimpleNamespace(read=AsyncMock(side_effect=[packet[:9], packet[9:27], packet[27:], b""]))
+        writer = SimpleNamespace(write=Mock(), drain=AsyncMock(), close=Mock(), wait_closed=AsyncMock())
+        with patch.object(receive.asyncio, "open_connection", new=AsyncMock(return_value=(reader, writer))):
+            with self.assertRaises(OSError):
+                asyncio.run(self.client._douyu())
+        APP.processEvents()
+        self.assertEqual(self.client.canonical_room, "douyu:8888")
+        self.assertEqual(len(self.events), 1)
+        self.assertTrue(self.events[0]["self_sent"])
+        sent = api.douyu_messages(bytearray(b"".join(call.args[0] for call in writer.write.call_args_list)))
+        self.assertTrue(any(event.get("type") == "joingroup" and event.get("rid") == "8888" for event in sent))
+        writer.close.assert_called_once()
 
 
 if __name__ == "__main__":

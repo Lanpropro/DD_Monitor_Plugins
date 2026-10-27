@@ -24,6 +24,13 @@ DONATE = BASE + "/japi/gift/donate/mainsite/v3"
 CHAT_SEND_TIMEOUT = 12.0
 
 
+@dataclass(frozen=True)
+class ChatReceipt:
+    uid: str
+    uname: str
+    text: str
+
+
 class InteractionError(ValueError):
     pass
 
@@ -331,8 +338,9 @@ class DouyuAPI:
             if server is None:
                 raise InteractionError("斗鱼未返回可用的互动网关")
             cookies = web_cookies(session.cookies, room)
-            return asyncio.run(send_chat(server, room, uid, text.strip(), cookies, cancelled,
-                                         timeout=_remaining(deadline), progress=progress))
+            asyncio.run(send_chat(server, room, uid, text.strip(), cookies, cancelled,
+                                  timeout=_remaining(deadline), progress=progress))
+            return ChatReceipt(uid, cookies.get("acf_nickname") or "我", text.strip())
 
 
 def packet(values):

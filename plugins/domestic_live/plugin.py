@@ -682,6 +682,10 @@ class DouyuPlatform(NumericLivePlatform):
     follow_cookie_domain = "douyu.com"
     account_login_url = "https://passport.douyu.com/index/login?client_id=1"
 
+    def danmaku_client(self, room_id: str, parent=None):
+        from .douyu_danmaku import DouyuDanmakuClient
+        return DouyuDanmakuClient(room_id, self, parent)
+
     def account_info(self, session, cancelled) -> dict:
         if cancelled():
             return {}
