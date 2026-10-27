@@ -1907,7 +1907,9 @@ class Viewer(QDialog):
 
     def sync_picture(self, *_args):
         row = self.rows.get(self.main.currentData())
-        interval = max(4, int(1000 / getattr(row.decoder, "fps", 30))) if row is not None else 33
+        # Poll twice per source frame: Qt paint/chat work can delay a timer by
+        # several milliseconds. The audio clock still owns playback speed.
+        interval = max(4, int(500 / getattr(row.decoder, "fps", 30))) if row is not None else 33
         if self.render_timer.interval() != interval:
             self.render_timer.setInterval(interval)
         tile = self.picture
