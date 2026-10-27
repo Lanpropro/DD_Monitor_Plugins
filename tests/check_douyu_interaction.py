@@ -75,6 +75,19 @@ class APITests(unittest.TestCase):
             with self.assertRaises(api.InteractionError):
                 api.room_number(room)
 
+    def test_web_cookie_scopes_include_www_but_exclude_message_and_passport(self):
+        jar = cookie_jar()
+        for domain, value in ((".douyu.com", "root"), ("www.douyu.com", "web"),
+                              ("msg.douyu.com", "message"), ("passport.douyu.com", "passport")):
+            jar.set("acf_dmjwt_token", value, domain=domain, path="/")
+        jar.set("private", "wrong-path", domain="www.douyu.com", path="/other")
+        jar.set("expired", "old", domain="www.douyu.com", path="/", expires=1)
+        cookies = api.web_cookies(jar, "douyu:473252")
+        self.assertEqual(cookies["acf_dmjwt_token"], "web")
+        self.assertNotIn("private", cookies)
+        self.assertNotIn("expired", cookies)
+        self.assertEqual(cookies["dy_did"], "fixture-device")
+
     def test_gift_price_skin_limits_and_special_flow(self):
         gift = api.gift_catalog(catalog())[0]
         self.assertEqual((gift.id, gift.skin_id, gift.maximum), (20006, 12, 10))
@@ -123,6 +136,13 @@ class APITests(unittest.TestCase):
         self.assertEqual(call.kwargs["data"], {"giftId": 20006, "giftCount": 2,
             "roomId": "9999", "skinId": 12, "bizExt": "{}", "ctn": "csrf"})
         self.assertFalse(call.kwargs["allow_redirects"])
+
+    def test_gift_csrf_can_be_a_www_host_cookie(self):
+        client, session = self.client()
+        session.cookies.clear(".douyu.com", "/", "acf_ccn")
+        session.cookies.set("acf_ccn", "web-csrf", domain="www.douyu.com", path="/")
+        client.send_gift("9999", api.gift_catalog(catalog())[0], 2)
+        self.assertEqual(session.post.call_args.kwargs["data"]["ctn"], "web-csrf")
 
     def test_changed_price_never_spends(self):
         client, session = self.client(changed=True)
@@ -194,7 +214,7 @@ class FakeSocket:
 
 
 class ChatTests(unittest.TestCase):
-    def send(self, events):
+    def send(self, events, cookies=None):
         socket = FakeSocket(events)
         self.socket = socket
         class Client:
@@ -207,7 +227,8 @@ class ChatTests(unittest.TestCase):
             def ws_connect(self, *args, **kwargs):
                 return socket
         return asyncio.run(api.send_chat({"domain": "wsproxy.douyu.com", "port": 6673},
-            "9999", "42", "hello/@", {"acf_username": "fixture", "acf_auth_wl": "fake", "dy_did": "fixture"},
+            "9999", "42", "hello/@", cookies if cookies is not None else
+            {"acf_username": "fixture", "acf_auth_wl": "fake", "dy_did": "fixture"},
             lambda: False, client_factory=Client))
 
     def test_send_waits_for_matching_login_and_ack(self):
@@ -215,6 +236,18 @@ class ChatTests(unittest.TestCase):
                                     {"type": "chatres", "res": "0"}]), "弹幕已发送")
         self.assertEqual([e["type"] for e in self.socket.sent], ["loginreq", "chatmessage"])
         self.assertEqual(self.socket.sent[1]["content"], "hello/@")
+
+    def test_modern_jwt_login_does_not_require_legacy_password(self):
+        self.send([{"type": "loginres", "userid": "42"}, {"type": "chatres", "res": "0"}],
+                  {"acf_username": "fixture", "acf_dmjwt_token": "fixture-jwt", "dy_did": "fixture"})
+        self.assertEqual(self.socket.sent[0]["jwt"], "fixture-jwt")
+        self.assertEqual(self.socket.sent[0]["password"], "")
+
+    def test_missing_gateway_token_is_not_misreported_as_expired_login(self):
+        with self.assertRaises(api.InteractionError) as caught:
+            self.send([], {"dy_did": "fixture", "acf_username": "fixture"})
+        self.assertNotIsInstance(caught.exception, api.LoginRequired)
+        self.assertNotIn("重新登录", str(caught.exception))
 
     def test_wrong_login_never_sends_text(self):
         with self.assertRaises(api.InteractionError):
@@ -244,7 +277,7 @@ class UITests(unittest.TestCase):
     def setUp(self):
         self.parent = QWidget()
         self.owner = SimpleNamespace(platform=SimpleNamespace(_playback_cookies=lambda: cookie_jar()),
-            context=SimpleNamespace(notify=Mock()), sending=False, requests=set())
+            context=SimpleNamespace(notify=Mock(), request_login=Mock()), sending=False, requests=set())
         self.widget = ui.DouyuComposer(self.owner, self.parent)
         self.widget.set_room({"room_id": "douyu:9999", "platform": "douyu", "uname": "Synthetic"})
 
@@ -285,6 +318,21 @@ class UITests(unittest.TestCase):
         self.widget.completed(object(), (self.widget.snapshot(), "text", "keep", dict(self.widget.room)),
                               api.InteractionError("not sent"))
         self.assertEqual(self.widget.edit.text(), "keep")
+
+    def test_expired_login_action_opens_douyu_reauthentication(self):
+        self.widget.completed(object(), (self.widget.snapshot(), "text", "keep", dict(self.widget.room)),
+                              api.LoginRequired("斗鱼未登录，请重新登录"))
+        callback = self.owner.context.notify.call_args.kwargs["on_click"]
+        self.assertTrue(callable(callback))
+        self.owner.context.request_login.assert_not_called()
+        callback()
+        self.owner.context.request_login.assert_called_once_with("douyu", reauthenticate=True)
+
+    def test_gateway_error_does_not_request_reauthentication(self):
+        self.widget.completed(object(), (self.widget.snapshot(), "text", "keep", dict(self.widget.room)),
+                              api.InteractionError("互动网关令牌尚未取得"))
+        self.assertIsNone(self.owner.context.notify.call_args.kwargs["on_click"])
+        self.owner.context.request_login.assert_not_called()
 
     def test_gift_picker_does_not_send_on_selection(self):
         popup = ui.GiftPopup(self.widget)

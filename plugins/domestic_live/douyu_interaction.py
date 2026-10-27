@@ -25,6 +25,24 @@ class InteractionError(ValueError):
     pass
 
 
+class LoginRequired(InteractionError):
+    pass
+
+
+def web_cookies(jar, room):
+    """Use cookies visible on the room page, excluding passport/message subdomains."""
+    path = "/" + room_number(room)
+    result = {}
+    for cookie in sorted(jar, key=lambda c: (len(c.path or "/"),
+                         c.domain.lstrip(".").lower() == "www.douyu.com")):
+        domain = cookie.domain.lstrip(".").lower()
+        scope = cookie.path or "/"
+        if (domain in ("douyu.com", "www.douyu.com") and not cookie.is_expired() and
+                (path == scope or path.startswith(scope.rstrip("/") + "/"))):
+            result[cookie.name] = unquote(cookie.value)
+    return result
+
+
 def room_number(room):
     value = str(room or "")
     if value.startswith("douyu:"):
@@ -38,7 +56,7 @@ def api_data(payload):
     if not isinstance(payload, dict) or str(payload.get("error")) != "0":
         code = payload.get("error") if isinstance(payload, dict) else None
         if str(code) in ("901", "-1"):
-            raise InteractionError("斗鱼未登录或登录已过期，请重新登录")
+            raise LoginRequired("斗鱼未登录或登录已过期，请重新登录")
         raise InteractionError(f"斗鱼拒绝请求（代码 {code if isinstance(code, (int, str)) and str(code).lstrip('-').isdigit() else 'unknown'}），请到官网查看账号或房间限制")
     data = payload.get("data", {})
     return json.loads(data) if isinstance(data, str) else data
@@ -146,10 +164,10 @@ class DouyuAPI:
         _check_cancel(cancelled)
         payload = self._read(session, BASE + "/lapi/member/api/getInfo", params={"client_type": 0})
         if str(payload.get("error")) != "0" or not isinstance(payload.get("msg"), dict):
-            raise InteractionError("斗鱼未登录或登录已过期，请重新登录")
+            raise LoginRequired("斗鱼未登录或登录已过期，请重新登录")
         uid = str(payload["msg"].get("uid") or "")
         if not uid.isascii() or not uid.isdigit() or int(uid) <= 0:
-            raise InteractionError("斗鱼账号身份无效，请重新登录")
+            raise LoginRequired("斗鱼账号身份无效，请重新登录")
         return uid
 
     def send_gift(self, room, gift, count, cancelled=lambda: False):
@@ -165,10 +183,9 @@ class DouyuAPI:
             if current != gift:
                 raise InteractionError("礼物价格或状态已变化，请刷新列表后重新确认")
             api_data(self._read(session, BASE + "/wgapi/livenc/liveweb/csrfApi/getCsrfCookie"))
-            token = next((unquote(c.value) for c in session.cookies
-                          if c.name == "acf_ccn" and c.domain.lstrip(".") == "douyu.com"), "")
+            token = web_cookies(session.cookies, room).get("acf_ccn", "")
             if not token:
-                raise InteractionError("斗鱼登录缺少请求校验，请重新登录")
+                raise InteractionError("斗鱼网页请求校验尚未取得，请到官网完成验证后重试")
             _check_cancel(cancelled)
             try:
                 with session.post(DONATE, data={"giftId": gift.id, "giftCount": count,
@@ -199,8 +216,7 @@ class DouyuAPI:
                            type(s.get("port")) is int and 6671 <= s["port"] <= 6675), None)
             if server is None:
                 raise InteractionError("斗鱼未返回可用的互动网关")
-            cookies = {c.name: unquote(c.value) for c in self.cookies
-                       if c.domain.lstrip(".") == "douyu.com"}
+            cookies = web_cookies(session.cookies, room)
             return asyncio.run(send_chat(server, room, uid, text.strip(), cookies, cancelled))
 
 
@@ -212,13 +228,15 @@ def packet(values):
 
 async def send_chat(server, room, uid, text, cookies, cancelled, *, client_factory=aiohttp.ClientSession):
     did = cookies.get("dy_did", "")
-    if not did or not cookies.get("acf_username") or not cookies.get("acf_auth_wl"):
-        raise InteractionError("斗鱼登录缺少互动凭据，请重新登录")
+    jwt = cookies.get("acf_dmjwt_token", "")
+    legacy = cookies.get("acf_username") and cookies.get("acf_auth_wl")
+    if not did or not (jwt or legacy):
+        raise InteractionError("斗鱼互动网关令牌尚未取得，请到官网完成账号验证；当前请求未发送")
     rt = str(int(time.time()))
     login = {"type": "loginreq", "roomid": room, "username": cookies.get("acf_username", ""),
              "password": cookies.get("acf_auth_wl", ""), "ltkid": cookies.get("acf_ltkid", ""),
              "biz": cookies.get("acf_biz", ""), "stk": cookies.get("acf_stk", ""),
-             "jwt": cookies.get("acf_dmjwt_token", ""), "devid": did, "ct": 0, "pt": 2,
+             "jwt": jwt, "devid": did, "ct": 0, "pt": 2,
              "cvr": 0, "tvr": 7, "apd": "", "rt": rt, "ver": "20220825", "aver": "218101901",
              "vk": hashlib.md5((rt + "r5*^5;}2#${XF[h+;'./.Q'1;,-]f'p[" + did).encode()).hexdigest()}
     sent = False
@@ -239,7 +257,7 @@ async def send_chat(server, room, uid, text, cookies, cancelled, *, client_facto
                             kind = event.get("type")
                             if kind == "loginres":
                                 if event.get("userid") != uid:
-                                    raise InteractionError("斗鱼互动登录未确认当前账号，请重新登录")
+                                    raise LoginRequired("斗鱼互动登录未确认当前账号，请重新登录")
                                 if not sent:
                                     _check_cancel(cancelled)
                                     sent = True

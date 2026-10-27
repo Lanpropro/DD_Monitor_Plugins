@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QApplication, QDialog, QGridLayout, QHBoxLayout,
     QSpinBox, QToolButton, QVBoxLayout, QWidget)
 
 from ddm import plugins as api, theme
-from .douyu_interaction import DouyuAPI, InteractionError, room_number
+from .douyu_interaction import DouyuAPI, InteractionError, LoginRequired, room_number
 
 
 class Request(QThread):
@@ -271,10 +271,13 @@ class DouyuComposer(QWidget):
             supported = False
         self.setVisible(supported)
 
-    def feedback(self, message):
+    def feedback(self, message, *, login_required=False):
         room = dict(self.room)
+        action = None
+        if login_required:
+            action = lambda: self.owner.context.request_login("douyu", reauthenticate=True)
         self.owner.context.notify(f"【{room.get('uname') or '斗鱼'}（{room.get('room_id', '')}）】{message}",
-                                  rooms=(room,), kind="info")
+                                  rooms=(room,), kind="warning" if login_required else "info", on_click=action)
         self.edit.setToolTip(message)
         if self.popup:
             self.popup.status.setText(message)
@@ -318,7 +321,7 @@ class DouyuComposer(QWidget):
                 self.owner.context.notify(f"【斗鱼 {room.get('room_id', '')}】账号或房间已变化，请在原直播间核对发送结果", rooms=(room,))
             return
         if isinstance(value, Exception):
-            self.feedback(str(value))
+            self.feedback(str(value), login_required=isinstance(value, LoginRequired))
         elif kind == "catalog":
             self.popup.set_gifts(value)
         else:
