@@ -1,5 +1,6 @@
 """Per-tile Douyu interaction controls, owned by domestic_live."""
 import threading
+import time
 import weakref
 
 import requests
@@ -81,15 +82,17 @@ class GiftCard(QPushButton):
 
 class Request(QThread):
     result = Signal(object, object, object)
+    phase = Signal(object, str)
 
     def __init__(self, key, operation):
         super().__init__()
         self.key, self.operation = key, operation
         self.cancelled = threading.Event()
+        self.started_at = time.monotonic()
 
     def run(self):
         try:
-            value = self.operation(self.cancelled.is_set)
+            value = self.operation(self.cancelled.is_set, lambda stage: self.phase.emit(self, stage))
         except Exception as error:
             value = error if isinstance(error, InteractionError) else InteractionError(
                 "斗鱼网络请求失败，请稍后重试" if isinstance(error, requests.RequestException)
@@ -361,9 +364,23 @@ class DouyuComposer(QWidget):
             self.popup.send.setEnabled(False)
             self.popup.spinner.set_busy(kind == "catalog")
         request.result.connect(self.completed)
+        request.phase.connect(self.progress)
         request.finished.connect(lambda: self.owner.retire(request), Qt.QueuedConnection)
         self.identity_timer.start()
         request.start()
+
+    def progress(self, request, stage):
+        if self.closing or self.pending is not request:
+            return
+        log = getattr(self.owner.context, "log", None)
+        if callable(log):
+            room = request.key[0][0]
+            log(f"[斗鱼互动] 房间={room} 阶段={stage} 耗时={time.monotonic() - request.started_at:.2f}s")
+        label = {"account": "确认账号", "gateway": "获取网关", "connect": "连接网关",
+                 "login": "确认互动身份", "wait_ack": "等待发送回执", "ack": "收到发送回执"}.get(stage)
+        if label:
+            self.edit.setToolTip(label)
+            self.send.setText("等待" if stage == "wait_ack" else "…")
 
     def check_identity(self):
         if self.pending is not None and self.pending.key[0] != self.snapshot():
@@ -386,6 +403,9 @@ class DouyuComposer(QWidget):
                 self.owner.context.notify(f"【斗鱼 {room.get('room_id', '')}】账号或房间已变化，请在原直播间核对发送结果", rooms=(room,))
             return
         if isinstance(value, Exception):
+            log = getattr(self.owner.context, "log", None)
+            if callable(log):
+                log(f"[斗鱼互动] 房间={key[0]} 阶段=failed 耗时={time.monotonic() - request.started_at:.2f}s")
             self.feedback(str(value), login_required=isinstance(value, LoginRequired))
         elif kind == "catalog":
             self.popup.set_gifts(value)
@@ -404,7 +424,7 @@ class DouyuComposer(QWidget):
             return
         key = self.snapshot()
         client = DouyuAPI(self.owner.platform._playback_cookies())
-        self.start("text", lambda cancelled: client.send_text(key[0], text, cancelled), key=key)
+        self.start("text", lambda cancelled, progress: client.send_text(key[0], text, cancelled, progress=progress), key=key)
 
     def open_gifts(self):
         if self.popup is None:
@@ -415,13 +435,13 @@ class DouyuComposer(QWidget):
     def load_gifts(self):
         key = self.snapshot()
         client = DouyuAPI(self.owner.platform._playback_cookies())
-        self.start("catalog", lambda cancelled: client.catalog(key[0], cancelled), key=key)
+        self.start("catalog", lambda cancelled, progress: client.catalog(key[0], cancelled), key=key)
 
     def send_gift(self, gift, count, key):
         if key != self.snapshot():
             return
         client = DouyuAPI(self.owner.platform._playback_cookies())
-        self.start("gift", lambda cancelled: client.send_gift(key[0], gift, count, cancelled), key=key)
+        self.start("gift", lambda cancelled, progress: client.send_gift(key[0], gift, count, cancelled), key=key)
 
     def interaction_active(self):
         return self.edit.hasFocus() or bool(self.popup and self.popup.isVisible())

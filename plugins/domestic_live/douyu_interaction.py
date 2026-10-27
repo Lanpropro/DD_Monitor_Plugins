@@ -20,6 +20,7 @@ from ddm.live_danmaku import douyu_messages, douyu_packet
 BASE = "https://www.douyu.com"
 GIFTS = "https://gift.douyucdn.cn/api/gift/v5/web/list"
 DONATE = BASE + "/japi/gift/donate/mainsite/v3"
+CHAT_SEND_TIMEOUT = 12.0
 
 
 class InteractionError(ValueError):
@@ -137,6 +138,18 @@ def _check_cancel(cancelled):
         raise InteractionError("操作已取消")
 
 
+def _remaining(deadline):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise InteractionError("斗鱼发送准备超时，本次未发送，请稍后再试")
+    return remaining
+
+
+def _chat_http_timeout(deadline):
+    remaining = _remaining(deadline)
+    return min(2, remaining), min(3, remaining)
+
+
 class DouyuAPI:
     def __init__(self, cookies, *, session_factory=requests.Session):
         self.cookies = cookies.copy()
@@ -150,8 +163,8 @@ class DouyuAPI:
         return session
 
     @staticmethod
-    def _read(session, url, **kwargs):
-        with session.get(url, timeout=(4, 8), **kwargs) as response:
+    def _read(session, url, *, timeout=(4, 8), **kwargs):
+        with session.get(url, timeout=timeout, **kwargs) as response:
             response.raise_for_status()
             return response.json()
 
@@ -161,9 +174,9 @@ class DouyuAPI:
         with self._session(room) as session:
             return gift_catalog(self._read(session, GIFTS, params={"rid": room}))
 
-    def _account(self, session, cancelled):
+    def _account(self, session, cancelled, *, timeout=(4, 8)):
         _check_cancel(cancelled)
-        payload = self._read(session, BASE + "/lapi/member/api/getInfo", params={"client_type": 0})
+        payload = self._read(session, BASE + "/lapi/member/api/getInfo", params={"client_type": 0}, timeout=timeout)
         if str(payload.get("error")) != "0" or not isinstance(payload.get("msg"), dict):
             raise LoginRequired("斗鱼未登录或登录已过期，请重新登录")
         uid = str(payload["msg"].get("uid") or "")
@@ -200,17 +213,26 @@ class DouyuAPI:
                 raise InteractionError("赠送结果未确认，请到斗鱼官网核对消费记录；请勿直接重试") from error
             return result
 
-    def send_text(self, room, text, cancelled=lambda: False):
+    def send_text(self, room, text, cancelled=lambda: False, *, progress=lambda stage: None):
         room = room_number(room)
         if not isinstance(text, str) or not text.strip() or len(text) > 100:
             raise InteractionError("请输入 1–100 字弹幕")
+        deadline = time.monotonic() + CHAT_SEND_TIMEOUT
+        stage = "account"
         with self._session(room) as session:
-            uid = self._account(session, cancelled)
-            _check_cancel(cancelled)
-            with session.post(BASE + "/lapi/live/gateway/web/" + room + "?isH5=1",
-                              timeout=(4, 8), allow_redirects=False) as response:
-                response.raise_for_status()
-                gateway = api_data(response.json())
+            try:
+                progress(stage)
+                uid = self._account(session, cancelled, timeout=_chat_http_timeout(deadline))
+                _check_cancel(cancelled)
+                stage = "gateway"
+                progress(stage)
+                with session.post(BASE + "/lapi/live/gateway/web/" + room + "?isH5=1",
+                                  timeout=_chat_http_timeout(deadline), allow_redirects=False) as response:
+                    response.raise_for_status()
+                    gateway = api_data(response.json())
+            except requests.Timeout as error:
+                label = "账号确认" if stage == "account" else "网关发现"
+                raise InteractionError(f"斗鱼{label}超时，本次未发送，请稍后再试") from error
             servers = gateway.get("wss", []) if isinstance(gateway, dict) else []
             server = next((s for s in servers if isinstance(s, dict) and
                            s.get("domain") == "wsproxy.douyu.com" and
@@ -218,7 +240,8 @@ class DouyuAPI:
             if server is None:
                 raise InteractionError("斗鱼未返回可用的互动网关")
             cookies = web_cookies(session.cookies, room)
-            return asyncio.run(send_chat(server, room, uid, text.strip(), cookies, cancelled))
+            return asyncio.run(send_chat(server, room, uid, text.strip(), cookies, cancelled,
+                                         timeout=_remaining(deadline), progress=progress))
 
 
 def packet(values):
@@ -237,7 +260,8 @@ def chat_ssl_context():
     return context
 
 
-async def send_chat(server, room, uid, text, cookies, cancelled, *, client_factory=aiohttp.ClientSession):
+async def send_chat(server, room, uid, text, cookies, cancelled, *, client_factory=aiohttp.ClientSession,
+                    timeout=CHAT_SEND_TIMEOUT, progress=lambda stage: None):
     did = cookies.get("dy_did", "")
     jwt = cookies.get("acf_dmjwt_token", "")
     legacy = cookies.get("acf_username") and cookies.get("acf_auth_wl")
@@ -253,12 +277,14 @@ async def send_chat(server, room, uid, text, cookies, cancelled, *, client_facto
     sent = False
     buffer = bytearray()
     try:
-        async with asyncio.timeout(16):
-            async with client_factory(timeout=aiohttp.ClientTimeout(total=16)) as client:
+        progress("connect")
+        async with asyncio.timeout(timeout):
+            async with client_factory(timeout=aiohttp.ClientTimeout(total=timeout)) as client:
                 async with client.ws_connect(f"wss://{server['domain']}:{server['port']}/",
                         origin=BASE, max_msg_size=4 * 1024 * 1024, ssl=chat_ssl_context(),
                         timeout=aiohttp.ClientWSTimeout(ws_close=0.25)) as ws:
                     _check_cancel(cancelled)
+                    progress("login")
                     await ws.send_bytes(packet(login))
                     async for message in ws:
                         _check_cancel(cancelled)
@@ -268,6 +294,9 @@ async def send_chat(server, room, uid, text, cookies, cancelled, *, client_facto
                         sent_before_packet = sent
                         for event in douyu_messages(buffer):
                             kind = event.get("type")
+                            if kind in ("loginres", "chatres", "error", "livres", "lsigres", "h5ckres"):
+                                code = str(event.get("res", event.get("code", "")))
+                                progress("reply_" + kind + ("_" + code if code.lstrip("-").isdigit() else ""))
                             if kind == "loginres":
                                 if event.get("userid") != uid:
                                     raise LoginRequired("斗鱼互动登录未确认当前账号，请重新登录")
@@ -277,15 +306,19 @@ async def send_chat(server, room, uid, text, cookies, cancelled, *, client_facto
                                     await ws.send_bytes(packet({"type": "chatmessage", "content": text.replace("\\", "\\\\"),
                                         "sender": uid, "dy": did, "col": 0, "pe": 0, "ifs": 0,
                                         "nc": 0, "dat": 0, "rev": 0}))
+                                    progress("wait_ack")
                             elif kind == "chatres" and sent:
                                 # This frame was received before writing the
                                 # message; it cannot acknowledge that write.
                                 if not sent_before_packet:
                                     continue
-                                if event.get("rid", room) != room or event.get("txt", text) not in (text, text.replace("\\", "\\\\")):
+                                if event.get("rid", room) != room:
                                     continue
                                 if event.get("res") != "0":
-                                    raise InteractionError("斗鱼拒绝弹幕，请到官网查看禁言、频率或账号限制")
+                                    code = str(event.get("res", ""))
+                                    safe_code = code if code.lstrip("-").isdigit() else "unknown"
+                                    raise InteractionError(f"斗鱼拒绝弹幕（代码 {safe_code}），请到官网查看禁言、频率或账号限制")
+                                progress("ack")
                                 return "斗鱼已返回发送回执"
                             elif kind in ("error", "livres", "lsigres"):
                                 raise InteractionError("弹幕发送结果未确认，请在直播间核对后再试" if sent else

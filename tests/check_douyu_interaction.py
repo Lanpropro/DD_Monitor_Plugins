@@ -7,9 +7,10 @@ import ssl
 from pathlib import Path
 import sys
 import threading
+import time
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
@@ -146,6 +147,36 @@ class APITests(unittest.TestCase):
         client.send_gift("9999", api.gift_catalog(catalog())[0], 2)
         self.assertEqual(session.post.call_args.kwargs["data"]["ctn"], "web-csrf")
 
+    def test_text_http_stages_share_one_budget(self):
+        client, session = self.client()
+        session.post.return_value = response({"error": 0, "data": {"wss": [
+            {"domain": "wsproxy.douyu.com", "port": 6671}]}})
+        phases = []
+        with patch.object(api, "send_chat", new=AsyncMock(return_value="ack")) as send:
+            self.assertEqual(client.send_text("9999", "hello", progress=phases.append), "ack")
+            self.assertLessEqual(send.call_args.kwargs["timeout"], api.CHAT_SEND_TIMEOUT)
+            self.assertGreater(send.call_args.kwargs["timeout"], 0)
+        self.assertEqual(phases, ["account", "gateway"])
+        self.assertEqual(session.get.call_args.kwargs["timeout"], (2, 3))
+        self.assertEqual(session.post.call_args.kwargs["timeout"], (2, 3))
+
+    def test_account_timeout_never_connects_gateway(self):
+        client, session = self.client()
+        session.get.side_effect = requests.Timeout("sensitive request details")
+        with self.assertRaisesRegex(api.InteractionError, "账号确认超时，本次未发送") as caught:
+            client.send_text("9999", "hello")
+        self.assertNotIn("sensitive", str(caught.exception))
+        session.post.assert_not_called()
+
+    def test_exhausted_preparation_budget_never_starts_websocket(self):
+        client, session = self.client()
+        with patch.object(api.time, "monotonic", side_effect=[0, 0, 13]), \
+                patch.object(api, "send_chat", new=AsyncMock()) as send:
+            with self.assertRaisesRegex(api.InteractionError, "准备超时，本次未发送"):
+                client.send_text("9999", "hello")
+        session.post.assert_not_called()
+        send.assert_not_called()
+
     def test_changed_price_never_spends(self):
         client, session = self.client(changed=True)
         with self.assertRaisesRegex(api.InteractionError, "已变化"):
@@ -211,6 +242,8 @@ class FakeSocket:
     def __aiter__(self):
         async def messages():
             for event in self.events:
+                if event is None:
+                    await asyncio.Future()
                 yield SimpleNamespace(type=aiohttp.WSMsgType.BINARY,
                                       data=event if isinstance(event, bytes) else api.packet(event))
         return messages()
@@ -225,9 +258,10 @@ class ChatTests(unittest.TestCase):
         suites = {cipher["name"] for cipher in context.get_ciphers()}
         self.assertTrue({"AES128-GCM-SHA256", "AES256-GCM-SHA384"} <= suites)
 
-    def send(self, events, cookies=None):
+    def send(self, events, cookies=None, *, timeout=api.CHAT_SEND_TIMEOUT):
         socket = FakeSocket(events)
         self.socket = socket
+        self.phases = []
         class Client:
             def __init__(self, **kwargs):
                 pass
@@ -243,7 +277,7 @@ class ChatTests(unittest.TestCase):
         return asyncio.run(api.send_chat({"domain": "wsproxy.douyu.com", "port": 6673},
             "9999", "42", "hello/@", cookies if cookies is not None else
             {"acf_username": "fixture", "acf_auth_wl": "fake", "dy_did": "fixture"},
-            lambda: False, client_factory=Client))
+            lambda: False, client_factory=Client, timeout=timeout, progress=self.phases.append))
 
     def test_send_waits_for_matching_login_and_ack(self):
         self.assertEqual(self.send([{"type": "loginres", "userid": "42"},
@@ -291,11 +325,28 @@ class ChatTests(unittest.TestCase):
         with self.assertRaisesRegex(api.InteractionError, "未确认"):
             self.send([batch])
 
-    def test_other_room_or_text_ack_cannot_claim_delivery(self):
-        for reply in ({"type": "chatres", "res": "0", "rid": "100"},
-                      {"type": "chatres", "res": "0", "txt": "another message"}):
-            with self.assertRaisesRegex(api.InteractionError, "未确认"):
-                self.send([{"type": "loginres", "userid": "42"}, reply])
+    def test_other_room_ack_cannot_claim_delivery(self):
+        with self.assertRaisesRegex(api.InteractionError, "未确认"):
+            self.send([{"type": "loginres", "userid": "42"},
+                       {"type": "chatres", "res": "0", "rid": "100"}])
+
+    def test_ack_text_is_not_required_to_equal_original(self):
+        result = self.send([{"type": "loginres", "userid": "42"},
+                            {"type": "chatres", "res": "0", "txt": "normalized reply metadata"}])
+        self.assertEqual(result, "斗鱼已返回发送回执")
+
+    def test_error_reply_text_does_not_get_ignored(self):
+        with self.assertRaisesRegex(api.InteractionError, "代码 308"):
+            self.send([{"type": "loginres", "userid": "42"},
+                       {"type": "chatres", "res": "308", "txt": "server explanation"}])
+
+    def test_missing_ack_has_bounded_wait_and_no_retry(self):
+        started = time.monotonic()
+        with self.assertRaisesRegex(api.InteractionError, "结果未确认"):
+            self.send([{"type": "loginres", "userid": "42"}, None], timeout=.03)
+        self.assertLess(time.monotonic() - started, .5)
+        self.assertEqual(len(self.socket.sent), 2)
+        self.assertIn("wait_ack", self.phases)
 
 
 class UITests(unittest.TestCase):
@@ -303,6 +354,11 @@ class UITests(unittest.TestCase):
         self.parent = QWidget()
         self.owner = SimpleNamespace(platform=SimpleNamespace(_playback_cookies=lambda: cookie_jar()),
             context=SimpleNamespace(notify=Mock(), request_login=Mock()), sending=False, requests=set())
+        def retire(request):
+            request.wait()
+            self.owner.requests.discard(request)
+            request.deleteLater()
+        self.owner.retire = retire
         self.widget = ui.DouyuComposer(self.owner, self.parent)
         self.widget.set_room({"room_id": "douyu:9999", "platform": "douyu", "uname": "Synthetic"})
 
@@ -396,6 +452,39 @@ class UITests(unittest.TestCase):
         with patch.object(self.widget, "start") as start:
             QTest.keyClick(self.widget.edit, Qt.Key_Return)
             start.assert_called_once()
+        self.owner.requests.discard(request)
+        request.deleteLater()
+
+    def test_worker_failure_restores_button_and_preserves_text(self):
+        self.widget.edit.setText("keep after timeout")
+        def fail(room, text, cancelled, *, progress):
+            progress("wait_ack")
+            raise api.InteractionError("弹幕发送结果未确认，请在直播间核对后再试")
+        with patch.object(ui.DouyuAPI, "send_text", side_effect=fail):
+            self.widget.send_text()
+            deadline = time.monotonic() + 1
+            while self.widget.pending is not None and time.monotonic() < deadline:
+                QTest.qWait(5)
+            QTest.qWait(10)
+        self.assertIsNone(self.widget.pending)
+        self.assertEqual(self.widget.send.text(), "发送")
+        self.assertTrue(self.widget.send.isEnabled())
+        self.assertFalse(self.widget.edit.isReadOnly())
+        self.assertFalse(self.owner.sending)
+        self.assertEqual(self.widget.edit.text(), "keep after timeout")
+
+    def test_progress_log_excludes_message_and_credentials(self):
+        self.owner.context.log = Mock()
+        self.widget.edit.setText("private draft")
+        with patch.object(ui.Request, "start"):
+            self.widget.send_text()
+        request = self.widget.pending
+        self.widget.progress(request, "wait_ack")
+        logged = self.owner.context.log.call_args.args[0]
+        self.assertIn("阶段=wait_ack", logged)
+        self.assertNotIn("private draft", logged)
+        self.assertNotIn("not-real", logged)
+        self.widget.completed(request, request.key, "ack")
         self.owner.requests.discard(request)
         request.deleteLater()
 
