@@ -165,15 +165,15 @@ def main():
         result.url = stream.to_url()
         try:
             with patch.object(platform, '_streams', return_value=(session, None, {'al': stream})), \
-                    patch.object(module.requests, 'get', return_value=result) as get, \
+                    patch.object(platform, '_probe_hls', return_value=result.url) as probe, \
                     patch.object(platform, '_verify_4k', return_value=True):
                 url, qn, _profile, out_headers = platform.play_url('huya:vctcn', 1020000)
                 assert qn == 1020000 and url == result.url
                 assert set(out_headers) == {'User-Agent', 'Referer'}
-                assert 'cookies' not in get.call_args.kwargs
+                assert 'Cookie' not in probe.call_args.args[1]
             result.iter_content.return_value = iter([b'#EXTM3U'])
             with patch.object(platform, '_streams', return_value=(session, None, {'al': stream})), \
-                    patch.object(module.requests, 'get', return_value=result), \
+                    patch.object(platform, '_probe_hls', return_value=result.url), \
                     patch.object(platform, '_verify_4k', return_value=False):
                 try:
                     platform.play_url('huya:vctcn', 1020000)

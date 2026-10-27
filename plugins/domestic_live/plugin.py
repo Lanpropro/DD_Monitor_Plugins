@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import struct
+import threading
 import time
 import uuid
 import zlib
@@ -14,6 +15,7 @@ from urllib.parse import parse_qsl, unquote, urljoin, urlsplit
 
 import requests
 from streamlink import Streamlink
+from streamlink.plugin.api import useragents
 from streamlink.exceptions import PluginError
 from streamlink.plugins.huya import Huya
 from streamlink.plugins.douyu import Douyu
@@ -161,6 +163,25 @@ class HuyaPlatform(LiveQualityPlatform):
     account_cookie_domain = "huya.com"
     follow_login_url = "https://www.huya.com/?evt_fe=login"
     follow_cookie_domain = "huya.com"
+
+    def __init__(self):
+        super().__init__()
+        self._failed_cdns = {}
+        self._cdn_lock = threading.Lock()
+
+    def report_playback_failure(self, room_id, url, reason):
+        if reason not in ("HTTP_401", "HTTP_403", "HTTP_404", "HTTP_410", "HTTP_502", "HTTP_503", "HTTP_504", "STALL",
+                          "Timeout", "ReadTimeout", "ConnectionError", "SSLError"):
+            return
+        canonical = self.normalize(room_id)
+        host = urlsplit(url).hostname or ""
+        if not re.fullmatch(r"[A-Za-z0-9.-]{1,253}", host):
+            return
+        with self._cdn_lock:
+            self._failed_cdns.setdefault(canonical, {})[host] = time.monotonic()
+        logger = getattr(self, "_diagnostic_log", None)
+        if logger is not None:
+            logger(f"[平台诊断] 阶段=source_rejected 房间={canonical} CDN={host} 原因={reason} 避让秒数=60")
 
     def _playback_cookies(self):
         jar = requests.cookies.RequestsCookieJar()
@@ -469,30 +490,78 @@ class HuyaPlatform(LiveQualityPlatform):
             # HLS 分片交给 FFmpeg 转封装，避免旧 VLC 处理虎牙 FLV 时间戳时停帧。
             # 不写 Cookie、不保存带签名的 URL。
             candidates = list(streams.values())
+            now = time.monotonic()
+            with self._cdn_lock:
+                failures = {host: stamp for host, stamp in self._failed_cdns.get(self.normalize(room_id), {}).items()
+                            if now - stamp < 60}
+                self._failed_cdns[self.normalize(room_id)] = failures
+            # 已在播放中失败的线路排在其他线路后；全部失败时仍允许新签名的有界尝试。
+            candidates.sort(key=lambda stream: failures.get(urlsplit(stream.to_url()).hostname, float("-inf")))
             seen = set()
             for stream in candidates:
                 url = stream.to_url()
                 if url in seen:
                     continue
                 seen.add(url)
-                if len(seen) > 3:
-                    break
                 try:
-                    with requests.get(url, headers=headers, stream=True, timeout=(4, 6)) as response:
-                        response.raise_for_status()
-                        if next(response.iter_content(7), b"") != b"#EXTM3U":
-                            continue
-                        qn = getattr(stream, "ddm_quality", 10000)
-                        restricted = any(item["qn"] == qn and item.get("restricted") for item in
-                                         self._qualities.get(room_id, []))
-                        if restricted and not self._verify_4k(response.url, headers):
-                            continue
-                        return response.url, qn if isinstance(qn, int) else 10000, "huya", headers
-                except requests.RequestException:
+                    playable = self._probe_hls(url, headers)
+                    if not playable:
+                        continue
+                    qn = getattr(stream, "ddm_quality", 10000)
+                    restricted = any(item["qn"] == qn and item.get("restricted") for item in
+                                     self._qualities.get(room_id, []))
+                    if restricted and not self._verify_4k(playable, headers):
+                        continue
+                    logger = getattr(self, "_diagnostic_log", None)
+                    if logger is not None:
+                        logger(f"[平台诊断] 阶段=source_selected 房间={self.normalize(room_id)} "
+                               f"CDN={urlsplit(playable).hostname} 画质={qn} 避让线路数={len(failures)}")
+                    return playable, qn if isinstance(qn, int) else 10000, "huya", headers
+                except requests.RequestException as error:
+                    logger = getattr(self, "_diagnostic_log", None)
+                    if logger is not None:
+                        logger(f"[平台诊断] 阶段=source_probe 房间={self.normalize(room_id)} "
+                               f"CDN={urlsplit(url).hostname} 原因={LivePlatformsPlugin._diagnostic_reason(error)}")
                     continue
             raise RuntimeError("虎牙所选画质未能获取可播放视频，请重试或手动选择其他画质")
         finally:
             session.http.close()
+
+    @staticmethod
+    def _probe_hls(url, headers):
+        """播放列表可读不代表分片可读；只探测一个分片，不下载或保存整段直播。"""
+        current, original = url, ""
+        for _ in range(2):
+            with requests.get(current, headers=headers, stream=True, timeout=(4, 6)) as response:
+                response.raise_for_status()
+                chunks, length = [], 0
+                for chunk in response.iter_content(4096):
+                    chunks.append(chunk)
+                    length += len(chunk)
+                    if length > 128 * 1024:
+                        return ""
+                text = b"".join(chunks).decode("utf-8-sig", errors="replace")
+                if not text.startswith("#EXTM3U"):
+                    return ""
+                current = response.url
+                original = original or current
+            lines = [line.strip() for line in text.splitlines() if line.strip()]
+            media = next((urljoin(current, line) for line in lines if not line.startswith("#")), "")
+            parts = urlsplit(media)
+            if parts.scheme not in ("http", "https") or parts.username or parts.password:
+                return ""
+            if any(line.startswith("#EXT-X-STREAM-INF:") for line in lines):
+                current = media
+                continue
+            if not any(line.startswith("#EXTINF:") for line in lines):
+                return ""
+            with requests.get(media, headers=headers, stream=True, timeout=(4, 6)) as response:
+                response.raise_for_status()
+                prefix = next(response.iter_content(512), b"").lstrip().lower()
+                if prefix and not prefix.startswith((b"<html", b"<!doctype", b"<?xml")):
+                    return original
+            return ""
+        return ""
 
     def room_url(self, room_id: str) -> str:
         canonical = self.normalize(room_id)
@@ -819,6 +888,14 @@ class DouyuPlatform(NumericLivePlatform):
         return data
 
 
+class DouyinLookupError(RuntimeError):
+    """可直接向用户展示的诊断，不包含响应正文、凭证或签名 URL。"""
+
+    @property
+    def user_message(self):
+        return str(self)
+
+
 class DouyinPlatform(NumericLivePlatform):
     kind = "douyin"
     share_hosts = ("v.douyin.com", "webcast.amemv.com")
@@ -867,6 +944,7 @@ class DouyinPlatform(NumericLivePlatform):
     def __init__(self):
         super().__init__()
         self._anchor_uids = {}
+        self._profile_additions = {}
         self._context = None
 
     def restore_follow_rooms(self, rooms):
@@ -885,7 +963,24 @@ class DouyinPlatform(NumericLivePlatform):
         uid = str(account.get("anchor_uid") or "")
         if not re.fullmatch(r"[1-9][0-9]{0,19}", uid) or cancelled():
             return dict(account)
-        room = self._follow_room(requests, uid, cancelled)
+        try:
+            room = self._follow_room(requests, uid, cancelled)
+        except (requests.RequestException, RuntimeError, ValueError, KeyError, TypeError) as error:
+            if cancelled():
+                return dict(account)
+            if not account.get("room_id"):
+                raise self._lookup_error("关注主播直播资料", error) from error
+            # 已有固定房间号时，不让补充接口失败阻止刷新；仍核对主播身份。
+            try:
+                info = self._room_page(self.normalize(account["room_id"]), expected_uid=uid)
+            except (requests.RequestException, RuntimeError, ValueError, KeyError, TypeError) as page_error:
+                raise DouyinLookupError(f"{self._lookup_error('关注主播直播资料', error)}；"
+                    f"直播间网页回退也失败：{self._lookup_error('直播间资料', page_error)}") from page_error
+            data = info["room"]
+            owner = data.get("owner") or info.get("anchor") or {}
+            room = {"web_rid": account["room_id"].split(":", 1)[1],
+                    "status": data["status"], "title": data.get("title", ""),
+                    "face": owner.get("avatar_thumb"), "cover": data.get("cover")}
         if not room or cancelled():
             return dict(account)
         canonical = self.normalize("douyin:" + str(room["web_rid"]))
@@ -931,6 +1026,22 @@ class DouyinPlatform(NumericLivePlatform):
         self._anchor_uids[canonical] = str(uid)
         return canonical
 
+    def profile_room_from_page(self, user, cancelled):
+        canonical = self.profile_room(user["uid"], cancelled, web_rid=user.get("web_rid", ""))
+        if not canonical or cancelled():
+            return ""
+        if user.get("web_rid"):
+            # 官网已确认主播和固定房间号；添加阶段不再依赖另一条匿名 HTTP 请求。
+            status = user.get("status")
+            info = api.RoomInfo(room_id=canonical, platform=self.kind,
+                uname=user.get("nickname") or f"抖音 · {user['web_rid']}",
+                title=user.get("title") or "抖音直播间", live=status == 2,
+                face=self._image_url(user.get("avatar")), cover_url=self._image_url(user.get("cover")),
+                extra={"playback_mode": "stream", "live_known": type(status) is int,
+                       "anchor_uid": str(user["uid"])})
+            self._profile_additions[canonical] = (time.monotonic(), info)
+        return canonical
+
     def follow_rooms(self, session, cancelled, *, accounts_only=False) -> list:
         if cancelled():
             return []
@@ -944,12 +1055,17 @@ class DouyinPlatform(NumericLivePlatform):
         known = {uid: rid for rid, uid in self._anchor_uids.items()}
         rooms, cursors = {}, {(0, 0, 0)}
         while not cancelled():
-            with session.get("https://www.douyin.com/aweme/v1/web/user/following/list/",
-                    params=params, headers=headers, timeout=(4, 8)) as response:
-                response.raise_for_status()
-                if not response.content:
-                    raise RuntimeError("抖音关注读取被官网拒绝，请在官方页面重新登录后重试")
-                payload = response.json()
+            try:
+                with session.get("https://www.douyin.com/aweme/v1/web/user/following/list/",
+                        params=params, headers=headers, timeout=(4, 8)) as response:
+                    response.raise_for_status()
+                    if not response.content:
+                        raise DouyinLookupError("抖音关注接口返回空内容，请在官方页面完成登录或验证后重试")
+                    payload = response.json()
+            except (requests.RequestException, ValueError) as error:
+                raise self._lookup_error("关注列表", error) from error
+            if not isinstance(payload, dict):
+                raise DouyinLookupError("抖音关注响应格式异常，请稍后重试；持续失败时请反馈插件版本与失败时间")
             if payload.get("status_code") != 0:
                 code = payload.get("status_code")
                 detail = f"（状态 {code}）" if isinstance(code, int) else "（响应格式异常）"
@@ -959,15 +1075,26 @@ class DouyinPlatform(NumericLivePlatform):
             for user in payload["followings"]:
                 if cancelled():
                     return []
+                if not isinstance(user, dict):
+                    raise DouyinLookupError("抖音关注响应包含无效账号资料，请重新读取")
                 room = user.get("room_data") or {}
                 if isinstance(room, str):
-                    room = json.loads(room)
+                    try:
+                        room = json.loads(room)
+                    except ValueError:
+                        room = {}
+                if not isinstance(room, dict):
+                    room = {}
                 uid = str(user.get("uid") or "")
                 owner = room.get("owner") or {}
+                if not isinstance(owner, dict):
+                    owner = {}
                 owner_uid = str(owner.get("id_str") or owner.get("id") or "")
                 if owner_uid and owner_uid != uid:
                     raise RuntimeError("抖音关注主播信息不匹配，请稍后重试")
-                rid = user.get("web_rid") or room.get("web_rid") or (room.get("owner") or {}).get("web_rid")
+                rid = user.get("web_rid") or room.get("web_rid") or owner.get("web_rid")
+                if rid and not re.fullmatch(r"[0-9]{1,20}", str(rid)):
+                    rid = ""
                 if rid and self.normalize("douyin:" + str(rid)) in rooms:
                     continue
                 # 官网列表已提供固定房间和状态时直接采用，避免逐个查询拖慢读取。
@@ -975,9 +1102,9 @@ class DouyinPlatform(NumericLivePlatform):
                 if not accounts_only and uid and (not rid or type(room.get("status")) is not int):
                     try:
                         resolved = self._follow_room(session, uid, cancelled)
-                    except requests.RequestException:
+                    except (requests.RequestException, RuntimeError, ValueError, KeyError, TypeError) as error:
                         if not rid:
-                            raise
+                            raise self._lookup_error("关注主播直播资料", error) from error
                         resolved = {}
                     if cancelled():
                         return []
@@ -1137,10 +1264,13 @@ class DouyinPlatform(NumericLivePlatform):
         return canonical, room
 
     def room_info(self, room_id: str) -> api.RoomInfo:
-        room_id, share = self._resolve_share_input(room_id)
-        canonical = self.normalize(room_id)
-        raw = canonical.split(":", 1)[1]
         try:
+            room_id, share = self._resolve_share_input(room_id)
+            canonical = self.normalize(room_id)
+            raw = canonical.split(":", 1)[1]
+            initial = self._profile_additions.pop(canonical, None)
+            if initial is not None and time.monotonic() - initial[0] < 60:
+                return initial[1]
             info = {"room": share} if share is not None else self.room_data(canonical)
             room = info["room"]
             owner = room.get("owner") or info.get("anchor") or {}
@@ -1151,35 +1281,136 @@ class DouyinPlatform(NumericLivePlatform):
                 extra={"playback_mode": "stream", "live_known": True,
                        "anchor_uid": str(owner.get("id_str") or owner.get("id") or "")})
         except (requests.RequestException, ValueError, KeyError, TypeError, StopIteration) as error:
-            raise RuntimeError("抖音房间信息获取失败，请使用直播间完整链接或稍后重试") from error
+            raise self._lookup_error("直播间资料", error) from error
+
+    @staticmethod
+    def _lookup_error(subject, error):
+        if isinstance(error, DouyinLookupError):
+            return error
+        if isinstance(error, requests.Timeout):
+            detail = "请求超时，请稍后重试"
+        elif isinstance(error, requests.HTTPError):
+            status = error.response.status_code if error.response is not None else None
+            detail = (f"请求被官网拒绝（HTTP {status}），请稍后重试" if status in (403, 429)
+                      else f"请求失败（HTTP {status}），请稍后重试")
+        elif isinstance(error, requests.exceptions.SSLError):
+            detail = "安全连接失败，请检查系统时间及网络代理设置"
+        elif isinstance(error, json.JSONDecodeError):
+            detail = "返回内容不是有效 JSON 资料，请稍后重试；持续失败时请反馈插件版本与失败时间"
+        elif isinstance(error, requests.RequestException):
+            detail = "连接失败，请检查网络或代理设置后重试"
+        else:
+            detail = "返回内容未包含可识别的资料，请稍后重试；持续失败时请反馈完整链接、插件版本与失败时间"
+        return DouyinLookupError(f"抖音{subject}{detail}")
 
     def room_data(self, room_id, session=None):
         canonical = self.normalize(room_id)
         uid = self._anchor_uids.get(canonical)
         if uid:
-            room = self._share_room(requests, uid, lambda: False)
-            if room:
-                if room["owner"]["web_rid"] != canonical.split(":", 1)[1]:
-                    raise ValueError("Mismatched Douyin room")
-                return {"room": room, "ttwid": room.pop("ttwid", "")}
+            try:
+                room = self._share_room(requests, uid, lambda: False)
+                if room:
+                    if room["owner"]["web_rid"] != canonical.split(":", 1)[1]:
+                        raise ValueError("Mismatched Douyin room")
+                    return {"room": room, "ttwid": room.pop("ttwid", "")}
+            except (requests.RequestException, RuntimeError, ValueError, KeyError, TypeError) as error:
+                cached_error = self._lookup_error("主播接口", error)
+                try:
+                    return self._room_page(canonical, session)
+                except (requests.RequestException, RuntimeError, ValueError, KeyError, TypeError) as page_error:
+                    raise DouyinLookupError(f"{cached_error}；直播间网页回退也失败：{self._lookup_error('直播间资料', page_error)}") from page_error
+        return self._room_page(canonical, session)
+
+    def _room_page(self, canonical, session=None, *, expected_uid=""):
         getter = session.http.get if session is not None else requests.get
         response = getter(self.room_url(canonical), headers={
-            "User-Agent": "Mozilla/5.0", "Referer": "https://live.douyin.com/"},
+            "User-Agent": useragents.DEFAULT, "Referer": "https://live.douyin.com/"},
             cookies={"__ac_nonce": uuid.uuid4().hex[:21]}, timeout=(4, 8))
         try:
             response.raise_for_status()
+            response.encoding = "utf-8"
             info = self._page_info(response.text)
             visitor = response.cookies.get("ttwid")
             info["ttwid"] = visitor if isinstance(visitor, str) else ""
+        except (requests.RequestException, RuntimeError, ValueError, KeyError, TypeError) as page_error:
+            logger = getattr(self, "_diagnostic_log", None)
+            if logger is not None:
+                content_type = response.headers.get("Content-Type", "").split(";", 1)[0].lower()
+                content_type = content_type if content_type in ("text/html", "application/json", "text/plain") else "other"
+                encoding = response.headers.get("Content-Encoding", "").lower()
+                encoding = encoding if encoding in ("", "gzip", "deflate", "br", "zstd") else "other"
+                host = urlsplit(response.url or "").hostname
+                host = host if host in self.hosts else "other"
+                page = response.text
+                markers = {name: name in page for name in
+                           ("__pace_f", "roomStore", "streamStore", "__rsc_f", "RENDER_DATA")}
+                markers["verification_text"] = any(word in page.lower() for word in
+                    ("验证码", "verifycenter", "captcha"))
+                logger(f"[平台诊断] 阶段=page_response 房间={canonical} HTTP={response.status_code} "
+                       f"类型={content_type} 编码={encoding or 'none'} 字节数={len(response.content)} "
+                       f"最终主机={host} 跳转次数={len(response.history)} 标记={json.dumps(markers)}")
+            # 正文格式不兼容时使用独立的公开数据入口，不重复请求同一张网页。
+            if response.status_code == 200:
+                try:
+                    visitor = response.cookies.get("ttwid")
+                    info = self._room_enter(canonical, visitor if isinstance(visitor, str) else "")
+                except (requests.RequestException, RuntimeError, ValueError, KeyError, TypeError) as error:
+                    page = response.text
+                    if (any(word in page.lower() for word in ("验证码", "verifycenter", "captcha")) and
+                            not any(marker in page for marker in ("roomStore", "__rsc_f", "RENDER_DATA"))):
+                        raise DouyinLookupError("抖音页面包含验证相关内容，未返回直播资料。请在软件内使用主播个人主页链接添加，"
+                            "或重新读取抖音关注，并在官网页面完成验证后重试。") from error
+                    raise DouyinLookupError(str(self._lookup_error("直播间网页", page_error))
+                        + "；公开接口回退也失败：" + str(self._lookup_error("房间接口", error))) from error
+            else:
+                raise
         finally:
             response.close()
         owner = info["room"].get("owner") or info.get("anchor") or {}
         owner_uid = str(owner.get("id_str") or owner.get("id") or "")
-        if uid and owner_uid != uid:
+        if expected_uid and owner_uid != expected_uid:
+            raise DouyinLookupError("抖音关注主播信息不匹配，请稍后重试")
+        web_rid = str(owner.get("web_rid") or "")
+        if web_rid and web_rid != canonical.split(":", 1)[1]:
+            raise ValueError("Mismatched Douyin room")
+        cached_uid = self._anchor_uids.get(canonical)
+        if cached_uid and owner_uid != cached_uid and not web_rid:
             raise ValueError("Mismatched Douyin anchor")
         if re.fullmatch(r"[0-9]{1,20}", owner_uid):
             self._anchor_uids[canonical] = owner_uid
         return info
+
+    def _room_enter(self, canonical, visitor=""):
+        raw = self.normalize(canonical).split(":", 1)[1]
+        with requests.get("https://live.douyin.com/webcast/room/web/enter/",
+                params={"aid": 6383, "app_name": "douyin_web", "live_id": 1,
+                        "device_platform": "web", "web_rid": raw},
+                headers={"User-Agent": useragents.DEFAULT, "Referer": "https://live.douyin.com/"},
+                cookies={"ttwid": visitor} if visitor else {}, timeout=(4, 8)) as response:
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict) or payload.get("status_code") != 0:
+                raise DouyinLookupError("抖音公开房间接口未返回有效资料，请稍后重试")
+            data = payload.get("data") or {}
+            if not isinstance(data, dict):
+                raise DouyinLookupError("抖音公开房间接口资料格式异常")
+            rooms = data.get("data") or []
+            if not isinstance(rooms, list):
+                raise DouyinLookupError("抖音公开房间接口资料格式异常")
+            for room in rooms:
+                if not isinstance(room, dict):
+                    continue
+                owner = room.get("owner") or data.get("user") or {}
+                if not isinstance(owner, dict):
+                    continue
+                uid = str(owner.get("id_str") or owner.get("id") or "")
+                if (str(owner.get("web_rid") or "") != raw or
+                        not re.fullmatch(r"[1-9][0-9]{0,19}", uid) or
+                        type(room.get("status")) is not int or not room.get("id_str")):
+                    continue
+                return {"room": dict(room, owner=owner),
+                        "ttwid": response.cookies.get("ttwid") or visitor}
+        raise DouyinLookupError("抖音公开房间接口没有返回身份匹配的房间，未导入其他主播")
 
     async def room_data_async(self, session, room_id):
         # 弹幕使用可取消的异步请求，共用关注/视频的身份校验与分享页解析。
@@ -1218,19 +1449,27 @@ class DouyinPlatform(NumericLivePlatform):
     @staticmethod
     def _page_info(page):
         # 与 Streamlink 8.6.1 相同的公开页面数据格式，保留网页的画质元数据。
-        chunks = re.findall(r'self\.__pace_f\.push\(\[\d+,("\w+:.+?")]\)</script>', page)
+        chunks = re.findall(r'self\.__pace_f\.push\(\s*\[\s*\d+\s*,\s*("(?:\\.|[^"\\])*")\s*]\s*\)', page)
         for chunk in reversed(chunks):
-            if "state" not in chunk or "streamStore" not in chunk:
+            if "roomStore" not in chunk:
                 continue
-            payload = json.loads(re.sub(r"^\w+:", "", json.loads(chunk)))
-            state = next(item["state"] for item in payload
-                         if isinstance(item, dict) and "state" in item)
-            info = state["roomStore"]["roomInfo"]
-            room = info["room"]
-            if type(room.get("status")) is not int or not room.get("id_str"):
-                raise ValueError("Missing room status")
-            return info
-        raise ValueError("Missing public room data")
+            try:
+                payload = json.loads(re.sub(r"^\w+:", "", json.loads(chunk)))
+                if not isinstance(payload, list):
+                    continue
+            except (ValueError, TypeError):
+                continue
+            for item in payload:
+                if not isinstance(item, dict) or not isinstance(item.get("state"), dict):
+                    continue
+                try:
+                    info = item["state"]["roomStore"]["roomInfo"]
+                    room = info["room"]
+                    if type(room.get("status")) is int and room.get("id_str"):
+                        return info
+                except (KeyError, TypeError, AttributeError):
+                    continue
+        raise DouyinLookupError("抖音直播间网页未返回可识别的房间资料，可能是验证页或页面格式变化；请稍后重试，持续失败时请反馈完整链接、插件版本与失败时间")
 
     def _streams(self, session, room_id, quality=250, *, preview=False):
         room = self.room_data(room_id, session)["room"]
@@ -1358,6 +1597,154 @@ class PlatformLogoControl(QObject):
 
 
 class LivePlatformsPlugin(api.Plugin):
+    @staticmethod
+    def _diagnostic_reason(error):
+        """仅记录错误类别；原始异常可能带签名 URL、代理密码和 Cookie。"""
+        reasons, seen = [], set()
+        while error is not None and id(error) not in seen and len(reasons) < 5:
+            seen.add(id(error))
+            detail = type(error).__name__
+            if isinstance(error, requests.HTTPError) and error.response is not None:
+                detail += f"(HTTP {error.response.status_code})"
+            elif isinstance(error, requests.exceptions.SSLError):
+                detail += "(证书校验失败)" if "CERTIFICATE_VERIFY_FAILED" in str(error) else "(TLS连接失败)"
+            elif isinstance(error, requests.exceptions.ProxyError):
+                detail += "(代理连接失败)"
+            elif isinstance(error, requests.ConnectionError):
+                if any(token in str(error) for token in ("getaddrinfo failed", "NameResolutionError")):
+                    detail += "(域名解析失败)"
+            elif isinstance(error, DouyinLookupError):
+                detail += f"({error.user_message})"
+            reasons.append(detail)
+            error = error.__cause__ or error.__context__
+        return " <- ".join(reasons)
+
+    def _enable_diagnostics(self, context, platform):
+        platform._diagnostic_log = context.log
+        for operation in ("room_info", "play_url"):
+            original = getattr(platform, operation)
+
+            def diagnosed(*args, _original=original, _operation=operation, **kwargs):
+                started = time.monotonic()
+                try:
+                    return _original(*args, **kwargs)
+                except Exception as error:  # noqa: BLE001
+                    try:
+                        canonical = platform.normalize(args[0] if args else kwargs.get("room_id", ""))
+                    except (ValueError, TypeError):
+                        canonical = ""
+                    room = canonical if re.fullmatch(r"[a-z]+:[A-Za-z0-9_-]{1,80}", canonical) else "分享链接或无效输入"
+                    mapped = (f" UID映射={'有' if platform._anchor_uids.get(canonical) else '无'}"
+                              if platform.kind == "douyin" else "")
+                    context.log(f"[平台诊断] 平台={platform.kind} 阶段={_operation} 房间={room}"
+                                f"{mapped} 耗时={time.monotonic() - started:.1f}s "
+                                f"原因={self._diagnostic_reason(error)}")
+                    raise
+
+            setattr(platform, operation, diagnosed)
+
+    @staticmethod
+    def _player_error_category(prefix, text):
+        lower = text.lower()
+        status = re.search(r"HTTP(?:/\d(?:\.\d)?| error)?\s+([45]\d\d)", text, re.IGNORECASE)
+        if status:
+            return "HTTP_" + status[1]
+        if any(word in lower for word in ("certificate", "tls", "ssl")):
+            return "TLS_OR_CERTIFICATE"
+        if any(word in lower for word in ("getaddrinfo", "resolve", "name or service not known")):
+            return "DNS"
+        if "timed out" in lower or "timeout" in lower:
+            return "TIMEOUT"
+        if prefix.startswith(("vd", "ffmpeg/video")) or "decoder" in lower or "hwdec" in lower:
+            return "VIDEO_DECODE"
+        if prefix.startswith("vo") or any(word in lower for word in ("direct3d", "d3d11", "swapchain")):
+            return "VIDEO_OUTPUT"
+        if prefix.startswith("ao") or "wasapi" in lower:
+            return "AUDIO_OUTPUT"
+        if "invalid data" in lower or prefix.startswith("demux"):
+            return "DEMUX_OR_FORMAT"
+        if any(word in lower for word in ("connection", "network", "failed to open", "protocol")):
+            return "NETWORK_OR_OPEN"
+        return "OTHER_MPV_ERROR"
+
+    def _detach_player_diagnostic(self, tile):
+        record = self._diagnostic_players.pop(tile, None)
+        if record is None:
+            return
+        try:
+            record["core"].unregister_event_callback(record["callback"])
+        except (ValueError, RuntimeError):
+            pass
+        try:
+            record["player"].stateChanged.disconnect(record["state_callback"])
+        except (RuntimeError, TypeError):
+            pass
+
+    def on_event(self, event, payload):
+        if (event == api.EVENT_STREAM_FAILED and self.context is not None and payload.get("source_url")
+                and getattr(self, "_diagnostic_enabled", False)):
+            room = str((payload.get("room") or {}).get("room_id") or "")
+            if room.startswith("huya:"):
+                self.context.platform("huya").report_playback_failure(
+                    room, payload["source_url"], payload.get("reason"))
+        if event == api.EVENT_CLOSING and self.context is not None:
+            platform = self.context.platform("douyin")
+            if platform is not None:
+                # 关闭事件位于主线程；持久化已确认的映射，不在网络线程读取界面或写配置。
+                platform.restore_follow_rooms([])
+        if not getattr(self, "_diagnostic_enabled", False):
+            return
+        if event == api.EVENT_CLOSING:
+            for tile in list(self._diagnostic_players):
+                self._detach_player_diagnostic(tile)
+            return
+        tile = payload.get("tile")
+        if event == api.EVENT_TILE_STOPPED:
+            self._detach_player_diagnostic(tile)
+            return
+        if event != api.EVENT_STREAM_RESOLVED:
+            return
+        source = payload.get("source")
+        room = str(getattr(source, "room_id", ""))
+        if not re.fullmatch(r"(?:huya|douyu|douyin):[A-Za-z0-9_-]{1,80}", room):
+            self._detach_player_diagnostic(tile)
+            return
+        context = self.context
+        player = getattr(context.window, "players", {}).get(tile)
+        core = getattr(player, "player", None)
+        if core is None or not callable(getattr(core, "register_event_callback", None)):
+            context.log(f"[平台诊断] 阶段=player_attach 房间={room} 结果=播放器不支持事件观察")
+            return
+        previous = self._diagnostic_players.get(tile)
+        if previous and previous["core"] is core:
+            previous["room"] = room
+            previous["seen"].clear()
+            return
+        self._detach_player_diagnostic(tile)
+        record = {"core": core, "player": player, "room": room, "seen": set()}
+
+        def callback(event):
+            if event.event_id.value != 2:  # libmpv LOG_MESSAGE；只观察现有 error 日志，不改变日志级别。
+                return
+            data = event.data
+            if data.level not in ("error", "fatal"):
+                return
+            category = self._player_error_category(data.prefix, data.text)
+            if category not in record["seen"]:
+                record["seen"].add(category)
+                context.log(f"[平台诊断] 阶段=player_error 房间={record['room']} 类别={category}")
+
+        def state_callback(state):
+            if state in ("playing", "buffering", "error"):
+                mode = player.decode_mode if player.decode_mode in ("auto", "none", "d3d11va", "nvdec", "dxva2") else "other"
+                context.log(f"[平台诊断] 阶段=player_state 房间={record['room']} 状态={state} 解码方式={mode}")
+
+        record.update(callback=callback, state_callback=state_callback)
+        core.register_event_callback(callback)
+        player.stateChanged.connect(state_callback)
+        self._diagnostic_players[tile] = record
+        context.log(f"[平台诊断] 阶段=player_attach 房间={room} 结果=已开始观察播放器")
+
     def on_load(self, context: api.PluginContext) -> None:
         huya = HuyaPlatform()
         huya._context = context
@@ -1371,10 +1758,18 @@ class LivePlatformsPlugin(api.Plugin):
             douyin.restore_follow_rooms([{"room_id": rid, "anchor_uid": uid} for rid, uid in saved.items()])
         douyin._context = context
         context.register_platform(douyin)
+        self._diagnostic_enabled = True
+        self._diagnostic_players = {}
+        for platform in (huya, douyu, douyin):
+            self._enable_diagnostics(context, platform)
+        context.log("[平台诊断] 已启用；记录失败响应特征与播放器错误类别，不记录正文、凭证或请求地址")
         if QApplication.instance() is not None and context.window is not None:
             self._logo_control = PlatformLogoControl(context, ("bilibili", "huya", "douyu", "douyin"), "显示国内平台 Logo")
 
     def on_unload(self):
+        for tile in list(getattr(self, "_diagnostic_players", {})):
+            self._detach_player_diagnostic(tile)
+        self._diagnostic_enabled = False
         if getattr(self, "_logo_control", None) is not None:
             self._logo_control.detach()
             self._logo_control = None

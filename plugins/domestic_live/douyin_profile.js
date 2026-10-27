@@ -1,4 +1,4 @@
-// 只读取目标主播的身份和固定网页房间号，不导出整个页面状态或账号凭证。
+// 只读取目标主播的身份和添加所需的卡片资料，不导出整个页面状态或账号凭证。
 (target) => {
     let identity, failure;
     const number = value => /^[1-9][0-9]{0,19}$/.test(String(value || ''));
@@ -10,8 +10,13 @@
         const ownerUid = owner?.id_str || owner?.idStr || owner?.uid || owner?.id;
         const sameOwner = !ownerUid || String(ownerUid) === String(user.uid);
         const rid = user.web_rid || user.webRid || (sameOwner && (room?.web_rid || owner?.web_rid || owner?.webRid));
+        const image = value => ({url_list: value?.url_list || value?.urlList || []});
         identity = {uid: String(user.uid), sec_uid: target,
-            web_rid: number(rid) ? String(rid) : identity?.web_rid || ''};
+            web_rid: number(rid) ? String(rid) : identity?.web_rid || '',
+            nickname: typeof user.nickname === 'string' ? user.nickname : '',
+            avatar: image(user.avatar_thumb || user.avatarThumb),
+            ...(sameOwner ? {title: typeof room.title === 'string' ? room.title : '',
+                status: Number.isInteger(room.status) ? room.status : null, cover: image(room.cover)} : {})};
     };
     const wanted = url => {
         try {
