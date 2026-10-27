@@ -178,6 +178,9 @@ class GiftPopup(AnchoredPopup):
         self.grid.setContentsMargins(0, 0, 0, 0)
         self.grid.setSpacing(3)
         self.grid.setAlignment(Qt.AlignTop)
+        for column in range(5):
+            self.grid.setColumnStretch(column, 1)
+            self.grid.setColumnMinimumWidth(column, 56)
         scroll.setWidget(cards)
         layout.addWidget(scroll, 1)
         self.summary = QLabel("请选择礼物")
@@ -230,6 +233,7 @@ class GiftPopup(AnchoredPopup):
         while self.grid.count():
             item = self.grid.takeAt(0)
             if item.widget():
+                item.widget().hide()
                 item.widget().deleteLater()
         for index, gift in enumerate(gifts):
             button = GiftCard(gift)
