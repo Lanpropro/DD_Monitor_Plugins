@@ -3,6 +3,7 @@ import argparse
 import asyncio
 import importlib
 import os
+import ssl
 from pathlib import Path
 import sys
 import threading
@@ -214,6 +215,14 @@ class FakeSocket:
 
 
 class ChatTests(unittest.TestCase):
+    def test_gateway_tls_keeps_verification_and_enables_rsa_gcm(self):
+        context = api.chat_ssl_context()
+        self.assertTrue(context.check_hostname)
+        self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertGreaterEqual(context.minimum_version, ssl.TLSVersion.TLSv1_2)
+        suites = {cipher["name"] for cipher in context.get_ciphers()}
+        self.assertTrue({"AES128-GCM-SHA256", "AES256-GCM-SHA384"} <= suites)
+
     def send(self, events, cookies=None):
         socket = FakeSocket(events)
         self.socket = socket
@@ -225,6 +234,8 @@ class ChatTests(unittest.TestCase):
             async def __aexit__(self, *args):
                 return False
             def ws_connect(self, *args, **kwargs):
+                assert kwargs["ssl"].verify_mode == ssl.CERT_REQUIRED
+                assert kwargs["ssl"].check_hostname
                 return socket
         return asyncio.run(api.send_chat({"domain": "wsproxy.douyu.com", "port": 6673},
             "9999", "42", "hello/@", cookies if cookies is not None else

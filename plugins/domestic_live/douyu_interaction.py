@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 import re
+import ssl
 import time
 from urllib.parse import unquote, urlsplit
 
@@ -226,6 +227,16 @@ def packet(values):
     return douyu_packet("".join(f"{escape(k)}@={escape(v)}/" for k, v in values.items()))
 
 
+def chat_ssl_context():
+    # The Douyu interaction gateway negotiates TLS 1.2 RSA-GCM, which is
+    # excluded from Python's default cipher list. Keep the default trust store,
+    # hostname checks and protocol floor; add only the two negotiated suites.
+    context = ssl.create_default_context()
+    context.set_ciphers(":".join(c["name"] for c in context.get_ciphers()) +
+                        ":AES128-GCM-SHA256:AES256-GCM-SHA384")
+    return context
+
+
 async def send_chat(server, room, uid, text, cookies, cancelled, *, client_factory=aiohttp.ClientSession):
     did = cookies.get("dy_did", "")
     jwt = cookies.get("acf_dmjwt_token", "")
@@ -245,7 +256,7 @@ async def send_chat(server, room, uid, text, cookies, cancelled, *, client_facto
         async with asyncio.timeout(16):
             async with client_factory(timeout=aiohttp.ClientTimeout(total=16)) as client:
                 async with client.ws_connect(f"wss://{server['domain']}:{server['port']}/",
-                        origin=BASE, max_msg_size=4 * 1024 * 1024) as ws:
+                        origin=BASE, max_msg_size=4 * 1024 * 1024, ssl=chat_ssl_context()) as ws:
                     _check_cancel(cancelled)
                     await ws.send_bytes(packet(login))
                     async for message in ws:
