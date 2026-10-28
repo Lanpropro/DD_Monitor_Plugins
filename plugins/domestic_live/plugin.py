@@ -262,7 +262,7 @@ class HuyaPlatform(LiveQualityPlatform):
         options = self._qualities[room_id]
         if preview:
             return min(options, key=lambda item: (item["rate"] == 0, item["rate"]))
-        if quality == 10000:
+        if quality in (250, 10000):
             # Auto starts with a public tier; gated HDR tiers must be selected explicitly.
             public = [item for item in options if 0 < item["rate"] <= 4000 and not item.get("restricted")]
             return max(public, key=lambda item: item["rate"]) if public else options[0]
@@ -563,7 +563,7 @@ class HuyaPlatform(LiveQualityPlatform):
             # 10000 means auto/highest available, not an explicit HDR tier.
             # Try the site's source tier once and return its actual quality ID.
             source = next((item for item in self._qualities.get(room_id, []) if item["rate"] == 0), None)
-            if quality == 10000 and not preview and source is not None and source["qn"] != 10000:
+            if quality in (250, 10000) and not preview and source is not None and source["qn"] != 10000:
                 first = self._select_quality(room_id, quality, preview)
                 if first["qn"] != source["qn"]:
                     session.http.close()

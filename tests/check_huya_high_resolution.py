@@ -34,7 +34,7 @@ def main():
                 patch.object(platform, '_authorize_4k', return_value='1') as authorize, \
                 patch.object(platform, '_account_stream_params', return_value={}) as account_params, \
                 patch.object(module.Huya, '_get_stream_params', return_value={}) as params:
-            for quality, preview, rate in ((10000, False, 4000), (250, False, 14000), (1020000, False, 20000),
+            for quality, preview, rate in ((10000, False, 4000), (250, False, 4000), (1020000, False, 20000),
                                            (1014000, False, 14000), (10000, True, 500)):
                 stream = platform._streams('huya:vctcn', quality, preview=preview)[2]['al_source']
                 if rate == 20000:
@@ -76,12 +76,12 @@ def main():
             data['vMultiStreamInfo'].append({'iBitRate': 0, 'sDisplayName': '原画'})
             page.text = 'var hyPlayerConfig = {stream:' + json.dumps(data) + '};</script>'
             platform._streams('huya:original', 10000)
-            assert params.call_args.args[-1] == 0, 'Normal rooms must retain original-quality selection'
+            assert params.call_args.args[-1] == 4000, 'Auto must start at a public bitrate even with an original tier'
             data['vMultiStreamInfo'] = []
             page.text = 'var hyPlayerConfig = {stream:' + json.dumps(data) + '};</script>'
             stream = platform._streams('huya:empty')[2]['al_source']
             assert stream.ddm_quality == 1000000 and params.call_args.args[-1] == 0
-        print('PASS: default 2K, 4K authorization warning in actual menu, manual 4K, lowest preview and normal-room fallbacks')
+        print('PASS: default public bitrate, 4K authorization warning in actual menu, manual 4K, lowest preview and normal-room fallbacks')
     finally:
         session.http.close()
         manager.unload()
