@@ -137,8 +137,8 @@ python tests/check_douyu_interaction.py --host ../DD_Monitor_CE --plugins-dir ..
 ## 虎牙发送弹幕开发验收
 
 虎牙格子底栏现提供纯文本输入和 Enter/小键盘 Enter 发送；成功静默清空草稿，失败保留，切换账号或房间后忽略旧回执。礼物暂不扩展。
-字段依据虎牙官网当前 [TAF Signal SDK](https://fedlib.msstatic.com/fedbasic/huyabaselibs/taf-signal/taf-signal.global.0.1.3.prod.js) 中的 `SendMessageReq`、`SendMessageRsp`，并由用户官网发送 `123` 的 `liveuif.sendMessage` / `tRsp` 抓包核实。
-本版改为官网同类 WebSocket WUP 发送：先以当前账号 Cookie 验证互动身份，通过后仅提交一次 `liveuif.sendMessage`，严格匹配请求编号、服务及方法，并且 `iStatus` 明确为 0 才确认成功。收到广播或用户信息更新应答不视为成功。保留证书校验，整次网关操作 12 秒有界、关闭等待 0.25 秒，不回退到 HTTP 重发；超时区分未提交与结果未知。真实账号发送仍待用户人工验收。
+字段依据虎牙官网当前 [TAF Signal SDK](https://fedlib.msstatic.com/fedbasic/huyabaselibs/taf-signal/taf-signal.global.0.1.3.prod.js) 中的 `SendMessageReq`、`SendMessageRsp`，并由用户官网发送 `123` 的 `liveui.sendMessage` / `tRsp` 抓包核实。
+本版改为官网同类 WebSocket WUP 发送：先以当前账号 Cookie 验证互动身份，通过后仅提交一次 `liveui.sendMessage`，严格匹配请求编号、服务及方法，并且 `iStatus` 明确为 0 才确认成功。收到广播或用户信息更新应答不视为成功。保留证书校验，整次网关操作 12 秒有界、关闭等待 0.25 秒，不回退到 HTTP 重发；超时区分未提交与结果未知。真实账号发送仍待用户人工验收。
 未开播房间的 `TT_ROOM_DATA` 可能给出全零频道，该场景属于不同聊天室协议，当前明确提示未适配，不把主播 UID 猜作频道号发出请求。
 比赛房间 HLS 探测失败时增加同画质 FLV 回退，复用官网当次下发的签名，校验 FLV 文件头后交给既有 FFmpeg/播放器链路；正常 HLS 仍优先，会员档位不使用匿名回退。同 CDN 的多个线路不互相覆盖。自动最高可用档位的 HDR 线路全部失败时，仅再尝试一次官网原画并返回实际画质编号；原画拥有独立编号，手动选择的 2K/HDR/会员画质不自动改变。
 重新登录需要配套本体的强制平台重新认证修复，清除目标平台本机会话后进入官网登录，不再停在已登录概要页；不影响浏览器外部已登录账号。

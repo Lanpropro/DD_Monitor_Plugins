@@ -1124,7 +1124,7 @@ class HuyaTests(unittest.TestCase):
     def reply(self, request_id=7, status=0, method="sendMessage", *, missing_status=False):
         payload = b"\x0a" + (b"" if missing_status else huya.tars_int(0,status)) + b"\x0b"
         values = b"\x08"+huya.tars_int(0,1)+huya.huya_string(0,"tRsp")+huya.tars_bytes(1,payload)
-        body = huya.tars_int(1,3)+huya.tars_int(4,request_id)+huya.huya_string(5,"liveuif")+huya.huya_string(6,method)+huya.tars_bytes(7,values)
+        body = huya.tars_int(1,3)+huya.tars_int(4,request_id)+huya.huya_string(5,"liveui")+huya.huya_string(6,method)+huya.tars_bytes(7,values)
         return struct.pack(">I",len(body)+4)+body
 
     def test_wup_send_has_explicit_success_and_correct_room_and_text(self):
@@ -1132,7 +1132,12 @@ class HuyaTests(unittest.TestCase):
         self.gateway.assert_called_once()
         self.session.post.assert_not_called()
         env=huya.tars_fields(self.gateway.call_args.args[0])
-        self.assertEqual((env[5],env[6]),("liveuif","sendMessage"))
+        self.assertEqual((env[5],env[6]),("liveui","sendMessage"))
+        # Captured web bytes: tag 5 string length 6, then tag 6 (0x66).
+        # The ASCII 'f' is a TARS field header, not part of the servant name.
+        wire = bytes.fromhex("56 06 6c 69 76 65 75 69 66 0b 73 65 6e 64 4d 65 73 73 61 67 65")
+        self.assertEqual(huya.tars_fields(wire), {5:"liveui",6:"sendMessage"})
+        self.assertIn(wire,self.gateway.call_args.args[0])
         values=huya.tars_fields(env[7])[0]
         body=huya.tars_fields(dict(zip(values[::2],values[1::2]))["tReq"])[0]
         self.assertEqual((body[1],body[2],body[3],body[8]),(100,200,"123",42))
@@ -1146,8 +1151,8 @@ class HuyaTests(unittest.TestCase):
     def test_wup_rejection_includes_numeric_code_and_stage(self):
         body=huya.tars_fields(self.reply()[4:])
         values=b"\x08"+huya.tars_int(0,1)+huya.huya_string(0,"")+huya.tars_bytes(1,huya.tars_int(0,-7))
-        packet=huya.tars_int(1,3)+huya.tars_int(4,7)+huya.huya_string(5,"liveuif")+huya.huya_string(6,"sendMessage")+huya.tars_bytes(7,values)
-        with self.assertRaisesRegex(api.InteractionError,"liveuif.sendMessage.*-7"):
+        packet=huya.tars_int(1,3)+huya.tars_int(4,7)+huya.huya_string(5,"liveui")+huya.huya_string(6,"sendMessage")+huya.tars_bytes(7,values)
+        with self.assertRaisesRegex(api.InteractionError,"liveui.sendMessage.*-7"):
             huya.parse_reply(struct.pack(">I",len(packet)+4)+packet,7)
 
     def test_auto_starts_at_public_quality_and_manual_hdr_stays_available(self):

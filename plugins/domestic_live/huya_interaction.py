@@ -33,7 +33,7 @@ def parse_reply(data, request_id):
         raise InteractionError("虎牙发送结果未确认，请在官网核对后再试")
     envelope = tars_fields(data[4:])
     if (envelope.get(1) != 3 or envelope.get(4) != request_id or
-            envelope.get(5) != "liveuif" or envelope.get(6) != "sendMessage"):
+            envelope.get(5) != "liveui" or envelope.get(6) != "sendMessage"):
         raise InteractionError("虎牙发送响应不匹配，请在官网核对后再试")
     entries = tars_fields(envelope.get(7, b"" )).get(0, [])
     values = dict(zip(entries[::2], entries[1::2]))
@@ -42,7 +42,7 @@ def parse_reply(data, request_id):
         if type(code) is not int:
             raise InteractionError("虎牙回执格式异常（阶段：WUP 返回值），发送结果未确认")
         if code != 0:
-            raise InteractionError(f"虎牙互动接口拒绝请求（阶段：liveuif.sendMessage；WUP 代码：{code}）。身份验证已通过，但发送未获成功确认；该代码不能直接证明账号过期或禁言。")
+            raise InteractionError(f"虎牙互动接口拒绝请求（阶段：liveui.sendMessage；WUP 代码：{code}）。身份验证已通过，但发送未获成功确认；该代码不能直接证明账号过期或禁言。")
     if "tRsp" not in values:
         raise InteractionError("虎牙发送响应缺少回执，请在官网核对后再试")
     result = tars_fields(values["tRsp"]).get(0, {})
@@ -89,7 +89,7 @@ class HuyaAPI:
             request_id = secrets.randbelow(2**30) + 1
             values = b"\x08" + tars_int(0, 1) + huya_string(0, "tReq") + tars_bytes(1, message_request(user, info, text.strip()))
             body = (tars_int(1, 3) + tars_int(2, 0) + tars_int(3, 0) + tars_int(4, request_id) +
-                huya_string(5, "liveuif") + huya_string(6, "sendMessage") + tars_bytes(7, values) +
+                huya_string(5, "liveui") + huya_string(6, "sendMessage") + tars_bytes(7, values) +
                 tars_int(8, 5000) + b"\x98\x0c\xa8\x0c")
             check()
             return asyncio.run(send_wup(body, base, user, int(account["uid"]), request_id, cancelled, progress=progress))
@@ -138,7 +138,7 @@ async def send_wup(body, base, user, uid, request_id, cancelled, *, progress=lam
                             if len(data) < 4:
                                 continue
                             envelope = tars_fields(data[4:])
-                            if (envelope.get(4) != request_id or envelope.get(5) != "liveuif" or
+                            if (envelope.get(4) != request_id or envelope.get(5) != "liveui" or
                                     envelope.get(6) != "sendMessage"):
                                 continue
                             result = parse_reply(data, request_id)
