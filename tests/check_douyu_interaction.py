@@ -1163,7 +1163,7 @@ class HuyaTests(unittest.TestCase):
         streams={str(n):SimpleNamespace(to_url=lambda n=n:f"https://fixture.msstatic.com/{n}.m3u8") for n in range(12)}
         with patch.object(platform,"_streams",return_value=(session,None,streams)),patch.object(platform,"_probe_hls",return_value="") as probe:
             with self.assertRaises(RuntimeError):platform.play_url("huya:lpl",1004000)
-        self.assertEqual(probe.call_count,4)
+            self.assertEqual(probe.call_count,4)
 
     def test_gateway_failure_not_retried(self):
         self.gateway.side_effect=api.InteractionError("结果未确认")
