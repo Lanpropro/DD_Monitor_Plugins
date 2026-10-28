@@ -95,9 +95,11 @@ class Request(QThread):
         try:
             value = self.operation(self.cancelled.is_set, lambda stage: self.phase.emit(self, stage))
         except Exception as error:
+            room = self.key[-1] if isinstance(self.key, tuple) and self.key and isinstance(self.key[-1], dict) else {}
+            platform = {"douyu": "斗鱼", "huya": "虎牙", "douyin": "抖音"}.get(room.get("platform"), "斗鱼")
             value = error if isinstance(error, InteractionError) else InteractionError(
-                "斗鱼网络请求失败，请稍后重试" if isinstance(error, requests.RequestException)
-                else "斗鱼互动请求失败，请刷新后重试")
+                f"{platform}网络请求失败，请稍后重试" if isinstance(error, requests.RequestException)
+                else f"{platform}互动请求失败，请刷新后重试")
         self.result.emit(self, self.key, value)
 
 

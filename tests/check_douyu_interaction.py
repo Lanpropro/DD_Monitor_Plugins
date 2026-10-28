@@ -1419,6 +1419,33 @@ class DouyinTests(unittest.TestCase):
         with self.assertRaises(api.InteractionError):self.client.send_text("douyin:123","hello")
         self.session.get.assert_not_called()
 
+    def test_account_empty_json_or_network_failure_never_submits_or_reports_expiry(self):
+        for error in [requests.exceptions.JSONDecodeError("empty","",0), requests.Timeout("private-url")]:
+            self.platform.account_info.side_effect=error
+            with self.assertRaises(api.InteractionError) as caught:self.client.send_text("douyin:123","hello")
+            self.assertNotIsInstance(caught.exception,api.LoginRequired)
+            self.assertIn("账号确认",str(caught.exception))
+            self.assertIn("未提交弹幕",str(caught.exception))
+            self.assertNotIn("private",str(caught.exception))
+        self.session.get.assert_not_called()
+
+    def test_account_probe_uses_complete_browser_user_agent(self):
+        platform=MANAGER.platforms["douyin"]
+        session=Mock()
+        session.get.return_value=response({"status_code":0,"user":{"uid":"42"}})
+        platform.account_info(session,lambda:False)
+        ua=session.get.call_args.kwargs["headers"]["User-Agent"]
+        self.assertIn("AppleWebKit",ua)
+        self.assertIn("Chrome/",ua)
+
+    def test_generic_worker_error_names_douyin(self):
+        request=ui.Request((None,"text","draft",{"platform":"douyin"}),lambda *_:(_ for _ in ()).throw(requests.Timeout()))
+        results=[]
+        request.result.connect(lambda *args:results.append(args[-1]))
+        request.run()
+        self.assertIn("抖音",str(results[0]))
+        self.assertNotIn("斗鱼",str(results[0]))
+
     def test_login_failure_never_write(self):
         self.platform.account_info.side_effect=RuntimeError("expired")
         with self.assertRaises(api.LoginRequired):self.client.send_text("douyin:123","hello")

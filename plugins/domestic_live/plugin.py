@@ -982,6 +982,9 @@ class DouyinLookupError(RuntimeError):
 
 class DouyinPlatform(NumericLivePlatform):
     kind = "douyin"
+    interaction_user_agent = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                              "AppleWebKit/537.36 (KHTML, like Gecko) "
+                              "Chrome/130.0.0.0 Safari/537.36")
     share_hosts = ("v.douyin.com", "webcast.amemv.com")
     label = "抖音"
     room_input_hint = "抖音直播间链接"
@@ -1316,7 +1319,7 @@ class DouyinPlatform(NumericLivePlatform):
         with session.get("https://www.douyin.com/aweme/v1/web/user/profile/self/",
                 params={"aid": 6383, "device_platform": "webapp", "source": "channel_pc_web",
                         "personal_center_strategy": 1},
-                headers={"User-Agent": "Mozilla/5.0", "Referer": self.account_login_url},
+                headers={"User-Agent": self.interaction_user_agent, "Referer": self.account_login_url},
                 timeout=(4, 8)) as response:
             response.raise_for_status()
             payload = response.json()

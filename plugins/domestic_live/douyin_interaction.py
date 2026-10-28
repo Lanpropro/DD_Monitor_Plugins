@@ -30,6 +30,19 @@ def playback_cookies(platform):
     return jar
 
 
+def preparation_error(stage, error):
+    if isinstance(error, ValueError):
+        reason = "官网返回空内容或非 JSON 数据"
+    elif isinstance(error, requests.HTTPError):
+        status = error.response.status_code if error.response is not None else None
+        reason = f"HTTP {status}" if isinstance(status, int) else "HTTP 请求失败"
+    elif isinstance(error, requests.Timeout):
+        reason = "请求超时"
+    else:
+        reason = "网络连接失败"
+    return InteractionError(f"抖音{stage}失败（{reason}），本次未提交弹幕。请稍后重试。")
+
+
 class DouyinAPI:
     def __init__(self, platform, cookies, *, session_factory=requests.Session):
         self.platform, self.cookies, self.session_factory = platform, cookies.copy(), session_factory
@@ -46,15 +59,22 @@ class DouyinAPI:
         check()
         with self.session_factory() as session:
             session.cookies.update(self.cookies)
-            session.headers.update({"User-Agent": "Mozilla/5.0", "Referer": self.platform.room_url(canonical)})
+            session.headers.update({"User-Agent": getattr(self.platform, "interaction_user_agent", "Mozilla/5.0"), "Referer": self.platform.room_url(canonical)})
             progress("account")
             try:
                 account = self.platform.account_info(session, cancelled)
+            except (requests.RequestException, ValueError) as error:
+                raise preparation_error("账号确认", error) from None
             except RuntimeError:
                 raise LoginRequired("抖音登录身份未确认，请在软件内重新登录") from None
             check()
             progress("gateway")
-            info = self.platform.room_data(canonical, SimpleNamespace(http=session))
+            try:
+                info = self.platform.room_data(canonical, SimpleNamespace(http=session))
+            except (requests.RequestException, ValueError) as error:
+                raise preparation_error("直播间信息读取", error) from None
+            except RuntimeError:
+                raise InteractionError("抖音直播间信息读取失败，本次未提交弹幕；请在官网检查是否需要安全验证") from None
             data = info.get("room", {})
             rid = str(data.get("id_str") or "")
             if not re.fullmatch(r"[1-9][0-9]{0,19}", rid) or data.get("status") != 2:
