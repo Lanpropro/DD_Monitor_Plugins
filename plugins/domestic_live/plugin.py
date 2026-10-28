@@ -1035,6 +1035,8 @@ class DouyinPlatform(NumericLivePlatform):
 
     def __init__(self):
         super().__init__()
+        from .douyin_interaction import BroadcastReceipts
+        self._chat_delivery = BroadcastReceipts()
         self._anchor_uids = {}
         self._profile_additions = {}
         self._context = None
@@ -1313,6 +1315,12 @@ class DouyinPlatform(NumericLivePlatform):
                             dict(item, sdk_key=item.get("sdkKey")) for item in qualities]}}}}}
 
         raise RuntimeError("抖音直播分享页信息获取失败，请稍后重试")
+
+    def danmaku_client(self, room_id, parent=None):
+        client = super().danmaku_client(room_id, parent)
+        canonical = self.normalize(room_id)
+        client.message.connect(lambda event: self._chat_delivery.observe(canonical, event))
+        return client
 
     def _playback_cookies(self):
         from .douyin_interaction import playback_cookies

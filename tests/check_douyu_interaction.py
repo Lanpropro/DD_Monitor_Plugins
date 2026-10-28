@@ -1390,6 +1390,7 @@ class DouyinTests(unittest.TestCase):
             account_info=Mock(return_value={"uid":"42","uname":"fixture"}),
             room_data=Mock(return_value={"room":{"id_str":"999999","status":2}}),
             _playback_cookies=lambda:requests.cookies.RequestsCookieJar())
+        self.platform._chat_delivery=SimpleNamespace(wait=Mock(return_value=True),own_uid="")
         self.client=self.module.DouyinAPI(self.platform,requests.cookies.RequestsCookieJar(),session_factory=lambda:self.session)
 
     def test_internal_room_id_single_write_and_explicit_receipt(self):
@@ -1407,12 +1408,29 @@ class DouyinTests(unittest.TestCase):
             phases=[]
             self.assertEqual(self.client.send_text("douyin:123","hello",progress=phases.append),
                              api.ChatReceipt("42","fixture","hello"))
-            self.assertEqual(phases[-1],"ack")
+            self.assertEqual(phases[-1],"broadcast")
         self.session.get.return_value=response({"status_code":30001,"data":{"msg_id_str":"7560000000000000123"}})
         with self.assertRaises(api.InteractionError):self.client.send_text("douyin:123","hello")
         for mid in ("", "0", "not-a-message", None):
             self.session.get.return_value=response({"status_code":0,"data":{"msg_id_str":mid}})
             with self.assertRaises(api.InteractionError):self.client.send_text("douyin:123","hello")
+
+    def test_http_acceptance_without_broadcast_is_unconfirmed_and_never_retried(self):
+        self.platform._chat_delivery.wait.return_value=False
+        with self.assertRaisesRegex(api.InteractionError,"广播投递未确认"):
+            self.client.send_text("douyin:123","hello")
+        self.session.get.assert_called_once()
+
+    def test_broadcast_tracker_matches_room_and_message_and_marks_own(self):
+        tracker=self.module.BroadcastReceipts()
+        tracker.own_uid="42"
+        event={"message_id":"123", "uid":"42"}
+        tracker.observe("douyin:123",event)
+        self.assertTrue(event["self_sent"])
+        self.assertTrue(tracker.wait("douyin:123","123",lambda:False,timeout=0))
+        self.assertFalse(tracker.wait("douyin:124","123",lambda:False,timeout=0))
+        self.assertFalse(tracker.wait("douyin:123","124",lambda:False,timeout=0))
+        self.assertFalse(tracker.wait("douyin:123","123",lambda:True,timeout=0))
 
     def test_unconfirmed_or_rejected_response_never_succeeds(self):
         for payload in [{"status_code":0,"data":{}},{"status_code":30001,"data":{}},{"data":{"id":"1"}},{"status_code":False,"data":{"id":"1"}}]:

@@ -522,10 +522,10 @@ class DouyuComposer(QWidget):
             room = request.key[0][0]
             log(f"[{self.room.get('platform', 'douyu')}互动] 房间={room} 阶段={stage} 耗时={time.monotonic() - request.started_at:.2f}s")
         label = {"account": "确认账号", "gateway": "获取网关", "connect": "连接网关",
-                 "login": "确认互动身份", "wait_ack": "等待发送回执", "ack": "收到发送回执"}.get(stage)
+                 "login": "确认互动身份", "wait_ack": "等待发送回执", "ack": "收到发送回执", "wait_broadcast": "接口已受理，等待弹幕广播", "broadcast": "已收到弹幕广播"}.get(stage)
         if label:
             self.edit.setToolTip(label)
-            self.send.setText("等待" if stage == "wait_ack" else "…")
+            self.send.setText("等待" if stage in ("wait_ack", "wait_broadcast") else "…")
 
     def check_identity(self):
         if self.pending is not None and self.pending.key[0] != self.snapshot():

@@ -1,10 +1,42 @@
 """Single-attempt Douyin web chat with explicit server acknowledgement."""
 import os
 import time
+import threading
+from collections import deque
 import re
 from types import SimpleNamespace
 import requests
 from .douyu_interaction import ChatReceipt, InteractionError, LoginRequired
+
+
+class BroadcastReceipts:
+    def __init__(self):
+        self.condition = threading.Condition()
+        self.recent = deque(maxlen=512)
+        self.own_uid = ""
+
+    def observe(self, room, event):
+        mid = event.get("message_id")
+        if not mid:
+            return
+        with self.condition:
+            self.recent.append((time.monotonic(), room, str(mid)))
+            self.condition.notify_all()
+        if self.own_uid and event.get("uid") == self.own_uid:
+            event["self_sent"] = True
+
+    def wait(self, room, mid, cancelled, timeout=8):
+        deadline = time.monotonic() + timeout
+        with self.condition:
+            while not cancelled():
+                now = time.monotonic()
+                if any(now - stamp < 30 and rid == room and message == mid
+                       for stamp, rid, message in self.recent):
+                    return True
+                if now >= deadline:
+                    return False
+                self.condition.wait(min(.1, deadline - now))
+        return False
 
 
 def playback_cookies(platform):
@@ -67,6 +99,9 @@ class DouyinAPI:
                 raise preparation_error("账号确认", error) from None
             except RuntimeError:
                 raise LoginRequired("抖音登录身份未确认，请在软件内重新登录") from None
+            delivery = getattr(self.platform, "_chat_delivery", None)
+            if delivery is not None:
+                delivery.own_uid = str(account["uid"])
             check()
             progress("gateway")
             try:
@@ -105,4 +140,8 @@ class DouyinAPI:
             if not re.fullmatch(r"[1-9][0-9]{0,19}", mid):
                 raise InteractionError("抖音响应缺少消息回执 ID，结果未确认；请在官网核对")
             progress("ack")
+            progress("wait_broadcast")
+            if delivery is None or not delivery.wait(canonical, mid, cancelled):
+                raise InteractionError("抖音接口已受理，但未在弹幕连接中观察到该消息。广播投递未确认，草稿已保留；不要立即重复发送，请在官网核对。")
+            progress("broadcast")
             return ChatReceipt(str(account["uid"]), account.get("uname") or "我", text.strip())
