@@ -1306,6 +1306,10 @@ class DouyinPlatform(NumericLivePlatform):
 
         raise RuntimeError("抖音直播分享页信息获取失败，请稍后重试")
 
+    def _playback_cookies(self):
+        from .douyin_interaction import playback_cookies
+        return playback_cookies(self)
+
     def account_info(self, session, cancelled) -> dict:
         if cancelled():
             return {}
@@ -1765,6 +1769,8 @@ class LivePlatformsPlugin(api.Plugin):
             pass
 
     def on_event(self, event, payload):
+        if event == api.EVENT_CLOSING and getattr(self, "_douyin_interaction", None) is not None:
+            self._douyin_interaction.shutdown()
         if event == api.EVENT_CLOSING and getattr(self, "_huya_interaction", None) is not None:
             self._huya_interaction.shutdown()
         if event == api.EVENT_CLOSING and getattr(self, "_douyu_interaction", None) is not None:
@@ -1850,6 +1856,9 @@ class LivePlatformsPlugin(api.Plugin):
             douyin.restore_follow_rooms([{"room_id": rid, "anchor_uid": uid} for rid, uid in saved.items()])
         douyin._context = context
         context.register_platform(douyin)
+        if callable(getattr(context, "register_tile_control", None)) and hasattr(api, "TileControl"):
+            from .douyu_composer import DouyinComposer
+            self._douyin_interaction = DouyuInteraction(context, douyin, composer_class=DouyinComposer, control_id="douyin_interaction")
         self._diagnostic_enabled = True
         self._diagnostic_players = {}
         for platform in (huya, douyu, douyin):
@@ -1859,6 +1868,9 @@ class LivePlatformsPlugin(api.Plugin):
             self._logo_control = PlatformLogoControl(context, ("bilibili", "huya", "douyu", "douyin"), "显示国内平台 Logo")
 
     def on_unload(self):
+        if getattr(self, "_douyin_interaction", None) is not None:
+            self._douyin_interaction.shutdown()
+            self._douyin_interaction = None
         if getattr(self, "_huya_interaction", None) is not None:
             self._huya_interaction.shutdown()
             self._huya_interaction = None

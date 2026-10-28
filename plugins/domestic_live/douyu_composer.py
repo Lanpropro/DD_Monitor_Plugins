@@ -645,7 +645,7 @@ class HuyaComposer(DouyuComposer):
 
     def show_failure_details(self, message):
         dialog = QDialog(self)
-        dialog.setWindowTitle("虎牙弹幕发送详情")
+        dialog.setWindowTitle("抖音弹幕发送详情" if self.room.get("platform") == "douyin" else "虎牙弹幕发送详情")
         dialog.setMinimumWidth(420)
         layout = QVBoxLayout(dialog)
         label = QLabel(message, dialog)
@@ -666,6 +666,34 @@ class HuyaComposer(DouyuComposer):
             return
         key = self.snapshot()
         client = HuyaAPI(self.owner.platform, self.owner.platform._playback_cookies())
+        self.start("text", lambda cancelled, progress: client.send_text(key[0], text, cancelled, progress=progress), key=key)
+
+
+class DouyinComposer(HuyaComposer):
+    def __init__(self, owner, parent=None):
+        super().__init__(owner, parent)
+        self.edit.setPlaceholderText("输入抖音弹幕，Enter 发送")
+        self.edit.setAccessibleName("发送到当前抖音直播间的弹幕")
+        self.edit.setMaxLength(50)
+
+    def set_room(self, room):
+        DouyuComposer.set_room(self, room)
+        self.setVisible(room.get("platform") == "douyin")
+
+    def feedback(self, message, *, login_required=False):
+        room = dict(self.room)
+        action = (lambda: self.owner.context.request_login("douyin", reauthenticate=True)) if login_required else lambda: self.show_failure_details(message)
+        self.owner.context.notify(f"【{room.get('uname') or '抖音'}（{room.get('room_id', '')}）】{message}",
+            rooms=(room,), kind="warning" if login_required else "info", on_click=action)
+        self.edit.setToolTip(message)
+
+    def send_text(self):
+        from .douyin_interaction import DouyinAPI
+        text = self.edit.text().strip()
+        if not text:
+            return
+        key = self.snapshot()
+        client = DouyinAPI(self.owner.platform, self.owner.platform._playback_cookies())
         self.start("text", lambda cancelled, progress: client.send_text(key[0], text, cancelled, progress=progress), key=key)
 
 

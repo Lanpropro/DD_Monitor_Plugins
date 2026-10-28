@@ -1379,6 +1379,71 @@ class HuyaTests(unittest.TestCase):
             widget.shutdown();parent.close();parent.deleteLater();APP.processEvents()
 
 
+class DouyinTests(unittest.TestCase):
+    def setUp(self):
+        self.module=importlib.import_module("ddm_plugin_domestic_live.douyin_interaction")
+        self.session=Mock(cookies=requests.cookies.RequestsCookieJar(),headers={})
+        self.session.__enter__=Mock(return_value=self.session)
+        self.session.__exit__=Mock(return_value=False)
+        self.session.get.return_value=response({"status_code":0,"data":{"id_str":"12345"}})
+        self.platform=SimpleNamespace(normalize=lambda room:"douyin:123",room_url=lambda room:"https://live.douyin.com/123",
+            account_info=Mock(return_value={"uid":"42","uname":"fixture"}),
+            room_data=Mock(return_value={"room":{"id_str":"999999","status":2}}),
+            _playback_cookies=lambda:requests.cookies.RequestsCookieJar())
+        self.client=self.module.DouyinAPI(self.platform,requests.cookies.RequestsCookieJar(),session_factory=lambda:self.session)
+
+    def test_internal_room_id_single_write_and_explicit_receipt(self):
+        self.assertEqual(self.client.send_text("douyin:123"," hello "),api.ChatReceipt("42","fixture","hello"))
+        self.session.get.assert_called_once()
+        call=self.session.get.call_args
+        self.assertEqual(call.args[0],"https://live.douyin.com/webcast/room/chat/")
+        self.assertEqual(call.kwargs["params"]["room_id"],"999999")
+        self.assertEqual(call.kwargs["params"]["content"],"hello")
+        self.assertFalse(call.kwargs["allow_redirects"])
+
+    def test_unconfirmed_or_rejected_response_never_succeeds(self):
+        for payload in [{"status_code":0,"data":{}},{"status_code":30001,"data":{}},{"data":{"id":"1"}},{"status_code":False,"data":{"id":"1"}}]:
+            self.session.get.return_value=response(payload)
+            with self.assertRaises(api.InteractionError):self.client.send_text("douyin:123","hello")
+        self.assertEqual(self.session.get.call_count,4)
+
+    def test_timeout_does_not_retry_or_expose_draft(self):
+        self.session.get.side_effect=requests.Timeout("secret-url?content=private")
+        with self.assertRaises(api.InteractionError) as error:self.client.send_text("douyin:123","private")
+        self.assertNotIn("private",str(error.exception))
+        self.session.get.assert_called_once()
+
+    def test_cancel_and_offline_never_write(self):
+        with self.assertRaises(api.InteractionError):self.client.send_text("douyin:123","hello",lambda:True)
+        self.platform.room_data.return_value={"room":{"id_str":"999999","status":4}}
+        with self.assertRaises(api.InteractionError):self.client.send_text("douyin:123","hello")
+        self.session.get.assert_not_called()
+
+    def test_login_failure_never_write(self):
+        self.platform.account_info.side_effect=RuntimeError("expired")
+        with self.assertRaises(api.LoginRequired):self.client.send_text("douyin:123","hello")
+        self.session.get.assert_not_called()
+
+    def test_composer_enter_visibility_and_login_action(self):
+        parent=QWidget()
+        owner=SimpleNamespace(platform=self.platform,context=SimpleNamespace(notify=Mock(),request_login=Mock()),sending=False,requests=set())
+        widget=ui.DouyinComposer(owner,parent)
+        try:
+            widget.set_room({"platform":"douyin","room_id":"douyin:123"})
+            self.assertFalse(widget.isHidden())
+            self.assertTrue(widget.gifts.isHidden())
+            widget.edit.setText("hello")
+            with patch.object(widget,"start") as start:
+                QTest.keyClick(widget.edit,Qt.Key_Return)
+                start.assert_called_once()
+            widget.feedback("expired",login_required=True)
+            owner.context.notify.call_args.kwargs["on_click"]()
+            owner.context.request_login.assert_called_once_with("douyin",reauthenticate=True)
+            widget.set_room({"platform":"huya","room_id":"huya:1"})
+            self.assertTrue(widget.isHidden())
+        finally:widget.shutdown();parent.close();parent.deleteLater();APP.processEvents()
+
+
 if __name__ == "__main__":
     try:
         unittest.main(argv=[sys.argv[0]], verbosity=2)
