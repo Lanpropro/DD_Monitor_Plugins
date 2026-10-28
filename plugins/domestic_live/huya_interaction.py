@@ -1,5 +1,6 @@
 """Huya acknowledged web WUP chat; never retry a write request."""
 import base64
+import hashlib
 import asyncio
 import aiohttp
 import json
@@ -124,7 +125,13 @@ async def send_wup(body, base, user, uid, request_id, cancelled, *, progress=lam
                                 raise LoginRequired("虎牙互动凭证未通过验证，请重新登录")
                             check()
                             sent = True
-                            await ws.send_bytes(tars_int(0, 3) + tars_bytes(1, struct.pack(">I", len(body)+4)+body) + tars_int(2, request_id))
+                            packet = struct.pack(">I", len(body) + 4) + body
+                            # Official sendWupNew hashes the complete encoded WUP, including length.
+                            trace = secrets.token_hex(8)
+                            command = (tars_int(0, 3) + tars_bytes(1, packet) + tars_int(2, 0) +
+                                       huya_string(3, f"{trace}:{trace}:0:0") + tars_int(4, 0) +
+                                       tars_int(5, 0) + huya_string(6, hashlib.md5(packet).hexdigest()))
+                            await ws.send_bytes(command)
                             progress("wait_ack")
                         elif command.get(0) == 4 and sent:
                             data = command.get(1, b"")

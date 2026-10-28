@@ -1202,6 +1202,16 @@ class HuyaTests(unittest.TestCase):
         result,socket=self.socket_send([frame(self.reply()),auth,frame(self.reply(8)),frame(self.reply())])
         self.assertEqual(result,"虎牙已确认发送")
         self.assertEqual([item[0] for item in socket.sent],[10,3])
+        import hashlib
+        command=socket.sent[1]
+        packet=struct.pack(">I",8)+b"body"
+        self.assertEqual(command[1],packet)
+        self.assertEqual(command[6],hashlib.md5(packet).hexdigest())
+        self.assertNotEqual(command[6],hashlib.md5(b"body").hexdigest())
+        self.assertEqual((command[2],command[4],command[5]),(0,0,0))
+        trace=command[3].split(":")
+        self.assertEqual(trace[0],trace[1])
+        self.assertEqual(trace[2:],["0","0"])
 
     def test_websocket_rejected_auth_never_writes_message(self):
         self.actual_send=self.real_transport
