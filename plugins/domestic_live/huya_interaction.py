@@ -1,5 +1,7 @@
 """Huya acknowledged web WUP chat; never retry a write request."""
 import base64
+import asyncio
+import aiohttp
 import json
 import re
 import secrets
@@ -35,7 +37,7 @@ def parse_reply(data, request_id):
     entries = tars_fields(envelope.get(7, b"" )).get(0, [])
     values = dict(zip(entries[::2], entries[1::2]))
     if "" in values and tars_fields(values[""]).get(0, -1) != 0:
-        raise InteractionError("虎牙拒绝请求，请到官网检查登录状态和发言限制")
+        raise InteractionError("虎牙互动接口拒绝请求，不能据此判断账号过期或禁言；本次结果请在官网核对")
     if "tRsp" not in values:
         raise InteractionError("虎牙发送响应缺少回执，请在官网核对后再试")
     result = tars_fields(values["tRsp"]).get(0, {})
@@ -77,7 +79,7 @@ class HuyaAPI:
                     raise InteractionError("虎牙未返回房间发言信息，请在官网完成验证")
                 info, _ = json.JSONDecoder().raw_decode(response.text[match.end():].lstrip())
             if not isinstance(info, dict) or any(type(info.get(k)) is not int or info[k] <= 0 for k in ("id", "channel", "sid")):
-                raise InteractionError("虎牙房间当前不支持发言，请在官网确认开播状态")
+                raise InteractionError("该房间未提供直播频道；未开播聊天室发送尚未适配，本次未发送")
             user, base = huya_user(session, account["uid"])
             request_id = secrets.randbelow(2**30) + 1
             values = b"\x08" + tars_int(0, 1) + huya_string(0, "tReq") + tars_bytes(1, message_request(user, info, text.strip()))
@@ -85,19 +87,55 @@ class HuyaAPI:
                 huya_string(5, "liveuif") + huya_string(6, "sendMessage") + tars_bytes(7, values) +
                 tars_int(8, 5000) + b"\x98\x0c\xa8\x0c")
             check()
-            progress("wait_ack")
-            try:
-                with session.post("https://cdnws.api.huya.com/",
+            return asyncio.run(send_wup(body, base, user, int(account["uid"]), request_id, cancelled, progress=progress))
+
+
+async def send_wup(body, base, user, uid, request_id, cancelled, *, progress=lambda stage: None,
+                   client_factory=aiohttp.ClientSession):
+    sent = False
+    fields = tars_fields(user)
+    auth = (tars_int(0, uid) + huya_string(1, fields[3]) + huya_string(2, fields[4]) +
+            huya_string(3, fields[1]) + tars_int(4, 1) + huya_string(5, ""))
+    def check():
+        if cancelled():
+            raise InteractionError("请求已取消；如已提交，请在官网核对结果")
+    try:
+        async with asyncio.timeout(12):
+            async with client_factory(timeout=aiohttp.ClientTimeout(total=12)) as session:
+                progress("connect")
+                async with session.ws_connect("wss://cdnws.api.huya.com/",
                         params={"baseinfo": base64.b64encode(base).decode("ascii")},
-                        data=struct.pack(">I", len(body) + 4) + body, timeout=(3, 5), allow_redirects=False,
-                        headers={"Content-Type": "application/octet-stream"}) as response:
-                    if response.is_redirect:
-                        raise InteractionError("虎牙发送结果未确认，请在官网核对后再试")
-                    response.raise_for_status()
-                    result = parse_reply(response.content, request_id)
-            except (requests.RequestException, ValueError, KeyError, TypeError) as error:
-                if isinstance(error, InteractionError):
-                    raise
-                raise InteractionError("虎牙发送结果未确认，请在官网核对后再试") from None
-            progress("ack")
-            return result
+                        origin="https://www.huya.com", max_msg_size=4*1024*1024,
+                        timeout=aiohttp.ClientWSTimeout(ws_close=.25)) as ws:
+                    check()
+                    progress("login")
+                    await ws.send_bytes(tars_int(0, 10) + tars_bytes(1, auth))
+                    async for message in ws:
+                        check()
+                        if message.type != aiohttp.WSMsgType.BINARY:
+                            raise InteractionError("虎牙互动连接已中断，请在官网核对发送结果")
+                        command = tars_fields(message.data)
+                        if command.get(0) == 11 and not sent:
+                            if tars_fields(command.get(1, b"" )).get(0) != 0:
+                                raise LoginRequired("虎牙互动凭证未通过验证，请重新登录")
+                            check()
+                            sent = True
+                            await ws.send_bytes(tars_int(0, 3) + tars_bytes(1, struct.pack(">I", len(body)+4)+body) + tars_int(2, request_id))
+                            progress("wait_ack")
+                        elif command.get(0) == 4 and sent:
+                            data = command.get(1, b"")
+                            if len(data) < 4:
+                                continue
+                            envelope = tars_fields(data[4:])
+                            if (envelope.get(4) != request_id or envelope.get(5) != "liveuif" or
+                                    envelope.get(6) != "sendMessage"):
+                                continue
+                            result = parse_reply(data, request_id)
+                            progress("ack")
+                            return result
+    except InteractionError:
+        raise
+    except (aiohttp.ClientError, TimeoutError, ValueError, KeyError, TypeError):
+        raise InteractionError("虎牙发送结果未确认，请在官网核对后再试" if sent else
+                               "虎牙互动连接未建立，本次未发送，请稍后重试") from None
+    raise InteractionError("虎牙未返回发送回执，请在官网核对后再试" if sent else "虎牙互动身份未确认，本次未发送")

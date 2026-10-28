@@ -363,14 +363,14 @@ class HuyaPlatform(LiveQualityPlatform):
             data, _end = json.JSONDecoder().raw_decode(script[match.end():].lstrip())
             if isinstance(data, str):
                 data = json.loads(base64.b64decode(data, validate=True))
-            options = [{"qn": 10000 if item["iBitRate"] == 0 else 1000000 + item["iBitRate"],
+            options = [{"qn": 1000000 + item["iBitRate"],
                         "desc": item.get("sDisplayName") or (
                             "原画" if item["iBitRate"] == 0 else f"{item['iBitRate']} kbps"),
                         "rate": item["iBitRate"]}
                        for item in data.get("vMultiStreamInfo", [])
                        if isinstance(item.get("iBitRate"), int) and item["iBitRate"] >= 0]
             if not options:
-                options.append({"qn": 10000, "desc": "原画", "rate": 0})
+                options.append({"qn": 1000000, "desc": "原画", "rate": 0})
             for option in options:
                 option["label"] = option["desc"]
                 option["restricted"] = bool(re.search(r"(?<!\d)4\s*K", option["desc"], re.I))
@@ -383,7 +383,7 @@ class HuyaPlatform(LiveQualityPlatform):
             bitrate = selected["rate"]
             uid = self._authorize_4k(session.http, data, bitrate) if selected["restricted"] else None
             streams = {}
-            for info in data.get("data", [{}])[0].get("gameStreamInfoList", []):
+            for line_index, info in enumerate(data.get("data", [{}])[0].get("gameStreamInfoList", [])):
                 # 复用官网 HLS 线路；会员 4K 用账号令牌，其余档位沿用公开取流。
                 base = info.get("sHlsUrl")
                 if not base:
@@ -400,7 +400,27 @@ class HuyaPlatform(LiveQualityPlatform):
                     url = "https:" + url
                 stream = HTTPStream(session, url, params=params)
                 stream.ddm_quality = selected["qn"]
-                streams[f"{info['sCdnType'].lower()}_source"] = stream
+                key = f"{info['sCdnType'].lower()}_source"
+                streams[key if key not in streams else f"{key}_{line_index}"] = stream
+                # Some match rooms reject HLS while their official FLV works.
+                # Do not substitute anonymous parameters for member-only tiers.
+                if uid is None and info.get("sFlvUrl") and info.get("sFlvAntiCode"):
+                    flv_qs = dict(parse_qsl(unescape(info["sFlvAntiCode"])))
+                    # Match-room URLs already carry a server-issued signature.
+                    # Regenerating it with a random visitor UID can return 404.
+                    if not flv_qs.get("wsSecret") or not flv_qs.get("wsTime"):
+                        continue
+                    flv_params = dict(flv_qs)
+                    if bitrate:
+                        flv_params["ratio"] = bitrate
+                    flv_base = info["sFlvUrl"]
+                    if flv_base.startswith("//"):
+                        flv_base = "https:" + flv_base
+                    flv = HTTPStream(session, f"{flv_base}/{name}.{info.get('sFlvUrlSuffix', 'flv')}", params=flv_params)
+                    flv.ddm_quality = selected["qn"]
+                    flv.ddm_transport = "flv"
+                    key = f"{info['sCdnType'].lower()}_flv_source"
+                    streams[key if key not in streams else f"{key}_{line_index}"] = flv
         except RuntimeError:
             session.http.close()
             raise
@@ -501,7 +521,9 @@ class HuyaPlatform(LiveQualityPlatform):
                             if now - stamp < 60}
                 self._failed_cdns[self.normalize(room_id)] = failures
             # 已在播放中失败的线路排在其他线路后；全部失败时仍允许新签名的有界尝试。
-            candidates.sort(key=lambda stream: failures.get(urlsplit(stream.to_url()).hostname, float("-inf")))
+            candidates.sort(key=lambda stream: (
+                getattr(stream, "ddm_transport", "hls") == "flv",
+                failures.get(urlsplit(stream.to_url()).hostname, float("-inf"))))
             seen = set()
             for stream in candidates:
                 url = stream.to_url()
@@ -509,7 +531,7 @@ class HuyaPlatform(LiveQualityPlatform):
                     continue
                 seen.add(url)
                 try:
-                    playable = self._probe_hls(url, headers)
+                    playable = (url if self._probe_flv(url, headers) else "") if getattr(stream, "ddm_transport", "hls") == "flv" else self._probe_hls(url, headers)
                     if not playable:
                         continue
                     qn = getattr(stream, "ddm_quality", 10000)
@@ -528,9 +550,29 @@ class HuyaPlatform(LiveQualityPlatform):
                         logger(f"[平台诊断] 阶段=source_probe 房间={self.normalize(room_id)} "
                                f"CDN={urlsplit(url).hostname} 原因={LivePlatformsPlugin._diagnostic_reason(error)}")
                     continue
+            # 10000 means auto/highest available, not an explicit HDR tier.
+            # Try the site's source tier once and return its actual quality ID.
+            source = next((item for item in self._qualities.get(room_id, []) if item["rate"] == 0), None)
+            if quality == 10000 and not preview and source is not None and source["qn"] != 10000:
+                first = self._select_quality(room_id, quality, preview)
+                if first["qn"] != source["qn"]:
+                    session.http.close()
+                    return self.play_url(room_id, source["qn"], preview=False)
             raise RuntimeError("虎牙所选画质未能获取可播放视频，请重试或手动选择其他画质")
         finally:
             session.http.close()
+
+    @staticmethod
+    def _probe_flv(url, headers):
+        with requests.get(url, headers=headers, stream=True, timeout=(4, 6)) as response:
+            response.raise_for_status()
+            prefix = bytearray()
+            for chunk in response.iter_content(512):
+                prefix.extend(chunk)
+                if len(prefix) >= 9:
+                    break
+            return (len(prefix) >= 9 and prefix[:4] == b"FLV\x01" and
+                    bool(prefix[4] & 5) and struct.unpack(">I", prefix[5:9])[0] >= 9)
 
     @staticmethod
     def _probe_hls(url, headers):

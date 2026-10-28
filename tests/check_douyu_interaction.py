@@ -1113,14 +1113,13 @@ class HuyaTests(unittest.TestCase):
             room_url=lambda room: "https://www.huya.com/"+room.split(":")[-1],
             account_info=Mock(return_value={"uid":"42"}), _playback_cookies=cookie_jar)
         self.client = huya.HuyaAPI(self.platform, cookie_jar(), session_factory=lambda: self.session)
-        self.session.post.side_effect = self.ack
+        self.real_transport=huya.send_wup
+        gateway_patch=patch.object(huya,"send_wup",new=AsyncMock(side_effect=self.ack))
+        self.gateway=gateway_patch.start()
+        self.addCleanup(gateway_patch.stop)
 
-    def ack(self, *args, **kwargs):
-        envelope = huya.tars_fields(kwargs["data"][4:])
-        packet = self.reply(envelope[4])
-        result = response({})
-        result.content = packet
-        return result
+    async def ack(self, body, base, user, uid, request_id, cancelled, **kwargs):
+        return huya.parse_reply(self.reply(request_id), request_id)
 
     def reply(self, request_id=7, status=0, method="sendMessage", *, missing_status=False):
         payload = b"\x0a" + (b"" if missing_status else huya.tars_int(0,status)) + b"\x0b"
@@ -1130,11 +1129,9 @@ class HuyaTests(unittest.TestCase):
 
     def test_wup_send_has_explicit_success_and_correct_room_and_text(self):
         self.assertEqual(self.client.send_text("huya:lpl", " 123 "), "虎牙已确认发送")
-        self.session.post.assert_called_once()
-        call=self.session.post.call_args
-        self.assertEqual(call.args[0],"https://cdnws.api.huya.com/")
-        self.assertFalse(call.kwargs["allow_redirects"])
-        env=huya.tars_fields(call.kwargs["data"][4:])
+        self.gateway.assert_called_once()
+        self.session.post.assert_not_called()
+        env=huya.tars_fields(self.gateway.call_args.args[0])
         self.assertEqual((env[5],env[6]),("liveuif","sendMessage"))
         values=huya.tars_fields(env[7])[0]
         body=huya.tars_fields(dict(zip(values[::2],values[1::2]))["tReq"])[0]
@@ -1146,18 +1143,49 @@ class HuyaTests(unittest.TestCase):
             with self.assertRaises(api.InteractionError):huya.parse_reply(data,7)
         self.assertEqual(huya.parse_reply(self.reply(),7),"虎牙已确认发送")
 
-    def test_timeout_not_retried_or_exposed(self):
-        self.session.post.side_effect=requests.Timeout("secret baseinfo=private")
-        with self.assertRaises(api.InteractionError) as caught:self.client.send_text("huya:lpl","123")
-        self.assertNotIn("private",str(caught.exception))
-        self.session.post.assert_called_once()
-
-    def test_redirect_not_success(self):
-        self.session.post.side_effect=None
-        self.session.post.return_value=response({})
-        self.session.post.return_value.is_redirect=True
+    def test_gateway_failure_not_retried(self):
+        self.gateway.side_effect=api.InteractionError("结果未确认")
         with self.assertRaises(api.InteractionError):self.client.send_text("huya:lpl","123")
-        self.session.post.assert_called_once()
+        self.gateway.assert_called_once()
+        self.session.post.assert_not_called()
+
+    def test_no_http_write_fallback(self):
+        self.session.post.side_effect=AssertionError("HTTP writes forbidden")
+        self.assertEqual(self.client.send_text("huya:lpl","123"),"虎牙已确认发送")
+        self.session.post.assert_not_called()
+
+    def socket_send(self, frames):
+        class Socket(FakeSocket):
+            async def send_bytes(self, data):
+                self.sent.append(huya.tars_fields(data))
+        socket=Socket(frames)
+        class Client:
+            def __init__(self,**kwargs):pass
+            async def __aenter__(self):return self
+            async def __aexit__(self,*args):return False
+            def ws_connect(self,url,**kwargs):
+                assert url=="wss://cdnws.api.huya.com/"
+                assert kwargs.get("ssl",True) is not False
+                assert kwargs["origin"]=="https://www.huya.com"
+                return socket
+        user,base=huya.huya_user(self.session,"42")
+        try:
+            return asyncio.run(self.actual_send(b"body",base,user,42,7,lambda:False,client_factory=Client)),socket
+        finally:self.socket=socket
+
+    def test_websocket_auth_precedes_one_write_and_only_matching_ack_succeeds(self):
+        self.actual_send=self.real_transport
+        auth=huya.tars_int(0,11)+huya.tars_bytes(1,huya.tars_int(0,0))
+        frame=lambda data:huya.tars_int(0,4)+huya.tars_bytes(1,data)
+        result,socket=self.socket_send([frame(self.reply()),auth,frame(self.reply(8)),frame(self.reply())])
+        self.assertEqual(result,"虎牙已确认发送")
+        self.assertEqual([item[0] for item in socket.sent],[10,3])
+
+    def test_websocket_rejected_auth_never_writes_message(self):
+        self.actual_send=self.real_transport
+        auth=huya.tars_int(0,11)+huya.tars_bytes(1,huya.tars_int(0,1))
+        with self.assertRaises(api.LoginRequired):self.socket_send([auth])
+        self.assertEqual([item[0] for item in self.socket.sent],[10])
 
     def test_login_required_does_not_send(self):
         self.platform.account_info.side_effect=RuntimeError("expired")
@@ -1171,6 +1199,88 @@ class HuyaTests(unittest.TestCase):
         self.session.get.return_value.text='var TT_ROOM_DATA = {"id":0,"channel":0,"sid":0};'
         with self.assertRaises(api.InteractionError):self.client.send_text("huya:lpl","123")
         self.session.post.assert_not_called()
+
+    def test_hls_failure_falls_back_to_same_quality_flv(self):
+        platform=MANAGER.platforms["huya"]
+        session=SimpleNamespace(http=SimpleNamespace(headers={"User-Agent":"fixture"},close=Mock()))
+        hls=SimpleNamespace(to_url=lambda:"https://fixture.msstatic.com/live.m3u8",ddm_quality=10000)
+        flv=SimpleNamespace(to_url=lambda:"https://fixture.msstatic.com/live.flv",ddm_quality=10000,ddm_transport="flv")
+        with patch.object(platform,"_streams",return_value=(session,None,{"hls":hls,"flv":flv})), \
+                patch.object(platform,"_probe_hls",side_effect=requests.HTTPError("403")), \
+                patch.object(platform,"_probe_flv",return_value=True) as probe:
+            result=platform.play_url("huya:lpl",10000)
+            self.assertEqual(result[:3],("https://fixture.msstatic.com/live.flv",10000,"huya"))
+            probe.assert_called_once()
+        session.http.close.assert_called_once()
+
+    def test_working_hls_remains_preferred(self):
+        platform=MANAGER.platforms["huya"]
+        session=SimpleNamespace(http=SimpleNamespace(headers={"User-Agent":"fixture"},close=Mock()))
+        hls=SimpleNamespace(to_url=lambda:"https://fixture.msstatic.com/live.m3u8",ddm_quality=10000)
+        flv=SimpleNamespace(to_url=lambda:"https://fixture.msstatic.com/live.flv",ddm_quality=10000,ddm_transport="flv")
+        with patch.object(platform,"_streams",return_value=(session,None,{"flv":flv,"hls":hls})), \
+                patch.object(platform,"_probe_hls",return_value=hls.to_url()), \
+                patch.object(platform,"_probe_flv") as probe:
+            self.assertEqual(platform.play_url("huya:lpl",10000)[0],hls.to_url())
+            probe.assert_not_called()
+
+    def test_flv_fallback_reuses_server_signature_and_never_bypasses_member_tier(self):
+        import json
+        module=importlib.import_module("ddm_plugin_domestic_live")
+        platform=MANAGER.platforms["huya"]
+        info={"sHlsUrl":"https://fixture.msstatic.com","sHlsUrlSuffix":"m3u8","sHlsAntiCode":"fm=x&fs=y&wsTime=1", "sCdnType":"AL","sStreamName":"room",
+              "sFlvUrl":"https://fixture.msstatic.com","sFlvUrlSuffix":"flv","sFlvAntiCode":"wsSecret=issued&wsTime=deadline&fm=opaque"}
+        data={"data":[{"gameStreamInfoList":[info]}],"vMultiStreamInfo":[{"iBitRate":0,"sDisplayName":"原画"}]}
+        session=SimpleNamespace(http=Mock(cookies=cookie_jar()))
+        session.http.get.return_value.text='var hyPlayerConfig={stream:'+json.dumps(data)+'};'
+        parser=SimpleNamespace(url="https://www.huya.com/lpl",_get_stream_params=Mock(return_value={"wsSecret":"generated"}))
+        stream=lambda session,url,params:SimpleNamespace(params=params,url=url)
+        with patch.object(module,"Streamlink",return_value=session),patch.object(module,"Huya",return_value=parser), \
+                patch.object(module,"HTTPStream",side_effect=stream),patch.object(platform,"_playback_cookies",return_value=cookie_jar()):
+            _,_,streams=platform._streams("huya:lpl",10000)
+            self.assertEqual(streams["al_flv_source"].params["wsSecret"],"issued")
+            self.assertEqual(parser._get_stream_params.call_count,1)
+            selected={"qn":1010000,"rate":10000,"restricted":True}
+            with patch.object(platform,"_select_quality",return_value=selected), \
+                    patch.object(platform,"_authorize_4k",return_value=42), \
+                    patch.object(platform,"_account_stream_params",return_value={"member":"signed"}):
+                _,_,streams=platform._streams("huya:lpl",1010000)
+                self.assertNotIn("al_flv_source",streams)
+
+    def test_auto_quality_can_recover_to_source_but_manual_quality_is_preserved(self):
+        platform=MANAGER.platforms["huya"]
+        session=SimpleNamespace(http=SimpleNamespace(headers={"User-Agent":"fixture"},close=Mock()))
+        failed=SimpleNamespace(to_url=lambda:"https://fixture.msstatic.com/hdr.m3u8",ddm_quality=1014100)
+        source=SimpleNamespace(to_url=lambda:"https://fixture.msstatic.com/source.flv",ddm_quality=1000000,ddm_transport="flv")
+        choices=[{"qn":1014100,"rate":14100},{"qn":1000000,"rate":0}]
+        with patch.dict(platform._qualities,{"huya:lpl":choices}), \
+                patch.object(platform,"_streams",side_effect=[(session,None,{"hls":failed}),(session,None,{"flv":source})]) as streams, \
+                patch.object(platform,"_probe_hls",return_value=""),patch.object(platform,"_probe_flv",return_value=True):
+            self.assertEqual(platform.play_url("huya:lpl",10000)[1],1000000)
+            self.assertEqual(streams.call_count,2)
+        with patch.dict(platform._qualities,{"huya:lpl":choices}), \
+                patch.object(platform,"_streams",return_value=(session,None,{"hls":failed})) as streams, \
+                patch.object(platform,"_probe_hls",return_value=""):
+            with self.assertRaises(RuntimeError):platform.play_url("huya:lpl",1014100)
+            streams.assert_called_once()
+
+    def test_flv_probe_checks_header_and_closes_response(self):
+        platform=MANAGER.platforms["huya"]
+        good=b"FLV\x01\x05\x00\x00\x00\x09"
+        for prefix,expected in [(good,True),(b"<html>error",False),(b"FLV",False),(b"FLV\x01\x00\x00\x00\x00\x09",False)]:
+            reply=response({});reply.iter_content.return_value=iter([prefix[:2],prefix[2:]])
+            with patch("requests.get",return_value=reply):
+                self.assertEqual(platform._probe_flv("https://fixture.msstatic.com/a.flv",{}),expected)
+                reply.__exit__.assert_called_once()
+
+    def test_websocket_timeout_distinguishes_unsent_from_unconfirmed(self):
+        self.actual_send=self.real_transport
+        real_timeout=asyncio.timeout
+        auth=huya.tars_int(0,11)+huya.tars_bytes(1,huya.tars_int(0,0))
+        for frames,label,writes in [([None],"本次未发送",[10]),([auth,None],"结果未确认",[10,3])]:
+            with patch.object(huya.asyncio,"timeout",side_effect=lambda _:real_timeout(.02)):
+                with self.assertRaisesRegex(api.InteractionError,label):self.socket_send(frames)
+            self.assertEqual([frame[0] for frame in self.socket.sent],writes)
 
     def test_huya_composer_enter_login_and_platform_visibility(self):
         parent=QWidget()

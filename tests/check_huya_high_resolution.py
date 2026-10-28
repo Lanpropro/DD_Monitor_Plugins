@@ -80,7 +80,7 @@ def main():
             data['vMultiStreamInfo'] = []
             page.text = 'var hyPlayerConfig = {stream:' + json.dumps(data) + '};</script>'
             stream = platform._streams('huya:empty')[2]['al_source']
-            assert stream.ddm_quality == 10000 and params.call_args.args[-1] == 0
+            assert stream.ddm_quality == 1000000 and params.call_args.args[-1] == 0
         print('PASS: default 2K, 4K authorization warning in actual menu, manual 4K, lowest preview and normal-room fallbacks')
     finally:
         session.http.close()
