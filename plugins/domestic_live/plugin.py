@@ -526,10 +526,10 @@ class HuyaPlatform(LiveQualityPlatform):
             candidates.sort(key=lambda stream: (
                 getattr(stream, "ddm_transport", "hls") == "flv",
                 failures.get(urlsplit(stream.to_url()).hostname, float("-inf"))))
-            # Reserve a probe for FLV even when the page advertises many HLS lines.
+            # Keep two FLV CDNs: the first may reject a match room while the second works.
             hls = [stream for stream in candidates if getattr(stream, "ddm_transport", "hls") != "flv"]
             flv = [stream for stream in candidates if getattr(stream, "ddm_transport", "hls") == "flv"]
-            candidates = hls[:2] + flv[:1] if flv else hls[:3]
+            candidates = hls[:2] + flv[:2] if flv else hls[:3]
             seen = set()
             attempts = 0
             for stream in candidates:
@@ -537,7 +537,7 @@ class HuyaPlatform(LiveQualityPlatform):
                 if url in seen:
                     continue
                 seen.add(url)
-                if attempts >= 3:
+                if attempts >= 4:
                     break
                 attempts += 1
                 try:

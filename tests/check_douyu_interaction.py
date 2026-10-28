@@ -1245,6 +1245,19 @@ class HuyaTests(unittest.TestCase):
             probe.assert_called_once()
         session.http.close.assert_called_once()
 
+    def test_second_flv_cdn_is_tried_after_first_cdn_rejects(self):
+        platform=MANAGER.platforms["huya"]
+        session=SimpleNamespace(http=SimpleNamespace(headers={"User-Agent":"fixture"},close=Mock()))
+        streams={str(n):SimpleNamespace(to_url=lambda n=n:f"https://hls{n}.test/live.m3u8",ddm_quality=1000000) for n in range(6)}
+        for host in ("al", "tx"):
+            streams[host]=SimpleNamespace(to_url=lambda host=host:f"https://{host}.test/live.flv",ddm_quality=1000000,ddm_transport="flv")
+        with patch.object(platform,"_streams",return_value=(session,None,streams)), \
+                patch.object(platform,"_probe_hls",return_value="") as hls, \
+                patch.object(platform,"_probe_flv",side_effect=[requests.HTTPError("403"),True]) as flv:
+            self.assertEqual(platform.play_url("huya:lpl",1000000)[0],"https://tx.test/live.flv")
+            self.assertEqual(hls.call_count,2)
+            self.assertEqual(flv.call_count,2)
+
     def test_working_hls_remains_preferred(self):
         platform=MANAGER.platforms["huya"]
         session=SimpleNamespace(http=SimpleNamespace(headers={"User-Agent":"fixture"},close=Mock()))
