@@ -1316,7 +1316,24 @@ class HuyaTests(unittest.TestCase):
             reply=response({});reply.url="http://192.0.2.1/live.flv";reply.iter_content.return_value=iter([prefix[:2],prefix[2:]])
             with patch("requests.get",return_value=reply):
                 self.assertEqual(platform._probe_flv("https://fixture.msstatic.com/a.flv",{}),reply.url if expected else "")
-                reply.__exit__.assert_called_once()
+                reply.close.assert_called_once()
+
+    def test_flv_handoff_keeps_probe_connection_and_prefix(self):
+        from ddm.hls_proxy import take_flv_response
+        platform=MANAGER.platforms["huya"]
+        reply=response({})
+        reply.url="http://192.0.2.1/live.flv"
+        prefix=b"FLV\x01\x05\x00\x00\x00\x09"
+        reply.iter_content.return_value=iter([prefix,b"remaining-video"])
+        with patch("requests.get",return_value=reply):
+            url,token=platform._probe_flv(reply.url,{},handoff=True)
+        self.assertEqual(url,reply.url)
+        reply.close.assert_not_called()
+        item=take_flv_response(token)
+        self.assertEqual(item[1],prefix)
+        self.assertEqual(list(item[2]),[b"remaining-video"])
+        self.assertIsNone(take_flv_response(token))
+        item[0].close()
 
     def test_websocket_timeout_distinguishes_unsent_from_unconfirmed(self):
         self.actual_send=self.real_transport

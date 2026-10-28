@@ -542,8 +542,13 @@ class HuyaPlatform(LiveQualityPlatform):
                 attempts += 1
                 try:
                     if getattr(stream, "ddm_transport", "hls") == "flv":
-                        target = self._probe_flv(url, headers)
-                        playable = target if isinstance(target, str) else url if target else ""
+                        target = self._probe_flv(url, headers, handoff=True)
+                        if isinstance(target, tuple):
+                            playable, token = target
+                            from ddm.hls_proxy import FLV_HANDOFF_HEADER
+                            headers[FLV_HANDOFF_HEADER] = token
+                        else:
+                            playable = target if isinstance(target, str) else url if target else ""
                     else:
                         playable = self._probe_hls(url, headers)
                     if not playable:
@@ -577,17 +582,30 @@ class HuyaPlatform(LiveQualityPlatform):
             session.http.close()
 
     @staticmethod
-    def _probe_flv(url, headers):
-        with requests.get(url, headers=headers, stream=True, timeout=(4, 6)) as response:
+    def _probe_flv(url, headers, *, handoff=False):
+        response = requests.get(url, headers=headers, stream=True, timeout=(4, 6))
+        retained = False
+        try:
             response.raise_for_status()
             prefix = bytearray()
-            for chunk in response.iter_content(512):
+            chunks = response.iter_content(65536)
+            for chunk in chunks:
                 prefix.extend(chunk)
                 if len(prefix) >= 9:
                     break
             valid = (len(prefix) >= 9 and prefix[:4] == b"FLV\x01" and
                      bool(prefix[4] & 5) and struct.unpack(">I", prefix[5:9])[0] >= 9)
-            return response.url if valid else ""
+            if not valid:
+                return ""
+            if handoff:
+                from ddm.hls_proxy import retain_flv_response
+                token = retain_flv_response(response, bytes(prefix), chunks)
+                retained = True
+                return response.url, token
+            return response.url
+        finally:
+            if not retained:
+                response.close()
 
     @staticmethod
     def _probe_hls(url, headers):
