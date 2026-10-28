@@ -1313,9 +1313,9 @@ class HuyaTests(unittest.TestCase):
         platform=MANAGER.platforms["huya"]
         good=b"FLV\x01\x05\x00\x00\x00\x09"
         for prefix,expected in [(good,True),(b"<html>error",False),(b"FLV",False),(b"FLV\x01\x00\x00\x00\x00\x09",False)]:
-            reply=response({});reply.iter_content.return_value=iter([prefix[:2],prefix[2:]])
+            reply=response({});reply.url="http://192.0.2.1/live.flv";reply.iter_content.return_value=iter([prefix[:2],prefix[2:]])
             with patch("requests.get",return_value=reply):
-                self.assertEqual(platform._probe_flv("https://fixture.msstatic.com/a.flv",{}),expected)
+                self.assertEqual(platform._probe_flv("https://fixture.msstatic.com/a.flv",{}),reply.url if expected else "")
                 reply.__exit__.assert_called_once()
 
     def test_websocket_timeout_distinguishes_unsent_from_unconfirmed(self):

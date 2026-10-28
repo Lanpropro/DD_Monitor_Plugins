@@ -541,7 +541,11 @@ class HuyaPlatform(LiveQualityPlatform):
                     break
                 attempts += 1
                 try:
-                    playable = (url if self._probe_flv(url, headers) else "") if getattr(stream, "ddm_transport", "hls") == "flv" else self._probe_hls(url, headers)
+                    if getattr(stream, "ddm_transport", "hls") == "flv":
+                        target = self._probe_flv(url, headers)
+                        playable = target if isinstance(target, str) else url if target else ""
+                    else:
+                        playable = self._probe_hls(url, headers)
                     if not playable:
                         continue
                     qn = getattr(stream, "ddm_quality", 10000)
@@ -581,8 +585,9 @@ class HuyaPlatform(LiveQualityPlatform):
                 prefix.extend(chunk)
                 if len(prefix) >= 9:
                     break
-            return (len(prefix) >= 9 and prefix[:4] == b"FLV\x01" and
-                    bool(prefix[4] & 5) and struct.unpack(">I", prefix[5:9])[0] >= 9)
+            valid = (len(prefix) >= 9 and prefix[:4] == b"FLV\x01" and
+                     bool(prefix[4] & 5) and struct.unpack(">I", prefix[5:9])[0] >= 9)
+            return response.url if valid else ""
 
     @staticmethod
     def _probe_hls(url, headers):
