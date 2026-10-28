@@ -1143,6 +1143,28 @@ class HuyaTests(unittest.TestCase):
             with self.assertRaises(api.InteractionError):huya.parse_reply(data,7)
         self.assertEqual(huya.parse_reply(self.reply(),7),"虎牙已确认发送")
 
+    def test_wup_rejection_includes_numeric_code_and_stage(self):
+        body=huya.tars_fields(self.reply()[4:])
+        values=b"\x08"+huya.tars_int(0,1)+huya.huya_string(0,"")+huya.tars_bytes(1,huya.tars_int(0,-7))
+        packet=huya.tars_int(1,3)+huya.tars_int(4,7)+huya.huya_string(5,"liveuif")+huya.huya_string(6,"sendMessage")+huya.tars_bytes(7,values)
+        with self.assertRaisesRegex(api.InteractionError,"liveuif.sendMessage.*-7"):
+            huya.parse_reply(struct.pack(">I",len(packet)+4)+packet,7)
+
+    def test_auto_starts_at_public_quality_and_manual_hdr_stays_available(self):
+        platform=MANAGER.platforms["huya"]
+        choices=[{"qn":1014100,"rate":14100},{"qn":1004000,"rate":4000},{"qn":1002000,"rate":2000}]
+        with patch.dict(platform._qualities,{"huya:lpl":choices}):
+            self.assertEqual(platform._select_quality("huya:lpl",10000,False)["rate"],4000)
+            self.assertEqual(platform._select_quality("huya:lpl",1014100,False)["rate"],14100)
+
+    def test_failed_probes_are_bounded(self):
+        platform=MANAGER.platforms["huya"]
+        session=SimpleNamespace(http=SimpleNamespace(headers={"User-Agent":"fixture"},close=Mock()))
+        streams={str(n):SimpleNamespace(to_url=lambda n=n:f"https://fixture.msstatic.com/{n}.m3u8") for n in range(12)}
+        with patch.object(platform,"_streams",return_value=(session,None,streams)),patch.object(platform,"_probe_hls",return_value="") as probe:
+            with self.assertRaises(RuntimeError):platform.play_url("huya:lpl",1004000)
+            self.assertEqual(probe.call_count,3)
+
     def test_gateway_failure_not_retried(self):
         self.gateway.side_effect=api.InteractionError("结果未确认")
         with self.assertRaises(api.InteractionError):self.client.send_text("huya:lpl","123")
@@ -1296,6 +1318,10 @@ class HuyaTests(unittest.TestCase):
             with patch.object(widget,"start") as start:
                 QTest.keyClick(widget.edit,Qt.Key_Return)
                 start.assert_called_once()
+            with patch.object(widget,"show_failure_details") as details:
+                widget.feedback("WUP 代码：-7")
+                owner.context.notify.call_args.kwargs["on_click"]()
+                details.assert_called_once_with("WUP 代码：-7")
             widget.feedback("登录过期",login_required=True)
             owner.context.notify.call_args.kwargs["on_click"]()
             owner.context.request_login.assert_called_once_with("huya",reauthenticate=True)

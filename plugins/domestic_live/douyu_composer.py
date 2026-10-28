@@ -638,10 +638,26 @@ class HuyaComposer(DouyuComposer):
 
     def feedback(self, message, *, login_required=False):
         room = dict(self.room)
-        action = (lambda: self.owner.context.request_login("huya", reauthenticate=True)) if login_required else None
+        action = (lambda: self.owner.context.request_login("huya", reauthenticate=True)) if login_required else lambda: self.show_failure_details(message)
         self.owner.context.notify(f"【{room.get('uname') or '虎牙'}（{room.get('room_id', '')}）】{message}",
             rooms=(room,), kind="warning" if login_required else "info", on_click=action)
         self.edit.setToolTip(message)
+
+    def show_failure_details(self, message):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("虎牙弹幕发送详情")
+        dialog.setMinimumWidth(420)
+        layout = QVBoxLayout(dialog)
+        label = QLabel(message, dialog)
+        label.setWordWrap(True)
+        label.setTextFormat(Qt.PlainText)
+        label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        layout.addWidget(label)
+        close = QPushButton("关闭", dialog)
+        style_button(close)
+        close.clicked.connect(dialog.accept)
+        layout.addWidget(close)
+        dialog.exec()
 
     def send_text(self):
         from .huya_interaction import HuyaAPI

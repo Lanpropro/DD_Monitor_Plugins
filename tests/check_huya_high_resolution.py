@@ -34,7 +34,7 @@ def main():
                 patch.object(platform, '_authorize_4k', return_value='1') as authorize, \
                 patch.object(platform, '_account_stream_params', return_value={}) as account_params, \
                 patch.object(module.Huya, '_get_stream_params', return_value={}) as params:
-            for quality, preview, rate in ((10000, False, 14000), (250, False, 14000), (1020000, False, 20000),
+            for quality, preview, rate in ((10000, False, 4000), (250, False, 14000), (1020000, False, 20000),
                                            (1014000, False, 14000), (10000, True, 500)):
                 stream = platform._streams('huya:vctcn', quality, preview=preview)[2]['al_source']
                 if rate == 20000:

@@ -36,8 +36,12 @@ def parse_reply(data, request_id):
         raise InteractionError("虎牙发送响应不匹配，请在官网核对后再试")
     entries = tars_fields(envelope.get(7, b"" )).get(0, [])
     values = dict(zip(entries[::2], entries[1::2]))
-    if "" in values and tars_fields(values[""]).get(0, -1) != 0:
-        raise InteractionError("虎牙互动接口拒绝请求，不能据此判断账号过期或禁言；本次结果请在官网核对")
+    if "" in values:
+        code = tars_fields(values[""]).get(0)
+        if type(code) is not int:
+            raise InteractionError("虎牙回执格式异常（阶段：WUP 返回值），发送结果未确认")
+        if code != 0:
+            raise InteractionError(f"虎牙互动接口拒绝请求（阶段：liveuif.sendMessage；WUP 代码：{code}）。身份验证已通过，但发送未获成功确认；该代码不能直接证明账号过期或禁言。")
     if "tRsp" not in values:
         raise InteractionError("虎牙发送响应缺少回执，请在官网核对后再试")
     result = tars_fields(values["tRsp"]).get(0, {})

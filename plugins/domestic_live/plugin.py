@@ -263,7 +263,9 @@ class HuyaPlatform(LiveQualityPlatform):
         if preview:
             return min(options, key=lambda item: (item["rate"] == 0, item["rate"]))
         if quality == 10000:
-            return options[0]
+            # Auto starts with a public tier; gated HDR tiers must be selected explicitly.
+            public = [item for item in options if 0 < item["rate"] <= 4000 and not item.get("restricted")]
+            return max(public, key=lambda item: item["rate"]) if public else options[0]
         return super()._select_quality(room_id, quality, preview)
 
     def follow_rooms(self, session, cancelled) -> list:
@@ -524,12 +526,20 @@ class HuyaPlatform(LiveQualityPlatform):
             candidates.sort(key=lambda stream: (
                 getattr(stream, "ddm_transport", "hls") == "flv",
                 failures.get(urlsplit(stream.to_url()).hostname, float("-inf"))))
+            # Reserve a probe for FLV even when the page advertises many HLS lines.
+            hls = [stream for stream in candidates if getattr(stream, "ddm_transport", "hls") != "flv"]
+            flv = [stream for stream in candidates if getattr(stream, "ddm_transport", "hls") == "flv"]
+            candidates = hls[:2] + flv[:1] if flv else hls[:3]
             seen = set()
+            attempts = 0
             for stream in candidates:
                 url = stream.to_url()
                 if url in seen:
                     continue
                 seen.add(url)
+                if attempts >= 3:
+                    break
+                attempts += 1
                 try:
                     playable = (url if self._probe_flv(url, headers) else "") if getattr(stream, "ddm_transport", "hls") == "flv" else self._probe_hls(url, headers)
                     if not playable:
