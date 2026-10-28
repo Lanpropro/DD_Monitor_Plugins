@@ -491,7 +491,7 @@ class DouyuComposer(QWidget):
         if self.closing or self.pending is not None:
             return
         if self.owner.sending and kind in ("text", "gift"):
-            self.feedback("已有斗鱼发送请求正在处理，请等待结果")
+            self.feedback("已有发送请求正在处理，请等待结果")
             return
         key = key or self.snapshot()
         if kind in ("text", "gift"):
@@ -518,7 +518,7 @@ class DouyuComposer(QWidget):
         log = getattr(self.owner.context, "log", None)
         if callable(log):
             room = request.key[0][0]
-            log(f"[斗鱼互动] 房间={room} 阶段={stage} 耗时={time.monotonic() - request.started_at:.2f}s")
+            log(f"[{self.room.get('platform', 'douyu')}互动] 房间={room} 阶段={stage} 耗时={time.monotonic() - request.started_at:.2f}s")
         label = {"account": "确认账号", "gateway": "获取网关", "connect": "连接网关",
                  "login": "确认互动身份", "wait_ack": "等待发送回执", "ack": "收到发送回执"}.get(stage)
         if label:
@@ -543,7 +543,7 @@ class DouyuComposer(QWidget):
             self.popup.spinner.set_busy(False)
         if key != self.snapshot():
             if kind in ("text", "gift"):
-                self.owner.context.notify(f"【斗鱼 {room.get('room_id', '')}】账号或房间已变化，请在原直播间核对发送结果", rooms=(room,))
+                self.owner.context.notify(f"【{room.get('room_id', '')}】账号或房间已变化，请在原直播间核对发送结果", rooms=(room,))
             return
         if kind == "wallet":
             if self.popup:
@@ -551,7 +551,7 @@ class DouyuComposer(QWidget):
         elif isinstance(value, Exception):
             log = getattr(self.owner.context, "log", None)
             if callable(log):
-                log(f"[斗鱼互动] 房间={key[0]} 阶段=failed 耗时={time.monotonic() - request.started_at:.2f}s")
+                log(f"[{self.room.get('platform', 'douyu')}互动] 房间={key[0]} 阶段=failed 耗时={time.monotonic() - request.started_at:.2f}s")
             self.feedback(str(value), login_required=isinstance(value, LoginRequired))
             if kind == "catalog" and self.popup:
                 self.popup.wallet_label.setText("余额：未知")
@@ -620,13 +620,47 @@ class DouyuComposer(QWidget):
             self.popup = None
 
 
+class HuyaComposer(DouyuComposer):
+    def __init__(self, owner, parent=None):
+        super().__init__(owner, parent)
+        self.edit.setPlaceholderText("输入虎牙弹幕，Enter 发送")
+        self.edit.setAccessibleName("发送到当前虎牙直播间的弹幕")
+        self.gifts.hide()
+
+    def set_room(self, room):
+        super().set_room(room)
+        supported = room.get("platform") == "huya"
+        try:
+            self.owner.platform.normalize(room.get("room_id", ""))
+        except ValueError:
+            supported = False
+        self.setVisible(supported)
+
+    def feedback(self, message, *, login_required=False):
+        room = dict(self.room)
+        action = (lambda: self.owner.context.request_login("huya", reauthenticate=True)) if login_required else None
+        self.owner.context.notify(f"【{room.get('uname') or '虎牙'}（{room.get('room_id', '')}）】{message}",
+            rooms=(room,), kind="warning" if login_required else "info", on_click=action)
+        self.edit.setToolTip(message)
+
+    def send_text(self):
+        from .huya_interaction import HuyaAPI
+        text = self.edit.text().strip()
+        if not text:
+            return
+        key = self.snapshot()
+        client = HuyaAPI(self.owner.platform, self.owner.platform._playback_cookies())
+        self.start("text", lambda cancelled, progress: client.send_text(key[0], text, cancelled, progress=progress), key=key)
+
+
 class DouyuInteraction:
-    def __init__(self, context, platform):
+    def __init__(self, context, platform, *, composer_class=DouyuComposer, control_id="douyu_interaction"):
         self.context, self.platform = context, platform
+        self.composer_class = composer_class
         self.controls = weakref.WeakSet()
         self.requests = set()
         self.sending = False
-        context.register_tile_control("douyu_interaction", self.make_control, priority=100)
+        context.register_tile_control(control_id, self.make_control, priority=100)
 
     def make_control(self, context):
         class Control(api.TileControl):
@@ -646,7 +680,7 @@ class DouyuInteraction:
             def shutdown(self):
                 self.widget.shutdown()
 
-        widget = DouyuComposer(self, context.parent)
+        widget = self.composer_class(self, context.parent)
         self.controls.add(widget)
         return Control(widget, minimum_width=90, preferred_width=240)
 

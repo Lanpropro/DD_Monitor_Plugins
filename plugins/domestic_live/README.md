@@ -134,6 +134,14 @@ python tests/check_douyu_interaction.py --host ../DD_Monitor_CE --plugins-dir ..
 此完整账号导入流程需要支持 `follow_accounts` 的新版宿主。
 聊天仍使用访客流程；斗鱼取流使用本次登录会话或已保存的登录状态申请账号允许的画质。
 
+## 虎牙发送弹幕开发验收
+
+虎牙格子底栏现提供纯文本输入和 Enter/小键盘 Enter 发送；成功静默清空草稿，失败保留，切换账号或房间后忽略旧回执。礼物暂不扩展。
+字段依据虎牙官网当前 [TAF Signal SDK](https://fedlib.msstatic.com/fedbasic/huyabaselibs/taf-signal/taf-signal.global.0.1.3.prod.js) 中的 `SendMessageReq`、`SendMessageRsp`，并由用户官网发送 `123` 的 `liveuif.sendMessage` / `tRsp` 抓包核实。
+本版通过既有官方 HTTP WUP 网关提交一次请求，仅匹配请求编号、服务和方法，且 `iStatus` 明确为 0 时确认成功。禁用 POST 跳转，不自动重试；身份、真实频道和子频道在发送前核对。用户抓包来自 WebSocket，因此 HTTP 传输及当前账号鉴权仍需人工验收，不等同于已验证官网完整流程。
+离线测试使用合成账号、房间和回执，覆盖成功、拒绝、错回执、超时、取消、未登录、未开播及格子键盘交互，不访问真实账号或发送真实弹幕。
+抖音发送暂未接入：主站登录与直播间发言身份、当前请求签名和业务回执还未得到完整核实；保留现有接收功能，不展示无法确认结果的发送入口。
+
 ## 弹幕
 
 选择包含弹幕格的布局，弹幕跟随主画面；切换主画面时自动切换直播间。

@@ -1690,6 +1690,8 @@ class LivePlatformsPlugin(api.Plugin):
             pass
 
     def on_event(self, event, payload):
+        if event == api.EVENT_CLOSING and getattr(self, "_huya_interaction", None) is not None:
+            self._huya_interaction.shutdown()
         if event == api.EVENT_CLOSING and getattr(self, "_douyu_interaction", None) is not None:
             self._douyu_interaction.shutdown()
         if (event == api.EVENT_STREAM_FAILED and self.context is not None and payload.get("source_url")
@@ -1764,8 +1766,9 @@ class LivePlatformsPlugin(api.Plugin):
         douyu._context = context
         context.register_platform(douyu)
         if callable(getattr(context, "register_tile_control", None)) and hasattr(api, "TileControl"):
-            from .douyu_composer import DouyuInteraction
+            from .douyu_composer import DouyuInteraction, HuyaComposer
             self._douyu_interaction = DouyuInteraction(context, douyu)
+            self._huya_interaction = DouyuInteraction(context, huya, composer_class=HuyaComposer, control_id="huya_interaction")
         douyin = DouyinPlatform()
         saved = context.setting("douyin_room_owners", {})
         if isinstance(saved, dict):
@@ -1781,6 +1784,9 @@ class LivePlatformsPlugin(api.Plugin):
             self._logo_control = PlatformLogoControl(context, ("bilibili", "huya", "douyu", "douyin"), "显示国内平台 Logo")
 
     def on_unload(self):
+        if getattr(self, "_huya_interaction", None) is not None:
+            self._huya_interaction.shutdown()
+            self._huya_interaction = None
         if getattr(self, "_douyu_interaction", None) is not None:
             self._douyu_interaction.shutdown()
             self._douyu_interaction = None

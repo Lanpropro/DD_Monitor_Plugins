@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import os
 import ssl
+import struct
 from pathlib import Path
 import sys
 import threading
@@ -35,6 +36,7 @@ MANAGER.load()
 assert "douyu" in MANAGER.platforms, MANAGER.summary
 api = importlib.import_module("ddm_plugin_domestic_live.douyu_interaction")
 ui = importlib.import_module("ddm_plugin_domestic_live.douyu_composer")
+huya = importlib.import_module("ddm_plugin_domestic_live.huya_interaction")
 receive = importlib.import_module("ddm_plugin_domestic_live.douyu_danmaku")
 
 
@@ -804,7 +806,7 @@ class UITests(unittest.TestCase):
         with patch.object(ui.Request, "start") as start:
             self.widget.start("text", Mock())
             start.assert_not_called()
-        self.assertIn("已有斗鱼发送请求", self.widget.edit.toolTip())
+        self.assertIn("已有发送请求", self.widget.edit.toolTip())
 
     def test_pending_send_cancelled_when_account_changes(self):
         request = SimpleNamespace(key=(self.widget.snapshot(), "gift"), cancelled=threading.Event())
@@ -1098,6 +1100,101 @@ class ReceiveTests(unittest.TestCase):
         sent = api.douyu_messages(bytearray(b"".join(call.args[0] for call in writer.write.call_args_list)))
         self.assertTrue(any(event.get("type") == "joingroup" and event.get("rid") == "8888" for event in sent))
         writer.close.assert_called_once()
+
+
+class HuyaTests(unittest.TestCase):
+    def setUp(self):
+        self.session = Mock(cookies=cookie_jar(), headers={})
+        self.session.__enter__ = Mock(return_value=self.session)
+        self.session.__exit__ = Mock(return_value=False)
+        self.session.get.return_value = response({})
+        self.session.get.return_value.text = 'var TT_ROOM_DATA = {"id":42,"channel":100,"sid":200};'
+        self.platform = SimpleNamespace(normalize=lambda room: room if str(room).startswith("huya:") else "huya:"+str(room),
+            room_url=lambda room: "https://www.huya.com/"+room.split(":")[-1],
+            account_info=Mock(return_value={"uid":"42"}), _playback_cookies=cookie_jar)
+        self.client = huya.HuyaAPI(self.platform, cookie_jar(), session_factory=lambda: self.session)
+        self.session.post.side_effect = self.ack
+
+    def ack(self, *args, **kwargs):
+        envelope = huya.tars_fields(kwargs["data"][4:])
+        packet = self.reply(envelope[4])
+        result = response({})
+        result.content = packet
+        return result
+
+    def reply(self, request_id=7, status=0, method="sendMessage", *, missing_status=False):
+        payload = b"\x0a" + (b"" if missing_status else huya.tars_int(0,status)) + b"\x0b"
+        values = b"\x08"+huya.tars_int(0,1)+huya.huya_string(0,"tRsp")+huya.tars_bytes(1,payload)
+        body = huya.tars_int(1,3)+huya.tars_int(4,request_id)+huya.huya_string(5,"liveuif")+huya.huya_string(6,method)+huya.tars_bytes(7,values)
+        return struct.pack(">I",len(body)+4)+body
+
+    def test_wup_send_has_explicit_success_and_correct_room_and_text(self):
+        self.assertEqual(self.client.send_text("huya:lpl", " 123 "), "虎牙已确认发送")
+        self.session.post.assert_called_once()
+        call=self.session.post.call_args
+        self.assertEqual(call.args[0],"https://cdnws.api.huya.com/")
+        self.assertFalse(call.kwargs["allow_redirects"])
+        env=huya.tars_fields(call.kwargs["data"][4:])
+        self.assertEqual((env[5],env[6]),("liveuif","sendMessage"))
+        values=huya.tars_fields(env[7])[0]
+        body=huya.tars_fields(dict(zip(values[::2],values[1::2]))["tReq"])[0]
+        self.assertEqual((body[1],body[2],body[3],body[8]),(100,200,"123",42))
+        self.assertEqual(body[0][0],42)
+
+    def test_reply_matches_id_method_and_status(self):
+        for data in [self.reply(8), self.reply(method="other"), self.reply(status=1),self.reply(missing_status=True),b"bad"]:
+            with self.assertRaises(api.InteractionError):huya.parse_reply(data,7)
+        self.assertEqual(huya.parse_reply(self.reply(),7),"虎牙已确认发送")
+
+    def test_timeout_not_retried_or_exposed(self):
+        self.session.post.side_effect=requests.Timeout("secret baseinfo=private")
+        with self.assertRaises(api.InteractionError) as caught:self.client.send_text("huya:lpl","123")
+        self.assertNotIn("private",str(caught.exception))
+        self.session.post.assert_called_once()
+
+    def test_redirect_not_success(self):
+        self.session.post.side_effect=None
+        self.session.post.return_value=response({})
+        self.session.post.return_value.is_redirect=True
+        with self.assertRaises(api.InteractionError):self.client.send_text("huya:lpl","123")
+        self.session.post.assert_called_once()
+
+    def test_login_required_does_not_send(self):
+        self.platform.account_info.side_effect=RuntimeError("expired")
+        with self.assertRaises(api.LoginRequired):self.client.send_text("huya:lpl","123")
+        self.session.post.assert_not_called()
+
+    def test_invalid_draft_cancel_and_closed_room_do_not_send(self):
+        for value in ("", " ", "x"*101):
+            with self.assertRaises(api.InteractionError):self.client.send_text("huya:lpl",value)
+        with self.assertRaises(api.InteractionError):self.client.send_text("huya:lpl","123",lambda: True)
+        self.session.get.return_value.text='var TT_ROOM_DATA = {"id":0,"channel":0,"sid":0};'
+        with self.assertRaises(api.InteractionError):self.client.send_text("huya:lpl","123")
+        self.session.post.assert_not_called()
+
+    def test_huya_composer_enter_login_and_platform_visibility(self):
+        parent=QWidget()
+        owner=SimpleNamespace(platform=self.platform,context=SimpleNamespace(notify=Mock(),request_login=Mock()),sending=False,requests=set())
+        widget=ui.HuyaComposer(owner,parent)
+        try:
+            parent.show()
+            widget.set_room({"platform":"huya","room_id":"huya:lpl"})
+            APP.processEvents()
+            self.assertFalse(widget.isHidden())
+            self.assertTrue(widget.gifts.isHidden())
+            widget.edit.setText("123")
+            with patch.object(widget,"start") as start:
+                QTest.keyClick(widget.edit,Qt.Key_Return)
+                start.assert_called_once()
+            widget.feedback("登录过期",login_required=True)
+            owner.context.notify.call_args.kwargs["on_click"]()
+            owner.context.request_login.assert_called_once_with("huya",reauthenticate=True)
+            widget.completed(object(),(widget.snapshot(),"text","123",dict(widget.room)),"虎牙已确认发送")
+            self.assertEqual(widget.edit.text(),"")
+            widget.set_room({"platform":"douyu","room_id":"douyu:123"})
+            self.assertTrue(widget.isHidden())
+        finally:
+            widget.shutdown();parent.close();parent.deleteLater();APP.processEvents()
 
 
 if __name__ == "__main__":
