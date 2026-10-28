@@ -408,13 +408,13 @@ class HuyaPlatform(LiveQualityPlatform):
                 # Do not substitute anonymous parameters for member-only tiers.
                 if uid is None and info.get("sFlvUrl") and info.get("sFlvAntiCode"):
                     flv_qs = dict(parse_qsl(unescape(info["sFlvAntiCode"])))
-                    # Match-room URLs already carry a server-issued signature.
-                    # Regenerating it with a random visitor UID can return 404.
-                    if not flv_qs.get("wsSecret") or not flv_qs.get("wsTime"):
+                    # Page-issued URLs can end after a short preview. Sign the FLV
+                    # anti-code itself (not the HLS code) for sustained playback.
+                    if not flv_qs.get("fm") or not flv_qs.get("wsTime"):
                         continue
-                    flv_params = dict(flv_qs)
-                    if bitrate:
-                        flv_params["ratio"] = bitrate
+                    flv_params = parser._get_stream_params(
+                        flv_qs["fm"], flv_qs.get("fs", ""), flv_qs.get("ctype", "huya_live"),
+                        flv_qs["wsTime"], name, bitrate)
                     flv_base = info["sFlvUrl"]
                     if flv_base.startswith("//"):
                         flv_base = "https:" + flv_base
@@ -529,7 +529,7 @@ class HuyaPlatform(LiveQualityPlatform):
             # Keep two FLV CDNs: the first may reject a match room while the second works.
             hls = [stream for stream in candidates if getattr(stream, "ddm_transport", "hls") != "flv"]
             flv = [stream for stream in candidates if getattr(stream, "ddm_transport", "hls") == "flv"]
-            candidates = hls[:2] + flv[:2] if flv else hls[:3]
+            candidates = hls[:2] + flv[:2] if flv else hls[:4]
             seen = set()
             attempts = 0
             for stream in candidates:

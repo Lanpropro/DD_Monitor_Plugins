@@ -1163,7 +1163,7 @@ class HuyaTests(unittest.TestCase):
         streams={str(n):SimpleNamespace(to_url=lambda n=n:f"https://fixture.msstatic.com/{n}.m3u8") for n in range(12)}
         with patch.object(platform,"_streams",return_value=(session,None,streams)),patch.object(platform,"_probe_hls",return_value="") as probe:
             with self.assertRaises(RuntimeError):platform.play_url("huya:lpl",1004000)
-            self.assertEqual(probe.call_count,3)
+        self.assertEqual(probe.call_count,4)
 
     def test_gateway_failure_not_retried(self):
         self.gateway.side_effect=api.InteractionError("结果未确认")
@@ -1269,12 +1269,12 @@ class HuyaTests(unittest.TestCase):
             self.assertEqual(platform.play_url("huya:lpl",10000)[0],hls.to_url())
             probe.assert_not_called()
 
-    def test_flv_fallback_reuses_server_signature_and_never_bypasses_member_tier(self):
+    def test_flv_signs_its_own_anticode_and_never_bypasses_member_tier(self):
         import json
         module=importlib.import_module("ddm_plugin_domestic_live")
         platform=MANAGER.platforms["huya"]
         info={"sHlsUrl":"https://fixture.msstatic.com","sHlsUrlSuffix":"m3u8","sHlsAntiCode":"fm=x&fs=y&wsTime=1", "sCdnType":"AL","sStreamName":"room",
-              "sFlvUrl":"https://fixture.msstatic.com","sFlvUrlSuffix":"flv","sFlvAntiCode":"wsSecret=issued&wsTime=deadline&fm=opaque"}
+              "sFlvUrl":"https://fixture.msstatic.com","sFlvUrlSuffix":"flv","sFlvAntiCode":"wsSecret=issued&wsTime=deadline&fm=opaque&fs=flvfs&ctype=flvtype"}
         data={"data":[{"gameStreamInfoList":[info]}],"vMultiStreamInfo":[{"iBitRate":0,"sDisplayName":"原画"}]}
         session=SimpleNamespace(http=Mock(cookies=cookie_jar()))
         session.http.get.return_value.text='var hyPlayerConfig={stream:'+json.dumps(data)+'};'
@@ -1283,8 +1283,9 @@ class HuyaTests(unittest.TestCase):
         with patch.object(module,"Streamlink",return_value=session),patch.object(module,"Huya",return_value=parser), \
                 patch.object(module,"HTTPStream",side_effect=stream),patch.object(platform,"_playback_cookies",return_value=cookie_jar()):
             _,_,streams=platform._streams("huya:lpl",10000)
-            self.assertEqual(streams["al_flv_source"].params["wsSecret"],"issued")
-            self.assertEqual(parser._get_stream_params.call_count,1)
+            self.assertEqual(streams["al_flv_source"].params["wsSecret"],"generated")
+            parser._get_stream_params.assert_called_with("opaque","flvfs","flvtype","deadline","room",0)
+            self.assertEqual(parser._get_stream_params.call_count,2)
             selected={"qn":1010000,"rate":10000,"restricted":True}
             with patch.object(platform,"_select_quality",return_value=selected), \
                     patch.object(platform,"_authorize_4k",return_value=42), \

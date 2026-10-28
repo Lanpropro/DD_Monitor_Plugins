@@ -455,8 +455,9 @@ class LookupTests(unittest.TestCase):
         segment.url = 'https://cdn3.test/media.ts'
         replies.append(segment)
         with patch.object(provider, '_streams', return_value=(session, None, streams)), patch.object(
-                module.requests, 'get', side_effect=replies):
+                module.requests, 'get', side_effect=replies) as get:
             self.assertEqual(provider.play_url('huya:199300')[0], 'https://cdn3.test/live.m3u8')
+            self.assertEqual(get.call_count, 5)  # Four playlists and the successful media probe.
 
     def test_huya_playback_rejection_changes_cdn_but_not_other_rooms(self):
         provider = module.HuyaPlatform()

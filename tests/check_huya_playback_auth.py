@@ -156,7 +156,7 @@ def main():
             assert not platform._verify_4k('https://cdn.test/live.m3u8', headers)
 
         stream = SimpleNamespace(ddm_quality=1020000, to_url=lambda: 'https://cdn.test/live.m3u8')
-        platform._qualities['huya:vctcn'] = [{'qn': 1020000, 'restricted': True}]
+        platform._qualities['huya:vctcn'] = [{'qn': 1020000, 'rate': 20000, 'restricted': True}]
         session = module.Streamlink()
         result = Mock()
         result.__enter__ = Mock(return_value=result)
