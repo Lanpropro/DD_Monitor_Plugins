@@ -1281,13 +1281,28 @@ class DouyinPlatform(NumericLivePlatform):
         return internal
 
     @staticmethod
+    def _sdk_stream_data(page, value):
+        if not isinstance(value, str) or not re.fullmatch(r"\$[0-9a-f]+", value):
+            return value
+        # React Flight 将较长的 SDK JSON 放在独立的 UTF-8 文本记录中。
+        chunks = re.findall(r'self\.__(?:rsc|pace)_f\.push\(\s*\[\s*\d+\s*,\s*("(?:\\.|[^"\\])*")\s*]\s*\)', page)
+        wire = "".join(json.loads(chunk) for chunk in chunks).encode("utf-8")
+        record = re.search(rb"(?:^|\n)" + value[1:].encode() + rb":T([0-9a-f]+),", wire)
+        if record is None:
+            return ""
+        try:
+            return wire[record.end():record.end() + int(record[1], 16)].decode("utf-8")
+        except UnicodeDecodeError:
+            return ""
+
+    @staticmethod
     def _share_info(page, internal, uid, visitor):
         chunks = re.findall(r'self\.__rsc_f\.push\(\[1,("(?:\\.|[^"\\])*")\]\)', page)
         for chunk in reversed(chunks):
             text = re.sub(r"^\w+:", "", json.loads(chunk))
             if not text.startswith('["$",'):
                 continue
-            node = json.loads(text)
+            node = json.JSONDecoder().raw_decode(text)[0]
             if len(node) != 4 or not isinstance(node[3], dict):
                 continue
             data = node[3].get("data")
@@ -1303,7 +1318,8 @@ class DouyinPlatform(NumericLivePlatform):
             if not re.fullmatch(r"[0-9]{1,20}", rid) or type(room.get("status")) is not int:
                 break
             stream = room.get("streamUrl") or {}
-            qualities = stream.get("liveCoreSdkData", {}).get("pullData", {}).get("options", {}).get("qualities", [])
+            pull = stream.get("liveCoreSdkData", {}).get("pullData", {})
+            qualities = pull.get("options", {}).get("qualities", [])
             return {"id_str": internal, "status": room["status"], "title": room.get("title", ""),
                     "ttwid": visitor if isinstance(visitor, str) else "",
                     "owner": {"id_str": owner_uid, "web_rid": rid, "nickname": owner.get("nickname", ""),
@@ -1311,7 +1327,8 @@ class DouyinPlatform(NumericLivePlatform):
                     "cover": {"url_list": (room.get("cover") or {}).get("urlList", [])},
                     "stream_url": {"flv_pull_url": stream.get("flvPullUrl") or {},
                         "hls_pull_url_map": stream.get("hlsPullUrlMap") or {},
-                        "live_core_sdk_data": {"pull_data": {"options": {"qualities": [
+                        "live_core_sdk_data": {"pull_data": {"stream_data": DouyinPlatform._sdk_stream_data(page, pull.get("streamData", "")),
+                            "options": {"qualities": [
                             dict(item, sdk_key=item.get("sdkKey")) for item in qualities]}}}}}
 
         raise RuntimeError("抖音直播分享页信息获取失败，请稍后重试")
@@ -1572,6 +1589,9 @@ class DouyinPlatform(NumericLivePlatform):
                     info = item["state"]["roomStore"]["roomInfo"]
                     room = info["room"]
                     if type(room.get("status")) is int and room.get("id_str"):
+                        pull = (room.get("stream_url") or {}).get("live_core_sdk_data", {}).get("pull_data", {})
+                        if "stream_data" in pull:
+                            pull["stream_data"] = DouyinPlatform._sdk_stream_data(page, pull["stream_data"])
                         return info
                 except (KeyError, TypeError, AttributeError):
                     continue
@@ -1586,14 +1606,36 @@ class DouyinPlatform(NumericLivePlatform):
                 if isinstance(value, str) and urlsplit(value).scheme in ("http", "https")}
         hls_urls = {key.lower(): value for key, value in (stream_url.get("hls_pull_url_map") or {}).items()
                     if isinstance(value, str) and urlsplit(value).scheme in ("http", "https")}
-        if not urls and not hls_urls:
-            return {}
         # 这些档位对应网页 SDK 的 ld/sd/hd/uhd；分辨率、帧率只用本房间元数据。
         sdk_keys = {"sd1": "ld", "sd2": "sd", "hd1": "hd", "full_hd1": "uhd"}
         metadata = stream_url.get("live_core_sdk_data", {}).get("pull_data", {}).get(
             "options", {}).get("qualities", [])
         metadata = {item.get("sdk_key"): item for item in metadata}
-        keys = sorted(urls.keys() | hls_urls.keys(), key=lambda key: Douyin.stream_weight(key)[0], reverse=True)
+        raw = stream_url.get("live_core_sdk_data", {}).get("pull_data", {}).get("stream_data", "")
+        try:
+            sdk = json.loads(raw) if isinstance(raw, str) and raw else raw
+        except ValueError:
+            sdk = {}
+        data = sdk.get("data", {}) if isinstance(sdk, dict) else {}
+        # 分享页有时不列原画元数据，但 SDK 仍给出实际 origin 地址。
+        if isinstance(data, dict) and "origin" in data and "origin" not in metadata:
+            metadata["origin"] = {"name": "原画"}
+        sdk_names = {value: key for key, value in sdk_keys.items()}
+        for sdk_key, item in metadata.items():
+            if item.get("disable") or not isinstance(data, dict):
+                continue
+            main = (data.get(sdk_key) or {}).get("main") or {}
+            if not isinstance(main, dict) or main.get("enableEncryption") in (True, 1):
+                continue
+            key = sdk_names.get(sdk_key, sdk_key)
+            for protocol, candidates in (("flv", urls), ("hls", hls_urls)):
+                url = main.get(protocol)
+                if isinstance(url, str) and urlsplit(url).scheme in ("http", "https"):
+                    candidates.setdefault(key, url)
+        keys = sorted(urls.keys() | hls_urls.keys(),
+                      key=lambda key: (key == "origin", Douyin.stream_weight(key)[0]), reverse=True)
+        if not keys:
+            return {}
         options = []
         for index, key in enumerate(keys):
             item = metadata.get(sdk_keys.get(key, key), {})

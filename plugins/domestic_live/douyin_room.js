@@ -9,7 +9,7 @@
         const room = info?.room || info;
         const owner = room?.owner || info?.anchor;
         const uid = owner?.id_str || owner?.id || owner?.uid;
-        const rid = owner?.web_rid || room?.web_rid;
+        const rid = info?.web_rid || owner?.web_rid || room?.web_rid;
         if (!current() || String(rid) !== target || !number(uid) ||
             !number(room?.id_str) || !Number.isInteger(room?.status)) return;
         identity = {uid: String(uid), web_rid: target, nickname: owner.nickname || '',
@@ -58,7 +58,18 @@
             try { visit(JSON.parse(script.textContent)); }
             catch (_) { try { visit(JSON.parse(decodeURIComponent(script.textContent))); } catch (_) {} }
         }
-        return identity || null;
+        // 官网消费 __pace_f 队列后，原始首屏资料仍保留在内联脚本中。
+        if (!identity) for (const script of document.scripts) {
+            if (!script.textContent.includes('roomStore')) continue;
+            for (const match of script.textContent.matchAll(/self\.__pace_f\.push\(\s*\[\s*\d+\s*,\s*("(?:\\.|[^"\\])*")\s*\]\s*\)/g)) {
+                try { visit(JSON.parse(JSON.parse(match[1]).replace(/^\w+:/, ''))); } catch (_) {}
+            }
+        }
+        if (identity) return identity;
+        if (document.querySelector('[data-e2e="live-room-nickname"], [data-e2e="rooom-info-bar-anchor"]'))
+            return {page_state: 'room_loaded'};
+        if (/验证码|captcha|verifycenter/i.test(document.title)) return {page_state: 'verification'};
+        return null;
     };
     window.__ddmDouyinProfile = {peek: read, read};
 }

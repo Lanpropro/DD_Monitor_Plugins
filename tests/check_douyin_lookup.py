@@ -364,6 +364,57 @@ class LookupTests(unittest.TestCase):
                             for call in get.call_args_list))
         self.assertNotEqual(module.useragents.DEFAULT, 'Mozilla/5.0')
 
+    def test_sdk_flight_text_is_preserved_for_original_quality(self):
+        sdk = json.dumps({'data': {'origin': {'main': {'flv': 'https://cdn.test/origin.flv'}}},
+                          'fixture': '中文'}, ensure_ascii=False)
+        room = {'idStr': '901', 'status': 2,
+                'owner': {'idStr': '101', 'webRid': '123'},
+                'streamUrl': {'liveCoreSdkData': {'pullData': {'streamData': '$8',
+                    'options': {'qualities': [{'sdkKey': 'origin', 'name': '原画'}]}}}}}
+        node = '5:' + json.dumps(['$', '$L7', None, {'data': {'room': room}}])
+        page = ''.join('self.__rsc_f.push([1,' + json.dumps(part) + ']);' for part in
+                       (node + '\n8:T' + format(len(sdk.encode()), 'x') + ',', sdk))
+        parsed = module.DouyinPlatform._share_info(page, '901', '101', '')
+        pull = parsed['stream_url']['live_core_sdk_data']['pull_data']
+        self.assertEqual(pull['stream_data'], sdk)
+        self.assertEqual(pull['options']['qualities'][0]['sdk_key'], 'origin')
+        self.assertEqual(module.DouyinPlatform._sdk_stream_data(page, '$9'), '')
+
+    def test_original_sdk_stream_is_available_above_flat_blue_quality(self):
+        from streamlink import Streamlink
+        provider = module.DouyinPlatform()
+        qualities = [{'sdk_key': 'uhd', 'name': '蓝光', 'resolution': '1920x1080'},
+                     {'sdk_key': 'origin', 'name': '原画', 'fps': 60, 'resolution': ''}]
+        raw = json.dumps({'data': {'origin': {'main': {'flv': 'https://cdn.test/origin.flv',
+            'hls': 'https://cdn.test/origin.m3u8'}}, 'uhd': {'main': {'flv': 'https://cdn.test/blue.flv'}},
+            'ao': {'main': {'flv': 'https://cdn.test/audio.flv'}}}})
+        room = {'status': 2, 'stream_url': {'flv_pull_url': {'FULL_HD1': 'https://cdn.test/blue.flv'},
+                'live_core_sdk_data': {'pull_data': {'stream_data': raw,
+                    'options': {'qualities': qualities}}}}}
+        session = Streamlink()
+        try:
+            with patch.object(provider, 'room_data', return_value={'room': room}):
+                streams = provider._streams(session, 'douyin:123')
+                self.assertEqual(streams['source'].to_url(), 'https://cdn.test/origin.flv')
+                self.assertEqual(streams['hls'].to_url(), 'https://cdn.test/origin.m3u8')
+                options = provider.room_quality_options('douyin:123')
+                self.assertEqual([o['label'] for o in options], ['原画', '蓝光'])
+                self.assertEqual(options[0]['qn'], 10000)
+                self.assertNotIn('1920x1080', options[0]['desc'])
+                self.assertEqual(provider._streams(session, 'douyin:123', options[1]['qn'])['source'].to_url(),
+                                 'https://cdn.test/blue.flv')
+                self.assertEqual(provider._streams(session, 'douyin:123', preview=True)['source'].to_url(),
+                                 'https://cdn.test/blue.flv')
+                original = qualities.pop()
+                self.assertEqual(provider._streams(session, 'douyin:123')['source'].to_url(),
+                                 'https://cdn.test/origin.flv')
+                qualities.append(original)
+                qualities[1]['disable'] = 1
+                self.assertEqual(provider._streams(session, 'douyin:123')['source'].to_url(),
+                                 'https://cdn.test/blue.flv')
+        finally:
+            session.http.close()
+
     def test_verified_uid_mapping_survives_normal_app_close(self):
         self.provider.restore_follow_rooms([{'room_id': self.canonical, 'anchor_uid': '101'}])
         context = SimpleNamespace(platform=Mock(return_value=self.provider), set_setting=Mock())
