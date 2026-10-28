@@ -99,7 +99,9 @@ class DouyinAPI:
             if code != 0:
                 raise InteractionError(f"抖音未确认发送（阶段：room/chat；状态码：{code}）。可能需要官网签名或安全验证，请在官网核对。")
             receipt = payload.get("data")
-            mid = str(receipt.get("id_str") or receipt.get("id") or receipt.get("message_id") or "") if isinstance(receipt, dict) else ""
+            # The web client's WebcastChatMessage converter reads msg_id_str.
+            mid = str(receipt.get("msg_id_str") or receipt.get("msg_id") or receipt.get("id_str") or
+                      receipt.get("id") or receipt.get("message_id") or "") if isinstance(receipt, dict) else ""
             if not re.fullmatch(r"[1-9][0-9]{0,19}", mid):
                 raise InteractionError("抖音响应缺少消息回执 ID，结果未确认；请在官网核对")
             progress("ack")

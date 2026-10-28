@@ -1401,6 +1401,19 @@ class DouyinTests(unittest.TestCase):
         self.assertEqual(call.kwargs["params"]["content"],"hello")
         self.assertFalse(call.kwargs["allow_redirects"])
 
+    def test_official_web_message_id_field_acknowledges_only_success(self):
+        for field in ("msg_id_str", "msg_id"):
+            self.session.get.return_value=response({"status_code":0,"data":{field:"7560000000000000123"}})
+            phases=[]
+            self.assertEqual(self.client.send_text("douyin:123","hello",progress=phases.append),
+                             api.ChatReceipt("42","fixture","hello"))
+            self.assertEqual(phases[-1],"ack")
+        self.session.get.return_value=response({"status_code":30001,"data":{"msg_id_str":"7560000000000000123"}})
+        with self.assertRaises(api.InteractionError):self.client.send_text("douyin:123","hello")
+        for mid in ("", "0", "not-a-message", None):
+            self.session.get.return_value=response({"status_code":0,"data":{"msg_id_str":mid}})
+            with self.assertRaises(api.InteractionError):self.client.send_text("douyin:123","hello")
+
     def test_unconfirmed_or_rejected_response_never_succeeds(self):
         for payload in [{"status_code":0,"data":{}},{"status_code":30001,"data":{}},{"data":{"id":"1"}},{"status_code":False,"data":{"id":"1"}}]:
             self.session.get.return_value=response(payload)
