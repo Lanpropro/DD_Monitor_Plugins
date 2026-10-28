@@ -358,6 +358,8 @@ class LookupTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, '主播个人主页') as caught:
                 self.provider.room_info(self.canonical)
         self.assertIn('官网页面完成验证', str(caught.exception))
+        self.assertIsInstance(caught.exception, module.DouyinVerificationRequired)
+        self.assertTrue(caught.exception.browser_verification)
         self.assertTrue(all(call.kwargs['headers']['User-Agent'] == module.useragents.DEFAULT
                             for call in get.call_args_list))
         self.assertNotEqual(module.useragents.DEFAULT, 'Mozilla/5.0')

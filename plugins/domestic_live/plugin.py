@@ -980,6 +980,10 @@ class DouyinLookupError(RuntimeError):
         return str(self)
 
 
+class DouyinVerificationRequired(DouyinLookupError):
+    browser_verification = True
+
+
 class DouyinPlatform(NumericLivePlatform):
     kind = "douyin"
     interaction_user_agent = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -989,6 +993,7 @@ class DouyinPlatform(NumericLivePlatform):
     label = "抖音"
     room_input_hint = "抖音直播间链接"
     profile_browser_init_script = (Path(__file__).parent / "douyin_profile.js").read_text(encoding="utf-8")
+    room_browser_init_script = (Path(__file__).parent / "douyin_room.js").read_text(encoding="utf-8")
     hosts = ("live.douyin.com", "douyin.com", "www.douyin.com")
     image_hosts = ("douyinpic.com", "byteimg.com", "ibytedtos.com", "douyincdn.com")
     account_login_url = "https://www.douyin.com/user/self"
@@ -1409,6 +1414,8 @@ class DouyinPlatform(NumericLivePlatform):
                 try:
                     return self._room_page(canonical, session)
                 except (requests.RequestException, RuntimeError, ValueError, KeyError, TypeError) as page_error:
+                    if isinstance(page_error, DouyinVerificationRequired):
+                        raise
                     raise DouyinLookupError(f"{cached_error}；直播间网页回退也失败：{self._lookup_error('直播间资料', page_error)}") from page_error
         return self._room_page(canonical, session)
 
@@ -1449,7 +1456,7 @@ class DouyinPlatform(NumericLivePlatform):
                     page = response.text
                     if (any(word in page.lower() for word in ("验证码", "verifycenter", "captcha")) and
                             not any(marker in page for marker in ("roomStore", "__rsc_f", "RENDER_DATA"))):
-                        raise DouyinLookupError("抖音页面包含验证相关内容，未返回直播资料。请在软件内使用主播个人主页链接添加，"
+                        raise DouyinVerificationRequired("抖音页面包含验证相关内容，未返回直播资料。请在软件内使用主播个人主页链接添加，"
                             "或重新读取抖音关注，并在官网页面完成验证后重试。") from error
                     raise DouyinLookupError(str(self._lookup_error("直播间网页", page_error))
                         + "；公开接口回退也失败：" + str(self._lookup_error("房间接口", error))) from error
