@@ -40,8 +40,11 @@ class BlockNetwork(QWebEngineUrlRequestInterceptor):
 
 
 class BrowserTests(unittest.TestCase):
-    def exercise(self, behavior, expected_error=None, *, module_error=False):
+    def exercise(self, behavior, expected_error=None, *, module_error=False, delayed_dependency=False):
         dialogs = []
+        initialization = "throw new ReferenceError('PRIVATE');" if module_error else ""
+        if module_error == "missing_call":
+            initialization = "throw new TypeError(\"Cannot read properties of undefined (reading 'call') PRIVATE\");"
         html = """<html><head></head><body><script>
             window.calls=0; window.webpackChunkdouyin_live_v2=[];
             const requireModule=()=>{ %s return {W:async params=>{
@@ -50,7 +53,24 @@ class BrowserTests(unittest.TestCase):
             }};};
             requireModule.m={123:function(){return '/webcast/room/chat/ paste_edit_method';}};
             window.webpackChunkdouyin_live_v2.push=entry=>entry[2](requireModule);
-            </script></body></html>""" % ("throw new ReferenceError('PRIVATE');" if module_error else "", behavior)
+            </script></body></html>""" % (initialization, behavior)
+        if delayed_dependency:
+            html = html.replace("requireModule.m={123:function(){return '/webcast/room/chat/ paste_edit_method';}};", """
+                const cache={};
+                const factories={123:function(module,exports,require){
+                    const client=require(456); // /webcast/room/chat/ paste_edit_method
+                    exports.W=client.W;
+                }};
+                const webpackRequire=id=>{
+                    if(cache[id])return cache[id].exports;
+                    const module=cache[id]={exports:{}};
+                    factories[id].call(module.exports,module,module.exports,webpackRequire);
+                    return module.exports;
+                };
+                webpackRequire.m=factories;
+                setTimeout(()=>{factories[456]=function(module){module.exports=requireModule();};},800);
+            """)
+            html = html.replace("entry=>entry[2](requireModule)", "entry=>entry[2](webpackRequire)")
 
         class Dialog(QDialog):
             def __init__(self, *a, **kw):
@@ -145,6 +165,13 @@ class BrowserTests(unittest.TestCase):
 
     def test_module_initialization_failure_never_invokes_send(self):
         self.exercise("return {};", ["模块初始化", "ReferenceError", "已调用发送：否"], module_error=True)
+
+    def test_helper_waits_for_its_late_dependency_before_initialization(self):
+        self.exercise("return {data:{status_code:0,data:{msg_id_str:'7560000000000000001',"
+                      "content_self_see_status:0}}};", delayed_dependency=True)
+
+    def test_module_typeerror_has_fixed_cause_without_raw_message(self):
+        self.exercise("return {};", ["TypeError", "模块调用目标缺失", "已调用发送：否"], module_error="missing_call")
 
 
 if __name__ == "__main__":

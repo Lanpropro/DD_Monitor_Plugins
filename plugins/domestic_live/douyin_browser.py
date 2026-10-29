@@ -8,6 +8,7 @@ from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from .douyu_interaction import InteractionError
 
 SCRIPT = (Path(__file__).parent / "douyin_send.js").read_text(encoding="utf-8")
+CLIENT_SCRIPT = (Path(__file__).parent / "douyin_client.js").read_text(encoding="utf-8")
 
 
 class BrowserChat(QObject):
@@ -46,6 +47,9 @@ class BrowserChat(QObject):
                 name = name if name in names else "其他异常"
                 submitted = "是" if result.get("submitted") is True else "否"
                 reason += f"；位置：{stage}；异常：{name}；已调用发送：{submitted}"
+                causes = {"missing_call": "模块调用目标缺失", "not_callable": "模块依赖不可调用"}
+                if result.get("cause") in causes:
+                    reason += "；分类：" + causes[result["cause"]]
             raise InteractionError(f"抖音官网发送未确认（阶段：官方客户端；原因：{reason}），请先核对直播间内是否出现该条消息。")
         return result
 
@@ -74,25 +78,23 @@ class BrowserChat(QObject):
                location.pathname.replace(/\/$/,'')!=='/'+%s) return {ready:false,reason:'page'};
             let require; const chunks=window.webpackChunkdouyin_live_v2;
             if(Array.isArray(chunks)) chunks.push([['ddm-prepare-'+%s],{},r=>{require=r}]);
-            const ready=!!require?.m && Object.values(require.m).some(factory=>{
-                const code=factory.toString();
-                return code.includes('/webcast/room/chat/')&&code.includes('paste_edit_method');
-            });
-            return {ready:!!ready,reason:ready?'ready':'module'};
-        })())""" % (json.dumps(task["webRid"]), json.dumps(task["id"]))
+            return (%s)(require);
+        })())""" % (json.dumps(task["webRid"]), json.dumps(task["id"]), CLIENT_SCRIPT)
         submit = """if(window.__ddmChatTaskId!==%s){
             window.__ddmChatTaskId=%s;window.__ddmChatCancelled=false;
             window.__ddmChatSubmitted=false;window.__ddmChatResult=null;
             window.__ddmChatStage='page';
-            Promise.resolve().then(()=> (%s)(%s)).then(data=>{window.__ddmChatResult=data})
+            Promise.resolve().then(()=> (%s)(%s, (%s))).then(data=>{window.__ddmChatResult=data})
             .catch(e=>{const allowed=['wrong_room_page','cancelled_before_send','official_client_changed',
             'official_client_not_ready','invalid_response'];window.__ddmChatResult={error:
             allowed.includes(e?.message)?e.message:'official_request_failed',
             stage:['page','module','request','response'].includes(window.__ddmChatStage)?window.__ddmChatStage:'unknown',
             exception:['Error','TypeError','ReferenceError','RangeError','SyntaxError','SecurityError',
             'NotAllowedError','AbortError','TimeoutError','NetworkError','AxiosError'].includes(e?.name)?e.name:'Other',
+            cause:window.__ddmChatStage==='module'&&e?.name==='TypeError'&&typeof e.message==='string'?
+            (e.message.includes("reading 'call'")?'missing_call':e.message.includes('is not a function')?'not_callable':'other'):'other',
             submitted:!!window.__ddmChatSubmitted}});
-        }""" % (json.dumps(task["id"]), json.dumps(task["id"]), SCRIPT, json.dumps(task))
+        }""" % (json.dumps(task["id"]), json.dumps(task["id"]), SCRIPT, json.dumps(task), CLIENT_SCRIPT)
         read_state = "JSON.stringify({submitted:!!window.__ddmChatSubmitted,result:window.__ddmChatResult})"
         def retry():
             if state["submitted"] or not state["retry_safe"] or request["done"].is_set():
@@ -127,7 +129,10 @@ class BrowserChat(QObject):
                     return
                 if not state["started"]:
                     if not result.get("ready"):
-                        dialog.status.setText("正在等待官网页面及发送模块；本次尚未提交，可重新加载环境。")
+                        if result.get("reason") == "dependency":
+                            dialog.status.setText("官网发送模块的依赖尚未加载；本次尚未提交，可重新加载环境。")
+                        else:
+                            dialog.status.setText("正在等待官网页面及发送模块；本次尚未提交，可重新加载环境。")
                         return
                     state.update(started=True, retry_safe=False)
                     dialog.read_button.setEnabled(False)

@@ -4,6 +4,15 @@ const vm = require('vm');
 const assert = require('assert');
 const path = require('path');
 const source = fs.readFileSync(path.join(__dirname, '../plugins/domestic_live/douyin_send.js'), 'utf8');
+const inspectClient = vm.runInNewContext('(' + fs.readFileSync(path.join(__dirname, '../plugins/domestic_live/douyin_client.js'), 'utf8') + ')');
+function checkDependencies() {
+    const requireModule=()=>{throw new Error('Read-only inspection must not initialize modules');};
+    requireModule.m={123:function(module,exports,$){$('456');return '/webcast/room/chat/ paste_edit_method';}};
+    assert.strictEqual(inspectClient(requireModule).reason,'dependency');
+    requireModule.m[456]=function(){};
+    assert.strictEqual(inspectClient(requireModule).ready,true);
+    assert.strictEqual(inspectClient(requireModule).id,'123');
+}
 async function fixture({cancelled=false, host='https://live.douyin.com', selfSee=0}={}) {
     let calls = 0, received;
     const client = {W: async params => {
@@ -19,9 +28,9 @@ async function fixture({cancelled=false, host='https://live.douyin.com', selfSee
     const fn = vm.runInNewContext('('+source+')', {window,location:{origin:host,pathname:'/123'},setTimeout});
     const task={id:'synthetic',webRid:'123',roomId:'999999',text:'hello'};
     if(cancelled || host!=='https://live.douyin.com') {
-        await assert.rejects(fn(task));assert.strictEqual(calls,0);return;
+        await assert.rejects(fn(task,inspectClient));assert.strictEqual(calls,0);return;
     }
-    const result=await fn(task);
+    const result=await fn(task,inspectClient);
     assert.strictEqual(calls,1);
     assert.strictEqual(received.room_id_str,'999999');
     assert.strictEqual(received.content,'hello');
@@ -31,7 +40,7 @@ async function fixture({cancelled=false, host='https://live.douyin.com', selfSee
     assert(!JSON.stringify(result).includes('private'));
     assert(!JSON.stringify(result).includes('secret'));
 }
-(async()=>{await fixture();await fixture({cancelled:true});await fixture({host:'https://example.com'});
+(async()=>{checkDependencies();await fixture();await fixture({cancelled:true});await fixture({host:'https://example.com'});
 await fixture({selfSee:{secret:'private'}});
 console.log('PASS: official helper called once, internal room, cancellation, origin guard, sanitized receipt');
 })().catch(error=>{console.error(error);process.exit(1)});
