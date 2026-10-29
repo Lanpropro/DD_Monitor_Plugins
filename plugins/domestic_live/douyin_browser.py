@@ -54,53 +54,73 @@ class BrowserChat(QObject):
         dialog.forget_button.hide()
         dialog.read_button.setText("重新加载环境")
         dialog.read_button.clicked.disconnect()
-        dialog.read_button.setEnabled(False)
+        dialog.read_button.setEnabled(True)
         task = dict(id=uuid.uuid4().hex, webRid=request["room"].split(":",1)[1],
                     roomId=request["params"]["room_id"], text=request["params"]["content"])
         page = dialog.browser.page()
         page.setAudioMuted(True)
-        state = {"started": False, "submitted": False, "retry_safe": False, "polling": False}
-        bootstrap = """(() => {
+        state = {"started": False, "submitted": False, "retry_safe": True, "polling": False, "epoch": 0}
+        prepare = """JSON.stringify((() => {
             if(location.origin!=='https://live.douyin.com'||
-               location.pathname.replace(/\/$/,'')!=='/'+%s) return null;
-            if(window.__ddmChatTaskId!==%s){
-                window.__ddmChatTaskId=%s;window.__ddmChatCancelled=false;
-                window.__ddmChatSubmitted=false;window.__ddmChatResult=null;
-                Promise.resolve().then(()=> (%s)(%s)).then(data=>{window.__ddmChatResult=data})
-                .catch(e=>{const allowed=['wrong_room_page','cancelled_before_send','official_client_changed',
-                'official_client_not_ready','invalid_response'];window.__ddmChatResult={error:
-                allowed.includes(e.message)?e.message:'official_request_failed'}});
-            }
-            return {started:true,submitted:!!window.__ddmChatSubmitted,result:window.__ddmChatResult};
-        })()""" % (json.dumps(task["webRid"]), json.dumps(task["id"]), json.dumps(task["id"]), SCRIPT, json.dumps(task))
-        read_state = "({started:!!window.__ddmChatTaskId,submitted:!!window.__ddmChatSubmitted,result:window.__ddmChatResult})"
+               location.pathname.replace(/\/$/,'')!=='/'+%s) return {ready:false,reason:'page'};
+            let require; const chunks=window.webpackChunkdouyin_live_v2;
+            if(Array.isArray(chunks)) chunks.push([['ddm-prepare-'+%s],{},r=>{require=r}]);
+            const ready=!!require?.m && Object.values(require.m).some(factory=>{
+                const code=factory.toString();
+                return code.includes('/webcast/room/chat/')&&code.includes('paste_edit_method');
+            });
+            return {ready:!!ready,reason:ready?'ready':'module'};
+        })())""" % (json.dumps(task["webRid"]), json.dumps(task["id"]))
+        submit = """if(window.__ddmChatTaskId!==%s){
+            window.__ddmChatTaskId=%s;window.__ddmChatCancelled=false;
+            window.__ddmChatSubmitted=false;window.__ddmChatResult=null;
+            Promise.resolve().then(()=> (%s)(%s)).then(data=>{window.__ddmChatResult=data})
+            .catch(e=>{const allowed=['wrong_room_page','cancelled_before_send','official_client_changed',
+            'official_client_not_ready','invalid_response'];window.__ddmChatResult={error:
+            allowed.includes(e.message)?e.message:'official_request_failed'}});
+        }""" % (json.dumps(task["id"]), json.dumps(task["id"]), SCRIPT, json.dumps(task))
+        read_state = "JSON.stringify({submitted:!!window.__ddmChatSubmitted,result:window.__ddmChatResult})"
         def retry():
             if state["submitted"] or not state["retry_safe"] or request["done"].is_set():
                 return
-            state.update(started=False, retry_safe=False)
+            state.update(started=False, retry_safe=True, polling=False, epoch=state["epoch"] + 1)
             request["deadline"] = time.monotonic() + 55
-            dialog.read_button.setEnabled(False)
             dialog.status.setText("正在重新加载官网环境；本次尚未提交弹幕。")
-            # Reload creates a fresh JS context. Submitted or uncertain writes cannot use this action.
-            dialog.browser.reload()
+            dialog.browser.load(QUrl(self.platform.room_url(request["room"])))
         dialog.read_button.clicked.connect(retry)
         def poll():
             if request["done"].is_set() or request["cancelled"]() or self.closed:
                 page.runJavaScript("window.__ddmChatCancelled=true")
                 dialog.reject()
                 return
-            if state["polling"] or state["retry_safe"]:
+            if state["polling"] or state["started"] and state["retry_safe"]:
                 return
             state["polling"] = True
-            def received(result):
+            epoch = state["epoch"]
+            def received(raw):
+                if epoch != state["epoch"]:
+                    return  # A read-only probe from the previous page cannot start a write.
                 state["polling"] = False
-                if request["done"].is_set() or not isinstance(result, dict):
+                if request["done"].is_set() or request["cancelled"]():
                     return
-                if result.get("started"):
-                    state["started"] = True
-                    state["submitted"] = state["submitted"] or bool(result.get("submitted"))
-                    dialog.status.setText("官网正在提交弹幕，等待回执，请勿重复发送。" if state["submitted"] else
-                                          "正在准备官网发送模块；如页面要求验证，请在下方完成。")
+                try:
+                    result = json.loads(raw) if isinstance(raw, str) else raw
+                except (ValueError, TypeError):
+                    result = None
+                if not isinstance(result, dict):
+                    if not state["started"]:
+                        dialog.status.setText("官网页面尚未就绪，本次未提交弹幕。可重新加载环境。")
+                    return
+                if not state["started"]:
+                    if not result.get("ready"):
+                        dialog.status.setText("正在等待官网页面及发送模块；本次尚未提交，可重新加载环境。")
+                        return
+                    state.update(started=True, retry_safe=False)
+                    dialog.read_button.setEnabled(False)
+                    dialog.status.setText("官网模块已就绪，正在提交弹幕并等待回执。")
+                    page.runJavaScript(submit)
+                    return
+                state["submitted"] = state["submitted"] or bool(result.get("submitted"))
                 outcome = result.get("result")
                 if not isinstance(outcome, dict):
                     return
@@ -108,14 +128,12 @@ class BrowserChat(QObject):
                 if safe_error and not state["submitted"]:
                     state["retry_safe"] = True
                     dialog.read_button.setEnabled(True)
-                    dialog.status.setText("官网发送模块未就绪，本次尚未提交。可点击「重新加载环境」再试。")
+                    dialog.status.setText("官网发送模块未就绪，本次尚未提交。可重新加载环境再试。")
                     return
                 request["result"] = outcome
                 request["done"].set()
                 dialog.accept()
-            # A page may render correctly even when loadFinished reports a failed subresource.
-            # Start by checking the actual document, not by waiting for all media requests.
-            page.runJavaScript(read_state if state["started"] else bootstrap, received)
+            page.runJavaScript(read_state if state["started"] else prepare, received)
         timer = QTimer(dialog)
         timer.setInterval(150)
         timer.timeout.connect(poll)

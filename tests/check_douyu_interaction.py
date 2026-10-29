@@ -1479,10 +1479,9 @@ class DouyinTests(unittest.TestCase):
         browser_module=importlib.import_module("ddm_plugin_domestic_live.douyin_browser")
         parent=QWidget()
         page=Mock()
-        states=[{"started":True,"submitted":False,"result":None},
-                {"started":True,"submitted":False,"result":{"error":"official_client_not_ready"}},
-                {"started":True,"submitted":True,"result":None},
-                {"started":True,"submitted":True,"result":{"status_code":0,"data":{"msg_id_str":"12345"}}}]
+        states=[None, '{"ready":false,"reason":"page"}', '{"ready":true}',
+                '{"submitted":false,"result":{"error":"official_client_not_ready"}}',
+                '{"ready":true}', '{"submitted":true,"result":{"status_code":0,"data":{"msg_id_str":"12345"}}}']
         def execute(script, callback=None):
             if callback:callback(states.pop(0))
         page.runJavaScript.side_effect=execute
@@ -1499,13 +1498,19 @@ class DouyinTests(unittest.TestCase):
         try:
             with patch("ddm.platform_login.PlatformFollowDialog",return_value=dialog):bridge.open(request)
             timer=dialog.findChild(QTimer)
+            self.assertTrue(dialog.read_button.isEnabled())
+            timer.timeout.emit()
+            self.assertTrue(dialog.read_button.isEnabled())
+            timer.timeout.emit()
+            self.assertTrue(dialog.read_button.isEnabled())
+            self.assertEqual(page.runJavaScript.call_count,2)
             timer.timeout.emit()
             self.assertIn("__ddmChatTaskId",page.runJavaScript.call_args.args[0])
             self.assertFalse(dialog.read_button.isEnabled())
             timer.timeout.emit()
             self.assertTrue(dialog.read_button.isEnabled())
             dialog.read_button.click()
-            dialog.browser.reload.assert_called_once()
+            self.assertEqual(dialog.browser.load.call_count,2)
             timer.timeout.emit()
             self.assertFalse(dialog.read_button.isEnabled())
             timer.timeout.emit()
