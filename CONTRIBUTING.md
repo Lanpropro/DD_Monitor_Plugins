@@ -84,3 +84,4 @@ python -m compileall -q plugins tests tools
 - 先明确暂存发布文件，再运行 `python tools/build_plugins.py`。它只读取 Git 跟踪文件；包结构及源码一致性检查使用 `python tests/check_packages.py --host ../DD_Monitor_CE`。
 - 网站下载数据与 SHA256 在独立网站仓库维护，来自已发布附件；本机重新打包的哈希不能替代公开附件哈希。
 - 提交源码、推送分支、发布插件 ZIP 与部署网站是不同动作。发布或部署前准备可审阅的产物、版本和验证结果，再按维护者授权执行。
+- `dist/` 是构建输出；最终安装包、校验文件与来源记录复制到配套本体仓库的 `results/`，再按授权上传 Release。测试日志和备份仍留在 `work/`。
