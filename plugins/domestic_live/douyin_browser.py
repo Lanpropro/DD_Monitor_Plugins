@@ -33,7 +33,12 @@ class BrowserChat(QObject):
         if not isinstance(result, dict) or result.get("error"):
             code = result.get("error", "cancelled") if isinstance(result, dict) else "cancelled"
             # Only fixed error categories leave the browser; never arbitrary exception messages.
-            raise InteractionError(f"抖音官网发送未确认（阶段：官方客户端；原因：{code}），请在页面完成登录或安全验证后核对结果")
+            labels = {"wrong_room_page": "官网页面与目标直播间不匹配",
+                      "cancelled_before_send": "提交前已取消", "official_client_changed": "官网发送模块结构已变化",
+                      "official_client_not_ready": "官网发送模块未就绪", "invalid_response": "官网未返回有效回执",
+                      "official_request_failed": "官网客户端调用失败", "cancelled": "窗口已关闭或请求已取消"}
+            reason = labels.get(code, "官网客户端返回未知错误")
+            raise InteractionError(f"抖音官网发送未确认（阶段：官方客户端；原因：{reason}），请在页面完成登录或安全验证后核对结果")
         return result
 
     def open(self, request):
@@ -75,7 +80,7 @@ class BrowserChat(QObject):
             if not started:
                 return
             def received(result):
-                if result is not None and not request["done"].is_set():
+                if isinstance(result, dict) and not request["done"].is_set():
                     request["result"] = result
                     request["done"].set()
                     dialog.accept()

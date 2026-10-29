@@ -7,7 +7,7 @@ import requests
 from PySide6.QtCore import QEvent, Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QPainter, QPen, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
-from PySide6.QtWidgets import (QDialog, QFrame, QGridLayout, QHBoxLayout,
+from PySide6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy,
     QSpinBox, QTabBar, QVBoxLayout, QWidget)
 
@@ -130,6 +130,60 @@ class DanmakuEdit(QLineEdit):
             event.accept()
             return
         super().keyPressEvent(event)
+
+
+class SendDetailsDialog(QDialog):
+    def __init__(self, room, message, parent=None):
+        super().__init__(parent)
+        platform = "抖音" if room.get("platform") == "douyin" else "虎牙"
+        self.setWindowTitle(f"{platform}弹幕发送详情")
+        self.setObjectName("SendDetails")
+        self.setMinimumWidth(460)
+        self.setMaximumWidth(620)
+        self.setStyleSheet(f"""
+            QDialog#SendDetails {{background:{theme.ELEVATED};}}
+            QLabel {{color:{theme.TEXT1};font-size:{theme.FONT_CONTROL}px;}}
+            QLabel#SendDetailsTitle {{font-size:20px;font-weight:600;}}
+            QLabel#SendDetailsMuted {{color:{theme.TEXT3};}}
+            QFrame#SendDetailsCard {{background:{theme.CONTENT};border:1px solid {theme.BORDER};border-radius:10px;}}
+            QPushButton {{min-height:34px;min-width:88px;padding:0 14px;border:1px solid {theme.BORDER_STRONG};
+                border-radius:8px;color:{theme.TEXT1};background:{theme.ELEVATED};}}
+            QPushButton:hover {{background:{theme.CONTENT_HOVER};}}
+            QPushButton#SendDetailsClose {{background:{theme.ACCENT};color:#04161f;border:none;}}
+        """)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 20)
+        layout.setSpacing(16)
+        def label(text, name=""):
+            result = QLabel(str(text))
+            result.setObjectName(name)
+            result.setWordWrap(True)
+            result.setTextFormat(Qt.PlainText)
+            return result
+        layout.addWidget(label("发送状态未确认", "SendDetailsTitle"))
+        layout.addWidget(label(f"{platform} · {room.get('uname') or '当前直播间'}", "SendDetailsMuted"))
+        card = QFrame()
+        card.setObjectName("SendDetailsCard")
+        details = QVBoxLayout(card)
+        details.setContentsMargins(16, 14, 16, 14)
+        details.setSpacing(8)
+        details.addWidget(label("接口信息", "SendDetailsMuted"))
+        self.message_label = label(message)
+        self.message_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        details.addWidget(self.message_label)
+        layout.addWidget(card)
+        layout.addWidget(label("请先核对直播间内是否已经出现该条弹幕，再决定是否重新发送。", "SendDetailsMuted"))
+        buttons = QHBoxLayout()
+        self.copy_button = QPushButton("复制详情")
+        self.copy_button.clicked.connect(lambda: QApplication.clipboard().setText(str(message)))
+        buttons.addWidget(self.copy_button)
+        buttons.addStretch(1)
+        self.close_button = QPushButton("关闭")
+        self.close_button.setObjectName("SendDetailsClose")
+        self.close_button.setDefault(True)
+        self.close_button.clicked.connect(self.accept)
+        buttons.addWidget(self.close_button)
+        layout.addLayout(buttons)
 
 
 class GiftConfirmDialog(QDialog):
@@ -646,19 +700,7 @@ class HuyaComposer(DouyuComposer):
         self.edit.setToolTip(message)
 
     def show_failure_details(self, message):
-        dialog = QDialog(self)
-        dialog.setWindowTitle("抖音弹幕发送详情" if self.room.get("platform") == "douyin" else "虎牙弹幕发送详情")
-        dialog.setMinimumWidth(420)
-        layout = QVBoxLayout(dialog)
-        label = QLabel(message, dialog)
-        label.setWordWrap(True)
-        label.setTextFormat(Qt.PlainText)
-        label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        layout.addWidget(label)
-        close = QPushButton("关闭", dialog)
-        style_button(close)
-        close.clicked.connect(dialog.accept)
-        layout.addWidget(close)
+        dialog = SendDetailsDialog(dict(self.room), message, self)
         dialog.exec()
 
     def send_text(self):

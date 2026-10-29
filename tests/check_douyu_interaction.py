@@ -1444,6 +1444,23 @@ class DouyinTests(unittest.TestCase):
         self.assertEqual(transport.call_count,2)
         self.session.get.assert_not_called()
 
+    def test_browser_specific_failure_is_not_masked_as_http_failure(self):
+        self.client.transport=Mock(side_effect=api.InteractionError("官网发送模块未就绪"))
+        with self.assertRaisesRegex(api.InteractionError,"官网发送模块未就绪"):
+            self.client.send_text("douyin:123","hello")
+        self.session.get.assert_not_called()
+
+    def test_details_dialog_is_selectable_and_has_separate_normal_size_buttons(self):
+        dialog=ui.SendDetailsDialog({"platform":"douyin","uname":"fixture"},"阶段：官方客户端；官网发送模块未就绪")
+        try:
+            dialog.show();APP.processEvents()
+            self.assertTrue(dialog.message_label.textInteractionFlags() & Qt.TextSelectableByMouse)
+            self.assertGreaterEqual(dialog.close_button.height(),34)
+            self.assertLess(dialog.close_button.width(),dialog.width()/2)
+            dialog.copy_button.click()
+            self.assertEqual(APP.clipboard().text(),dialog.message_label.text())
+        finally:dialog.close();dialog.deleteLater();APP.processEvents()
+
     def test_unconfirmed_or_rejected_response_never_succeeds(self):
         for payload in [{"status_code":0,"data":{}},{"status_code":30001,"data":{}},{"data":{"id":"1"}},{"status_code":False,"data":{"id":"1"}}]:
             self.session.get.return_value=response(payload)

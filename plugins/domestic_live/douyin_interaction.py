@@ -130,6 +130,8 @@ class DouyinAPI:
                             raise InteractionError("抖音发送接口发生跳转，结果未确认；请在官网核对后再试")
                         response.raise_for_status()
                         payload = response.json()
+            except InteractionError:
+                raise
             except (requests.RequestException, ValueError):
                 raise InteractionError("抖音发送结果未确认（阶段：room/chat），请在官网核对；不要立即重复发送") from None
             if not isinstance(payload, dict) or type(payload.get("status_code")) is not int:
