@@ -677,6 +677,7 @@ class DouyinComposer(HuyaComposer):
         self.edit.setPlaceholderText("输入抖音弹幕，Enter 发送")
         self.edit.setAccessibleName("发送到当前抖音直播间的弹幕")
         self.edit.setMaxLength(50)
+        self.browser_chat = None
 
     def set_room(self, room):
         DouyuComposer.set_room(self, room)
@@ -695,8 +696,18 @@ class DouyinComposer(HuyaComposer):
         if not text:
             return
         key = self.snapshot()
-        client = DouyinAPI(self.owner.platform, self.owner.platform._playback_cookies())
+        if self.browser_chat is None:
+            from .douyin_browser import BrowserChat
+            self.browser_chat = BrowserChat(self.owner.platform, self.owner.context, self)
+        client = DouyinAPI(self.owner.platform, self.owner.platform._playback_cookies(),
+                           transport=self.browser_chat.request)
         self.start("text", lambda cancelled, progress: client.send_text(key[0], text, cancelled, progress=progress), key=key)
+
+
+    def shutdown(self):
+        if self.browser_chat is not None:
+            self.browser_chat.shutdown()
+        super().shutdown()
 
 
 class DouyuInteraction:

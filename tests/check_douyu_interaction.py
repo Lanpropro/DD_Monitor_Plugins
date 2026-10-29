@@ -1432,6 +1432,18 @@ class DouyinTests(unittest.TestCase):
         self.assertFalse(tracker.wait("douyin:123","124",lambda:False,timeout=0))
         self.assertFalse(tracker.wait("douyin:123","123",lambda:True,timeout=0))
 
+    def test_browser_transport_writes_once_and_has_no_http_fallback(self):
+        transport=Mock(return_value={"status_code":0,"data":{"msg_id_str":"12345"}})
+        self.client.transport=transport
+        self.assertEqual(self.client.send_text("douyin:123","hello"),api.ChatReceipt("42","fixture","hello"))
+        transport.assert_called_once()
+        self.session.get.assert_not_called()
+        self.assertEqual(transport.call_args.args[1]["room_id"],"999999")
+        transport.side_effect=api.InteractionError("official client failed")
+        with self.assertRaises(api.InteractionError):self.client.send_text("douyin:123","hello")
+        self.assertEqual(transport.call_count,2)
+        self.session.get.assert_not_called()
+
     def test_unconfirmed_or_rejected_response_never_succeeds(self):
         for payload in [{"status_code":0,"data":{}},{"status_code":30001,"data":{}},{"data":{"id":"1"}},{"status_code":False,"data":{"id":"1"}}]:
             self.session.get.return_value=response(payload)

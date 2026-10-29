@@ -76,8 +76,9 @@ def preparation_error(stage, error):
 
 
 class DouyinAPI:
-    def __init__(self, platform, cookies, *, session_factory=requests.Session):
+    def __init__(self, platform, cookies, *, session_factory=requests.Session, transport=None):
         self.platform, self.cookies, self.session_factory = platform, cookies.copy(), session_factory
+        self.transport = transport
 
     def send_text(self, room, text, cancelled=lambda: False, *, progress=lambda stage: None):
         if not isinstance(text, str) or not text.strip() or len(text) > 50:
@@ -119,13 +120,16 @@ class DouyinAPI:
                       "device_platform": "web", "room_id": rid, "content": text.strip(), "type": 0}
             progress("wait_ack")
             try:
-                # This GET is a write operation: no retries, redirects or alternate writes.
-                with session.get("https://live.douyin.com/webcast/room/chat/", params=params,
-                                 allow_redirects=False, timeout=(3, 8)) as response:
-                    if response.is_redirect:
-                        raise InteractionError("抖音发送接口发生跳转，结果未确认；请在官网核对后再试")
-                    response.raise_for_status()
-                    payload = response.json()
+                if self.transport is not None:
+                    payload = self.transport(canonical, params, cancelled)
+                else:
+                    # This GET is a write operation: no retries, redirects or alternate writes.
+                    with session.get("https://live.douyin.com/webcast/room/chat/", params=params,
+                                     allow_redirects=False, timeout=(3, 8)) as response:
+                        if response.is_redirect:
+                            raise InteractionError("抖音发送接口发生跳转，结果未确认；请在官网核对后再试")
+                        response.raise_for_status()
+                        payload = response.json()
             except (requests.RequestException, ValueError):
                 raise InteractionError("抖音发送结果未确认（阶段：room/chat），请在官网核对；不要立即重复发送") from None
             if not isinstance(payload, dict) or type(payload.get("status_code")) is not int:
