@@ -76,6 +76,24 @@ def check(app, host, module, output=None):
             second.setText('draft 2')
             assert console.stack.currentWidget() is console.rows['2']
             assert first.text() == 'draft 1' and not sent
+            assert isinstance(console, module.SettingsPanel), 'Both consoles must use the same style and paint'
+            assert console.layout().contentsMargins() == viewer.settings_panel.layout().contentsMargins()
+            panel_height = viewer.panel.height()
+            console_height = console.height()
+            console.minimize.click()
+            QTest.qWait(40)
+            assert console.isHidden() and console.restore.isVisible()
+            assert viewer.settings_panel.isVisible(), 'Sending minimizes independently'
+            assert viewer.panel.height() >= panel_height + console_height - 1
+            viewer.resize(900, 720)
+            QTest.qWait(40)
+            assert console.isHidden(), 'Resize must not reopen a minimized console'
+            if output:
+                viewer.grab().save(str(output.with_name(output.stem + '-minimized.png')))
+            console.restore.click()
+            QTest.qWait(40)
+            assert console.isVisible() and console.restore.isHidden()
+            assert second.text() == 'draft 2' and not sent
             for width, height in ((1320, 880), (820, 700), (640, 1000)):
                 viewer.resize(width, height)
                 QTest.qWait(40)

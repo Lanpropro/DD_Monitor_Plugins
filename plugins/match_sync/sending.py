@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayou
     QLabel, QLineEdit, QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget)
 
 from ddm.widgets import Tile
+from .panels import SettingsPanel
 
 
 class SendRow(QFrame):
@@ -43,16 +44,27 @@ class SendRow(QFrame):
         self.deleteLater()
 
 
-class SendConsole(QFrame):
+class SendConsole(SettingsPanel):
     def __init__(self, viewer):
-        super().__init__()
-        self.setObjectName('MatchSyncSendConsole')
-        self.viewer = viewer
+        super().__init__(viewer, 'MatchSyncSendConsole')
         self.rows = {}
+        self.collapsed = False
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 4)
+        layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(4)
-        layout.addWidget(QLabel('弹幕发送'))
+        heading = QHBoxLayout()
+        heading.addWidget(QLabel('弹幕发送'), 1)
+        self.minimize = QPushButton('最小化')
+        self.minimize.setFixedWidth(68)
+        self.minimize.setToolTip('收起发送控制台，保留草稿并扩展弹幕栏。')
+        self.minimize.clicked.connect(lambda: self.set_collapsed(True))
+        heading.addWidget(self.minimize)
+        layout.addLayout(heading)
+        self.restore = QPushButton('展开发送', viewer.panel.bar)
+        self.restore.setFixedWidth(90)
+        self.restore.clicked.connect(lambda: self.set_collapsed(False))
+        viewer.panel.bar.layout().insertWidget(0, self.restore)
+        self.restore.hide()
         target_bar = QHBoxLayout()
         self.target = QComboBox()
         self.target.setAccessibleName('发送弹幕的直播间')
@@ -105,9 +117,14 @@ class SendConsole(QFrame):
 
     def sync_height(self):
         settings = self.viewer.settings_panel
-        self.setVisible(not settings.isHidden())
+        self.setVisible(not settings.isHidden() and not self.collapsed)
+        self.restore.setVisible(not settings.isHidden() and self.collapsed)
         if not settings.isHidden():
             self.setFixedHeight(settings.height())
+
+    def set_collapsed(self, collapsed):
+        self.collapsed = collapsed
+        self.sync_height()
 
     def hideEvent(self, event):
         if self.batch_dialog is not None:

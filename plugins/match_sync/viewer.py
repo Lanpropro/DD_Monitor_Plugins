@@ -10,7 +10,7 @@ from dataclasses import replace
 from urllib.parse import urlsplit
 
 from PySide6.QtCore import QEasingCurve, QEvent, QMetaObject, QMimeData, QObject, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, Qt, QThread, QTimer, Signal, Slot
-from PySide6.QtGui import QColor, QCursor, QDrag, QIcon, QImage, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QRegion
+from PySide6.QtGui import QColor, QCursor, QDrag, QIcon, QImage, QKeySequence, QPainter, QPen, QPixmap, QRegion
 from PySide6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices
 from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QCheckBox, QComboBox, QDialog,
     QDialogButtonBox, QDoubleSpinBox, QFrame,
@@ -25,6 +25,7 @@ from .engine import route_pcm_s16_stereo, Alignment, Match, RATE, SafetyBuffer, 
 from .media import Chat, Decoder, PlatformChat
 from .fullscreen import mark_fullscreen
 from .sending import SendConsole
+from .panels import SettingsPanel
 
 COLORS = ("#38bdf8", "#fb7185", "#a78bfa", "#4ade80", "#fbbf24", "#fb923c")
 ROW_MIME = "application/x-ddm-match-sync-row"
@@ -550,54 +551,6 @@ class ComparisonPanel(QFrame):
             text = f"{position} · {playback}"
             if state.text() != text:
                 state.setText(text)
-
-
-class SettingsPanel(QWidget):
-    def __init__(self, viewer):
-        super().__init__(viewer)
-        self.viewer = viewer
-        self.setObjectName("MatchSyncSettings")
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setMinimumHeight(130)
-        self.setMaximumHeight(240)
-        self.setStyleSheet(f"""
-            #MatchSyncSettings, #MatchSyncRows {{
-                background: transparent; border: none;
-            }}
-            #MatchSyncSettings QLabel, #MatchSyncSettings QCheckBox {{ color: palette(window-text); }}
-            #MatchSyncSettings QScrollArea, #MatchSyncSettings QScrollArea > QWidget {{
-                background: transparent; border: none;
-            }}
-            #MatchSyncSettings QPushButton, #MatchSyncSettings QLineEdit,
-            #MatchSyncSettings QComboBox, #MatchSyncSettings QDoubleSpinBox {{
-                background: palette(button); color: palette(window-text);
-                border: 1px solid palette(mid);
-                border-radius: {theme.RADIUS_MD}px; padding: 4px 6px;
-            }}
-            #MatchSyncSettings QPushButton:hover {{
-                background: palette(light); border-color: palette(highlight);
-            }}
-            #MatchSyncSettings QPushButton:checked {{
-                background: rgba(251, 114, 153, 45); border-color: palette(highlight);
-            }}
-        """)
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        path = QPainterPath()
-        path.addRoundedRect(QRectF(self.rect()), theme.RADIUS_LG, theme.RADIUS_LG)
-        top = QPainterPath()
-        top.addRoundedRect(QRectF(0, 0, self.width(), self.height() / 2),
-                           theme.RADIUS_MD, theme.RADIUS_MD)
-        path = path.united(top)
-        tint = QLinearGradient(0, 0, 0, self.height())
-        top_color, bottom_color = theme.qcolor(theme.CONTENT), theme.qcolor(theme.BG)
-        top_color.setAlpha(round(255 * self.viewer.panel_alpha) if self.viewer.skin_visible else 238)
-        bottom_color.setAlpha(round(255 * self.viewer.panel_alpha) if self.viewer.skin_visible else 245)
-        tint.setColorAt(0, top_color)
-        tint.setColorAt(1, bottom_color)
-        painter.fillPath(path, tint)
 
 
 class CompactStatus(QLabel):
@@ -1337,7 +1290,6 @@ class Viewer(QDialog):
             #MatchSyncCompare QScrollArea, #MatchSyncCompare QScrollArea > QWidget {{ background: transparent; border: none; }}
         """)
         styled(self.panel, f"#MatchSync #DanmakuPanel {{ background: {background}; border: none; }}")
-        styled(self.send_console, f"#MatchSyncSendConsole {{ background: {background}; border: none; }}")
         for widget, name in ((self.panel.bar, "DanmakuBar"),
                              (self.panel.findChild(QWidget, "DanmakuHeader"), "DanmakuHeader")):
             styled(widget, f"#MatchSync #{name} {{ background: transparent; border: none; }}")
