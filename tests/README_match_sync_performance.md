@@ -1,5 +1,9 @@
 # 二路插件响应性回归
 
+`check_match_sync_interaction.py --host <宿主目录>` 使用真实宿主弹幕栏和控件管理器，
+注册不联网的替身输入框，验证逐房间草稿、同名来源路由、列表裁剪、画面弹幕原文、
+长度限制、移除/卸载及弹幕栏关闭恢复。仅向替身发 Enter，不读取账号或发送真实弹幕。
+
 `check_match_sync_audio_probe.py` 验证开发工具的正负声音偏移、增益与噪声、
 无关/被淹没声音、静音及周期歧义。仅合成数据，不启用运行时声音匹配或 OCR；
 调查结论见 [无比赛画面对齐](../docs/development/match-sync-commentary-alignment.md)。
