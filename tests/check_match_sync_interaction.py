@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 
 def check(app, host, module):
-    from PySide6.QtCore import QPoint
+    from PySide6.QtCore import QPoint, Qt
     from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QWidget
     from ddm import danmaku_actions, plugins
     from ddm.plugin_controls import TileControl
@@ -39,6 +39,7 @@ def check(app, host, module):
         manager = plugins.PluginManager(window=host, plugins_dir=directory)
         manager.register_tile_control('fixture', 'composer', Composer)
         viewer = module.Viewer(plugins.PluginContext(manager, 'interaction_check'), {})
+        viewer.setAttribute(Qt.WA_DontShowOnScreen, host.testAttribute(Qt.WA_DontShowOnScreen))
         try:
             for key in ('1', '2'):
                 viewer.add_room(key, {'alias': 'same name'})
