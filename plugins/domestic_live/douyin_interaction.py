@@ -148,6 +148,10 @@ class DouyinAPI:
             progress("ack")
             progress("wait_broadcast")
             if delivery is None or not delivery.wait(canonical, mid, cancelled):
-                raise InteractionError("抖音接口已受理，但未在弹幕连接中观察到该消息。广播投递未确认，草稿已保留；不要立即重复发送，请在官网核对。")
+                flag = receipt.get("content_self_see_status") if isinstance(receipt, dict) else None
+                flag = flag if type(flag) is int else "未提供"
+                raise InteractionError("抖音接口已受理，但未在弹幕连接中观察到该消息。广播投递未确认，草稿已保留；"
+                                       "不要立即重复发送，请在官网核对。"
+                                       f"（受理状态：0；content_self_see_status：{flag}，不作为公共投递证明）")
             progress("broadcast")
             return ChatReceipt(str(account["uid"]), account.get("uname") or "我", text.strip())

@@ -15,7 +15,20 @@ async (task, inspectClient) => {
             const exports = require(client.id);
             const send = exports?.W;
             if (typeof send !== 'function') throw new Error('official_client_changed');
+            window.__ddmChatStage = 'security';
+            const securityEntry = Object.entries(require.m).find(([, factory]) => {
+                const code = factory.toString();
+                return code.includes('getSecuritySdkInitWebStatus:function') && code.includes('securitySdkInitWeb:function');
+            });
+            if (!securityEntry) throw new Error('official_security_changed');
+            const security = require(securityEntry[0]);
+            if (typeof security?.getSecuritySdkInitWebStatus !== 'function') throw new Error('official_security_changed');
+            const status = await security.getSecuritySdkInitWebStatus();
+            if (status === 'timeout') throw new Error('official_security_timeout');
+            if (status !== 'success' && status !== 'skip_by_client_version') throw new Error('official_security_failed');
             if (window.__ddmChatCancelled) throw new Error('cancelled_before_send');
+            if (location.origin !== 'https://live.douyin.com' || location.pathname.replace(/\/$/, '') !== '/' + task.webRid)
+                throw new Error('wrong_room_page');
             window.__ddmChatSubmitted = true;
             window.__ddmChatStage = 'request';
             // The official client supplies device data, SDK initialization and per-request signatures.

@@ -36,10 +36,14 @@ class BrowserChat(QObject):
             labels = {"wrong_room_page": "官网页面与目标直播间不匹配",
                       "cancelled_before_send": "提交前已取消", "official_client_changed": "官网发送模块结构已变化",
                       "official_client_not_ready": "官网发送模块未就绪", "invalid_response": "官网未返回有效回执",
+                      "official_security_changed": "官网安全环境模块结构已变化",
+                      "official_security_timeout": "官网安全环境初始化超时，本次未提交",
+                      "official_security_failed": "官网安全环境初始化失败，本次未提交",
                       "official_request_failed": "官网客户端调用失败", "cancelled": "窗口已关闭或请求已取消"}
             reason = labels.get(code, "官网客户端返回未知错误")
             if isinstance(result, dict):
-                stages = {"page": "页面校验", "module": "模块初始化", "request": "官网请求", "response": "回执解析"}
+                stages = {"page": "页面校验", "module": "模块初始化", "security": "安全环境准备",
+                          "request": "官网请求", "response": "回执解析"}
                 stage = stages.get(result.get("stage"), "未知")
                 names = {"Error", "TypeError", "ReferenceError", "RangeError", "SyntaxError", "SecurityError",
                          "NotAllowedError", "AbortError", "TimeoutError", "NetworkError", "AxiosError"}
@@ -86,9 +90,10 @@ class BrowserChat(QObject):
             window.__ddmChatStage='page';
             Promise.resolve().then(()=> (%s)(%s, (%s))).then(data=>{window.__ddmChatResult=data})
             .catch(e=>{const allowed=['wrong_room_page','cancelled_before_send','official_client_changed',
-            'official_client_not_ready','invalid_response'];window.__ddmChatResult={error:
+            'official_client_not_ready','invalid_response','official_security_changed',
+            'official_security_timeout','official_security_failed'];window.__ddmChatResult={error:
             allowed.includes(e?.message)?e.message:'official_request_failed',
-            stage:['page','module','request','response'].includes(window.__ddmChatStage)?window.__ddmChatStage:'unknown',
+            stage:['page','module','security','request','response'].includes(window.__ddmChatStage)?window.__ddmChatStage:'unknown',
             exception:['Error','TypeError','ReferenceError','RangeError','SyntaxError','SecurityError',
             'NotAllowedError','AbortError','TimeoutError','NetworkError','AxiosError'].includes(e?.name)?e.name:'Other',
             cause:window.__ddmChatStage==='module'&&e?.name==='TypeError'&&typeof e.message==='string'?

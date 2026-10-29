@@ -1421,6 +1421,21 @@ class DouyinTests(unittest.TestCase):
             self.client.send_text("douyin:123","hello")
         self.session.get.assert_called_once()
 
+    def test_unconfirmed_receipt_reports_only_numeric_self_see_flag(self):
+        self.platform._chat_delivery.wait.return_value=False
+        for flag in (0, 1, None, "PRIVATE", {"cookie":"PRIVATE"}):
+            with self.subTest(flag=flag):
+                self.session.get.reset_mock()
+                self.session.get.return_value=response({"status_code":0,"data":{
+                    "msg_id_str":"12345","content_self_see_status":flag}})
+                with self.assertRaises(api.InteractionError) as error:
+                    self.client.send_text("douyin:123","hello")
+                detail=str(error.exception)
+                self.assertIn("广播投递未确认",detail)
+                self.assertIn("content_self_see_status",detail)
+                self.assertNotIn("PRIVATE",detail)
+                self.session.get.assert_called_once()
+
     def test_broadcast_tracker_matches_room_and_message_and_marks_own(self):
         tracker=self.module.BroadcastReceipts()
         tracker.own_uid="42"

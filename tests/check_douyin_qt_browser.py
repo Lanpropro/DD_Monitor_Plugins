@@ -40,27 +40,30 @@ class BlockNetwork(QWebEngineUrlRequestInterceptor):
 
 
 class BrowserTests(unittest.TestCase):
-    def exercise(self, behavior, expected_error=None, *, module_error=False, delayed_dependency=False):
+    def exercise(self, behavior, expected_error=None, *, module_error=False, delayed_dependency=False, security_status="success"):
         dialogs = []
         initialization = "throw new ReferenceError('PRIVATE');" if module_error else ""
         if module_error == "missing_call":
             initialization = "throw new TypeError(\"Cannot read properties of undefined (reading 'call') PRIVATE\");"
         html = """<html><head></head><body><script>
             window.calls=0; window.webpackChunkdouyin_live_v2=[];
-            const requireModule=()=>{ %s return {W:async params=>{
+            const security={getSecuritySdkInitWebStatus:async()=>%s};
+            const securityFactory=function(){return 'getSecuritySdkInitWebStatus:function securitySdkInitWeb:function';};
+            const requireModule=id=>{ %s if(id==='789')return security; return {W:async params=>{
                 window.calls++; window.params=params;
                 %s
             }};};
-            requireModule.m={123:function(){return '/webcast/room/chat/ paste_edit_method';}};
+            requireModule.m={123:function(){return '/webcast/room/chat/ paste_edit_method';},789:securityFactory};
             window.webpackChunkdouyin_live_v2.push=entry=>entry[2](requireModule);
-            </script></body></html>""" % (initialization, behavior)
+            </script></body></html>""" % (json.dumps(security_status), initialization, behavior)
         if delayed_dependency:
-            html = html.replace("requireModule.m={123:function(){return '/webcast/room/chat/ paste_edit_method';}};", """
+            html = html.replace("requireModule.m={123:function(){return '/webcast/room/chat/ paste_edit_method';},789:securityFactory};", """
                 const cache={};
                 const factories={123:function(module,exports,require){
                     const client=require(456); // /webcast/room/chat/ paste_edit_method
                     exports.W=client.W;
-                }};
+                },789:function(module){module.exports=security;
+                    return 'getSecuritySdkInitWebStatus:function securitySdkInitWeb:function';}};
                 const webpackRequire=id=>{
                     if(cache[id])return cache[id].exports;
                     const module=cache[id]={exports:{}};
@@ -122,8 +125,8 @@ class BrowserTests(unittest.TestCase):
                 QTest.qWait(20)
             self.assertTrue(snapshot)
             state = json.loads(snapshot[0])
-            self.assertEqual(state["calls"], 0 if module_error else 1)
-            if not module_error:
+            self.assertEqual(state["calls"], 0 if module_error or security_status != "success" else 1)
+            if state["calls"]:
                 self.assertEqual(state["params"]["room_id_str"], "999999")
             if expected_error:
                 self.assertIsInstance(outcome.get("error"), module.InteractionError)
@@ -172,6 +175,12 @@ class BrowserTests(unittest.TestCase):
 
     def test_module_typeerror_has_fixed_cause_without_raw_message(self):
         self.exercise("return {};", ["TypeError", "模块调用目标缺失", "已调用发送：否"], module_error="missing_call")
+
+    def test_security_timeout_does_not_submit(self):
+        self.exercise("return {};", ["安全环境初始化超时", "已调用发送：否"], security_status="timeout")
+
+    def test_security_failure_does_not_submit(self):
+        self.exercise("return {};", ["安全环境初始化失败", "已调用发送：否"], security_status="fail")
 
 
 if __name__ == "__main__":
