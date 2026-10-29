@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayou
     QLabel, QLineEdit, QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget)
 
 from ddm.widgets import Tile
-from .panels import SettingsPanel
+from .panels import SettingsPanel, console_button_style
 
 
 class SendRow(QFrame):
@@ -49,6 +49,7 @@ class SendConsole(SettingsPanel):
         super().__init__(viewer, 'MatchSyncSendConsole')
         self.rows = {}
         self.collapsed = False
+        self.expanded_without_settings = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(4)
@@ -60,10 +61,18 @@ class SendConsole(SettingsPanel):
         self.minimize.clicked.connect(lambda: self.set_collapsed(True))
         heading.addWidget(self.minimize)
         layout.addLayout(heading)
-        self.restore = QPushButton('展开发送', viewer.panel.bar)
+        self.restore_bar = QWidget(viewer.panel)
+        self.restore_bar.setObjectName('DanmakuBar')
+        restore_layout = QHBoxLayout(self.restore_bar)
+        restore_layout.setContentsMargins(10, 2, 10, 2)
+        self.restore = QPushButton('展开发送', self.restore_bar)
         self.restore.setFixedWidth(90)
+        self.restore.setStyleSheet(console_button_style('QPushButton'))
         self.restore.clicked.connect(lambda: self.set_collapsed(False))
-        viewer.panel.bar.layout().insertWidget(0, self.restore)
+        restore_layout.addWidget(self.restore)
+        restore_layout.addStretch(1)
+        viewer.panel.layout().addWidget(self.restore_bar)
+        self.restore_bar.hide()
         self.restore.hide()
         target_bar = QHBoxLayout()
         self.target = QComboBox()
@@ -117,13 +126,17 @@ class SendConsole(SettingsPanel):
 
     def sync_height(self):
         settings = self.viewer.settings_panel
-        self.setVisible(not settings.isHidden() and not self.collapsed)
-        self.restore.setVisible(not settings.isHidden() and self.collapsed)
         if not settings.isHidden():
+            self.expanded_without_settings = False
             self.setFixedHeight(settings.height())
+        visible = not self.collapsed and (not settings.isHidden() or self.expanded_without_settings)
+        self.setVisible(visible)
+        self.restore.setVisible(not visible)
+        self.restore_bar.setVisible(not visible)
 
     def set_collapsed(self, collapsed):
         self.collapsed = collapsed
+        self.expanded_without_settings = not collapsed and self.viewer.settings_panel.isHidden()
         self.sync_height()
 
     def hideEvent(self, event):

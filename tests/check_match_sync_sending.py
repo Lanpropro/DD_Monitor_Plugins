@@ -90,10 +90,17 @@ def check(app, host, module, output=None):
             assert console.isHidden(), 'Resize must not reopen a minimized console'
             if output:
                 viewer.grab().save(str(output.with_name(output.stem + '-minimized.png')))
+            viewer.set_settings_visible(False)
+            QTest.qWait(40)
+            assert console.restore.isVisible(), 'Restore sending must survive both consoles being minimized'
+            if output:
+                viewer.grab().save(str(output.with_name(output.stem + '-both-minimized.png')))
             console.restore.click()
             QTest.qWait(40)
             assert console.isVisible() and console.restore.isHidden()
+            assert viewer.settings_panel.isHidden(), 'Sending can be restored without opening the left console'
             assert second.text() == 'draft 2' and not sent
+            viewer.set_settings_visible(True)
             for width, height in ((1320, 880), (820, 700), (640, 1000)):
                 viewer.resize(width, height)
                 QTest.qWait(40)

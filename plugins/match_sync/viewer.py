@@ -1290,10 +1290,12 @@ class Viewer(QDialog):
             #MatchSyncCompare QScrollArea, #MatchSyncCompare QScrollArea > QWidget {{ background: transparent; border: none; }}
         """)
         styled(self.panel, f"#MatchSync #DanmakuPanel {{ background: {background}; border: none; }}")
-        for widget, name in ((self.panel.bar, "DanmakuBar"),
+        panel_bar = getattr(self.panel, 'bar', None)
+        for widget, name in ((panel_bar, "DanmakuBar"),
                              (self.panel.findChild(QWidget, "DanmakuHeader"), "DanmakuHeader")):
-            styled(widget, f"#MatchSync #{name} {{ background: transparent; border: none; }}")
-        for label in self.panel.bar.findChildren(QLabel):
+            if widget is not None:
+                styled(widget, f"#MatchSync #{name} {{ background: transparent; border: none; }}")
+        for label in panel_bar.findChildren(QLabel) if panel_bar is not None else ():
             styled(label, "color: palette(window-text); background: transparent;")
         self.panel.body.viewport().setAutoFillBackground(False)
         styled(self.picture, f"#MatchSync #Tile {{ background: {background}; }} "

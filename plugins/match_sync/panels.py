@@ -6,6 +6,18 @@ from PySide6.QtWidgets import QWidget
 from ddm import theme
 
 
+def console_button_style(selector):
+    return f"""
+        {selector} {{
+            background: palette(button); color: palette(window-text);
+            border: 1px solid palette(mid);
+            border-radius: {theme.RADIUS_MD}px; padding: 4px 6px;
+        }}
+        {selector}:hover {{ background: palette(light); border-color: palette(highlight); }}
+        {selector}:checked {{ background: rgba(251, 114, 153, 45); border-color: palette(highlight); }}
+    """
+
+
 class SettingsPanel(QWidget):
     def __init__(self, viewer, object_name="MatchSyncSettings"):
         super().__init__(viewer)
@@ -22,29 +34,21 @@ class SettingsPanel(QWidget):
             #MatchSyncSettings QScrollArea, #MatchSyncSettings QScrollArea > QWidget {{
                 background: transparent; border: none;
             }}
-            #MatchSyncSettings QPushButton, #MatchSyncSettings QLineEdit,
+            #MatchSyncSettings QLineEdit,
             #MatchSyncSettings QComboBox, #MatchSyncSettings QDoubleSpinBox {{
                 background: palette(button); color: palette(window-text);
                 border: 1px solid palette(mid);
                 border-radius: {theme.RADIUS_MD}px; padding: 4px 6px;
             }}
-            #MatchSyncSettings QPushButton:hover {{
-                background: palette(light); border-color: palette(highlight);
-            }}
-            #MatchSyncSettings QPushButton:checked {{
-                background: rgba(251, 114, 153, 45); border-color: palette(highlight);
-            }}
-        """.replace("MatchSyncSettings", object_name))
+        """.replace("MatchSyncSettings", object_name)
+            + console_button_style(f'#{object_name} QPushButton'))
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         path = QPainterPath()
-        path.addRoundedRect(QRectF(self.rect()), theme.RADIUS_LG, theme.RADIUS_LG)
-        top = QPainterPath()
-        top.addRoundedRect(QRectF(0, 0, self.width(), self.height() / 2),
-                           theme.RADIUS_MD, theme.RADIUS_MD)
-        path = path.united(top)
+        # Match the host's Tile and DanmakuPanel outer corners.
+        path.addRoundedRect(QRectF(self.rect()), 10, 10)
         tint = QLinearGradient(0, 0, 0, self.height())
         top_color, bottom_color = theme.qcolor(theme.CONTENT), theme.qcolor(theme.BG)
         top_color.setAlpha(round(255 * self.viewer.panel_alpha) if self.viewer.skin_visible else 238)
