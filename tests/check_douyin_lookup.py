@@ -533,6 +533,39 @@ class LookupTests(unittest.TestCase):
         self.assertNotIn('private', str(logs.call_args_list))
         self.assertNotIn('signature=', str(logs.call_args_list))
 
+    def test_huya_hls_playback_failure_tries_healthy_flv_before_another_hls(self):
+        from ddm.hls_proxy import FLV_HANDOFF_HEADER
+        provider = module.HuyaPlatform()
+        session = SimpleNamespace(http=SimpleNamespace(headers={'User-Agent': 'fixture'}, close=Mock()))
+        streams = {name: SimpleNamespace(ddm_quality=1004000, ddm_transport=transport,
+            to_url=lambda name=name, transport=transport: f'https://{name}.test/live.' +
+                ('flv' if transport == 'flv' else 'm3u8'))
+            for name, transport in (('hls1', 'hls'), ('hls2', 'hls'), ('flv1', 'flv'), ('flv2', 'flv'))}
+        with patch.object(provider, '_streams', return_value=(session, None, streams)), patch.object(
+                provider, '_probe_hls', side_effect=lambda url, headers: url) as hls, patch.object(
+                provider, '_probe_flv', side_effect=lambda url, headers, **kw: (url, 'fixture-token')) as flv, patch.object(
+                module.time, 'monotonic', return_value=10):
+            first = provider.play_url('huya:123')[0]
+            self.assertIn('hls1.test', first)
+            flv.assert_not_called()
+            provider.report_playback_failure('huya:123', first, 'HTTP_403')
+            hls.reset_mock()
+            result = provider.play_url('huya:123')
+            self.assertIn('flv1.test', result[0])
+            self.assertEqual(result[1], 1004000)
+            self.assertEqual(result[3][FLV_HANDOFF_HEADER], 'fixture-token')
+            hls.assert_not_called()
+            self.assertTrue(flv.call_args.kwargs['handoff'])
+            self.assertIn('hls1.test', provider.play_url('huya:456')[0])
+            provider.report_playback_failure('huya:123', result[0], 'LIVE_EOF')
+            self.assertIn('flv2.test', provider.play_url('huya:123')[0])
+            provider.report_playback_failure('huya:123', 'https://flv2.test/live.flv', 'HTTP_403')
+            self.assertIn('hls2.test', provider.play_url('huya:123')[0])
+        with patch.object(provider, '_streams', return_value=(session, None, streams)), patch.object(
+                provider, '_probe_hls', side_effect=lambda url, headers: url), patch.object(
+                module.time, 'monotonic', return_value=71):
+            self.assertIn('hls1.test', provider.play_url('huya:123')[0])
+
     def test_huya_player_failure_event_is_forwarded_only_while_loaded(self):
         plugin = module.LivePlatformsPlugin()
         provider = module.HuyaPlatform()

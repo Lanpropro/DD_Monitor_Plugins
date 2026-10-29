@@ -175,7 +175,7 @@ class HuyaPlatform(LiveQualityPlatform):
         self._cdn_lock = threading.Lock()
 
     def report_playback_failure(self, room_id, url, reason):
-        if reason not in ("HTTP_401", "HTTP_403", "HTTP_404", "HTTP_410", "HTTP_502", "HTTP_503", "HTTP_504", "STALL",
+        if reason not in ("HTTP_401", "HTTP_403", "HTTP_404", "HTTP_410", "HTTP_502", "HTTP_503", "HTTP_504", "STALL", "LIVE_EOF",
                           "Timeout", "ReadTimeout", "ConnectionError", "SSLError"):
             return
         canonical = self.normalize(room_id)
@@ -529,7 +529,11 @@ class HuyaPlatform(LiveQualityPlatform):
             # Keep two FLV CDNs: the first may reject a match room while the second works.
             hls = [stream for stream in candidates if getattr(stream, "ddm_transport", "hls") != "flv"]
             flv = [stream for stream in candidates if getattr(stream, "ddm_transport", "hls") == "flv"]
-            candidates = hls[:2] + flv[:2] if flv else hls[:4]
+            # A fresh playlist probe can pass again after playback failed with 403.
+            # Do not rotate through HLS forever while a healthy signed FLV is available.
+            prefer_flv = (any(urlsplit(stream.to_url()).hostname in failures for stream in hls) and
+                          any(urlsplit(stream.to_url()).hostname not in failures for stream in flv))
+            candidates = (flv[:2] + hls[:2] if prefer_flv else hls[:2] + flv[:2]) if flv else hls[:4]
             seen = set()
             attempts = 0
             for stream in candidates:
@@ -561,7 +565,8 @@ class HuyaPlatform(LiveQualityPlatform):
                     logger = getattr(self, "_diagnostic_log", None)
                     if logger is not None:
                         logger(f"[平台诊断] 阶段=source_selected 房间={self.normalize(room_id)} "
-                               f"CDN={urlsplit(playable).hostname} 画质={qn} 避让线路数={len(failures)}")
+                               f"CDN={urlsplit(playable).hostname} 画质={qn} "
+                               f"传输={getattr(stream, 'ddm_transport', 'hls')} 避让线路数={len(failures)}")
                     return playable, qn if isinstance(qn, int) else 10000, "huya", headers
                 except requests.RequestException as error:
                     logger = getattr(self, "_diagnostic_log", None)
