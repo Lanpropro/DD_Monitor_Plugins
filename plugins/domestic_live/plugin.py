@@ -1251,7 +1251,7 @@ class DouyinPlatform(NumericLivePlatform):
         return {"web_rid": rid, "status": room["status"], "title": room.get("title", ""),
                 "face": owner.get("avatar_thumb"), "cover": room.get("cover")}
 
-    def _share_room(self, session, uid, cancelled):
+    def _share_room(self, session, uid, cancelled, *, canonical=""):
         # 个人页下播后没有 room_data；直播资料的 web_rid 也可能为空。
         # 通过最近直播记录的内部 ID 读取官方分享页，得到长期有效的网页房间号。
         with session.get("https://live.douyin.com/webcast/room/info_by_user/",
@@ -1263,6 +1263,16 @@ class DouyinPlatform(NumericLivePlatform):
         internal = self._share_identity(payload, uid)
         if not internal or cancelled():
             return {}
+        room = payload["data"]
+        if canonical and type(room.get("status")) is int and room["status"] == 4:
+            # The owner mapping and API identity are verified; an ended room need not
+            # expose a usable live share page (or any streams) to confirm its status.
+            raw = canonical.split(":", 1)[1]
+            owner = room.get("owner") or {}
+            if (str(owner.get("id_str") or owner.get("id") or uid) != uid or
+                    str(owner.get("web_rid") or raw) != raw):
+                raise RuntimeError("抖音关注主播信息不匹配，请稍后重试")
+            return dict(room, owner=dict(owner, id_str=uid, web_rid=raw))
         with requests.get("https://webcast.amemv.com/webcast/reflow/" + internal,
                 headers={"User-Agent": "Mozilla/5.0"}, timeout=(4, 8)) as response:
             response.raise_for_status()
@@ -1434,7 +1444,7 @@ class DouyinPlatform(NumericLivePlatform):
         uid = self._anchor_uids.get(canonical)
         if uid:
             try:
-                room = self._share_room(requests, uid, lambda: False)
+                room = self._share_room(requests, uid, lambda: False, canonical=canonical)
                 if room:
                     if room["owner"]["web_rid"] != canonical.split(":", 1)[1]:
                         raise ValueError("Mismatched Douyin room")

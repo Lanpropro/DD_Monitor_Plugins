@@ -43,6 +43,33 @@ class LookupTests(unittest.TestCase):
             self.assertNotIn('auth', get.call_args.kwargs)
             self.assertEqual(set(get.call_args.kwargs['cookies']), {'__ac_nonce'})
 
+    def test_known_offline_anchor_does_not_need_live_share_page(self):
+        self.provider._anchor_uids[self.canonical] = '101'
+        data = {'id_str': '90001', 'owner_user_id': '101', 'status': 4, 'title': 'ended',
+                'owner': {'id_str': '101', 'web_rid': '', 'nickname': 'fixture anchor'}}
+        def get(url, **kwargs):
+            self.assertEqual(url, 'https://live.douyin.com/webcast/room/info_by_user/')
+            return response(payload={'status_code': 0, 'data': data})
+        with patch.object(module.requests, 'get', side_effect=get) as read:
+            info = self.provider.rooms_status([self.canonical])[self.canonical]
+        self.assertFalse(info['live'])
+        self.assertTrue(info['live_known'])
+        self.assertEqual(info['room_id'], self.canonical)
+        self.assertEqual(info['uname'], 'fixture anchor')
+        read.assert_called_once()
+
+    def test_offline_shortcut_rejects_unverified_or_mismatched_status(self):
+        self.provider._anchor_uids[self.canonical] = '101'
+        for changes in ({'owner_user_id': '999'}, {'status': None}, {'status': '4'}, {'id_str': ''},
+                        {'owner': {'id_str': '999'}}, {'owner': {'id_str': '101', 'web_rid': '12345'}}):
+            data = dict(id_str='90001', owner_user_id='101', status=4, owner={'id_str': '101'})
+            data.update(changes)
+            with self.subTest(changes=changes), patch.object(module.requests, 'get',
+                    return_value=response(payload={'status_code': 0, 'data': data})), patch.object(
+                    self.provider, '_room_page', side_effect=module.DouyinLookupError('fixture challenge')):
+                with self.assertRaises(RuntimeError):
+                    self.provider.room_info(self.canonical)
+
     def test_profile_add_uses_verified_page_once_when_http_is_unavailable(self):
         user = {'uid': '101', 'web_rid': '439082987915', 'nickname': 'profile anchor',
                 'status': 2, 'title': 'profile live',
