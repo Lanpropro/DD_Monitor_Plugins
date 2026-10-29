@@ -1461,6 +1461,59 @@ class DouyinTests(unittest.TestCase):
             self.assertEqual(APP.clipboard().text(),dialog.message_label.text())
         finally:dialog.close();dialog.deleteLater();APP.processEvents()
 
+    def test_cancelled_browser_error_does_not_suggest_login(self):
+        module=importlib.import_module("ddm_plugin_domestic_live.douyin_browser")
+        parent=QWidget()
+        bridge=module.BrowserChat(self.platform,SimpleNamespace(window=None),parent)
+        bridge.closed=True
+        try:
+            with self.assertRaises(api.InteractionError) as error:
+                bridge.request("douyin:123",{"room_id":"999999","content":"hello"},lambda:True)
+            self.assertIn("取消",str(error.exception))
+            self.assertNotIn("登录",str(error.exception))
+        finally:parent.deleteLater();APP.processEvents()
+
+    def test_browser_starts_without_loadfinished_and_only_retries_before_submission(self):
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QDialog, QLabel, QPushButton
+        browser_module=importlib.import_module("ddm_plugin_domestic_live.douyin_browser")
+        parent=QWidget()
+        page=Mock()
+        states=[{"started":True,"submitted":False,"result":None},
+                {"started":True,"submitted":False,"result":{"error":"official_client_not_ready"}},
+                {"started":True,"submitted":True,"result":None},
+                {"started":True,"submitted":True,"result":{"status_code":0,"data":{"msg_id_str":"12345"}}}]
+        def execute(script, callback=None):
+            if callback:callback(states.pop(0))
+        page.runJavaScript.side_effect=execute
+        dialog=QDialog(parent)
+        dialog.status=QLabel(dialog)
+        dialog.remember=QWidget(dialog)
+        dialog.forget_button=QPushButton(dialog)
+        dialog.read_button=QPushButton(dialog)
+        dialog.read_button.clicked.connect(lambda:None)
+        dialog.browser=SimpleNamespace(page=lambda:page,load=Mock(),reload=Mock())
+        bridge=browser_module.BrowserChat(self.platform,SimpleNamespace(window=None),parent)
+        request=dict(room="douyin:123",params={"room_id":"999999","content":"hello"},cancelled=lambda:False,
+                     done=threading.Event(),result=None,deadline=time.monotonic()+55)
+        try:
+            with patch("ddm.platform_login.PlatformFollowDialog",return_value=dialog):bridge.open(request)
+            timer=dialog.findChild(QTimer)
+            timer.timeout.emit()
+            self.assertIn("__ddmChatTaskId",page.runJavaScript.call_args.args[0])
+            self.assertFalse(dialog.read_button.isEnabled())
+            timer.timeout.emit()
+            self.assertTrue(dialog.read_button.isEnabled())
+            dialog.read_button.click()
+            dialog.browser.reload.assert_called_once()
+            timer.timeout.emit()
+            self.assertFalse(dialog.read_button.isEnabled())
+            timer.timeout.emit()
+            self.assertTrue(request["done"].is_set())
+            self.assertEqual(request["result"]["status_code"],0)
+            self.assertNotIn("登录",str(browser_module.InteractionError("窗口已关闭或请求已取消")))
+        finally:bridge.shutdown();parent.close();parent.deleteLater();APP.processEvents()
+
     def test_unconfirmed_or_rejected_response_never_succeeds(self):
         for payload in [{"status_code":0,"data":{}},{"status_code":30001,"data":{}},{"data":{"id":"1"}},{"status_code":False,"data":{"id":"1"}}]:
             self.session.get.return_value=response(payload)
