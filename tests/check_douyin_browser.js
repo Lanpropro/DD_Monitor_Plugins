@@ -4,11 +4,11 @@ const vm = require('vm');
 const assert = require('assert');
 const path = require('path');
 const source = fs.readFileSync(path.join(__dirname, '../plugins/domestic_live/douyin_send.js'), 'utf8');
-async function fixture({cancelled=false, host='https://live.douyin.com'}={}) {
+async function fixture({cancelled=false, host='https://live.douyin.com', selfSee=0}={}) {
     let calls = 0, received;
     const client = {W: async params => {
         calls++; received=params;
-        return {data:{status_code:0,data:{msg_id_str:'7560000000000000001',content_self_see_status:0,
+        return {data:{status_code:0,data:{msg_id_str:'7560000000000000001',content_self_see_status:selfSee,
             content:'private',user:{secret:'not-exported'}}}};
     }};
     const requireModule = () => client;
@@ -27,10 +27,11 @@ async function fixture({cancelled=false, host='https://live.douyin.com'}={}) {
     assert.strictEqual(received.content,'hello');
     assert.strictEqual(received.paste_edit_method,'non_paste');
     assert.strictEqual(result.data.msg_id_str,'7560000000000000001');
-    assert.strictEqual(result.data.content_self_see_status,0);
+    assert.strictEqual(result.data.content_self_see_status,Number.isInteger(selfSee)?selfSee:null);
     assert(!JSON.stringify(result).includes('private'));
     assert(!JSON.stringify(result).includes('secret'));
 }
 (async()=>{await fixture();await fixture({cancelled:true});await fixture({host:'https://example.com'});
+await fixture({selfSee:{secret:'private'}});
 console.log('PASS: official helper called once, internal room, cancellation, origin guard, sanitized receipt');
 })().catch(error=>{console.error(error);process.exit(1)});

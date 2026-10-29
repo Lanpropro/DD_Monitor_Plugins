@@ -37,6 +37,15 @@ class BrowserChat(QObject):
                       "official_client_not_ready": "官网发送模块未就绪", "invalid_response": "官网未返回有效回执",
                       "official_request_failed": "官网客户端调用失败", "cancelled": "窗口已关闭或请求已取消"}
             reason = labels.get(code, "官网客户端返回未知错误")
+            if isinstance(result, dict):
+                stages = {"page": "页面校验", "module": "模块初始化", "request": "官网请求", "response": "回执解析"}
+                stage = stages.get(result.get("stage"), "未知")
+                names = {"Error", "TypeError", "ReferenceError", "RangeError", "SyntaxError", "SecurityError",
+                         "NotAllowedError", "AbortError", "TimeoutError", "NetworkError", "AxiosError"}
+                name = result.get("exception")
+                name = name if name in names else "其他异常"
+                submitted = "是" if result.get("submitted") is True else "否"
+                reason += f"；位置：{stage}；异常：{name}；已调用发送：{submitted}"
             raise InteractionError(f"抖音官网发送未确认（阶段：官方客户端；原因：{reason}），请先核对直播间内是否出现该条消息。")
         return result
 
@@ -74,10 +83,15 @@ class BrowserChat(QObject):
         submit = """if(window.__ddmChatTaskId!==%s){
             window.__ddmChatTaskId=%s;window.__ddmChatCancelled=false;
             window.__ddmChatSubmitted=false;window.__ddmChatResult=null;
+            window.__ddmChatStage='page';
             Promise.resolve().then(()=> (%s)(%s)).then(data=>{window.__ddmChatResult=data})
             .catch(e=>{const allowed=['wrong_room_page','cancelled_before_send','official_client_changed',
             'official_client_not_ready','invalid_response'];window.__ddmChatResult={error:
-            allowed.includes(e.message)?e.message:'official_request_failed'}});
+            allowed.includes(e?.message)?e.message:'official_request_failed',
+            stage:['page','module','request','response'].includes(window.__ddmChatStage)?window.__ddmChatStage:'unknown',
+            exception:['Error','TypeError','ReferenceError','RangeError','SyntaxError','SecurityError',
+            'NotAllowedError','AbortError','TimeoutError','NetworkError','AxiosError'].includes(e?.name)?e.name:'Other',
+            submitted:!!window.__ddmChatSubmitted}});
         }""" % (json.dumps(task["id"]), json.dumps(task["id"]), SCRIPT, json.dumps(task))
         read_state = "JSON.stringify({submitted:!!window.__ddmChatSubmitted,result:window.__ddmChatResult})"
         def retry():

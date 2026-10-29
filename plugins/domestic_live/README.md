@@ -308,4 +308,7 @@ python tests/check_douyu_interaction.py --host ../DD_Monitor_CE --plugins-dir ..
 
 离线脚本验证：`node tests/check_douyin_browser.js`（完全模拟官网模块，无网络、账号及真实弹幕）。
 
+实际 Qt WebEngine 离线验证：`python tests/check_douyin_qt_browser.py --host <本体目录>`，可加 `--plugins-dir <本体目录>/plugins_user` 检查安装副本。使用临时无痕页面和模拟模块并阻断外网，覆盖页面准备、单次调用、成功回调及异常分类；不读取账号，不证明真实公共广播投递。
+官网调用失败详情区分页面校验、模块初始化、官网请求和回执解析，只显示白名单异常类型及是否已调用发送，不导出异常正文、堆栈、Cookie 或签名地址。异常后不自动重发。
+
 官网互动窗口通过实际页面就绪状态启动脚本，不等待媒体子资源全部加载成功。模块未就绪且确认尚未提交时提供「重新加载环境」；已提交或结果不明时不提供重发。取消提示不再引导重新登录。
