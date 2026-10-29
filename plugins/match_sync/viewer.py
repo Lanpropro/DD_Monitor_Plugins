@@ -24,6 +24,7 @@ from ddm import config as config_module, motion, theme
 from .engine import route_pcm_s16_stereo, Alignment, Match, RATE, SafetyBuffer, LateBuffer, match_scenes, refine_match, mix_pcm, resample_pcm
 from .media import Chat, Decoder, PlatformChat
 from .fullscreen import mark_fullscreen
+from .sending import SendConsole
 
 COLORS = ("#38bdf8", "#fb7185", "#a78bfa", "#4ade80", "#fbbf24", "#fb923c")
 ROW_MIME = "application/x-ddm-match-sync-row"
@@ -1270,7 +1271,15 @@ class Viewer(QDialog):
         left_layout.setSpacing(4)
         left_layout.addWidget(self.body_split, 1)
         split.addWidget(self.left_pane)
-        split.addWidget(self.panel)
+        self.send_console = SendConsole(self)
+        right_pane = QWidget()
+        right_layout = QVBoxLayout(right_pane)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
+        right_layout.addWidget(self.panel, 1)
+        right_layout.addWidget(self.send_console)
+        split.addWidget(right_pane)
+        self.settings_panel.installEventFilter(self)
         split.setSizes([930, 330])
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1328,6 +1337,7 @@ class Viewer(QDialog):
             #MatchSyncCompare QScrollArea, #MatchSyncCompare QScrollArea > QWidget {{ background: transparent; border: none; }}
         """)
         styled(self.panel, f"#MatchSync #DanmakuPanel {{ background: {background}; border: none; }}")
+        styled(self.send_console, f"#MatchSyncSendConsole {{ background: {background}; border: none; }}")
         for widget, name in ((self.panel.bar, "DanmakuBar"),
                              (self.panel.findChild(QWidget, "DanmakuHeader"), "DanmakuHeader")):
             styled(widget, f"#MatchSync #{name} {{ background: transparent; border: none; }}")
@@ -1432,6 +1442,8 @@ class Viewer(QDialog):
             event.acceptProposedAction()
             return True
         elif kind == QEvent.Resize:
+            if watched is self.settings_panel and hasattr(self, 'send_console'):
+                self.send_console.sync_height()
             if watched is self.picture.bottom:
                 QTimer.singleShot(0, self._layout_restore_control)
             if self.embedded and watched is self.parentWidget():
@@ -1459,6 +1471,7 @@ class Viewer(QDialog):
                     widget.installEventFilter(self)
                     widget.hide()
         self._sync_sidebar_marks()
+        self.send_console.sync_height()
         super().showEvent(event)
 
     def hideEvent(self, event):
@@ -1528,6 +1541,7 @@ class Viewer(QDialog):
             self.settings_height = self.settings_panel.height()
             self.compare.setChecked(False)
         self.settings_panel.setVisible(visible)
+        self.send_console.sync_height()
         self.restore_settings.setVisible(not visible)
         self._layout_restore_control()
         if visible:
@@ -1847,6 +1861,7 @@ class Viewer(QDialog):
                     self.add_room(room_id, {"alias": room.get("uname") or ""})
 
     def update_main_choices(self):
+        self.send_console.sync_rooms()
         selected = self.main.currentData()
         self.main.blockSignals(True)
         self.main.clear()
