@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QCheckBox, QCombo
     QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLayout, QLineEdit,
     QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QSlider, QSplitter, QStyle, QTextEdit, QToolTip, QVBoxLayout, QWidget)
 
-from ddm.widgets import AUTO_QUALITY, Avatar, ROOM_MIME, Tile
+from ddm.widgets import AUTO_QUALITY, Avatar, DanmakuPanel, ROOM_MIME, Tile
 from ddm.fullscreen_cursor import FullscreenCursor
 from ddm.dialogs import SHORTCUT_ACTIONS
 from ddm import config as config_module, motion, theme
@@ -28,7 +28,6 @@ from .media import Chat, Decoder, PlatformChat
 from .fullscreen import mark_fullscreen
 from .recording import MultiTrackRecorder
 from .video import REPLAY_SECONDS
-from .interaction import ChatPanel
 
 COLORS = ("#38bdf8", "#fb7185", "#a78bfa", "#4ade80", "#fbbf24", "#fb923c")
 ROW_MIME = "application/x-ddm-match-sync-row"
@@ -1250,11 +1249,7 @@ class Viewer(QDialog):
         self.picture.recordingRequested.connect(self._record_picture)
         self.picture.videoDanmakuAdvancedRequested.connect(self._open_danmaku_settings)
         self.fullscreen_dialog = None
-        self.chat_visible = QCheckBox('右侧弹幕')
-        self.chat_visible.setChecked(context.setting('chat_visible', True))
-        self.chat_visible.toggled.connect(self._set_chat_visible)
-        heading.insertWidget(2, self.chat_visible)
-        self.panel = ChatPanel(self)
+        self.panel = DanmakuPanel(self)
         self.panel.roomDropped.connect(self._add_dragged)
         self.panel.body.setAcceptDrops(False)
         self.panel.body.viewport().setAcceptDrops(False)
@@ -1267,8 +1262,6 @@ class Viewer(QDialog):
             if hasattr(self.video_danmaku, "set_native_video"):
                 self.video_danmaku.set_native_video(False)
             self.video_danmaku.apply_settings(settings)
-            self.video_danmaku.actionsRequested.disconnect(self.picture._show_danmaku_actions)
-            self.video_danmaku.actionsRequested.connect(self.panel.overlay_actions)
             self.picture.videoDanmakuChanged.connect(lambda: self.overlay_pending.clear())
         self.panel.apply_style(settings.get("danmaku_font", ""),
                                int(settings.get("danmaku_font_size") or 13))
@@ -1326,7 +1319,6 @@ class Viewer(QDialog):
         split.addWidget(self.left_pane)
         split.addWidget(self.panel)
         split.setSizes([930, 330])
-        self._set_chat_visible(self.chat_visible.isChecked())
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(split)
@@ -1858,10 +1850,6 @@ class Viewer(QDialog):
         self.context.set_setting("automatic", self.automatic.isChecked())
         self.context.set_setting('buffer_reserve', self.reserve_seconds)
 
-    def _set_chat_visible(self, visible):
-        self.panel.setVisible(visible)
-        self.context.set_setting('chat_visible', visible)
-
     def _buffer_reserve_changed(self):
         self.reserve_seconds = self.buffer_reserve.currentData()
         self.late_buffer = LateBuffer(self.reserve_seconds)
@@ -1925,8 +1913,6 @@ class Viewer(QDialog):
         self.main.blockSignals(False)
         self._main_changed()
 
-        self.panel.sync_rooms()
-
     def _main_changed(self, *_args):
         selected = self.main.currentData() or ""
         if selected in self.rows:
@@ -1982,9 +1968,7 @@ class Viewer(QDialog):
 
     def sync_picture(self, *_args):
         row = self.rows.get(self.main.currentData())
-        # Poll twice per source frame: Qt paint/chat work can delay a timer by
-        # several milliseconds. The audio clock still owns playback speed.
-        interval = max(4, int(500 / getattr(row.decoder, "fps", 30))) if row is not None else 33
+        interval = max(4, int(1000 / getattr(row.decoder, "fps", 30))) if row is not None else 33
         if self.render_timer.interval() != interval:
             self.render_timer.setInterval(interval)
         tile = self.picture
@@ -2960,10 +2944,6 @@ class Viewer(QDialog):
             if not self.rows[key].show_chat.isChecked() or clock + shifts[key] - received > 5:
                 self.overlay_pending.pop(key, None)
             elif self.video_danmaku.add_event(event):
-                if event.get('kind', 'danmaku') == 'danmaku' and self.video_danmaku.comments:
-                    comment = self.video_danmaku.comments[-1]
-                    comment.source_room = key
-                    comment.source_text = event.get('source_text', event.get('text', ''))
                 self.overlay_pending.pop(key, None)
                 self.overlay_last = key
 
@@ -3087,7 +3067,6 @@ class Viewer(QDialog):
             self.panel.add_event(event)
             received = _due + shifts[event["source_room"]]
             self.overlay_pending[event["source_room"]] = (received, {**event,
-                "source_text": event.get('text') or '',
                 "text": f"【{event['source_label']}】 {event.get('text') or ''}"})
         self._render_overlay(clock, shifts)
 
