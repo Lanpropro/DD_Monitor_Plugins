@@ -1,5 +1,25 @@
 # 二路插件响应性回归
 
+`check_match_sync_audio_probe.py` 验证开发工具的正负声音偏移、增益与噪声、
+无关/被淹没声音、静音及周期歧义。仅合成数据，不启用运行时声音匹配或 OCR；
+调查结论见 [无比赛画面对齐](../docs/development/match-sync-commentary-alignment.md)。
+
+`check_match_sync_recording.py --host <宿主目录> --output <work/test-artifacts下的目录>`
+生成并解码 H264/HEVC 本地素材（含 B 帧），验证视频复制、三条具名 AAC 音轨、
+440/880Hz 声音隔离、250ms 偏移校正、缺失音轨静音、停止封装及断线模板保护；
+另以替身验证录制按钮、目录要求、静音仍保留音轨、成员变化和停止插件收尾。
+
+`check_match_sync_replay.py --host <宿主目录>` 离屏验证整组回看的共同缓存边界、
+画面/PCM/弹幕时间、历史弹幕不变性、最多 10 分钟时间轴、1/3/5/10 分钟配置、
+回看期间直播接收与直播进度匹配、返回直播和缓存过期。
+`check_match_sync_replay_storage.py --output <work/test-artifacts下的目录>` 验证磁盘
+视频/PCM、完整 GOP 淘汰、解码者持有文件的生命周期、磁盘失败回退，以及快速生成
+的 12 分钟 H264 内容在十分钟前和直播位置的实际解码；不代表 12 分钟墙钟长测。
+
+`check_match_sync_independent.py --host <宿主目录>` 使用合成缓存与 PCM 验证副路
+独立播放：无偏移、零偏移、已有偏移、声音开关、暂停、主路隔离、旧匹配结果、
+重连和返回同步。离屏运行，禁止联网，不打开音频设备或真实直播。
+
 `check_match_sync_contention.py --host <宿主目录>` 检查音频供给持锁时 GUI
 读取时钟不等待，并检查失败搜索的逐路 2/4/8 秒退避、手动重试和重连重置，以及
 候选密集场景的歧义拒绝及候选顺序。`check_match_sync_event_filter.py --host <宿主目录>`
