@@ -58,6 +58,37 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(info['uname'], 'fixture anchor')
         read.assert_called_once()
 
+    def test_known_anchor_success_without_current_live_record_is_offline(self):
+        self.provider._anchor_uids[self.canonical] = '101'
+        with patch.object(module.requests, 'get', return_value=response(
+                payload={'status_code': 0, 'data': {}, 'extra': {}})) as read:
+            info = self.provider.rooms_status([self.canonical])[self.canonical]
+        self.assertFalse(info['live'])
+        self.assertTrue(info['live_known'])
+        self.assertEqual(info['anchor_uid'], '101')
+        self.assertEqual(info['room_id'], self.canonical)
+        self.assertEqual(info['uname'], '')  # A status-only update preserves the saved display metadata.
+        self.assertEqual(info['title'], '')
+        read.assert_called_once()
+        self.assertEqual(read.call_args.args[0], 'https://live.douyin.com/webcast/room/info_by_user/')
+
+    def test_no_live_record_does_not_fabricate_an_unknown_fixed_room(self):
+        with patch.object(module.requests, 'get', return_value=response(payload={'status_code': 0, 'data': {}})) as read:
+            self.assertEqual(self.provider._share_room(module.requests, '101', lambda: False), {})
+        read.assert_called_once()
+
+    def test_empty_or_failed_responses_are_not_offline_records(self):
+        self.provider._anchor_uids[self.canonical] = '101'
+        replies = [response(payload=payload) for payload in (
+            {'status_code': 1, 'data': {}}, {'status_code': False, 'data': {}},
+            {'status_code': 0, 'data': None}, {'status_code': 0, 'data': []}, {'status_code': 0})]
+        replies += [response(text=''), response(status=403)]
+        for reply in replies:
+            with self.subTest(reply=reply.status_code), patch.object(module.requests, 'get', return_value=reply), patch.object(
+                    self.provider, '_room_page', side_effect=module.DouyinLookupError('fixture challenge')):
+                with self.assertRaises(RuntimeError):
+                    self.provider.room_info(self.canonical)
+
     def test_offline_shortcut_rejects_unverified_or_mismatched_status(self):
         self.provider._anchor_uids[self.canonical] = '101'
         for changes in ({'owner_user_id': '999'}, {'status': None}, {'status': '4'}, {'id_str': ''},

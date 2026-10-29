@@ -1261,7 +1261,14 @@ class DouyinPlatform(NumericLivePlatform):
             response.raise_for_status()
             payload = response.json()
         internal = self._share_identity(payload, uid)
-        if not internal or cancelled():
+        if cancelled():
+            return {}
+        if (canonical and type(payload.get("status_code")) is int and payload["data"] == {} and
+                re.fullmatch(r"[1-9][0-9]{0,19}", uid)):
+            # A successful empty record means this known anchor has no current live.
+            # Keep the verified fixed room; there is no live share page to resolve.
+            return {"status": 4, "owner": {"id_str": uid, "web_rid": canonical.split(":", 1)[1]}}
+        if not internal:
             return {}
         room = payload["data"]
         if canonical and type(room.get("status")) is int and room["status"] == 4:
@@ -1410,8 +1417,9 @@ class DouyinPlatform(NumericLivePlatform):
             info = {"room": share} if share is not None else self.room_data(canonical)
             room = info["room"]
             owner = room.get("owner") or info.get("anchor") or {}
-            return api.RoomInfo(room_id=canonical, uname=owner.get("nickname") or f"抖音 · {raw}",
-                title=room.get("title") or "抖音直播间", live=room["status"] == 2,
+            status_only = room["status"] == 4 and not room.get("id_str")
+            return api.RoomInfo(room_id=canonical, uname="" if status_only else owner.get("nickname") or f"抖音 · {raw}",
+                title="" if status_only else room.get("title") or "抖音直播间", live=room["status"] == 2,
                 platform=self.kind, face=self._image_url(owner.get("avatar_thumb")),
                 cover_url=self._image_url(room.get("cover")),
                 extra={"playback_mode": "stream", "live_known": True,
