@@ -36,6 +36,7 @@ class ContributionGuideTests(unittest.TestCase):
             source = document.read_text(encoding='utf-8')
             links = re.findall(r'\]\(([^)]+)\)', source)
             links += re.findall(r'href="([^"]+)"', source)
+            links += re.findall(r'src="([^"]+)"', source)
             for link in links:
                 if '://' not in link and not link.startswith('#'):
                     with self.subTest(document=relative, link=link):
@@ -46,6 +47,12 @@ class ContributionGuideTests(unittest.TestCase):
         cards = re.findall(r'<td\b[^>]*>(.*?)</td>', readme, re.DOTALL)
         manifests = list((ROOT / 'plugins').glob('*/plugin.json'))
         self.assertEqual(len(cards), len(manifests))
+        platforms = {
+            'domestic_live': {'huya', 'douyu', 'douyin'},
+            'global_live': {'twitch', 'youtube'},
+            'match_sync': {'bilibili', 'huya', 'douyu', 'douyin', 'twitch', 'youtube'},
+            'bili_live': {'bilibili'},
+        }
         for path in manifests:
             manifest = json.loads(path.read_text(encoding='utf-8'))
             with self.subTest(plugin=manifest['id']):
@@ -55,6 +62,8 @@ class ContributionGuideTests(unittest.TestCase):
                 author = manifest.get('author', 'Lanpropro')
                 self.assertIn(f'href="https://github.com/{author}"', matches[0])
                 self.assertIn('下载插件', matches[0])
+                icons = re.findall(r'<img src="docs/assets/platforms/([^"/]+)\.png"', matches[0])
+                self.assertEqual(set(icons), platforms[manifest['id']])
 
     def test_release_notes_are_indexed_in_one_directory(self):
         self.assertFalse(list(ROOT.glob('RELEASE-*.md')))

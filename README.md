@@ -20,6 +20,7 @@
 <tr>
 <td width="50%" valign="top">
 <h3><a href="plugins/domestic_live/README.md">国内直播平台</a></h3>
+<p><img src="docs/assets/platforms/huya.png" alt="虎牙" width="24" height="24"> &nbsp; <img src="docs/assets/platforms/douyu.png" alt="斗鱼" width="24" height="24"> &nbsp; <img src="docs/assets/platforms/douyin.png" alt="抖音" width="24" height="24"></p>
 <p><strong>虎牙 · 斗鱼 · 抖音</strong></p>
 <p>将国内平台的直播间加入关注与画面墙，解析直播流，在同一套界面里观看。</p>
 <p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
@@ -27,6 +28,7 @@
 </td>
 <td width="50%" valign="top">
 <h3><a href="plugins/global_live/README.md">海外直播平台</a></h3>
+<p><img src="docs/assets/platforms/twitch.png" alt="Twitch" width="24" height="24"> &nbsp; <img src="docs/assets/platforms/youtube.png" alt="YouTube" width="24" height="24"></p>
 <p><strong>Twitch · YouTube</strong></p>
 <p>接入海外平台直播，提供关注、播放、悬停预览与聊天弹幕，支持自动画质。</p>
 <p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
@@ -36,13 +38,15 @@
 <tr>
 <td width="50%" valign="top">
 <h3><a href="plugins/match_sync/README.md">比赛二路同步</a></h3>
+<p><img src="docs/assets/platforms/bilibili.png" alt="哔哩哔哩" width="24" height="24"> &nbsp; <img src="docs/assets/platforms/huya.png" alt="虎牙" width="24" height="24"> &nbsp; <img src="docs/assets/platforms/douyu.png" alt="斗鱼" width="24" height="24"> &nbsp; <img src="docs/assets/platforms/douyin.png" alt="抖音" width="24" height="24"> &nbsp; <img src="docs/assets/platforms/twitch.png" alt="Twitch" width="24" height="24"> &nbsp; <img src="docs/assets/platforms/youtube.png" alt="YouTube" width="24" height="24"></p>
 <p><strong>一路主画面，多路解说</strong></p>
-<p>对齐比赛主画面与二路直播，混合解说声音、合并带来源标记的弹幕。</p>
+<p>对齐比赛主画面与二路直播，混合解说声音、合并带来源标记的弹幕。其他平台需先启用对应平台插件。</p>
 <p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
 <p><a href="plugins/match_sync/README.md">功能与兼容说明</a> · <a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.4">下载插件</a></p>
 </td>
 <td width="50%" valign="top">
 <h3><a href="plugins/bili_live/README.md">B站直播互动</a></h3>
+<p><img src="docs/assets/platforms/bilibili.png" alt="哔哩哔哩" width="24" height="24"></p>
 <p><strong>弹幕 · 表情 · 礼物</strong></p>
 <p>使用本体登录，在直播格子里发送文字与表情，浏览礼物目录和背包并参与互动。</p>
 <p>作者：<a href="https://github.com/reon-nynes">@reon-nynes</a><br>兼容维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
