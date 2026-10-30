@@ -17,14 +17,14 @@ from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QCheckBox, QCombo
     QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLayout, QLineEdit,
     QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QSlider, QSplitter, QStyle, QTextEdit, QToolTip, QVBoxLayout, QWidget)
 
-from ddm.widgets import AUTO_QUALITY, Avatar, DanmakuPanel, ROOM_MIME, Tile
+from ddm.widgets import AUTO_QUALITY, Avatar, ROOM_MIME, Tile
 from ddm.fullscreen_cursor import FullscreenCursor
 from ddm.dialogs import SHORTCUT_ACTIONS
 from ddm import config as config_module, motion, theme
 from .engine import route_pcm_s16_stereo, Alignment, Match, RATE, SafetyBuffer, LateBuffer, match_scenes, refine_match, mix_pcm, resample_pcm
 from .media import Chat, Decoder, PlatformChat
 from .fullscreen import mark_fullscreen
-from .sending import SendConsole
+from .sending import SendConsole, SendingDanmakuPanel
 from .panels import SettingsPanel
 
 COLORS = ("#38bdf8", "#fb7185", "#a78bfa", "#4ade80", "#fbbf24", "#fb923c")
@@ -1156,7 +1156,7 @@ class Viewer(QDialog):
         self.picture.recordingRequested.connect(self._record_picture)
         self.picture.videoDanmakuAdvancedRequested.connect(self._open_danmaku_settings)
         self.fullscreen_dialog = None
-        self.panel = DanmakuPanel(self)
+        self.panel = SendingDanmakuPanel(self)
         self.panel.roomDropped.connect(self._add_dragged)
         self.panel.body.setAcceptDrops(False)
         self.panel.body.viewport().setAcceptDrops(False)

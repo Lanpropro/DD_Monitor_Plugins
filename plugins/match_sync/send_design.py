@@ -259,7 +259,7 @@ class RecipientDelegate(QStyledItemDelegate):
         if selected or option.state & QStyle.State_MouseOver:
             painter.setBrush(QColor(c['raised']))
             painter.drawRoundedRect(rect, 6, 6)
-        if option.state & QStyle.State_HasFocus:
+        if selected and option.state & QStyle.State_HasFocus:
             painter.setPen(QPen(QColor(c['accent']), 1))
             painter.setBrush(Qt.NoBrush)
             painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 6, 6)

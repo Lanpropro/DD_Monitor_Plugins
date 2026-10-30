@@ -335,6 +335,7 @@ def check(app, host, module, output=None):
             QTest.qWait(30)
             assert console.saved_input.mapTo(console, QPoint()).y() == saved_input_y, 'No selection must retain compose space'
             assert console.pages.isHidden() and console.selected_room is None
+            assert console.rooms.currentItem() is None, 'Unchecked rooms must immediately lose their focus frame'
             assert console.saved_texts.isEnabled(), 'Saved texts can still be managed without recipients'
             count = len(sent)
             console.saved_texts.itemClicked.emit(console.saved_texts.item(0))
@@ -344,13 +345,27 @@ def check(app, host, module, output=None):
             rect = console.saved_texts.visualItemRect(console.saved_texts.item(0))
             QTest.mouseClick(console.saved_texts.viewport(), Qt.LeftButton, pos=rect.topRight() + QPoint(-8, 8))
             assert console.saved_texts.count() == 0 and viewer.context.setting('saved_send_texts') == []
-            viewer.panel.add_message('some author', 'message to save')
-            cursor = viewer.panel.body.document().find('message to save')
-            viewer.panel.body.setTextCursor(cursor)
-            text = console.chat_text(QPoint(10, 10))
-            assert text == 'message to save', 'Transfer message text without the username'
-            console.store_phrase(text)
+            viewer.panel.add_event({'uname': 'some author', 'text': 'message to save', 'source_room': '2'})
+            event = viewer.panel._blocks[-1]
+            assert event['source_room'] == '2', 'Keep source room for the merged chat repeat button'
+            menu = console.create_chat_toolbar(event)
+            assert menu.repeat_action.isEnabled(), '+1 must work for the source even without console selection'
+            assert viewer.panel.body.contextMenuPolicy() == Qt.DefaultContextMenu
+            with patch.object(console, 'create_chat_toolbar', return_value=menu), patch.object(menu, 'exec', return_value=menu.save_action):
+                viewer.panel.body.messageClicked.emit(0, QPoint(20, 20))
             assert viewer.context.setting('saved_send_texts') == ['message to save']
+            select({'1'})
+            menu = console.create_chat_toolbar(event)
+            count = len(sent)
+            with patch.object(console, 'create_chat_toolbar', return_value=menu), patch.object(menu, 'exec', return_value=menu.repeat_action):
+                console.show_chat_actions(event, QPoint(20, 20))
+            QTest.qWait(130)
+            assert sent[count:] == [('2', 'message to save')], '+1 must target the message source, not another selected room'
+            assert second.text() == 'draft 2'
+            assert first.text() == 'draft 1'
+            unavailable_menu = console.create_chat_toolbar({**event, 'source_room': 'missing'})
+            assert not unavailable_menu.repeat_action.isEnabled()
+            unavailable_menu.deleteLater()
             console.saved_texts.clear()
             console.persist_texts()
             select({'2'})

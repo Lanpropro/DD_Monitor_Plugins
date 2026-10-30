@@ -1,12 +1,38 @@
 """Independent platform composers below the merged chat, one per live room."""
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import (QBoxLayout, QFrame, QHBoxLayout, QListView, QListWidget,
+from PySide6.QtCore import QPointF, Qt, QTimer
+from PySide6.QtGui import QAction, QColor, QCursor, QPalette
+from PySide6.QtWidgets import (QApplication, QBoxLayout, QFrame, QHBoxLayout, QListView, QListWidget,
     QListWidgetItem, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 
-from ddm.widgets import Tile
+from ddm.widgets import DanmakuPanel, Tile
+from ddm.danmaku_actions import CommentToolbar
 from .panels import SettingsPanel, console_button_style
 from .send_design import ACCESSORY_WIDTH, INPUT_HEIGHT, RecipientDelegate, SavedTextDelegate, SavedTextList, align_composer, colors, style_compose, stylesheet
+
+
+class SendingDanmakuPanel(DanmakuPanel):
+    def __init__(self, viewer):
+        super().__init__(viewer)
+        self.viewer = viewer
+
+    def add_event(self, event):
+        super().add_event(event)
+        self._blocks[-1]['source_room'] = str(event.get('source_room') or '')
+
+    def _message_clicked(self, index, position):
+        if not 0 <= index < len(self._blocks):
+            return
+        self._scroll_revision += 1
+        self._scroll_trim_remainder = 0.0
+        self._follow_tail = False
+        self._update_bottom_button()
+        self.body._action_block = self.body.document().findBlockByNumber(index)
+        self.body.viewport().update()
+        try:
+            self.viewer.send_console.show_chat_actions(self._blocks[index], position)
+        finally:
+            self.body._action_block = None
+            self.body._hover_at(QPointF(self.body.viewport().mapFromGlobal(QCursor.pos())))
 
 
 class SendRow(QFrame):
@@ -172,8 +198,6 @@ class SendConsole(SettingsPanel):
         self.feedback.setMaximumHeight(self.feedback.fontMetrics().height() * 2 + 4)
         work_layout.addWidget(self.feedback)
         self.feedback.hide()
-        viewer.panel.body.setContextMenuPolicy(Qt.CustomContextMenu)
-        viewer.panel.body.customContextMenuRequested.connect(self.chat_menu)
         self.refresh_design()
 
     def add_saved_text(self, text):
@@ -199,24 +223,42 @@ class SendConsole(SettingsPanel):
         self.viewer.context.set_setting('saved_send_texts',
             [self.saved_texts.item(i).text() for i in range(self.saved_texts.count())])
 
-    def chat_text(self, position):
-        body = self.viewer.panel.body
-        if body.textCursor().hasSelection():
-            return body.textCursor().selectedText().replace('\u2029', '\n').replace('\ufffc', '').strip()
-        index = body.cursorForPosition(position).blockNumber()
-        blocks = self.viewer.panel._blocks
-        return str(blocks[index].get('text') or '') if 0 <= index < len(blocks) else ''
+    def create_chat_toolbar(self, event):
+        text = str(event.get('text') or '')
+        menu = CommentToolbar(self.viewer.panel)
+        menu.copy_action.setEnabled(bool(text))
+        key = str(event.get('source_room') or '')
+        row = self.rows.get(key)
+        controls = row.tile._plugin_controls if row is not None else None
+        available = bool(text and controls is not None and controls.can_repeat(event)
+                         and not self.batch_panel.timer.isActive())
+        menu.repeat_action.setEnabled(available)
+        menu.repeat_button.setToolTip('发送到该弹幕来源直播间' if available else '来源房间的发送入口不可用或正在发送')
+        menu.save_action = QAction('暂存', menu)
+        save_button = menu._button(menu.save_action, menu)
+        menu.save_action.setEnabled(bool(text.strip()))
+        save_button.setToolTip('转存为暂存文本')
+        menu.layout().addWidget(save_button)
+        return menu
 
-    def chat_menu(self, position):
-        body = self.viewer.panel.body
-        text = self.chat_text(position)
-        menu = body.createStandardContextMenu()
-        menu.addSeparator()
-        save = menu.addAction('转存为暂存文本')
-        save.setEnabled(bool(text.strip()))
-        save.triggered.connect(lambda: self.store_phrase(text))
+    def show_chat_actions(self, event, position):
+        event = dict(event)
+        text = str(event.get('text') or '')
+        menu = self.create_chat_toolbar(event)
         try:
-            menu.exec(body.viewport().mapToGlobal(position))
+            chosen = menu.exec(position)
+            if chosen is menu.copy_action:
+                QApplication.clipboard().setText(text)
+            elif chosen is menu.save_action:
+                self.store_phrase(text)
+            elif chosen is menu.repeat_action and menu.repeat_action.isEnabled():
+                key = str(event.get('source_room') or '')
+                if event.get('dm_type') == 1:
+                    row = self.rows.get(key)
+                    if row is not None:
+                        row.tile._plugin_controls.repeat_message(event, key)
+                else:
+                    self.batch_panel.begin(text, targets=[key])
         finally:
             menu.deleteLater()
 
@@ -385,6 +427,10 @@ class SendConsole(SettingsPanel):
             self.batch_targets.add(key)
         else:
             self.batch_targets.discard(key)
+            self.rooms.clearSelection()
+            if self.rooms.currentItem() is item:
+                self.rooms.setCurrentItem(None)
+            self.rooms.viewport().update()
         self._update_selection()
 
     def _update_selection(self):
@@ -473,10 +519,10 @@ class BatchSend(QWidget):
     def start(self, *_args):
         self.begin(self.edit.text())
 
-    def begin(self, text):
+    def begin(self, text, targets=None):
         if self.timer.isActive() or not text.strip():
             return
-        self.pending = self.console.checked_rooms()
+        self.pending = self.console.checked_rooms() if targets is None else list(targets)
         if not self.pending:
             return
         self.text = text
