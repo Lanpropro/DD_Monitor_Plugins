@@ -1,9 +1,9 @@
 """Scoped, opaque sending-workspace styling and recipient rendering."""
-from PySide6.QtCore import QEvent, QPoint, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QLineEdit, QListWidget, QPushButton, QSizePolicy, QStyle, QStyledItemDelegate, QWidget
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QLineEdit, QListWidget, QPushButton, QSizePolicy, QStyle, QStyleOptionButton, QStyledItemDelegate, QWidget
 
-from ddm import theme
+from ddm import motion, theme
 from .panels import console_button_style
 
 
@@ -20,8 +20,33 @@ def colors():
 
 
 INPUT_HEIGHT = 32
-SEND_WIDTH = 60
+SEND_WIDTH = 32
 ACCESSORY_WIDTH = 56
+
+
+class SendIconFace(QObject):
+    def eventFilter(self, button, event):
+        if event.type() != QEvent.Paint:
+            return False
+        painter = QPainter(button)
+        option = QStyleOptionButton()
+        option.initFrom(button)
+        if button.isDown():
+            option.state |= QStyle.State_Sunken
+        button.style().drawControl(QStyle.CE_PushButtonBevel, option, painter, button)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.translate(button.width() / 2, button.height() / 2)
+        painter.setPen(QPen(theme.qcolor(theme.TEXT1 if button.isEnabled() else theme.TEXT4), 1.5))
+        path = QPainterPath()
+        path.moveTo(7, -7)
+        path.lineTo(-7, -2)
+        path.lineTo(-1, 1)
+        path.lineTo(2, 7)
+        path.closeSubpath()
+        path.moveTo(-1, 1)
+        path.lineTo(7, -7)
+        painter.drawPath(path)
+        return True
 
 
 def style_compose(editor, send):
@@ -33,7 +58,12 @@ def style_compose(editor, send):
         border: 1px solid transparent; border-radius: 8px; padding: 4px 8px;
         font-size: {theme.FONT_CONTROL}px;}}
         QLineEdit:focus {{border-color: {c['accent']};}}''')
-    send.setFixedSize(SEND_WIDTH, INPUT_HEIGHT)
+    send.setFixedSize(SEND_WIDTH if send.property('sendPrimary') else 60, INPUT_HEIGHT)
+    if send.property('sendPrimary') and not hasattr(send, '_match_sync_face'):
+        send._match_sync_face = SendIconFace(send)
+        send.installEventFilter(send._match_sync_face)
+        send.setAccessibleName('发送弹幕')
+        send.setToolTip('发送弹幕')
     send.setStyleSheet(console_button_style('QPushButton'))
 
 
@@ -239,12 +269,42 @@ class SavedTextDelegate(QStyledItemDelegate):
 
 
 class RecipientDelegate(QStyledItemDelegate):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.animations = {}
+        self.pointer_change = False
+
+    def animate(self, key, checked):
+        previous = self.animations.get(key)
+        start = previous.currentValue() if previous is not None else float(not checked)
+        if previous is not None:
+            previous.stop()
+            previous.deleteLater()
+        animation = QVariantAnimation(self)
+        animation.setDuration(140 if self.pointer_change and motion.enabled() else 0)
+        animation.setEasingCurve(motion.THEME_WAVE_EASING)
+        animation.setStartValue(start)
+        animation.setEndValue(float(checked))
+        animation.valueChanged.connect(lambda _value: self.parent().viewport().update())
+        self.animations[key] = animation
+        animation.start()
+
+    def forget(self, key):
+        animation = self.animations.pop(key, None)
+        if animation is not None:
+            animation.stop()
+            animation.deleteLater()
+
     def editorEvent(self, event, model, option, index):
         if (event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton
                 and index.flags() & Qt.ItemIsEnabled and index.flags() & Qt.ItemIsUserCheckable
                 and option.rect.contains(event.position().toPoint())):
             checked = index.data(Qt.CheckStateRole) == Qt.Checked.value
-            return model.setData(index, (Qt.Unchecked if checked else Qt.Checked).value, Qt.CheckStateRole)
+            self.pointer_change = True
+            try:
+                return model.setData(index, (Qt.Unchecked if checked else Qt.Checked).value, Qt.CheckStateRole)
+            finally:
+                self.pointer_change = False
         return super().editorEvent(event, model, option, index)
 
     def paint(self, painter, option, index):
@@ -255,14 +315,14 @@ class RecipientDelegate(QStyledItemDelegate):
         checked = index.data(Qt.CheckStateRole)
         selected = (checked == Qt.Checked.value if checked is not None else
                     bool(option.state & QStyle.State_Selected))
+        animation = self.animations.get(index.data(Qt.UserRole))
+        progress = float(animation.currentValue()) if animation is not None else float(selected)
         painter.setPen(Qt.NoPen)
-        if selected or option.state & QStyle.State_MouseOver:
-            painter.setBrush(QColor(c['raised']))
+        if progress or option.state & QStyle.State_MouseOver:
+            color = QColor(c['raised'])
+            color.setAlphaF(max(progress, .5 if option.state & QStyle.State_MouseOver else 0))
+            painter.setBrush(color)
             painter.drawRoundedRect(rect, 6, 6)
-        if selected and option.state & QStyle.State_HasFocus:
-            painter.setPen(QPen(QColor(c['accent']), 1))
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 6, 6)
         avatar = QRectF(rect.left() + 8, rect.center().y() - 16, 32, 32)
         pixmap = index.data(Qt.DecorationRole)
         if isinstance(pixmap, QPixmap) and not pixmap.isNull():
@@ -279,13 +339,9 @@ class RecipientDelegate(QStyledItemDelegate):
             painter.setPen(QColor(c['text']))
             painter.drawText(avatar, Qt.AlignCenter, str(index.data(Qt.DisplayRole) or '?')[:1])
         painter.setPen(Qt.NoPen)
-        if selected:
-            painter.setPen(QPen(QColor(c['accent']), 1.5))
-            painter.setBrush(Qt.NoBrush)
-            painter.drawEllipse(avatar.adjusted(-2, -2, 2, 2))
         text = str(index.data(Qt.DisplayRole) or '').split('\n', 1)
         font = QFont(option.font)
-        font.setWeight(QFont.DemiBold if selected else QFont.Normal)
+        font.setWeight(QFont.Normal)
         metrics = QFontMetrics(font)
         left, width = int(rect.left() + 48), max(0, int(rect.width() - 74))
         line_height = metrics.height()
@@ -301,7 +357,11 @@ class RecipientDelegate(QStyledItemDelegate):
         if checked is not None:
             painter.setPen(QPen(QColor(c['accent'] if selected else c['secondary']), 1.5))
             x, y = int(rect.right() - 21), int(rect.center().y() - 6)
-            if selected:
+            if progress > 0:
+                painter.setOpacity(progress)
+                painter.translate(x + 6, y + 6)
+                painter.scale(.94 + .06 * progress, .94 + .06 * progress)
+                painter.translate(-x - 6, -y - 6)
                 painter.drawLine(x, y + 6, x + 4, y + 10)
                 painter.drawLine(x + 4, y + 10, x + 12, y + 1)
         painter.restore()

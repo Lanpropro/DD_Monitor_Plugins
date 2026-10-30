@@ -64,7 +64,7 @@ def check_platform_controls(app, host, module, source):
                             if button.property('sendPrimary'))
                 assert editor.height() == viewer.send_console.batch_panel.edit.height() == 32, kind
                 assert send.size() == viewer.send_console.batch_panel.send.size(), kind
-                assert send.width() == 60, kind
+                assert send.width() == 32 and hasattr(send, '_match_sync_face'), kind
                 gift = controls.applicable()[0].control.widget.gifts
                 assert 'QPushButton#TileCtrl:hover' in gift.styleSheet(), kind
             return {'domestic_controls': ['douyu', 'huya', 'douyin'], 'credentials_read': False}
@@ -128,7 +128,7 @@ def check(app, host, module, output=None):
         manager = plugins.PluginManager(window=host, plugins_dir=directory)
         manager.register_tile_control('fixture', 'send', Composer)
         viewer = module.Viewer(plugins.PluginContext(manager, 'sending_check'), {})
-        assert not viewer.send_console.context.text()
+        assert viewer.send_console.findChild(module.QLabel, 'SendContext') is None
         assert viewer.send_console.work.isHidden()
         assert viewer.send_console.title.text() == '弹幕控制台'
         assert not viewer.notice.text()
@@ -147,7 +147,10 @@ def check(app, host, module, output=None):
             viewer.panel.bottom_button.show()
             QTest.mouseClick(viewer.panel.bottom_button, Qt.LeftButton)
             assert not console.minimize.hasFocus(), 'Returning to chat bottom must not focus the minimize icon'
-            QTest.mouseClick(console.settings_button, Qt.LeftButton)
+            assert not hasattr(console, 'settings_button')
+            assert console.minimize.size() == viewer.minimize_settings.size(), (console.minimize.size(), viewer.minimize_settings.size())
+            assert console.minimize.styleSheet() == viewer.minimize_settings.styleSheet()
+            QTest.mouseClick(viewer.match_settings_button, Qt.LeftButton)
             assert viewer.match_settings is not None and viewer.match_settings.isVisible()
             assert viewer.buffer_reserve.parentWidget() is viewer.match_settings
             assert viewer.automatic.parentWidget() is viewer.settings_panel
@@ -197,12 +200,22 @@ def check(app, host, module, output=None):
             viewer.rows['2'].avatar.set_pixmap_image(avatar)
             console.refresh_avatar('2')
             assert isinstance(console.rooms.item(1).data(Qt.DecorationRole), QPixmap)
+            QTest.qWait(160)
+            picture = console.rooms.viewport().grab()
+            rect = console.rooms.visualItemRect(console.rooms.item(1))
+            sample = picture.toImage().pixelColor(round((rect.left() + 10) * picture.devicePixelRatio()),
+                                                  round(rect.center().y() * picture.devicePixelRatio()))
+            assert sample != module.theme.qcolor(module.theme.ACCENT), 'Do not outline selected avatars in blue'
+            assert viewer.panel.property('joined') is True
+            joined_image = viewer.panel.grab().toImage()
+            assert joined_image.pixelColor(0, joined_image.height() - 1) == joined_image.pixelColor(20, joined_image.height() - 1), 'Joined chat must have square lower corners'
             assert isinstance(console, module.SettingsPanel), 'Keep the existing console size and visibility contract'
             panel_height = viewer.panel.height()
             console_height = console.height()
             console.minimize.click()
             QTest.qWait(40)
             assert console.isHidden() and console.restore.isVisible()
+            assert viewer.panel.property('joined') is False
             assert viewer.settings_panel.isVisible(), 'Sending minimizes independently'
             assert viewer.panel.height() >= panel_height + console_height - 1
             viewer.resize(900, 720)
@@ -234,7 +247,7 @@ def check(app, host, module, output=None):
                     assert console.body_layout.direction() == (QBoxLayout.LeftToRight if regular
                                                               else QBoxLayout.TopToBottom)
                     assert first.isVisible() == (console.selected_room == '1')
-            assert console.context.text().startswith('发送给')
+            assert console.findChild(module.QLabel, 'SendContext') is None
             for right_width in (640, 300):
                 viewer.resize(1500, 880)
                 viewer.picture_split.setSizes([1500 - right_width, right_width])
@@ -306,7 +319,7 @@ def check(app, host, module, output=None):
             assert not active, 'Closing stops further targets and shuts down the pending composer'
             assert console.statuses['2'] == '已取消，未发送'
             assert dialog.send.text() == '发送'
-            assert console.context.text() == '同文发送'
+            assert hasattr(dialog.send, '_match_sync_face')
             select({'2'})
             second.setText('draft 2')
             console.saved_input.setText('saved message')
@@ -433,10 +446,27 @@ def check(app, host, module, output=None):
             viewer.set_settings_visible(True)
             QTest.qWait(50)
             assert console.isVisible() and second.text() == 'draft 2'
+            assert viewer.panel.property('joined') is True
             controls = console.rows['2'].tile._plugin_controls
             viewer.remove_room('2')
             assert controls._disposed and '2' not in console.rows
             assert not console.checked_rooms() and console.pages.isHidden()
+            viewer.panel.set_placeholder('')
+            for index in range(80):
+                viewer.panel.add_message('fixture', f'old section {index}')
+            QTest.qWait(20)
+            viewer.panel.jump_to_bottom()
+            scrollbar = viewer.panel.body.verticalScrollBar()
+            old_scroll = scrollbar.value()
+            viewer.panel.begin_replay_section()
+            viewer.panel.add_event({'text': '回看分段', '_replay_divider': True})
+            for index in range(12):
+                viewer.panel.add_message('fixture', f'replayed section {index}')
+            viewer.panel.end_replay_section()
+            if module.motion.enabled():
+                assert scrollbar.value() < scrollbar.maximum(), 'Replay should scroll into the new section, not jump'
+            QTest.qWait(260)
+            assert scrollbar.value() == scrollbar.maximum() and scrollbar.maximum() >= old_scroll
             if output:
                 output.parent.mkdir(parents=True, exist_ok=True)
                 viewer.grab().save(str(output))

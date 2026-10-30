@@ -3,7 +3,8 @@ from bisect import bisect_right
 from collections import deque
 import time
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QSlider, QStyle, QToolTip, QVBoxLayout, QWidget
 from ddm import theme
 
@@ -136,6 +137,51 @@ class TimelineSlider(QSlider):
 
 
 class PlaybackTimeEdit(QLineEdit):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.scrubbing = False
+        self._pressed = False
+
+    @staticmethod
+    def scrub_gain(pixels, seconds):
+        speed = abs(pixels) / max(.001, seconds)
+        return .05 + min(3.0, speed / 350) ** 1.2
+
+    def mousePressEvent(self, event):
+        super().mousePressEvent(event)
+        if event.button() == Qt.LeftButton:
+            self._pressed = True
+            self._start_x = self._last_x = event.globalPosition().x()
+            self._last_time = time.perf_counter()
+            value = self.parentWidget().parse_time(self.text())
+            self._drag_value = float(value if value is not None else self.parentWidget().slider.value() / 1000)
+            self._drag_origin = self.parentWidget().window_start
+
+    def mouseMoveEvent(self, event):
+        if self._pressed and (self.scrubbing or abs(event.globalPosition().x() - self._start_x) >= 4):
+            now = time.perf_counter()
+            delta = event.globalPosition().x() - self._last_x
+            self._drag_value += delta * self.scrub_gain(delta, now - self._last_time)
+            self._drag_value = max(0, min(self.parentWidget().slider.maximum() / 1000, self._drag_value))
+            self._last_x, self._last_time = event.globalPosition().x(), now
+            self.scrubbing = True
+            self.setCursor(Qt.SizeHorCursor)
+            self.parentWidget().preview_elapsed(self._drag_value)
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._pressed = False
+        if self.scrubbing and event.button() == Qt.LeftButton:
+            self.scrubbing = False
+            self.setCursor(Qt.IBeamCursor)
+            self.parentWidget().seek_elapsed(self._drag_value, self._drag_origin)
+            self.clearFocus()
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+
     def focusInEvent(self, event):
         self.parentWidget().edit_origin = self.parentWidget().window_start
         super().focusInEvent(event)
@@ -174,7 +220,7 @@ class ReplayBar(QWidget):
         self.slider.setPageStep(10000)
         self.slider.setAccessibleName('整组回看进度')
         self.slider.sliderReleased.connect(self.seek)
-        self.slider.sliderMoved.connect(lambda value: self.time_edit.setText(self.format_time(value / 1000)))
+        self.slider.sliderMoved.connect(lambda value: self.preview_elapsed(value / 1000))
         track.addWidget(self.slider)
         ticks = QHBoxLayout()
         ticks.setContentsMargins(0, 0, 0, 0)
@@ -191,6 +237,9 @@ class ReplayBar(QWidget):
         self.time_edit = PlaybackTimeEdit(self)
         self.time_edit.setFixedSize(56, 24)
         self.time_edit.setAlignment(Qt.AlignCenter)
+        font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
+        font.setPixelSize(theme.FONT_CONTROL)
+        self.time_edit.setFont(font)
         self.time_edit.setAccessibleName('当前播放时间，可输入调整')
         self.time_edit.setStyleSheet('''QLineEdit {background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 0;}
             QLineEdit:focus {background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
@@ -206,6 +255,27 @@ class ReplayBar(QWidget):
         layout.addWidget(timeline, 1)
         layout.addWidget(self.time_edit)
         layout.addWidget(self.back)
+        self.details = QWidget(viewer.picture)
+        self.details.setObjectName('ReplayDetails')
+        self.details.setAttribute(Qt.WA_StyledBackground)
+        self.details.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.details.setStyleSheet(f'#ReplayDetails {{background: {theme.ELEVATED}; border-radius: 8px;}}'
+            f' #ReplayDetails QLabel {{color: {theme.TEXT1}; background: transparent; font-size: 11px;}}')
+        detail_layout = QVBoxLayout(self.details)
+        detail_layout.setContentsMargins(10, 5, 10, 5)
+        detail_layout.setSpacing(2)
+        self.detail_position = QLabel()
+        self.detail_position.setFont(font)
+        self.detail_position.setAlignment(Qt.AlignCenter)
+        detail_layout.addWidget(self.detail_position)
+        detail_ticks = QHBoxLayout()
+        self.detail_ticks = [QLabel() for _ in range(5)]
+        for index, label in enumerate(self.detail_ticks):
+            if index:
+                detail_ticks.addStretch(1)
+            detail_ticks.addWidget(label)
+        detail_layout.addLayout(detail_ticks)
+        self.details.hide()
         self.refresh(force=True)
 
     @staticmethod
@@ -214,26 +284,48 @@ class ReplayBar(QWidget):
         return f'{seconds // 60:02d}:{seconds % 60:02d}'
 
     def seek(self):
-        if self.slider.value() >= self.slider.maximum() - 200:
-            self.viewer.return_live()
-        else:
-            self.viewer.seek_replay(self.window_start + self.slider.value() / 1000)
+        self.seek_elapsed(self.slider.value() / 1000)
 
-    def enter_time(self):
-        parts = self.time_edit.text().strip().split(':')
-        valid = 1 <= len(parts) <= 3 and all(part.isdigit() for part in parts)
-        if valid and len(parts) > 1:
-            valid = all(int(part) < 60 for part in parts[1:])
-        seconds = sum(int(part) * 60 ** index for index, part in enumerate(reversed(parts))) if valid else -1
-        origin = self.edit_origin if self.time_edit.hasFocus() else self.window_start
-        if seconds < 0 or seconds * 1000 > self.slider.maximum():
-            QToolTip.showText(self.time_edit.mapToGlobal(self.time_edit.rect().bottomLeft()),
-                '请输入可用范围内的时间，例如 02:30', self.time_edit)
-            return
+    def seek_elapsed(self, seconds, origin=None):
+        self.details.hide()
         if seconds * 1000 >= self.slider.maximum() - 200:
             self.viewer.return_live()
         else:
-            self.viewer.seek_replay(origin + seconds)
+            self.viewer.seek_replay((self.window_start if origin is None else origin) + seconds)
+
+    def preview_elapsed(self, seconds):
+        self.time_edit.setText(self.format_time(seconds))
+        self.slider.setValue(round(seconds * 1000))
+        whole, millis = divmod(round(seconds * 1000), 1000)
+        self.detail_position.setText(f'{self.format_time(whole)}.{millis:03d}  /  {self.format_time(self.slider.maximum() / 1000)}')
+        center = round(seconds / 5) * 5
+        for index, label in enumerate(self.detail_ticks):
+            label.setText(self.format_time(max(0, min(self.slider.maximum() / 1000, center + (index - 2) * 5))))
+        picture = self.viewer.picture
+        width = min(picture.width() - 16, max(300, min(520, self.width())))
+        position = self.mapTo(picture, QPoint())
+        x = max(8, min(picture.width() - width - 8, position.x() + (self.width() - width) // 2))
+        self.details.setGeometry(x, max(0, position.y() - 52), width, 46)
+        self.details.show()
+        self.details.raise_()
+
+    @staticmethod
+    def parse_time(text):
+        parts = text.strip().split(':')
+        if not 1 <= len(parts) <= 3 or not all(part.isdigit() for part in parts):
+            return None
+        if len(parts) > 1 and not all(int(part) < 60 for part in parts[1:]):
+            return None
+        return sum(int(part) * 60 ** index for index, part in enumerate(reversed(parts)))
+
+    def enter_time(self):
+        seconds = self.parse_time(self.time_edit.text())
+        origin = self.edit_origin if self.time_edit.hasFocus() else self.window_start
+        if seconds is None or seconds * 1000 > self.slider.maximum():
+            QToolTip.showText(self.time_edit.mapToGlobal(self.time_edit.rect().bottomLeft()),
+                '请输入可用范围内的时间，例如 02:30', self.time_edit)
+            return
+        self.seek_elapsed(seconds, origin)
         self.time_edit.clearFocus()
         self.refresh(force=True)
 
@@ -259,10 +351,14 @@ class ReplayBar(QWidget):
         self.back.setEnabled(timeline.active)
         self.slider.setToolTip(f'当前可回看 {self.format_time(duration)}，最多 10 分钟')
         current = max(0, min(duration, now - timeline.delay - self.window_start))
-        if not self.slider.isSliderDown():
+        if not self.slider.isSliderDown() and not self.time_edit.scrubbing:
             self.slider.setRange(0, round(duration * 1000))
             self.slider.setValue(round(current * 1000))
         if not self.time_edit.hasFocus() and not self.slider.isSliderDown():
             self.time_edit.setText(self.format_time(current))
         self.middle_tick.setText(self.format_time(duration / 2))
         self.end_tick.setText(self.format_time(duration))
+
+    def hideEvent(self, event):
+        self.details.hide()
+        super().hideEvent(event)

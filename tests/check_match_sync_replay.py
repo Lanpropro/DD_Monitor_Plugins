@@ -196,6 +196,12 @@ def check(app, host, module, output=None):
                 if output:
                     output.parent.mkdir(parents=True, exist_ok=True)
                     viewer.grab().save(str(output))
+                QTest.mousePress(bar.slider, Qt.LeftButton, pos=QPoint(bar.slider.width() // 2, bar.slider.height() // 2))
+                assert not bar.details.isHidden() and '.' in bar.detail_position.text()
+                if output:
+                    viewer.grab().save(str(output.with_name(output.stem + '-detail.png')))
+                QTest.mouseRelease(bar.slider, Qt.LeftButton, pos=QPoint(bar.slider.width() // 2, bar.slider.height() // 2))
+                assert bar.details.isHidden()
                 QTest.mouseClick(bar.slider, Qt.LeftButton, pos=QPoint(bar.slider.width() // 2, bar.slider.height() // 2))
                 assert abs(viewer.replay.delay - bar.slider.maximum() / 2000) < 3
                 origin = bar.window_start
@@ -204,6 +210,16 @@ def check(app, host, module, output=None):
                 bar.time_edit.setText('02:30')
                 QTest.keyClick(bar.time_edit, Qt.Key_Return)
                 assert abs(time.monotonic() - viewer.replay.delay - (origin + 150)) < 1
+                assert bar.time_edit.scrub_gain(10, .01) > bar.time_edit.scrub_gain(10, 1) * 5
+                before_drag = viewer.replay.delay
+                center = bar.time_edit.rect().center()
+                QTest.mousePress(bar.time_edit, Qt.LeftButton, pos=center)
+                QTest.qWait(50)
+                QTest.mouseMove(bar.time_edit, center + QPoint(12, 0))
+                assert bar.time_edit.scrubbing and not bar.details.isHidden()
+                QTest.mouseRelease(bar.time_edit, Qt.LeftButton, pos=center + QPoint(12, 0))
+                assert not bar.time_edit.scrubbing and bar.details.isHidden()
+                assert viewer.replay.delay < before_drag
                 expected_delay = viewer.replay.delay
                 with patch.object(import_module(module.__package__ + '.replay').QToolTip, 'showText') as tooltip:
                     bar.time_edit.setText('99:99')

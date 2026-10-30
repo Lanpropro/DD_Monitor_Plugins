@@ -1321,7 +1321,8 @@ class Viewer(QDialog):
             #MatchSyncCompare QLabel, #MatchSyncCompare QCheckBox {{ color: palette(window-text); }}
             #MatchSyncCompare QScrollArea, #MatchSyncCompare QScrollArea > QWidget {{ background: transparent; border: none; }}
         """)
-        styled(self.panel, f"#MatchSync #DanmakuPanel {{ background: {background}; border: none; }}")
+        styled(self.panel, f"#MatchSync #DanmakuPanel {{ background: {background}; border: none; }}"
+               '#MatchSync #DanmakuPanel[joined="true"] {border-bottom-left-radius: 0; border-bottom-right-radius: 0;}')
         panel_bar = getattr(self.panel, 'bar', None)
         for widget, name in ((panel_bar, "DanmakuBar"),
                              (self.panel.findChild(QWidget, "DanmakuHeader"), "DanmakuHeader")):
@@ -1982,6 +1983,7 @@ class Viewer(QDialog):
         return self._replay_live_anchor + self.audio.correction
 
     def _rebuild_replay_chat(self, stamp, live=False):
+        self.panel.begin_replay_section()
         self.panel._follow_tail = True
         label = '返回直播' if live else '回看至'
         timestamp = time.strftime('%H:%M:%S', time.localtime(time.time() - (time.monotonic() - stamp)))
@@ -1991,6 +1993,7 @@ class Viewer(QDialog):
             self.video_danmaku.clear()
         for event in self.replay.messages_between(stamp - 30, stamp):
             self.panel.add_event(event)
+        self.panel.end_replay_section()
 
     def seek_replay(self, stamp):
         now = time.monotonic()

@@ -2,7 +2,6 @@
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QLinearGradient, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QFormLayout, QLabel, QPushButton, QVBoxLayout, QWidget
-import math
 
 from ddm import theme
 
@@ -18,6 +17,9 @@ class ConsoleIconButton(QPushButton):
         self.setDefault(False)
         self.setFocusPolicy(Qt.NoFocus)
         self.setCursor(Qt.PointingHandCursor)
+        self.setStyleSheet(f'''QPushButton {{background: transparent; border: none; padding: 0; border-radius: 6px;
+            min-width: 28px; max-width: 28px; min-height: 26px; max-height: 26px;}}
+            QPushButton:hover {{background: {theme.ACCENT_SOFT};}}''')
 
     def paintEvent(self, event):
         super().paintEvent(event)
@@ -31,10 +33,8 @@ class ConsoleIconButton(QPushButton):
         if self.kind == 'settings':
             painter.drawEllipse(QRectF(-5, -5, 10, 10))
             painter.drawEllipse(QRectF(-1.5, -1.5, 3, 3))
-            for index in range(8):
-                angle = index * math.pi / 4
-                painter.drawLine(QPointF(5 * math.cos(angle), 5 * math.sin(angle)),
-                                 QPointF(7.5 * math.cos(angle), 7.5 * math.sin(angle)))
+            for x, y in ((1, 0), (0, 1), (-1, 0), (0, -1)):
+                painter.drawLine(QPointF(5 * x, 5 * y), QPointF(7 * x, 7 * y))
         elif self.kind == 'minimize':
             painter.drawLine(QPointF(-6, 3), QPointF(6, 3))
         else:
@@ -105,6 +105,9 @@ class SettingsPanel(QWidget):
         path = QPainterPath()
         # Match the host's Tile and DanmakuPanel outer corners.
         path.addRoundedRect(QRectF(self.rect()), 10, 10)
+        if self.objectName() == 'MatchSyncSendConsole':
+            path.setFillRule(Qt.WindingFill)
+            path.addRect(QRectF(0, 0, self.width(), 10))
         tint = QLinearGradient(0, 0, 0, self.height())
         top_color, bottom_color = theme.qcolor(theme.CONTENT), theme.qcolor(theme.BG)
         top_color.setAlpha(round(255 * self.viewer.panel_alpha) if self.viewer.skin_visible else 238)

@@ -1,5 +1,5 @@
 """Independent platform composers below the merged chat, one per live room."""
-from PySide6.QtCore import QPointF, Qt, QTimer
+from PySide6.QtCore import QPointF, QPropertyAnimation, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QCursor, QPalette
 from html import escape
 from PySide6.QtWidgets import (QApplication, QBoxLayout, QFrame, QHBoxLayout, QListView, QListWidget,
@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (QApplication, QBoxLayout, QFrame, QHBoxLayout, QL
 
 from ddm.widgets import DanmakuPanel, Tile
 from ddm.danmaku_actions import CommentToolbar
+from ddm import motion
 from .panels import ConsoleIconButton, SettingsPanel, console_button_style
 from .send_design import ACCESSORY_WIDTH, INPUT_HEIGHT, RecipientDelegate, SavedTextDelegate, SavedTextList, align_composer, colors, style_compose, stylesheet
 
@@ -16,9 +17,42 @@ class SendingDanmakuPanel(DanmakuPanel):
         super().__init__(viewer)
         self.viewer = viewer
         self._adding_divider = False
+        self._replay_section = False
+        self._scroll_animation = QPropertyAnimation(self.body.verticalScrollBar(), b'value', self)
+        self._scroll_animation.setDuration(220)
+        self._scroll_animation.setEasingCurve(motion.THEME_WAVE_EASING)
+        self.body.userScrolled.connect(self._scroll_animation.stop)
         self.bottom_button.setAutoDefault(False)
         self.bottom_button.setDefault(False)
         self.bottom_button.setFocusPolicy(Qt.NoFocus)
+
+    def begin_replay_section(self):
+        self._scroll_animation.stop()
+        self._replay_section = True
+        self._section_scroll = self.body.verticalScrollBar().value()
+        self._scroll_revision += 1
+
+    def _restore_scroll_state(self, state):
+        if self._replay_section:
+            self._scroll_restore_id += 1
+            self._follow_tail = True
+            self.body.verticalScrollBar().setValue(self._section_scroll)
+            return
+        if self._scroll_animation.state() == QPropertyAnimation.Running and state[0]:
+            self._scroll_animation.setEndValue(self.body.verticalScrollBar().maximum())
+            return
+        super()._restore_scroll_state(state)
+
+    def end_replay_section(self):
+        self._replay_section = False
+        self._update_bottom_button()
+        bar = self.body.verticalScrollBar()
+        if motion.enabled():
+            self._scroll_animation.setStartValue(bar.value())
+            self._scroll_animation.setEndValue(bar.maximum())
+            self._scroll_animation.start()
+        else:
+            bar.setValue(bar.maximum())
 
     def add_event(self, event):
         self._adding_divider = bool(event.get('_replay_divider'))
@@ -111,13 +145,9 @@ class SendConsole(SettingsPanel):
         self.title = QLabel('弹幕控制台')
         self.title.setObjectName('SendTitle')
         heading.addWidget(self.title, 1)
-        self.settings_button = ConsoleIconButton('settings', '比赛二路设置')
-        self.settings_button.clicked.connect(viewer.open_match_settings)
-        heading.addWidget(self.settings_button)
         self.minimize = ConsoleIconButton('minimize', '最小化弹幕控制台')
         self.minimize.setObjectName('SendMinimize')
         self.minimize.setAccessibleName('最小化发送台')
-        self.minimize.setFixedSize(28, 28)
         self.minimize.setToolTip('收起发送控制台，保留草稿并扩展弹幕栏。')
         self.minimize.clicked.connect(lambda: self.set_collapsed(True))
         heading.addWidget(self.minimize)
@@ -153,11 +183,6 @@ class SendConsole(SettingsPanel):
         work_layout = QVBoxLayout(self.work)
         work_layout.setContentsMargins(0, 0, 0, 0)
         work_layout.setSpacing(6)
-        self.context = QLabel('')
-        self.context.setObjectName('SendContext')
-        self.context.setTextFormat(Qt.PlainText)
-        self.context.setWordWrap(True)
-        work_layout.addWidget(self.context)
         self.body_layout.addWidget(self.work, 1)
         self.body_scroll = QScrollArea()
         self.body_scroll.setFrameShape(QFrame.NoFrame)
@@ -323,6 +348,7 @@ class SendConsole(SettingsPanel):
                 self.stack.removeWidget(row)
                 row.shutdown()
                 self.statuses.pop(key, None)
+                self.rooms.itemDelegate().forget(key)
                 self.send_watches.pop(key, None)
                 timer = self.status_timers.pop(key, None)
                 if timer is not None:
@@ -442,6 +468,7 @@ class SendConsole(SettingsPanel):
             if self.rooms.currentItem() is item:
                 self.rooms.setCurrentItem(None)
             self.rooms.viewport().update()
+        self.rooms.itemDelegate().animate(key, checked)
         self._update_selection()
 
     def _update_selection(self):
@@ -450,17 +477,14 @@ class SendConsole(SettingsPanel):
         self.pages.setVisible(bool(keys))
         if not keys:
             self.selected_room = None
-            self.context.setText('选择接收弹幕的主播' if self.rows else '')
         elif len(keys) == 1:
             self.selected_room = keys[0]
             self.stack.setCurrentWidget(self.rows[keys[0]])
-            self.context.setText(f'发送给 {self.viewer.rows[keys[0]].label()}')
             for index in range(self.rooms.count()):
                 if self.rooms.item(index).data(Qt.UserRole) == keys[0]:
                     self.rooms.setCurrentRow(index)
         else:
             self.selected_room = None
-            self.context.setText('同文发送')
         self.batch_panel.update_targets()
         self.saved_texts.setEnabled(not self.batch_panel.timer.isActive())
 
@@ -471,6 +495,11 @@ class SendConsole(SettingsPanel):
             self.setFixedHeight(settings.height())
         visible = not self.collapsed and (not settings.isHidden() or self.expanded_without_settings)
         self.setVisible(visible)
+        if self.viewer.panel.property('joined') != visible:
+            self.viewer.panel.setProperty('joined', visible)
+            self.viewer.panel.style().unpolish(self.viewer.panel)
+            self.viewer.panel.style().polish(self.viewer.panel)
+            self.viewer.panel.update()
         self.restore.setVisible(not visible)
         self.restore_bar.setVisible(not visible)
 
