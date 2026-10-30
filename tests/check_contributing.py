@@ -1,5 +1,6 @@
 """Contribution workflow and local documentation links; standard library only."""
 from pathlib import Path
+import json
 import re
 import unittest
 
@@ -33,10 +34,27 @@ class ContributionGuideTests(unittest.TestCase):
                          'docs/releases/README.md', 'docs/archive/README.md'):
             document = ROOT / relative
             source = document.read_text(encoding='utf-8')
-            for link in re.findall(r'\]\(([^)]+)\)', source):
+            links = re.findall(r'\]\(([^)]+)\)', source)
+            links += re.findall(r'href="([^"]+)"', source)
+            for link in links:
                 if '://' not in link and not link.startswith('#'):
                     with self.subTest(document=relative, link=link):
                         self.assertTrue((document.parent / link.split('#', 1)[0]).is_file(), link)
+
+    def test_readme_showcases_each_plugin_with_author_credit(self):
+        readme = (ROOT / 'README.md').read_text(encoding='utf-8')
+        cards = re.findall(r'<td\b[^>]*>(.*?)</td>', readme, re.DOTALL)
+        manifests = list((ROOT / 'plugins').glob('*/plugin.json'))
+        self.assertEqual(len(cards), len(manifests))
+        for path in manifests:
+            manifest = json.loads(path.read_text(encoding='utf-8'))
+            with self.subTest(plugin=manifest['id']):
+                matches = [card for card in cards
+                           if f'href="plugins/{manifest["id"]}/README.md"' in card]
+                self.assertEqual(len(matches), 1)
+                author = manifest.get('author', 'Lanpropro')
+                self.assertIn(f'href="https://github.com/{author}"', matches[0])
+                self.assertIn('下载插件', matches[0])
 
     def test_release_notes_are_indexed_in_one_directory(self):
         self.assertFalse(list(ROOT.glob('RELEASE-*.md')))
