@@ -114,14 +114,8 @@ python tests/check_packages.py --host ../DD_Monitor_CE
 
 </details>
 
-## 作者与贡献
-
-感谢 [@reon-nynes](https://github.com/reon-nynes) 提供 B站直播互动插件，感谢 [@Soraray](https://github.com/Soraray) 对 Enter 交互的贡献。
-国内、海外和比赛二路插件由 [@Lanpropro](https://github.com/Lanpropro) 维护；B站插件的本体兼容适配与集成验收也由本仓库维护者完成。
-
 欢迎通过 [Issue](https://github.com/Lanpropro/DD_Monitor_Plugins/issues) 反馈问题，或提交 Pull Request 贡献插件与改进。提交时请注明适用插件、本体版本及复现步骤。
 
 ## 来源与许可
 
-插件首次提取自 [DD监控室CE](https://github.com/Lanpropro/DD_Monitor_CE) 的 `4bf84bc` 基线，后续在本仓库独立维护。
 保留原项目的 GNU LGPL v2.1 许可，第三方来源与声明见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE.md)。
