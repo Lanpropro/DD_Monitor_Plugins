@@ -84,6 +84,22 @@ class IntegrationTests(unittest.TestCase):
     def composer(self,tile=None):
         tile=tile or self.window.wall.tiles[0]
         return next(e.control.widget for e in tile._plugin_controls.entries if e.owner=='bili_live')
+    def test_host_repeat_emoticon_uses_installed_plugin_send_hook(self):
+        composer = self.composer()
+        tile = self.window.wall.tiles[0]
+        controls = tile._plugin_controls
+        event = {'text': '[表情]', 'dm_type': 1, 'emoticon_unique': 'official_13'}
+        composer.edit.setText('keep draft')
+        send_api = importlib.import_module('ddm_plugin_bili_live.bili_api')
+        with patch.object(send_api, 'send_danmaku', return_value={'code': 0}) as send:
+            self.assertTrue(controls.can_repeat(event))
+            self.assertTrue(controls.repeat_message(event, controls.room_id()))
+            settle(lambda: not composer.busy)
+        self.assertEqual(send.call_count, 1)
+        self.assertEqual(send.call_args.args[1], 'official_13')
+        self.assertEqual(send.call_args.kwargs['dm_type'], 1)
+        self.assertEqual(composer.edit.text(), 'keep draft')
+
     def test_host_enter_focus_and_fullscreen_input_survive_plugin_update(self):
         composer=self.composer();tile=self.window.wall.tiles[0]
         tile.pause_button.setFocus();APP.processEvents()

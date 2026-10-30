@@ -31,6 +31,39 @@ def settle(predicate, seconds=3):
 
 class ComposerTests(unittest.TestCase):
 
+    def test_repeat_large_emoticon_sends_identifier_and_keeps_draft(self):
+        self.composer.edit.setText('keep my draft')
+        event = {'text': '[表情]', 'dm_type': 1, 'emoticon_unique': 'official_13'}
+        entered, release = threading.Event(), threading.Event()
+        def send(*args, **kwargs):
+            entered.set()
+            release.wait(3)
+            return {'code': 0}
+        try:
+            with patch.object(bili, 'send_danmaku', side_effect=send) as request:
+                self.assertTrue(self.composer.repeat_message(event))
+                settle(entered.is_set)
+                self.assertFalse(self.composer.repeat_message(event), 'Busy composer sends only once')
+                release.set()
+                settle(lambda: not self.composer.busy)
+            self.assertEqual(request.call_count, 1)
+            self.assertEqual(request.call_args.args[:2], ('101', 'official_13'))
+            self.assertEqual(request.call_args.kwargs['dm_type'], 1)
+            self.assertEqual(self.composer.edit.text(), 'keep my draft')
+        finally:
+            release.set()
+
+    def test_repeat_emoticon_uses_existing_login_and_support_checks(self):
+        event = {'text': '[表情]', 'dm_type': 1, 'emoticon_unique': 'official_13'}
+        with patch.object(bili, 'send_danmaku') as request:
+            self.assertFalse(self.composer.repeat_message(dict(event, emoticon_unique='')))
+            self.assertFalse(self.composer.repeat_message(dict(event, dm_type=0)))
+            session.set_login_cookies('', '')
+            self.assertFalse(self.composer.repeat_message(event))
+            self.composer.set_room('')
+            self.assertFalse(self.composer.repeat_message(event))
+        request.assert_not_called()
+
     def test_pending_refresh_keeps_same_room_emoticons_usable_but_context_change_clears_them(self):
         packs=[{'pkg_type':3,'pkg_name':'保留','emoticons':[{'emoji':'[保留]','perm':1}]}]
         with patch.object(bili,'get_emoticons',return_value=packs):

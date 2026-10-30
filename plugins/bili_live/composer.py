@@ -286,6 +286,14 @@ class DanmakuComposer(QWidget):
         if self._finish_send(context):
             self._feedback(request_message(error, sending=True),error=error)
 
+    def repeat_message(self, event):
+        identifier = event.get("emoticon_unique")
+        if (event.get("dm_type") != 1 or not identifier or self._closing or
+                self.busy or not self.supported):
+            return False
+        self._send(str(identifier), 1)
+        return self._pending is not None
+
     def choose_emoticon(self, pkg_type, emote):
         if self._closing:
             return

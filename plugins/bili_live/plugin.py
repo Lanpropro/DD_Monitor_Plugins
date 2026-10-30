@@ -38,6 +38,8 @@ class BiliLive(api.Plugin):
                 return True
             def shutdown(self):
                 self.widget.shutdown()
+            def repeat_message(self, event):
+                return self.widget.repeat_message(event)
         control = BiliControl(DanmakuComposer(self.session, context.parent, coordinator=self.coordinator, notifier=NotificationReporter(self.context)), minimum_width=90, preferred_width=240)
         self.controls.add(control)
         return control
