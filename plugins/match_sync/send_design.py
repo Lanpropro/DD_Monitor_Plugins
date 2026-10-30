@@ -4,7 +4,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, Q
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QLineEdit, QListWidget, QPushButton, QSizePolicy, QStyle, QStyledItemDelegate, QWidget
 
 from ddm import motion, theme
-from .panels import console_button_style
+from .panels import console_button_style, use_link_cursor
 
 
 def colors():
@@ -50,6 +50,7 @@ class SendIconFace(QObject):
 
 def style_compose(editor, send):
     c = colors()
+    use_link_cursor(send)
     editor.setMinimumWidth(0)
     editor.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     editor.setFixedHeight(INPUT_HEIGHT)

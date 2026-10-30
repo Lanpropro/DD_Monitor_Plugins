@@ -4,7 +4,7 @@ from collections import deque
 import time
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
-from PySide6.QtGui import QFontDatabase, QPainter, QPen
+from PySide6.QtGui import QColor, QFontDatabase, QPainter, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QSlider, QStyle, QToolTip, QVBoxLayout, QWidget
 from ddm import theme
 
@@ -200,7 +200,7 @@ class ReplayRuler(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(QPen(theme.qcolor(theme.TEXT1), 1))
+        painter.setPen(QPen(QColor('#f1f2f5'), 1))
         font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
         font.setPixelSize(10)
         painter.setFont(font)
@@ -283,8 +283,9 @@ class ReplayBar(QWidget):
         self.details.setObjectName('ReplayDetails')
         self.details.setAttribute(Qt.WA_StyledBackground)
         self.details.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.details.setStyleSheet('#ReplayDetails, #ReplayDetails QWidget {background: transparent; border: none;}'
-            ' #ReplayDetails QLabel {color: palette(window-text); background: transparent; font-size: 11px;}')
+        self.details.setStyleSheet('#ReplayDetails {background: rgba(16, 18, 23, 180); border: none; border-radius: 8px;}'
+            ' #ReplayDetails QWidget {background: transparent; border: none;}'
+            ' #ReplayDetails QLabel {color: #f1f2f5; background: transparent; font-size: 11px;}')
         detail_layout = QVBoxLayout(self.details)
         detail_layout.setContentsMargins(0, 5, 0, 5)
         detail_layout.setSpacing(2)

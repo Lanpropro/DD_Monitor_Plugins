@@ -174,6 +174,21 @@ def check(app, host, module, output=None):
                            viewer.match_settings_button, viewer.minimize_settings, console.minimize):
                 assert button.cursor().shape() == Qt.PointingHandCursor, button
                 assert button.testAttribute(Qt.WA_Hover), button
+            panels = import_module(module.__package__ + '.panels')
+            from PySide6.QtCore import QEvent
+            if sys.platform == 'win32':
+                with patch.object(panels.QApplication, 'platformName', return_value='windows'), \
+                        patch.object(panels.QApplication, 'widgetAt', return_value=viewer.automatic), \
+                        patch.object(panels.ctypes.windll.user32, 'LoadCursorW', return_value=123) as load, \
+                        patch.object(panels.ctypes.windll.user32, 'SetCursor') as apply:
+                    override = panels.QApplication.overrideCursor()
+                    assert not viewer.automatic._match_link_cursor.eventFilter(viewer.automatic, QEvent(QEvent.Enter))
+                    load.assert_called_once_with(None, 32649)
+                    apply.assert_called_once_with(123)
+                    load.reset_mock()
+                    viewer.automatic._match_link_cursor.eventFilter(viewer.automatic, QEvent(QEvent.Leave))
+                    load.assert_not_called()
+                    assert panels.QApplication.overrideCursor() is override, 'Do not leave a global cursor override'
             assert not console.minimize.text() and not viewer.minimize_settings.text()
             assert not console.minimize.autoDefault() and not console.minimize.isDefault()
             viewer.panel.body.setFocus()

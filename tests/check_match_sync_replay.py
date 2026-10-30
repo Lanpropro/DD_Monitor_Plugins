@@ -229,7 +229,7 @@ def check(app, host, module, output=None):
                 assert not bar.details.isHidden() and '.' in bar.detail_position.text()
                 assert bar.ruler.width() == bar.slider.width()
                 assert bar.ruler.mapTo(viewer.picture, QPoint()).x() == bar.slider.mapTo(viewer.picture, QPoint()).x()
-                assert 'background: transparent' in bar.details.styleSheet()
+                assert 'rgba(16, 18, 23, 180)' in bar.details.styleSheet()
                 assert bar.ruler.duration > 0 and bar.ruler.height() >= 32
                 if output:
                     viewer.grab().save(str(output.with_name(output.stem + '-detail.png')))
@@ -243,14 +243,16 @@ def check(app, host, module, output=None):
                     line = viewer.panel.body.document().resource(QTextDocument.ImageResource, QUrl(key))
                     assert line.pixelColor(0, 40) == module.theme.qcolor(module.theme.TEXT1), mode
                     assert line.height() == 80 and line.pixelColor(0, 0).alpha() == 0
-                    point = bar.details.mapTo(viewer.picture, QPoint(1, 1))
+                    point = bar.details.mapTo(viewer.picture, QPoint(12, 3))
                     shown = viewer.picture.grab().toImage()
                     bar.details.hide()
                     beneath = viewer.picture.grab().toImage()
                     bar.details.show()
                     ratio = viewer.picture.devicePixelRatioF()
                     point = QPoint(round(point.x() * ratio), round(point.y() * ratio))
-                    assert shown.pixelColor(point) == beneath.pixelColor(point), 'Ruler background must reveal the picture'
+                    over, under = shown.pixelColor(point), beneath.pixelColor(point)
+                    for actual, source, tint in zip(over.getRgb()[:3], under.getRgb()[:3], (16, 18, 23)):
+                        assert abs(actual - (tint * 180 / 255 + source * 75 / 255)) <= 3, 'Ruler backing must blend with the picture'
                     if output:
                         viewer.grab().save(str(output.with_name(output.stem + '-detail-' + mode + '.png')))
                 QTest.mouseRelease(bar.slider, Qt.LeftButton, pos=QPoint(bar.slider.width() // 2, bar.slider.height() // 2))

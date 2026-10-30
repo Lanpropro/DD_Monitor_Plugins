@@ -1,14 +1,37 @@
 """Shared appearance of the playback and sending consoles."""
 import math
-from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QLinearGradient, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QDialog, QDialogButtonBox, QFormLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+import ctypes
+import sys
+from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt
+from PySide6.QtGui import QCursor, QLinearGradient, QPainter, QPainterPath, QPen
+from PySide6.QtWidgets import QApplication, QDialog, QDialogButtonBox, QFormLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from ddm import theme
 
 
+class LinkCursor(QObject):
+    def eventFilter(self, widget, event):
+        if (event.type() in (QEvent.Enter, QEvent.HoverMove, QEvent.MouseMove)
+                and widget.isEnabled() and sys.platform == 'win32'
+                and QApplication.platformName() == 'windows'
+                and QApplication.widgetAt(QCursor.pos()) is widget):
+            # Use the live system link cursor, including animated Windows themes.
+            user32 = ctypes.windll.user32
+            user32.LoadCursorW.restype = ctypes.c_void_p
+            user32.SetCursor.argtypes = (ctypes.c_void_p,)
+            user32.SetCursor(user32.LoadCursorW(None, 32649))  # IDC_HAND
+        return False
+
+
+def use_link_cursor(widget):
+    widget.setCursor(Qt.PointingHandCursor)
+    if not hasattr(widget, '_match_link_cursor'):
+        widget._match_link_cursor = LinkCursor(widget)
+        widget.installEventFilter(widget._match_link_cursor)
+
+
 def style_checkbox(checkbox):
-    checkbox.setCursor(Qt.PointingHandCursor)
+    use_link_cursor(checkbox)
     checkbox.setAttribute(Qt.WA_Hover)
     checkbox.setMouseTracking(True)
     checkbox.setStyleSheet(f'''QCheckBox {{color: {theme.TEXT1}; border: none; border-radius: 5px; padding: 3px;}}
@@ -25,7 +48,7 @@ class ConsoleIconButton(QPushButton):
         self.setAutoDefault(False)
         self.setDefault(False)
         self.setFocusPolicy(Qt.NoFocus)
-        self.setCursor(Qt.PointingHandCursor)
+        use_link_cursor(self)
         self.setAttribute(Qt.WA_Hover)
         self.setMouseTracking(True)
         self.setStyleSheet(f'''QPushButton {{background: transparent; border: none; padding: 0; border-radius: 6px;
