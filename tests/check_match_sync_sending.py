@@ -141,6 +141,24 @@ def check(app, host, module, output=None):
             viewer.show()
             QTest.qWait(80)
             console = viewer.send_console
+            assert not console.minimize.text() and not viewer.minimize_settings.text()
+            assert not console.minimize.autoDefault() and not console.minimize.isDefault()
+            viewer.panel.body.setFocus()
+            viewer.panel.bottom_button.show()
+            QTest.mouseClick(viewer.panel.bottom_button, Qt.LeftButton)
+            assert not console.minimize.hasFocus(), 'Returning to chat bottom must not focus the minimize icon'
+            QTest.mouseClick(console.settings_button, Qt.LeftButton)
+            assert viewer.match_settings is not None and viewer.match_settings.isVisible()
+            assert viewer.buffer_reserve.parentWidget() is viewer.match_settings
+            assert viewer.automatic.parentWidget() is viewer.settings_panel
+            assert viewer.compare.parentWidget() is viewer.settings_panel
+            old_reserve = viewer.buffer_reserve.currentIndex()
+            viewer.buffer_reserve.setCurrentIndex(viewer.buffer_reserve.findData(8))
+            assert viewer.reserve_seconds == 8
+            viewer.buffer_reserve.setCurrentIndex(old_reserve)
+            if output:
+                viewer.match_settings.grab().save(str(output.with_name(output.stem + '-settings.png')))
+            viewer.match_settings.close()
             def finish_batch():
                 deadline = time.monotonic() + 2
                 while console.batch_panel.timer.isActive() and time.monotonic() < deadline:

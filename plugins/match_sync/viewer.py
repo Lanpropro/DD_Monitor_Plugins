@@ -25,7 +25,7 @@ from .engine import route_pcm_s16_stereo, Alignment, Match, RATE, SafetyBuffer, 
 from .media import Chat, Decoder, PlatformChat
 from .fullscreen import mark_fullscreen
 from .sending import SendConsole, SendingDanmakuPanel
-from .panels import SettingsPanel
+from .panels import ConsoleIconButton, MatchSettingsDialog, SettingsPanel
 from .replay import ReplayBar, ReplayTimeline
 
 COLORS = ("#38bdf8", "#fb7185", "#a78bfa", "#4ade80", "#fbbf24", "#fb923c")
@@ -1138,9 +1138,9 @@ class Viewer(QDialog):
         use_current.clicked.connect(self.import_current)
         self.add_controls = (self.input, add, use_current)
         self.settings_panel = SettingsPanel(self)
+        self.match_settings = None
         self.settings_height = 220
-        self.minimize_settings = QPushButton("最小化")
-        self.minimize_settings.setFixedWidth(68)
+        self.minimize_settings = ConsoleIconButton('minimize', '最小化播放控制台')
         self.minimize_settings.setToolTip("收起设置栏，保留画面、声音和弹幕播放。")
         self.minimize_settings.clicked.connect(lambda: self.set_settings_visible(False))
         self.restore_settings = QPushButton("展开设置")
@@ -1156,7 +1156,9 @@ class Viewer(QDialog):
         for widget in self.add_controls:
             heading.addWidget(widget)
         heading.addStretch(0)
-        heading.addWidget(self.buffer_reserve)
+        self.match_settings_button = ConsoleIconButton('settings', '比赛二路设置')
+        self.match_settings_button.clicked.connect(self.open_match_settings)
+        heading.addWidget(self.match_settings_button)
         heading.addWidget(self.minimize_settings)
         self.picture = Tile({})
         self.replay_bar = ReplayBar(self)
@@ -1960,8 +1962,16 @@ class Viewer(QDialog):
                              (self.canvas.image.isNull() or self.canvas.waiting))
 
     def replay_histories(self):
+        primary = self.alignment.reference or self.main.currentData()
         return {key: row.decoder.history for key, row in self.rows.items()
-                if row.decoder is not None and not row.paused}
+                if key == primary and row.decoder is not None and not row.paused}
+
+    def open_match_settings(self):
+        if self.match_settings is None:
+            self.match_settings = MatchSettingsDialog(self)
+        self.match_settings.show()
+        self.match_settings.raise_()
+        self.match_settings.activateWindow()
 
     def live_clock(self):
         if not self.replay.active:
@@ -1971,8 +1981,11 @@ class Viewer(QDialog):
         self._replay_live_updated = now
         return self._replay_live_anchor + self.audio.correction
 
-    def _rebuild_replay_chat(self, stamp):
-        self.panel.set_placeholder('')
+    def _rebuild_replay_chat(self, stamp, live=False):
+        self.panel._follow_tail = True
+        label = '返回直播' if live else '回看至'
+        timestamp = time.strftime('%H:%M:%S', time.localtime(time.time() - (time.monotonic() - stamp)))
+        self.panel.add_event({'text': f'{label} {timestamp}', '_replay_divider': True})
         self.overlay_pending.clear()
         if self.video_danmaku is not None:
             self.video_danmaku.clear()
@@ -1996,7 +2009,7 @@ class Viewer(QDialog):
         clock = self.live_clock()
         self.replay.live()
         self.canvas.set_frame(None)
-        self._rebuild_replay_chat(time.monotonic())
+        self._rebuild_replay_chat(time.monotonic(), live=True)
         self.audio.flush(clock)
         self.replay_bar.refresh(force=True)
 
@@ -2761,7 +2774,7 @@ class Viewer(QDialog):
         clock = self._recover_clock(clock, shifts)
         now = time.monotonic()
         self.replay.observe(now, clock, {key: shift for key, shift in shifts.items()
-                                       if self.rows[key].sync_state == '已同步'})
+                                       if key == self.alignment.reference or self.rows[key].sync_state == '已同步'})
         shown_clock, shown_shifts = self.replay.presentation(clock, shifts, now)
         if self.replay.active and not self.replay.valid(shown_clock, shown_shifts, self.replay_histories()):
             self.return_live()

@@ -1,12 +1,13 @@
 """Independent platform composers below the merged chat, one per live room."""
 from PySide6.QtCore import QPointF, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QCursor, QPalette
+from html import escape
 from PySide6.QtWidgets import (QApplication, QBoxLayout, QFrame, QHBoxLayout, QListView, QListWidget,
     QListWidgetItem, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 
 from ddm.widgets import DanmakuPanel, Tile
 from ddm.danmaku_actions import CommentToolbar
-from .panels import SettingsPanel, console_button_style
+from .panels import ConsoleIconButton, SettingsPanel, console_button_style
 from .send_design import ACCESSORY_WIDTH, INPUT_HEIGHT, RecipientDelegate, SavedTextDelegate, SavedTextList, align_composer, colors, style_compose, stylesheet
 
 
@@ -14,13 +15,25 @@ class SendingDanmakuPanel(DanmakuPanel):
     def __init__(self, viewer):
         super().__init__(viewer)
         self.viewer = viewer
+        self._adding_divider = False
+        self.bottom_button.setAutoDefault(False)
+        self.bottom_button.setDefault(False)
+        self.bottom_button.setFocusPolicy(Qt.NoFocus)
 
     def add_event(self, event):
+        self._adding_divider = bool(event.get('_replay_divider'))
         super().add_event(event)
         self._blocks[-1]['source_room'] = str(event.get('source_room') or '')
+        self._blocks[-1]['_replay_divider'] = self._adding_divider
+        self._adding_divider = False
+
+    def _block_html(self, entry):
+        if self._adding_divider or entry.get('_replay_divider'):
+            return f'<p align="center" style="color:#8a8f98; margin:8px 0;">──── {escape(entry.get("text", ""))} ────</p>'
+        return super()._block_html(entry)
 
     def _message_clicked(self, index, position):
-        if not 0 <= index < len(self._blocks):
+        if not 0 <= index < len(self._blocks) or self._blocks[index].get('_replay_divider'):
             return
         self._scroll_revision += 1
         self._scroll_trim_remainder = 0.0
@@ -98,7 +111,10 @@ class SendConsole(SettingsPanel):
         self.title = QLabel('弹幕控制台')
         self.title.setObjectName('SendTitle')
         heading.addWidget(self.title, 1)
-        self.minimize = QPushButton('−')
+        self.settings_button = ConsoleIconButton('settings', '比赛二路设置')
+        self.settings_button.clicked.connect(viewer.open_match_settings)
+        heading.addWidget(self.settings_button)
+        self.minimize = ConsoleIconButton('minimize', '最小化弹幕控制台')
         self.minimize.setObjectName('SendMinimize')
         self.minimize.setAccessibleName('最小化发送台')
         self.minimize.setFixedSize(28, 28)

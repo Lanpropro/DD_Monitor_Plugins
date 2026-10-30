@@ -127,6 +127,8 @@ def check(app, host, module, output=None):
             pump.clock_segments.clear()
             pump.clock_snapshot = None
             viewer.replay.live()
+            viewer.panel.add_message('previous user', 'earlier live section')
+            viewer.panel._follow_tail = False
             replay_now = time.monotonic()
             target = replay_now - 100
             for stamp, text in ((target - 1, 'before'), (target + .05, 'during'), (replay_now, 'live only')):
@@ -144,6 +146,9 @@ def check(app, host, module, output=None):
                 viewer._replay_live_anchor, viewer._replay_live_updated = anchor, updated
                 viewer.playback_rate = old_rate
                 assert 'before' in viewer.panel.body.toPlainText()
+                assert 'earlier live section' in viewer.panel.body.toPlainText()
+                assert '回看至' in viewer.panel.body.toPlainText()
+                assert viewer.panel._follow_tail, 'Jumping must reveal the newly separated chat section'
                 assert 'live only' not in viewer.panel.body.toPlainText()
                 viewer.audio.update_snapshot()
                 rate, sources = viewer.audio.snapshot
@@ -171,16 +176,20 @@ def check(app, host, module, output=None):
                 assert 'during' in viewer.panel.body.toPlainText()
                 assert 'live only' not in viewer.panel.body.toPlainText()
                 assert 'new incoming live' not in viewer.panel.body.toPlainText()
-                viewer.resize(1320, 880)
+                viewer.resize(1800, 900)
                 viewer.show()
                 viewer.replay_bar.refresh(force=True)
                 QTest.qWait(40)
                 bar = viewer.replay_bar
                 slot = viewer.picture.status_label
-                assert bar.parentWidget() is slot and bar.width() <= 360
+                assert bar.parentWidget() is slot
+                assert abs(bar.width() - round(slot.width() * 2 / 3)) <= 1
                 assert abs(bar.geometry().center().x() - slot.rect().center().x()) <= 1
                 assert bar.mapTo(viewer.picture.bottom, QPoint()).x() > viewer.picture.volume_label.geometry().right()
                 assert bar.width() <= slot.width() - 30, 'Keep visible space around the centered replay controls'
+                assert not bar.back.text() and bar.back.kind == 'live'
+                assert 'background: transparent' in bar.back.styleSheet()
+                assert 'background: transparent' in bar.time_edit.styleSheet()
                 assert not bar.isHidden() and not bar.slider.isHidden(), 'Show the timeline without a toggle'
                 assert bar.start_tick.mapTo(bar, QPoint()).y() > bar.slider.mapTo(bar, QPoint()).y()
                 assert bar.start_tick.mapTo(slot, QPoint(0, bar.start_tick.height())).y() <= slot.height(), 'Do not clip the timestamps'
@@ -205,8 +214,31 @@ def check(app, host, module, output=None):
                 assert not viewer.replay.active and viewer.audio.correction == correction
                 assert 'live only' in viewer.panel.body.toPlainText()
                 assert 'new incoming live' in viewer.panel.body.toPlainText()
+                assert '返回直播' in viewer.panel.body.toPlainText()
                 assert viewer.audio.snapshot[0] == viewer.playback_rate
                 assert not bar.slider.isHidden(), 'Keep the timeline visible when returning live'
+                viewer.rows['2'].match_confirmed = False
+                viewer.rows['2'].sync_state = '等待对齐'
+                with patch.object(viewer, '_recover_clock', side_effect=lambda clock, _shifts: clock), \
+                     patch.object(viewer, '_smooth_shifts', return_value={'1': .5, '2': 4.5}), \
+                     patch.object(viewer, '_update_sync_health'):
+                    viewer.render()
+                bar.refresh(force=True)
+                assert bar.slider.isEnabled(), 'An unconfirmed secondary must not disable normal main replay'
+                saved_timeline = viewer.replay
+                viewer.replay = module.ReplayTimeline()
+                viewer.rows['1'].sync_state = '准备缓存'
+                clock_now = time.monotonic()
+                with patch.object(viewer, '_recover_clock', side_effect=lambda clock, _shifts: clock), \
+                     patch.object(viewer, '_smooth_shifts', return_value={'1': .5, '2': 4.5}), \
+                     patch.object(viewer, '_update_sync_health'):
+                    with patch.object(module.time, 'monotonic', return_value=clock_now):
+                        viewer.render()
+                    with patch.object(module.time, 'monotonic', return_value=clock_now + .8):
+                        viewer.render()
+                        bar.refresh(force=True)
+                        assert bar.slider.isEnabled(), 'Initial main playback must work before manual confirmation'
+                viewer.replay = saved_timeline
             decoders[0].history.trim_bytes(0)
             assert viewer.replay.available(time.monotonic(), histories) is None, 'Do not offer evicted media'
             viewer.stop()

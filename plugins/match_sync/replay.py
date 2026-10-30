@@ -4,10 +4,11 @@ from collections import deque
 import time
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy, QSlider, QStyle, QToolTip, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QSlider, QStyle, QToolTip, QVBoxLayout, QWidget
+from ddm import theme
 
 from .engine import RATE
-from .panels import console_button_style
+from .panels import ConsoleIconButton
 from .replay_cache import REPLAY_SECONDS
 
 
@@ -191,12 +192,16 @@ class ReplayBar(QWidget):
         self.time_edit.setFixedSize(56, 24)
         self.time_edit.setAlignment(Qt.AlignCenter)
         self.time_edit.setAccessibleName('当前播放时间，可输入调整')
+        self.time_edit.setStyleSheet('''QLineEdit {background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 0;}
+            QLineEdit:focus {background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                stop:0 rgba(110,120,135,0), stop:0.5 rgba(110,120,135,85), stop:1 rgba(110,120,135,0));
+                border-color: palette(highlight);}''')
         self.time_edit.setToolTip('输入 mm:ss 并按 Enter 跳转；00:00 为当前可回看窗口的起点')
         self.time_edit.returnPressed.connect(self.enter_time)
-        self.back = QPushButton('直播')
-        self.back.setFixedSize(44, 24)
-        self.back.setToolTip('返回直播')
-        self.back.setStyleSheet(console_button_style('QPushButton'))
+        self.back = ConsoleIconButton('live', '返回直播', self)
+        self.back.setObjectName('TileCtrl')
+        self.back.setStyleSheet(f'''QPushButton {{background: transparent; border: none; padding: 0; border-radius: 6px;}}
+            QPushButton:hover {{background: {theme.ACCENT_SOFT};}}''')
         self.back.clicked.connect(viewer.return_live)
         layout.addWidget(timeline, 1)
         layout.addWidget(self.time_edit)
@@ -238,7 +243,7 @@ class ReplayBar(QWidget):
             return
         self.last_update = now
         self.setVisible(bool(self.viewer.rows))
-        width = min(360, max(44, self.parentWidget().width() - 40))
+        width = max(44, round(self.parentWidget().width() * 2 / 3))
         self.setFixedWidth(width)
         self.time_edit.setVisible(width >= 130)
         self.middle_tick.setVisible(width >= 210)
