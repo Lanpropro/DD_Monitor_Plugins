@@ -1,12 +1,12 @@
 """Independent platform composers below the merged chat, one per live room."""
-from PySide6.QtCore import QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPalette
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (QBoxLayout, QFrame, QHBoxLayout, QListView, QListWidget,
     QListWidgetItem, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 
 from ddm.widgets import Tile
 from .panels import SettingsPanel, console_button_style
-from .send_design import RecipientDelegate, colors, stylesheet
+from .send_design import ACCESSORY_WIDTH, INPUT_HEIGHT, RecipientDelegate, align_composer, colors, style_compose, stylesheet
 
 
 class SendRow(QFrame):
@@ -21,6 +21,7 @@ class SendRow(QFrame):
         self.composer_bar.setFixedHeight(40)
         composer_layout = QHBoxLayout(self.composer_bar)
         composer_layout.setContentsMargins(0, 0, 0, 0)
+        composer_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         layout.addWidget(self.composer_bar)
         self._tile_controls = None
         room = next((dict(item) for item in getattr(viewer.context.window, 'rooms', [])
@@ -66,9 +67,6 @@ class SendConsole(SettingsPanel):
         self.title = QLabel('弹幕发送')
         self.title.setObjectName('SendTitle')
         heading.addWidget(self.title, 1)
-        self.selection_hint = QLabel('左键选择，可多选')
-        self.selection_hint.setObjectName('SendFeedback')
-        heading.addWidget(self.selection_hint)
         self.minimize = QPushButton('−')
         self.minimize.setObjectName('SendMinimize')
         self.minimize.setAccessibleName('最小化发送台')
@@ -119,9 +117,6 @@ class SendConsole(SettingsPanel):
         self.body_scroll.setWidgetResizable(True)
         self.body_scroll.setWidget(body)
         layout.addWidget(self.body_scroll, 1)
-        self.empty = QLabel('加入直播间后，可在这里分别发送弹幕')
-        self.empty.setWordWrap(True)
-        work_layout.addWidget(self.empty)
         self.stack = QStackedWidget()
         self.pages = QStackedWidget()
         self.pages.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
@@ -129,17 +124,22 @@ class SendConsole(SettingsPanel):
         self.batch_panel = BatchSend(self)
         self.pages.addWidget(self.batch_panel)
         work_layout.addWidget(self.pages, 1)
-        self.feedback = QLabel('左键选择主播；选一位单发，选多位同文发送。')
+        self.feedback = QLabel('')
         self.feedback.setTextFormat(Qt.PlainText)
         self.feedback.setObjectName('SendFeedback')
         self.feedback.setWordWrap(True)
         self.feedback.setMaximumHeight(self.feedback.fontMetrics().height() * 2 + 4)
         work_layout.addWidget(self.feedback)
+        self.feedback.hide()
         self.refresh_design()
 
     def refresh_design(self):
         self.setStyleSheet(stylesheet())
         c = colors()
+        for row in self.rows.values():
+            for entry in row.tile._plugin_controls.applicable():
+                align_composer(entry.control.widget)
+        style_compose(self.batch_panel.edit, self.batch_panel.send)
         for editor in self.findChildren(QLineEdit):
             palette = editor.palette()
             palette.setColor(QPalette.Text, QColor(c['text']))
@@ -159,7 +159,6 @@ class SendConsole(SettingsPanel):
         self.layout().setSpacing(10 if regular else 6)
         self.body_layout.setSpacing(12 if regular else 6)
         self.body_layout.setDirection(QBoxLayout.LeftToRight if regular else QBoxLayout.TopToBottom)
-        self.selection_hint.setVisible(self.width() >= 400)
         row_height = max(52, self.rooms.fontMetrics().height() * 2 + 12)
         if regular:
             self.rooms.setFixedWidth(176)
@@ -175,13 +174,6 @@ class SendConsole(SettingsPanel):
             self.rooms.setFlow(QListView.LeftToRight)
             self.rooms.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
             self.rooms.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        path = QPainterPath()
-        path.addRoundedRect(QRectF(self.rect()), 10, 10)
-        painter.fillPath(path, QColor(colors()['surface']))
 
     def sync_rooms(self):
         had_rows = bool(self.rows)
@@ -248,6 +240,7 @@ class SendConsole(SettingsPanel):
         self.feedback.setText(f'{self.viewer.rows[key].label()}：{text}；结果请查看平台提示。'
                               if key in self.viewer.rows else f'{key}：{text}')
         self.feedback.setToolTip(self.feedback.text())
+        self.feedback.show()
 
     def refresh_avatar(self, key):
         row = self.viewer.rows.get(key)
@@ -277,10 +270,8 @@ class SendConsole(SettingsPanel):
         keys = self.checked_rooms()
         self.pages.setCurrentIndex(1 if len(keys) > 1 else 0)
         self.pages.setVisible(bool(keys))
-        self.empty.setVisible(not keys)
         if not keys:
             self.selected_room = None
-            self.empty.setText('左键选择主播；选一位单发，选多位同文发送。')
             self.context.setText('选择接收弹幕的主播')
         elif len(keys) == 1:
             self.selected_room = keys[0]
@@ -324,19 +315,29 @@ class BatchSend(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 4, 0, 4)
         layout.setAlignment(Qt.AlignTop)
-        compose = QHBoxLayout()
+        self.compose = QWidget(self)
+        self.compose.setFixedHeight(40)
+        compose = QHBoxLayout(self.compose)
+        compose.setContentsMargins(0, 0, 16, 0)
+        compose.setSpacing(4)
         self.edit = QLineEdit()
         self.edit.setPlaceholderText('发送给所选主播的相同内容')
         compose.addWidget(self.edit, 1)
         self.send = QPushButton('发送到所选主播')
         self.send.setProperty('sendPrimary', True)
         self.send.clicked.connect(self.start)
-        compose.addWidget(self.send)
+        accessories = QWidget(self.compose)
+        accessories.setFixedWidth(ACCESSORY_WIDTH)
+        extras = QHBoxLayout(accessories)
+        extras.setContentsMargins(0, 0, 0, 0)
         self.cancel = QPushButton('取消')
         self.cancel.clicked.connect(self.stop)
         self.cancel.hide()
-        compose.addWidget(self.cancel)
-        layout.addLayout(compose)
+        self.cancel.setFixedHeight(INPUT_HEIGHT)
+        extras.addWidget(self.cancel)
+        compose.addWidget(accessories)
+        compose.addWidget(self.send)
+        layout.addWidget(self.compose)
         self.timer = QTimer(self)
         self.timer.setInterval(50)
         self.timer.timeout.connect(self.advance)

@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 def check_platform_controls(app, host, module, source):
     """Use the maintained domestic composers, with no credentials or requests."""
+    from PySide6.QtWidgets import QPushButton
     from ddm import plugins
     package = types.ModuleType('sending_domestic_fixture')
     package.__path__ = [str(source.resolve())]
@@ -57,6 +58,11 @@ def check_platform_controls(app, host, module, source):
                 assert len(controls.applicable()) == 1, kind
                 assert controls._repeat_editor() is not None, kind
                 assert row.unavailable.isHidden(), kind
+                editor = controls._repeat_editor()
+                send = next(button for button in row.findChildren(QPushButton)
+                            if button.property('sendPrimary'))
+                assert editor.height() == viewer.send_console.batch_panel.edit.height() == 32, kind
+                assert send.size() == viewer.send_console.batch_panel.send.size(), kind
             return {'domestic_controls': ['douyu', 'huya', 'douyin'], 'credentials_read': False}
         finally:
             manager.unload()
@@ -125,6 +131,8 @@ def check(app, host, module, output=None):
             viewer.show()
             QTest.qWait(80)
             console = viewer.send_console
+            assert not console.feedback.isVisible()
+            assert not any('左键选择主播；' in label.text() for label in console.findChildren(module.QLabel))
             first = console.rows['1'].tile._plugin_controls.entries[0].control.edit
             second = console.rows['2'].tile._plugin_controls.entries[0].control.edit
             def select(keys):
@@ -209,7 +217,7 @@ def check(app, host, module, output=None):
             QTest.qWait(40)
             feedback_bottom = console.feedback.mapTo(console.body_scroll.viewport(),
                                                       QPoint(0, console.feedback.height())).y()
-            assert feedback_bottom <= console.body_scroll.viewport().height(), (
+            assert not console.feedback.isVisible() or feedback_bottom <= console.body_scroll.viewport().height(), (
                 feedback_bottom, console.body_scroll.viewport().height(),
                 console.body_scroll.widget().minimumSizeHint(), console.work.minimumSizeHint(),
                 console.pages.minimumSizeHint(), console.feedback.sizeHint(),
@@ -222,9 +230,21 @@ def check(app, host, module, output=None):
                     QTest.qWait(30)
                     console.grab().save(str(output.with_name(output.stem + '-light.png')))
                 console.refresh_design()
+            single_button = next(button for button in second.parentWidget().findChildren(QPushButton)
+                                 if button.property('sendPrimary'))
+            single_edit_geometry = (second.mapTo(console, QPoint()).x(), second.mapTo(console, QPoint()).y(),
+                                    second.width(), second.height())
+            single_button_geometry = (single_button.mapTo(console, QPoint()).x(),
+                                      single_button.mapTo(console, QPoint()).y(),
+                                      single_button.width(), single_button.height())
             select({'1', '2', '3'})
             dialog = console.batch_panel
             assert console.pages.currentWidget() is dialog
+            QTest.qWait(40)
+            assert (dialog.edit.mapTo(console, QPoint()).x(), dialog.edit.mapTo(console, QPoint()).y(),
+                    dialog.edit.width(), dialog.edit.height()) == single_edit_geometry
+            assert (dialog.send.mapTo(console, QPoint()).x(), dialog.send.mapTo(console, QPoint()).y(),
+                    dialog.send.width(), dialog.send.height()) == single_button_geometry
             dialog.edit.setText('shared')
             dialog.start()
             QTest.qWait(250)
