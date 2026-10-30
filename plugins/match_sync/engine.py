@@ -323,7 +323,7 @@ class AudioRing:
 
 class History:
     def __init__(self, seconds: float = HISTORY_SECONDS,
-                 byte_limit: int = FRAME_BYTES_LIMIT):
+                 byte_limit: int = FRAME_BYTES_LIMIT, audio_factory=AudioRing):
         self.seconds = seconds
         self.byte_limit = byte_limit
         self.frames = deque()
@@ -331,7 +331,7 @@ class History:
         self.byte_size = 0
         self.origin: float | None = None
         self.lock = threading.RLock()
-        self.audio = AudioRing(seconds)
+        self.audio = audio_factory(seconds)
 
     def append(self, timestamp: float, jpeg: bytes, sample: Sample | None = None):
         with self.lock:

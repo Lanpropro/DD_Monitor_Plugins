@@ -26,6 +26,7 @@ from .media import Chat, Decoder, PlatformChat
 from .fullscreen import mark_fullscreen
 from .sending import SendConsole, SendingDanmakuPanel
 from .panels import SettingsPanel
+from .replay import ReplayBar, ReplayTimeline
 
 COLORS = ("#38bdf8", "#fb7185", "#a78bfa", "#4ade80", "#fbbf24", "#fb923c")
 ROW_MIME = "application/x-ddm-match-sync-row"
@@ -216,6 +217,21 @@ class AudioFeed(QObject):
         self.pump.fill()
 
     @Slot()
+    def flush(self):
+        pump = self.pump
+        with pump.lock:
+            if pump.sink is None:
+                return
+            clock = pump._clock() if pump.flush_clock is None else pump.flush_clock
+            pump.sink.reset()
+            pump.device = pump.sink.start()
+            pump.anchor = clock
+            pump.written = pump.played = 0
+            pump.media_written = 0.0
+            pump.clock_segments.clear()
+            pump.clock_snapshot = clock
+
+    @Slot()
     def state_changed(self):
         if self.pump.sink is not None and self.pump.sink.error().value:
             self.pump.status.emit("音频设备出错；检查系统默认设备后停止并重新开始")
@@ -253,6 +269,7 @@ class AudioPump(QObject):
         self.snapshot = (1.0, ())
         self.played = 0
         self.clock_snapshot = None
+        self.flush_clock = None
         self.timer = QTimer(self)
         self.timer.setInterval(10)
         self.timer.setTimerType(Qt.PreciseTimer)
@@ -303,6 +320,13 @@ class AudioPump(QObject):
             sink.deleteLater()
         self.device = None
         self.clock_snapshot = None
+        self.snapshot = (1.0, ())
+
+    def flush(self, target_clock=None):
+        self.update_snapshot()
+        self.flush_clock = None if target_clock is None else target_clock - self.correction
+        if self.thread is not None:
+            QMetaObject.invokeMethod(self.feed, 'flush', Qt.BlockingQueuedConnection)
 
     def clock(self):
         # Audio mixing/device I/O can outlast a GUI frame. Reuse the last
@@ -331,13 +355,19 @@ class AudioPump(QObject):
         # thread receives only immutable values and thread-safe media histories.
         shifts = self.viewer.shifts()
         rate = self.viewer.playback_rate
+        replaying = self.viewer.replay.active
+        clock = self.clock()
+        shown_clock, shown_shifts = self.viewer.replay.presentation(clock, shifts)
+        if replaying:
+            rate = 1.0
         inputs = []
         for room_id, row in self.viewer.rows.items():
             if (row.decoder is not None and row.audible.isChecked() and not row.paused
-                    and not self.viewer.sync_waiting and row.sync_state == "已同步"):
-                inputs.append((row.decoder.history, shifts[room_id],
-                               rate + self.viewer.relative_rates.get(room_id, 1.0) - 1.0,
-                               row.channel.currentData(), row.volume.value() * row.mix_gain))
+                    and room_id in shown_shifts
+                    and (replaying or not self.viewer.sync_waiting and row.sync_state == "已同步")):
+                inputs.append((row.decoder.history, shown_clock + shown_shifts[room_id] - clock,
+                               1.0 if replaying else rate + self.viewer.relative_rates.get(room_id, 1.0) - 1.0,
+                               row.channel.currentData(), row.volume.value() * (1.0 if replaying else row.mix_gain)))
         self.snapshot = (rate, tuple(inputs))
 
     def fill(self):
@@ -1028,6 +1058,9 @@ class Viewer(QDialog):
         self.row_preview = []
         self.saved_rooms = {str(item["room_id"]): item for item in context.setting("rooms", [])}
         self.running = False
+        self.replay = ReplayTimeline()
+        self._replay_live_anchor = 0.0
+        self._replay_live_updated = 0.0
         self.overlay_pending = {}
         self.overlay_last = ""
         self.alignment = Alignment()
@@ -1126,6 +1159,7 @@ class Viewer(QDialog):
         heading.addWidget(self.buffer_reserve)
         heading.addWidget(self.minimize_settings)
         self.picture = Tile({})
+        self.replay_bar = ReplayBar(self)
         self.restore_settings.setParent(self.picture.bottom)
         self.restore_settings.setObjectName("TileCtrl")
         self.restore_settings.setFixedHeight(26)
@@ -1527,7 +1561,7 @@ class Viewer(QDialog):
         height = 240 if visible else 0
         self.body_split.setSizes([max(1, sizes[0] + sizes[1] - height), height, sizes[2]])
         if visible:
-            self.comparison_panel.render(self.audio.clock(), self.shifts())
+            self.comparison_panel.render(self.live_clock(), self.shifts())
 
     def reorder_room(self, room_id, target_id, after=False):
         if room_id == target_id or room_id not in self.rows or target_id not in self.rows:
@@ -1707,7 +1741,7 @@ class Viewer(QDialog):
 
     def show_comparison(self, room_id):
         self.compare.setChecked(True)
-        self.comparison_panel.render(self.audio.clock(), self.shifts())
+        self.comparison_panel.render(self.live_clock(), self.shifts())
         index = self.comparison_panel.target.findData(room_id)
         if index >= 0:
             self.comparison_panel.target.setCurrentIndex(index)
@@ -1925,6 +1959,47 @@ class Viewer(QDialog):
         self._show_buffering(self.running and not row.paused and
                              (self.canvas.image.isNull() or self.canvas.waiting))
 
+    def replay_histories(self):
+        return {key: row.decoder.history for key, row in self.rows.items()
+                if row.decoder is not None and not row.paused}
+
+    def live_clock(self):
+        if not self.replay.active:
+            return self.audio.clock()
+        now = time.monotonic()
+        self._replay_live_anchor += (now - self._replay_live_updated) * self.playback_rate
+        self._replay_live_updated = now
+        return self._replay_live_anchor + self.audio.correction
+
+    def _rebuild_replay_chat(self, stamp):
+        self.panel.set_placeholder('')
+        self.overlay_pending.clear()
+        if self.video_danmaku is not None:
+            self.video_danmaku.clear()
+        for event in self.replay.messages_between(stamp - 30, stamp):
+            self.panel.add_event(event)
+
+    def seek_replay(self, stamp):
+        now = time.monotonic()
+        live_clock = self.live_clock()
+        was_replaying = self.replay.active
+        if self.replay.seek(stamp, now, self.replay_histories()):
+            if not was_replaying:
+                self._replay_live_anchor = live_clock - self.audio.correction
+                self._replay_live_updated = now
+            self.canvas.set_frame(None)
+            self._rebuild_replay_chat(now - self.replay.delay)
+            self.audio.flush()
+            self.replay_bar.refresh(force=True)
+
+    def return_live(self):
+        clock = self.live_clock()
+        self.replay.live()
+        self.canvas.set_frame(None)
+        self._rebuild_replay_chat(time.monotonic())
+        self.audio.flush(clock)
+        self.replay_bar.refresh(force=True)
+
     def _picture_setting(self, key, value):
         row = self.rows.get(self.main.currentData())
         if row is None:
@@ -2039,7 +2114,7 @@ class Viewer(QDialog):
                           if self.running and not self.alignment.automatic else None)
         main = self.rows.get(self.alignment.reference)
         bounds = main.decoder.history.bounds() if main is not None and main.decoder is not None else None
-        if bounds is None or preserved_main is None or not bounds[0] <= self.audio.clock() + preserved_main <= bounds[1] - .05:
+        if bounds is None or preserved_main is None or not bounds[0] <= self.live_clock() + preserved_main <= bounds[1] - .05:
             preserved_main = None
         if (not self.automatic.isChecked() and self.alignment.automatic and not self.alignment.manual_locked
                 and (self.running or self.rendered_shifts)):
@@ -2123,11 +2198,11 @@ class Viewer(QDialog):
         main = self.rows.get(self.alignment.reference)
         main_bounds = main.decoder.history.bounds() if main is not None and main.decoder is not None else None
         main_shift = self.shifts().get(self.alignment.reference)
-        if main_bounds is not None and main_shift is not None and main_bounds[0] <= self.audio.clock() + main_shift <= main_bounds[1] - .05:
+        if main_bounds is not None and main_shift is not None and main_bounds[0] <= self.live_clock() + main_shift <= main_bounds[1] - .05:
             self.stable_reference_shift = main_shift
         row = self.rows[room_id]
         bounds = row.decoder.history.bounds() if row.decoder is not None else None
-        self.independent_shifts[room_id] = (bounds[1] - self.safety_buffer.target - self.audio.clock()
+        self.independent_shifts[room_id] = (bounds[1] - self.safety_buffer.target - self.live_clock()
                                            if bounds is not None else -self.safety_buffer.target)
         self.alignment.candidates.pop(room_id, None)
         self.admitted_rooms.discard(room_id)
@@ -2170,7 +2245,7 @@ class Viewer(QDialog):
                             and key not in self.rematch_rooms and row.decoder is not None)
                 buffered = False
                 if tracking and .2 < abs(delta) <= .8:
-                    clock = self.audio.clock()
+                    clock = self.live_clock()
                     bounds = row.decoder.history.bounds_at(clock + previous[key])
                     buffered = (bounds is not None and bounds[0] <= clock + min(previous[key], wanted[key])
                                 and clock + max(previous[key], wanted[key]) <= bounds[1] - .05)
@@ -2322,7 +2397,7 @@ class Viewer(QDialog):
         if self._valid(row, worker):
             row.large_candidate = None
             previous = getattr(row.decoder.history, 'previous', None)
-            position = self.audio.clock() + self.shifts().get(row.room_id, 0)
+            position = self.live_clock() + self.shifts().get(row.room_id, 0)
             if previous is not None and previous.frame_at(position) is not None:
                 row.reset_pending = True
                 return
@@ -2502,7 +2577,7 @@ class Viewer(QDialog):
                     self._queue_rematch(row, local=True)
                     self.generation += 1
             visible = key == self.alignment.reference or (self.compare.isChecked() and key in self.comparison_panel.shown_rooms)
-            if available and visible and key != self.alignment.reference and hasattr(decoder, "picture_at"):
+            if available and visible and not self.replay.active and key != self.alignment.reference and hasattr(decoder, "picture_at"):
                 displayed = row.actual_position is not None and abs(row.actual_position - target) <= .2
                 if displayed:
                     row.picture_wait_since = None
@@ -2607,7 +2682,7 @@ class Viewer(QDialog):
         if (row is None or main is None or row.decoder is None or main.decoder is None
                 or not self.alignment.automatic or room_id not in self.alignment.lags or row.paused):
             return
-        clock, shifts = self.audio.clock(), self.shifts()
+        clock, shifts = self.live_clock(), self.shifts()
         target = clock + shifts[room_id]
         bounds = row.decoder.history.bounds_at(target)
         if row.needs_epoch_samples and bounds is not None and target < bounds[0]:
@@ -2651,7 +2726,7 @@ class Viewer(QDialog):
             if pending is None:
                 continue
             received, event = pending
-            if not self.rows[key].show_chat.isChecked() or clock + shifts[key] - received > 5:
+            if key not in shifts or not self.rows[key].show_chat.isChecked() or clock + shifts[key] - received > 5:
                 self.overlay_pending.pop(key, None)
             elif self.video_danmaku.add_event(event):
                 self.overlay_pending.pop(key, None)
@@ -2664,7 +2739,7 @@ class Viewer(QDialog):
             self._suppress_host_audio()
         self._sync_sidebar_marks()
         self.sync_picture()
-        clock = self.audio.clock()
+        clock = self.live_clock()
         wanted = self.target_shifts()
         shifts = self._smooth_shifts(wanted)
         if self.alignment.automatic:
@@ -2684,11 +2759,20 @@ class Viewer(QDialog):
                     current.decoder.history.previous = None
                     self._reset(current, current.decoder)
         clock = self._recover_clock(clock, shifts)
+        now = time.monotonic()
+        self.replay.observe(now, clock, {key: shift for key, shift in shifts.items()
+                                       if self.rows[key].sync_state == '已同步'})
+        shown_clock, shown_shifts = self.replay.presentation(clock, shifts, now)
+        if self.replay.active and not self.replay.valid(shown_clock, shown_shifts, self.replay_histories()):
+            self.return_live()
+            shown_clock, shown_shifts = clock, shifts
+        self.replay_bar.refresh()
         row = self.rows.get(self.alignment.reference)
-        if row is not None and row.decoder is not None and not row.paused:
-            frame = self.canvas.show_at(row.decoder, clock + shifts[row.room_id])
+        if row is not None and row.decoder is not None and not row.paused and row.room_id in shown_shifts:
+            frame = self.canvas.show_at(row.decoder, shown_clock + shown_shifts[row.room_id])
             row.actual_position = self.canvas.frame_key
-            waiting = self.canvas.playback_waiting(row.decoder, clock + shifts[row.room_id], frame, self.sync_waiting)
+            waiting = self.canvas.playback_waiting(row.decoder, shown_clock + shown_shifts[row.room_id], frame,
+                                                   self.sync_waiting and not self.replay.active)
             self._show_buffering(waiting)
             if self.sync_waiting:
                 self.notice.setText("主画面等待缓存恢复；异常二路已静音，已确认偏移保持不变")
@@ -2710,7 +2794,9 @@ class Viewer(QDialog):
                         "自动对齐已关闭；手动偏移")
                 self.notice.setText(f"主画面：{row.label()} · 本地播放延后约 {delay:.1f} 秒 · {mode}")
         if self.compare.isChecked():
-            self.comparison_panel.render(clock, shifts)
+            self.comparison_panel.render(shown_clock, shown_shifts)
+        if self.replay.active:
+            self.notice.setText('整组回看中；后台继续接收直播并自动对齐')
         self._update_sync_health(clock, shifts)
         eligible = []
         chat_budget = min(80, max(1, 200 // max(1, len(self.rows))))
@@ -2750,11 +2836,22 @@ class Viewer(QDialog):
                 event["color"] = row.color
                 eligible.append((received - shifts[room_id], event))
         for _due, event in sorted(eligible, key=lambda item: item[0]):
-            self.panel.add_event(event)
+            self.replay.record_message(now, event)
+            if not self.replay.active:
+                self.panel.add_event(event)
             received = _due + shifts[event["source_room"]]
-            self.overlay_pending[event["source_room"]] = (received, {**event,
-                "text": f"【{event['source_label']}】 {event.get('text') or ''}"})
-        self._render_overlay(clock, shifts)
+            if not self.replay.active:
+                self.overlay_pending[event["source_room"]] = (received, {**event,
+                    "text": f"【{event['source_label']}】 {event.get('text') or ''}"})
+        if self.replay.active:
+            for event in self.replay.messages_between(self.replay.cursor, shown_clock):
+                key = event['source_room']
+                if key in shown_shifts:
+                    self.panel.add_event(event)
+                    self.overlay_pending[key] = (shown_clock + shown_shifts[key], {**event,
+                        'text': f"【{event['source_label']}】 {event.get('text') or ''}"})
+            self.replay.cursor = shown_clock
+        self._render_overlay(shown_clock, shown_shifts)
 
     def _configure_picture_budget(self):
         reference = self.alignment.reference
@@ -2810,13 +2907,13 @@ class Viewer(QDialog):
                           if value.match_confirmed and key in known and key not in self.rematch_rooms}
         reacquiring_rooms = {key for key, value in self.rows.items() if value.needs_epoch_samples}
         reference_id = row.room_id
-        clock, shifts = self.audio.clock(), self.shifts()
+        clock, shifts = self.live_clock(), self.shifts()
         positions = {key: clock + shifts[key] for key in details}
-        has_picture = self.canvas.frame_key is not None
+        has_picture = self.canvas.frame_key is not None and not self.replay.active
         if has_picture:
             positions[reference_id] = self.canvas.frame_key
         preview_rooms = set()
-        for key in self.comparison_panel.shown_rooms if self.compare.isChecked() else ():
+        for key in self.comparison_panel.shown_rooms if self.compare.isChecked() and not self.replay.active else ():
             canvas = self.comparison_panel.cards[key][2]
             if canvas.preview_only:
                 preview_rooms.add(key)
@@ -2936,7 +3033,7 @@ class Viewer(QDialog):
                 main_shift = self.shifts()[main.room_id]
                 if self.stable_reference_shift is None:
                     main_shift = min(main_shift, -self.alignment.buffer_seconds - max(0, match.lag))
-                target = self.audio.clock() + main_shift
+                target = self.live_clock() + main_shift
                 if self.stable_reference_shift is None and main_bounds and other_bounds and not (
                         main_bounds[0] <= target <= main_bounds[1] - .05
                         and other_bounds[0] <= target + match.lag <= other_bounds[1] - .05):
@@ -2945,7 +3042,7 @@ class Viewer(QDialog):
                     continue
             was_confirmed = row.match_confirmed
             previous_lag = self.alignment.lags.get(room_id)
-            position = self.audio.clock() + self.shifts().get(room_id, 0)
+            position = self.live_clock() + self.shifts().get(room_id, 0)
             bounds = row.decoder.history.bounds_at(position) if row.decoder is not None else None
             buffered = bounds is not None and bounds[0] <= position <= bounds[1] - .05
             established = was_confirmed and previous_lag is not None and room_id not in self.independent_shifts
@@ -3023,7 +3120,7 @@ class Viewer(QDialog):
         elif self.compare.isChecked() and row.room_id in self.comparison_panel.shown_rooms:
             frame = self.comparison_panel.cards[row.room_id][2].frame
         else:
-            frame = (row.decoder.history.frame_at(self.audio.clock() + self.shifts()[row.room_id])
+            frame = (row.decoder.history.frame_at(self.live_clock() + self.shifts()[row.room_id])
                      if row.decoder is not None else None)
             if frame is not None and hasattr(row.decoder, "picture_at"):
                 history = row.decoder.history
@@ -3145,6 +3242,8 @@ class Viewer(QDialog):
             self.fullscreen_dialog.close()
         self._stop_recording()
         self.running = False
+        self.replay = ReplayTimeline()
+        self.replay_bar.refresh(force=True)
         self.sync_waiting = False
         self.locked_clock = None
         self.offset_repositioning = False
