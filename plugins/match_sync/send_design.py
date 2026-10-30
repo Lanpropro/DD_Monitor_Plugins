@@ -97,6 +97,7 @@ def stylesheet():
         #MatchSyncSendConsole QScrollArea, #MatchSyncSendConsole QScrollArea > QWidget,
         #MatchSyncSendConsole QScrollArea > QWidget > QWidget {{background: transparent; border: none;}}
         #MatchSyncSendConsole QListWidget {{background: {c['inset']}; border: none; border-radius: 8px;}}
+        #MatchSyncSendConsole #SavedTextList {{background: transparent;}}
         #MatchSyncSendConsole QLineEdit {{background: {c['input']}; color: {c['text']};
             border: 1px solid transparent; border-radius: 8px; padding: 6px 8px;}}
         #MatchSyncSendConsole QLineEdit:focus {{border-color: {c['accent']};}}
@@ -109,6 +110,30 @@ def stylesheet():
         #MatchSyncSendConsole QPushButton:disabled {{background: {c['raised']}; color: {c['secondary']};}}
         #MatchSyncSendConsole #SendMinimize {{background: transparent;}}
     '''
+
+
+class SavedTextDelegate(QStyledItemDelegate):
+    def sizeHint(self, option, index):
+        width = option.fontMetrics.horizontalAdvance(str(index.data() or '')) + 24
+        return QSize(max(32, min(width, self.parent().viewport().width() - 12)), 32)
+
+    def paint(self, painter, option, index):
+        c = colors()
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(option.rect.adjusted(1, 1, -1, -1))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(c['input'] if option.state & QStyle.State_MouseOver else c['raised']))
+        painter.drawRoundedRect(rect, 10, 10)
+        if option.state & QStyle.State_HasFocus:
+            painter.setPen(QPen(QColor(c['accent']), 1))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(rect, 10, 10)
+        painter.setFont(option.font)
+        painter.setPen(QColor(c['text']))
+        text = option.fontMetrics.elidedText(str(index.data() or ''), Qt.ElideRight, max(0, int(rect.width()) - 20))
+        painter.drawText(rect.adjusted(10, 0, -10, 0), Qt.AlignVCenter | Qt.AlignLeft, text)
+        painter.restore()
 
 
 class RecipientDelegate(QStyledItemDelegate):

@@ -277,8 +277,11 @@ def check(app, host, module, output=None):
             assert dialog.send.text() == '发送'
             assert console.context.text() == '同文发送'
             select({'2'})
-            second.setText('saved message')
+            second.setText('draft 2')
+            console.saved_input.setText('saved message')
             console.save_text.click()
+            assert not console.saved_input.text()
+            console.saved_input.setText('saved message')
             console.save_text.click()
             assert console.saved_texts.count() == 1, 'Do not duplicate saved texts'
             assert viewer.context.setting('saved_send_texts') == ['saved message']
@@ -289,16 +292,16 @@ def check(app, host, module, output=None):
                              pos=console.saved_texts.visualItemRect(console.saved_texts.item(0)).center())
             QTest.qWait(130)
             assert sent[before_saved_send:] == [('2', 'saved message')]
-            assert second.text() == 'saved message', 'Quick send must preserve the independent draft'
+            assert second.text() == 'draft 2', 'Quick send must preserve the independent draft'
             select({'1', '2'})
             console.saved_texts.itemClicked.emit(console.saved_texts.item(0))
             QTest.qWait(200)
             assert sent[-2:] == [('1', 'saved message'), ('2', 'saved message')]
-            assert first.text() == 'draft 1' and second.text() == 'saved message'
+            assert first.text() == 'draft 1' and second.text() == 'draft 2'
             second.setText('draft 2')
             select(set())
             assert console.pages.isHidden() and console.selected_room is None
-            assert not console.saved_texts.isEnabled()
+            assert console.saved_texts.isEnabled(), 'Saved texts can still be managed without recipients'
             count = len(sent)
             console.saved_texts.itemClicked.emit(console.saved_texts.item(0))
             assert len(sent) == count
@@ -311,7 +314,9 @@ def check(app, host, module, output=None):
             select({'2'})
             assert console.pages.currentWidget() is console.stack
             assert second.text() == 'draft 2'
-            console.save_text.click()
+            console.saved_input.setText('draft 2')
+            QTest.keyClick(console.saved_input, Qt.Key_Return)
+            assert console.saved_texts.count() == 1
             viewer.rows['2'].alias.setText('changed name')
             assert 'changed name' in console.rooms.currentItem().text()
             viewer.set_settings_visible(False)
@@ -330,7 +335,7 @@ def check(app, host, module, output=None):
             reopened = module.Viewer(plugins.PluginContext(manager, 'sending_check'), {})
             try:
                 assert reopened.send_console.saved_texts.item(0).text() == 'draft 2'
-                assert reopened.send_console.saved_texts.isEnabled() == bool(reopened.send_console.checked_rooms())
+                assert reopened.send_console.saved_texts.isEnabled()
             finally:
                 reopened.close()
                 reopened.deleteLater()
