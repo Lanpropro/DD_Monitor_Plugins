@@ -118,7 +118,8 @@ def check(app, host, module, output=None):
 
         def finish(self):
             active.clear()
-            self.edit.clear()
+            if not self.widget.property('fail_send'):
+                self.edit.clear()
             self.edit.setReadOnly(False)
 
     with tempfile.TemporaryDirectory() as directory:
@@ -254,10 +255,10 @@ def check(app, host, module, output=None):
             assert sent == [('1', 'shared'), ('2', 'shared'), ('3', 'shared')]
             assert first.text() == 'draft 1' and second.text() == 'draft 2'
             assert not dialog.timer.isActive()
-            assert all(console.statuses[key] == '已处理' for key in ('1', '2', '3'))
+            assert all(console.statuses[key] == '✓' for key in ('1', '2', '3'))
             assert all(console.rooms.item(index).data(Qt.CheckStateRole) == Qt.Checked.value
                        for index in range(console.rooms.count())), 'Visual checks must match the actual send targets'
-            assert '已处理' in console.feedback.text()
+            assert not console.feedback.isVisible()
             if output:
                 output.parent.mkdir(parents=True, exist_ok=True)
                 viewer.grab().save(str(output.with_name(output.stem + '-multi.png')))
@@ -285,6 +286,35 @@ def check(app, host, module, output=None):
             console.save_text.click()
             assert console.saved_texts.count() == 1, 'Do not duplicate saved texts'
             assert viewer.context.setting('saved_send_texts') == ['saved message']
+            for index in range(30):
+                console.add_saved_text('scroll phrase ' + str(index))
+            QTest.qWait(40)
+            assert console.saved_texts.verticalScrollBar().maximum() > 0
+            assert console.saved_texts.horizontalScrollBar().maximum() == 0
+            console.saved_texts.scrollToBottom()
+            assert console.saved_texts.visualItemRect(console.saved_texts.item(30)).intersects(console.saved_texts.viewport().rect())
+            while console.saved_texts.count() > 1:
+                console.saved_texts.takeItem(console.saved_texts.count() - 1)
+            console.saved_texts.scrollToTop()
+            console.store_phrase('second phrase')
+            QTest.qWait(40)
+            first_position = console.saved_texts.visualItemRect(console.saved_texts.item(0)).center()
+            second_position = console.saved_texts.visualItemRect(console.saved_texts.item(1)).center()
+            count_before_drag = len(sent)
+            QTest.mousePress(console.saved_texts.viewport(), Qt.LeftButton, pos=first_position)
+            QTest.qWait(470)
+            QTest.mouseMove(console.saved_texts.viewport(), second_position)
+            QTest.mouseRelease(console.saved_texts.viewport(), Qt.LeftButton, pos=second_position)
+            assert len(sent) == count_before_drag, 'A long press or drag must not send'
+            assert viewer.context.setting('saved_send_texts') == ['second phrase', 'saved message']
+            position = console.saved_texts.visualItemRect(console.saved_texts.item(0)).center()
+            QTest.mouseClick(console.saved_texts.viewport(), Qt.RightButton, pos=position)
+            assert console.saved_texts.count() == 2, 'Right click only reveals the delete badge'
+            if output:
+                console.grab().save(str(output.with_name(output.stem + '-delete-badge.png')))
+            rect = console.saved_texts.visualItemRect(console.saved_texts.item(0))
+            QTest.mouseClick(console.saved_texts.viewport(), Qt.LeftButton, pos=rect.topRight() + QPoint(-8, 8))
+            assert viewer.context.setting('saved_send_texts') == ['saved message']
             if output:
                 console.grab().save(str(output.with_name(output.stem + '-stored-text.png')))
             before_saved_send = len(sent)
@@ -310,17 +340,39 @@ def check(app, host, module, output=None):
             console.saved_texts.itemClicked.emit(console.saved_texts.item(0))
             assert len(sent) == count
             position = console.saved_texts.visualItemRect(console.saved_texts.item(0)).center()
-            with patch.object(import_module(module.SendConsole.__module__), 'QMenu') as menu_type:
-                menu = menu_type.return_value
-                menu.exec.return_value = menu.addAction.return_value
-                console.saved_menu(position)
+            QTest.mouseClick(console.saved_texts.viewport(), Qt.RightButton, pos=position)
+            rect = console.saved_texts.visualItemRect(console.saved_texts.item(0))
+            QTest.mouseClick(console.saved_texts.viewport(), Qt.LeftButton, pos=rect.topRight() + QPoint(-8, 8))
             assert console.saved_texts.count() == 0 and viewer.context.setting('saved_send_texts') == []
+            viewer.panel.add_message('some author', 'message to save')
+            cursor = viewer.panel.body.document().find('message to save')
+            viewer.panel.body.setTextCursor(cursor)
+            text = console.chat_text(QPoint(10, 10))
+            assert text == 'message to save', 'Transfer message text without the username'
+            console.store_phrase(text)
+            assert viewer.context.setting('saved_send_texts') == ['message to save']
+            console.saved_texts.clear()
+            console.persist_texts()
             select({'2'})
             assert console.pages.currentWidget() is console.stack
             assert second.text() == 'draft 2'
             console.saved_input.setText('draft 2')
             QTest.keyClick(console.saved_input, Qt.Key_Return)
             assert console.saved_texts.count() == 1
+            second.setText('direct success')
+            single_button.click()
+            QTest.qWait(130)
+            assert console.statuses['2'] == '✓' and not console.feedback.isVisible()
+            QTest.qWait(2550)
+            assert '2' not in console.statuses, 'Success check should disappear'
+            composer = console.rows['2'].tile._plugin_controls.entries[0].control
+            composer.widget.setProperty('fail_send', True)
+            second.setText('failed attempt')
+            single_button.click()
+            QTest.qWait(130)
+            assert console.statuses.get('2') != '✓', 'A failed request must not display success'
+            composer.widget.setProperty('fail_send', False)
+            second.setText('draft 2')
             viewer.rows['2'].alias.setText('changed name')
             assert 'changed name' in console.rooms.currentItem().text()
             viewer.set_settings_visible(False)

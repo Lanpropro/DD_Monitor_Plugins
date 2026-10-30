@@ -2,11 +2,11 @@
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (QBoxLayout, QFrame, QHBoxLayout, QListView, QListWidget,
-    QListWidgetItem, QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
+    QListWidgetItem, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 
 from ddm.widgets import Tile
 from .panels import SettingsPanel, console_button_style
-from .send_design import ACCESSORY_WIDTH, INPUT_HEIGHT, RecipientDelegate, SavedTextDelegate, align_composer, colors, style_compose, stylesheet
+from .send_design import ACCESSORY_WIDTH, INPUT_HEIGHT, RecipientDelegate, SavedTextDelegate, SavedTextList, align_composer, colors, style_compose, stylesheet
 
 
 class SendRow(QFrame):
@@ -56,6 +56,11 @@ class SendConsole(SettingsPanel):
         super().__init__(viewer, 'MatchSyncSendConsole')
         self.rows = {}
         self.statuses = {}
+        self.status_timers = {}
+        self.send_watches = {}
+        self.watch_timer = QTimer(self)
+        self.watch_timer.setInterval(50)
+        self.watch_timer.timeout.connect(self.check_sends)
         self.batch_targets = set()
         self.selected_room = None
         self.collapsed = False
@@ -134,11 +139,11 @@ class SendConsole(SettingsPanel):
         self.saved_input.returnPressed.connect(self.store_text)
         saved_heading.addWidget(self.saved_input, 1)
         self.save_text = QPushButton('暂存')
-        self.save_text.setToolTip('保存暂存区输入的文字；左键点击文字块发送，右键删除。')
+        self.save_text.setToolTip('保存文字；左键发送，长按拖动排序，右键显示删除小标。')
         self.save_text.clicked.connect(self.store_text)
         saved_heading.addWidget(self.save_text)
         work_layout.addLayout(saved_heading)
-        self.saved_texts = QListWidget()
+        self.saved_texts = SavedTextList()
         self.saved_texts.setObjectName('SavedTextList')
         self.saved_texts.setViewMode(QListView.IconMode)
         self.saved_texts.setFlow(QListView.LeftToRight)
@@ -149,13 +154,13 @@ class SendConsole(SettingsPanel):
         self.saved_texts.setMouseTracking(True)
         self.saved_texts.setCursor(Qt.PointingHandCursor)
         self.saved_texts.setItemDelegate(SavedTextDelegate(self.saved_texts))
-        self.saved_texts.setAccessibleName('暂存文本，左键发送，右键删除')
+        self.saved_texts.setAccessibleName('暂存文本，左键发送，长按排序，右键显示删除小标')
         self.saved_texts.setMinimumHeight(36)
         self.saved_texts.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.saved_texts.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.saved_texts.setTextElideMode(Qt.ElideRight)
-        self.saved_texts.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.saved_texts.customContextMenuRequested.connect(self.saved_menu)
+        self.saved_texts.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.saved_texts.changed.connect(self.persist_texts)
         self.saved_texts.itemClicked.connect(lambda item: self.batch_panel.begin(item.text()))
         for text in viewer.context.setting('saved_send_texts', []):
             self.add_saved_text(text)
@@ -167,6 +172,8 @@ class SendConsole(SettingsPanel):
         self.feedback.setMaximumHeight(self.feedback.fontMetrics().height() * 2 + 4)
         work_layout.addWidget(self.feedback)
         self.feedback.hide()
+        viewer.panel.body.setContextMenuPolicy(Qt.CustomContextMenu)
+        viewer.panel.body.customContextMenuRequested.connect(self.chat_menu)
         self.refresh_design()
 
     def add_saved_text(self, text):
@@ -178,24 +185,40 @@ class SendConsole(SettingsPanel):
         text = self.saved_input.text().strip()
         if not text.strip():
             return
+        self.store_phrase(text)
+        self.saved_input.clear()
+
+    def store_phrase(self, text):
+        if not text.strip():
+            return
         if not any(self.saved_texts.item(i).text() == text for i in range(self.saved_texts.count())):
             self.add_saved_text(text)
             self.persist_texts()
-        self.saved_input.clear()
 
     def persist_texts(self):
         self.viewer.context.set_setting('saved_send_texts',
             [self.saved_texts.item(i).text() for i in range(self.saved_texts.count())])
 
-    def saved_menu(self, position):
-        item = self.saved_texts.itemAt(position)
-        if item is None:
-            return
-        menu = QMenu(self)
-        remove = menu.addAction('删除暂存文本')
-        if menu.exec(self.saved_texts.viewport().mapToGlobal(position)) is remove:
-            self.saved_texts.takeItem(self.saved_texts.row(item))
-            self.persist_texts()
+    def chat_text(self, position):
+        body = self.viewer.panel.body
+        if body.textCursor().hasSelection():
+            return body.textCursor().selectedText().replace('\u2029', '\n').replace('\ufffc', '').strip()
+        index = body.cursorForPosition(position).blockNumber()
+        blocks = self.viewer.panel._blocks
+        return str(blocks[index].get('text') or '') if 0 <= index < len(blocks) else ''
+
+    def chat_menu(self, position):
+        body = self.viewer.panel.body
+        text = self.chat_text(position)
+        menu = body.createStandardContextMenu()
+        menu.addSeparator()
+        save = menu.addAction('转存为暂存文本')
+        save.setEnabled(bool(text.strip()))
+        save.triggered.connect(lambda: self.store_phrase(text))
+        try:
+            menu.exec(body.viewport().mapToGlobal(position))
+        finally:
+            menu.deleteLater()
 
     def refresh_design(self):
         self.setStyleSheet(stylesheet())
@@ -249,6 +272,11 @@ class SendConsole(SettingsPanel):
                 self.stack.removeWidget(row)
                 row.shutdown()
                 self.statuses.pop(key, None)
+                self.send_watches.pop(key, None)
+                timer = self.status_timers.pop(key, None)
+                if timer is not None:
+                    timer.stop()
+                    timer.deleteLater()
         for key, room in self.viewer.rows.items():
             if key not in self.rows:
                 self.rows[key] = SendRow(self.viewer, room)
@@ -257,12 +285,12 @@ class SendConsole(SettingsPanel):
                 editor = self.rows[key].tile._plugin_controls._repeat_editor()
                 if editor is not None:
                     editor.textChanged.connect(lambda _text, room_id=key: self.refresh_room(room_id))
-                    editor.returnPressed.connect(lambda room_id=key: self.set_status(room_id, '已请求发送'))
+                    editor.returnPressed.connect(lambda room_id=key, edit=editor: self.watch_send(room_id, edit))
                     for button in editor.parentWidget().findChildren(QPushButton):
                         if button.text() == '发送' and button.window() is editor.window():
                             button.setProperty('sendPrimary', True)
-                            button.clicked.connect(lambda _checked=False, room_id=key:
-                                                   self.set_status(room_id, '已请求发送'))
+                            button.clicked.connect(lambda _checked=False, room_id=key, edit=editor:
+                                                   self.watch_send(room_id, edit))
             self.rows[key].update_name(room)
         if not had_rows and self.rows:
             checked = {next(iter(self.rows))}
@@ -295,17 +323,45 @@ class SendConsole(SettingsPanel):
             item = self.rooms.item(index)
             if item.data(Qt.UserRole) == key:
                 text = self.statuses.get(key, '')
-                item.setText(f"{row.label()}\n{'有草稿 · ' if draft else ''}{text or '待发送'}")
+                detail = text or ('有草稿' if draft else '')
+                item.setText(f"{row.label()}\n{detail}")
                 item.setToolTip(f'{row.label()} · {key}\n{item.text().partition(chr(10))[2]}')
                 self.refresh_avatar(key)
 
     def set_status(self, key, text):
+        if key in self.status_timers:
+            self.status_timers[key].stop()
         self.statuses[key] = text
         self.refresh_room(key)
-        self.feedback.setText(f'{self.viewer.rows[key].label()}：{text}；结果请查看平台提示。'
-                              if key in self.viewer.rows else f'{key}：{text}')
-        self.feedback.setToolTip(self.feedback.text())
-        self.feedback.show()
+        self.feedback.hide()
+        if text == '✓':
+            if key not in self.status_timers:
+                timer = QTimer(self)
+                timer.setSingleShot(True)
+                timer.timeout.connect(lambda room_id=key: self.clear_status(room_id))
+                self.status_timers[key] = timer
+            self.status_timers[key].start(2500)
+
+    def clear_status(self, key):
+        self.statuses.pop(key, None)
+        self.refresh_room(key)
+
+    def watch_send(self, key, editor):
+        self.set_status(key, '')
+        if editor.isReadOnly() or not editor.isEnabled():
+            self.send_watches[key] = editor
+            self.set_status(key, '发送中…')
+            self.watch_timer.start()
+
+    def check_sends(self):
+        for key, editor in tuple(self.send_watches.items()):
+            if key not in self.rows:
+                self.send_watches.pop(key)
+            elif not editor.isReadOnly() and editor.isEnabled():
+                self.send_watches.pop(key)
+                self.set_status(key, '✓' if not editor.text() else '')
+        if not self.send_watches:
+            self.watch_timer.stop()
 
     def refresh_avatar(self, key):
         row = self.viewer.rows.get(key)
@@ -439,7 +495,8 @@ class BatchSend(QWidget):
             key, row, editor = self.active
             if key in self.console.viewer.rows and (editor.isReadOnly() or not editor.isEnabled()):
                 return
-            self.console.set_status(key, '已处理' if key in self.console.viewer.rows else '已移除，已取消')
+            self.console.set_status(key, ('✓' if not editor.text() else '')
+                                    if key in self.console.viewer.rows else '已移除，已取消')
             row.shutdown()
             self.active = None
         while self.pending:

@@ -1,7 +1,7 @@
 """Scoped, opaque sending-workspace styling and recipient rendering."""
-from PySide6.QtCore import QEvent, QRectF, QSize, Qt
+from PySide6.QtCore import QEvent, QPoint, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QPushButton, QSizePolicy, QStyle, QStyledItemDelegate, QWidget
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QLineEdit, QListWidget, QPushButton, QSizePolicy, QStyle, QStyledItemDelegate, QWidget
 
 from ddm import theme
 from .panels import console_button_style
@@ -112,7 +112,101 @@ def stylesheet():
     '''
 
 
+class SavedTextList(QListWidget):
+    changed = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self._pressed = None
+        self._dragging = False
+        self._position = QPoint()
+        self._start = QPoint()
+        self._hold = QTimer(self)
+        self._hold.setSingleShot(True)
+        self._hold.setInterval(450)
+        self._hold.timeout.connect(self._begin_drag)
+        self._scroll = QTimer(self)
+        self._scroll.setInterval(60)
+        self._scroll.timeout.connect(self._move_drag)
+        self.setVerticalScrollMode(QListWidget.ScrollPerPixel)
+        self.setDragEnabled(False)
+        self.setAcceptDrops(False)
+
+    def mousePressEvent(self, event):
+        position = event.position().toPoint()
+        item = self.itemAt(position)
+        if event.button() == Qt.RightButton:
+            if item is not None:
+                item.setData(Qt.UserRole + 4, not item.data(Qt.UserRole + 4))
+            event.accept()
+            return
+        if event.button() == Qt.LeftButton and item is not None:
+            rect = self.visualItemRect(item)
+            if item.data(Qt.UserRole + 4) and SavedTextDelegate.delete_rect(rect).contains(position):
+                self.takeItem(self.row(item))
+                self.changed.emit()
+                event.accept()
+                return
+            self._pressed = item
+            self._start = self._position = position
+            self._hold.start()
+        super().mousePressEvent(event)
+
+    def _begin_drag(self):
+        if self._pressed is not None:
+            self._dragging = True
+            self.setCursor(Qt.ClosedHandCursor)
+            self._scroll.start()
+
+    def _move_drag(self):
+        if not self._dragging:
+            return
+        bar = self.verticalScrollBar()
+        if self._position.y() < 20:
+            bar.setValue(bar.value() - 12)
+        elif self._position.y() > self.viewport().height() - 20:
+            bar.setValue(bar.value() + 12)
+        target = self.itemAt(self._position)
+        if target is not None and target is not self._pressed:
+            row = self.row(target)
+            self.takeItem(self.row(self._pressed))
+            self.insertItem(row, self._pressed)
+            self.doItemsLayout()
+
+    def mouseMoveEvent(self, event):
+        self._position = event.position().toPoint()
+        if self._dragging:
+            self._move_drag()
+            event.accept()
+            return
+        if (self._position - self._start).manhattanLength() > QApplication.startDragDistance():
+            self._hold.stop()
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._hold.stop()
+        self._scroll.stop()
+        dragged = self._dragging
+        moved = (event.position().toPoint() - self._start).manhattanLength() > QApplication.startDragDistance()
+        pressed, self._pressed = self._pressed, None
+        self._dragging = False
+        self.setCursor(Qt.PointingHandCursor)
+        if event.button() == Qt.RightButton or dragged or moved or pressed is None:
+            if dragged:
+                self.changed.emit()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def contextMenuEvent(self, event):
+        event.accept()
+
+
 class SavedTextDelegate(QStyledItemDelegate):
+    @staticmethod
+    def delete_rect(rect):
+        return QRectF(rect.right() - 17, rect.top(), 17, 17)
+
     def sizeHint(self, option, index):
         width = option.fontMetrics.horizontalAdvance(str(index.data() or '')) + 24
         return QSize(max(32, min(width, self.parent().viewport().width() - 12)), 32)
@@ -133,6 +227,14 @@ class SavedTextDelegate(QStyledItemDelegate):
         painter.setPen(QColor(c['text']))
         text = option.fontMetrics.elidedText(str(index.data() or ''), Qt.ElideRight, max(0, int(rect.width()) - 20))
         painter.drawText(rect.adjusted(10, 0, -10, 0), Qt.AlignVCenter | Qt.AlignLeft, text)
+        if index.data(Qt.UserRole + 4):
+            close = self.delete_rect(option.rect).adjusted(1, 1, -1, -1)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(c['accent']))
+            painter.drawEllipse(close)
+            painter.setPen(QPen(QColor(c['text']), 1.4))
+            painter.drawLine(close.topLeft() + QPoint(4, 4), close.bottomRight() - QPoint(4, 4))
+            painter.drawLine(close.topRight() + QPoint(-4, 4), close.bottomLeft() + QPoint(4, -4))
         painter.restore()
 
 
@@ -193,7 +295,7 @@ class RecipientDelegate(QStyledItemDelegate):
         painter.drawText(left, top + metrics.ascent(), metrics.elidedText(text[0], Qt.ElideRight, width))
         font.setWeight(QFont.Normal)
         painter.setFont(font)
-        painter.setPen(QColor(c['secondary']))
+        painter.setPen(QColor(c['accent'] if len(text) > 1 and text[1] == '✓' else c['secondary']))
         painter.drawText(left, top + line_height + metrics.ascent(),
                          metrics.elidedText(text[1] if len(text) > 1 else '', Qt.ElideRight, width))
         if checked is not None:
