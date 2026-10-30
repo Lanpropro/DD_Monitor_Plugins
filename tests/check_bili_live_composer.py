@@ -40,18 +40,74 @@ class ComposerTests(unittest.TestCase):
             release.wait(3)
             return {'code': 0}
         try:
-            with patch.object(bili, 'send_danmaku', side_effect=send) as request:
+            packages = [{'emoticons': [{'emoticon_unique': 'official_13', 'perm': 1}]}]
+            with patch.object(bili, 'get_emoticons', return_value=packages) as check, \
+                    patch.object(bili, 'send_danmaku', side_effect=send) as request:
                 self.assertTrue(self.composer.repeat_message(event))
                 settle(entered.is_set)
                 self.assertFalse(self.composer.repeat_message(event), 'Busy composer sends only once')
                 release.set()
                 settle(lambda: not self.composer.busy)
             self.assertEqual(request.call_count, 1)
+            check.assert_called_once()
+            self.assertEqual(check.call_args.args, ('101',))
+            self.assertEqual(check.call_args.kwargs['cookies']['SESSDATA'], 'test-session')
             self.assertEqual(request.call_args.args[:2], ('101', 'official_13'))
             self.assertEqual(request.call_args.kwargs['dm_type'], 1)
             self.assertEqual(self.composer.edit.text(), 'keep my draft')
         finally:
             release.set()
+
+    def test_repeat_emoticon_rejects_locked_missing_and_failed_permission_checks(self):
+        import requests
+        event = {'text': '[表情]', 'dm_type': 1, 'emoticon_unique': 'official_13'}
+        self.composer.edit.setText('keep my draft')
+        # Cached permissions are never sufficient to authorize sending.
+        self.composer._catalog_key = self.composer._context()
+        self.composer._packages = [{'emoticons': [{'emoticon_unique': 'official_13', 'perm': 1}]}]
+        cases = (
+            ([{'emoticons': [{'emoticon_unique': 'official_13', 'perm': 0}]}], None, '未解锁'),
+            ([{'emoticons': [{'emoticon_unique': 'official_13'}]}], None, '未解锁'),
+            ([], None, '无法使用'),
+            (None, requests.Timeout(), '无法检测表情权限'),
+            (None, ValueError('synthetic denial'), '无法检测表情权限'),
+        )
+        for packages, error, expected in cases:
+            with self.subTest(expected=expected), \
+                    patch.object(bili, 'get_emoticons', return_value=packages, side_effect=error), \
+                    patch.object(bili, 'send_danmaku') as send:
+                self.assertTrue(self.composer.repeat_message(event))
+                settle(lambda: not self.composer.busy)
+                send.assert_not_called()
+                self.assertIn(expected, self.composer.feedback.text())
+                self.assertEqual(self.composer.edit.text(), 'keep my draft')
+
+    def test_repeat_permission_result_is_discarded_after_context_change(self):
+        event = {'text': '[表情]', 'dm_type': 1, 'emoticon_unique': 'official_13'}
+        for change in ('account', 'room', 'shutdown'):
+            entered, release = threading.Event(), threading.Event()
+            def check(*args, **kwargs):
+                entered.set()
+                release.wait(3)
+                return [{'emoticons': [{'emoticon_unique': 'official_13', 'perm': 1}]}]
+            try:
+                with self.subTest(change=change), patch.object(bili, 'get_emoticons', side_effect=check), \
+                        patch.object(bili, 'send_danmaku') as send:
+                    self.assertTrue(self.composer.repeat_message(event))
+                    settle(entered.is_set)
+                    if change == 'account':
+                        session.set_login_cookies('new-session', 'new-csrf', 'device-test')
+                        self.composer.sync_credentials()
+                    elif change == 'room':
+                        self.composer.set_room('202')
+                    else:
+                        self.composer.shutdown()
+                    release.set()
+                    settle(lambda: not self.composer._requests)
+                    send.assert_not_called()
+                    self.assertFalse(self.composer.busy)
+            finally:
+                release.set()
 
     def test_repeat_emoticon_uses_existing_login_and_support_checks(self):
         event = {'text': '[表情]', 'dm_type': 1, 'emoticon_unique': 'official_13'}
