@@ -72,6 +72,10 @@ def main():
         app.processEvents()
         assert not canvas.testAttribute(Qt.WA_OpaquePaintEvent)
         assert host.grab().toImage().pixelColor(10, 10) == QColor('blue')
+        empty = host.grab().toImage().convertToFormat(QImage.Format_RGB32)
+        expected = QImage(empty.size(), QImage.Format_RGB32)
+        expected.fill(QColor('blue'))
+        assert empty == expected, 'An empty canvas must not draw placeholder text'
         canvas.transparent_background = False
         canvas._sync_opaque_paint()
         canvas.update()

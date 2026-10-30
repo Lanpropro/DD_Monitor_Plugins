@@ -137,7 +137,7 @@ class SendConsole(SettingsPanel):
         work_layout = QVBoxLayout(self.work)
         work_layout.setContentsMargins(0, 0, 0, 0)
         work_layout.setSpacing(6)
-        self.context = QLabel('选择一位主播')
+        self.context = QLabel('')
         self.context.setObjectName('SendContext')
         self.context.setTextFormat(Qt.PlainText)
         self.context.setWordWrap(True)
@@ -227,13 +227,11 @@ class SendConsole(SettingsPanel):
         text = str(event.get('text') or '')
         menu = CommentToolbar(self.viewer.panel)
         menu.copy_action.setEnabled(bool(text))
-        key = str(event.get('source_room') or '')
-        row = self.rows.get(key)
-        controls = row.tile._plugin_controls if row is not None else None
-        available = bool(text and controls is not None and controls.can_repeat(event)
+        keys = self.checked_rooms()
+        available = bool(text and keys and all(self.rows[key].tile._plugin_controls.can_repeat(event) for key in keys)
                          and not self.batch_panel.timer.isActive())
         menu.repeat_action.setEnabled(available)
-        menu.repeat_button.setToolTip('发送到该弹幕来源直播间' if available else '来源房间的发送入口不可用或正在发送')
+        menu.repeat_button.setToolTip('发送给当前选中的主播' if available else '请先选择主播，并确认所选房间的发送入口可用')
         menu.save_action = QAction('暂存', menu)
         save_button = menu._button(menu.save_action, menu)
         menu.save_action.setEnabled(bool(text.strip()))
@@ -252,13 +250,7 @@ class SendConsole(SettingsPanel):
             elif chosen is menu.save_action:
                 self.store_phrase(text)
             elif chosen is menu.repeat_action and menu.repeat_action.isEnabled():
-                key = str(event.get('source_room') or '')
-                if event.get('dm_type') == 1:
-                    row = self.rows.get(key)
-                    if row is not None:
-                        row.tile._plugin_controls.repeat_message(event, key)
-                else:
-                    self.batch_panel.begin(text, targets=[key])
+                self.batch_panel.begin(text, event=event)
         finally:
             menu.deleteLater()
 
@@ -439,7 +431,7 @@ class SendConsole(SettingsPanel):
         self.pages.setVisible(bool(keys))
         if not keys:
             self.selected_room = None
-            self.context.setText('选择接收弹幕的主播')
+            self.context.setText('选择接收弹幕的主播' if self.rows else '')
         elif len(keys) == 1:
             self.selected_room = keys[0]
             self.stack.setCurrentWidget(self.rows[keys[0]])
@@ -519,13 +511,14 @@ class BatchSend(QWidget):
     def start(self, *_args):
         self.begin(self.edit.text())
 
-    def begin(self, text, targets=None):
+    def begin(self, text, event=None):
         if self.timer.isActive() or not text.strip():
             return
-        self.pending = self.console.checked_rooms() if targets is None else list(targets)
+        self.pending = self.console.checked_rooms()
         if not self.pending:
             return
         self.text = text
+        self.event = dict(event) if event is not None else {'text': text}
         self.send.setEnabled(False)
         self.cancel.show()
         self.edit.setReadOnly(True)
@@ -541,7 +534,7 @@ class BatchSend(QWidget):
             key, row, editor = self.active
             if key in self.console.viewer.rows and (editor.isReadOnly() or not editor.isEnabled()):
                 return
-            self.console.set_status(key, ('✓' if not editor.text() else '')
+            self.console.set_status(key, ('✓' if not editor.text() and self.event.get('dm_type') != 1 else '')
                                     if key in self.console.viewer.rows else '已移除，已取消')
             row.shutdown()
             self.active = None
@@ -556,12 +549,16 @@ class BatchSend(QWidget):
             row.hide()
             controls = row.tile._plugin_controls
             editor = controls._repeat_editor()
-            if editor is None or len(self.text) > editor.maxLength():
+            if editor is None or not controls.can_repeat(self.event) or (self.event.get('dm_type') != 1 and len(self.text) > editor.maxLength()):
                 self.console.set_status(key, '入口不可用或超出长度限制')
                 row.shutdown()
                 continue
             self.active = (key, row, editor)
-            controls.repeat_text(self.text, key)
+            if not controls.repeat_message(self.event, key):
+                self.console.set_status(key, '入口不可用或未开始发送')
+                row.shutdown()
+                self.active = None
+                continue
             self.console.set_status(key, '正在处理…')
             return
         self.stop()

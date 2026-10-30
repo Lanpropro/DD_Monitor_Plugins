@@ -150,10 +150,6 @@ class Canvas(QFrame):
         if not self.transparent_background:
             painter.fillRect(self.rect(), theme.qcolor(theme.CONTENT) if theme.is_light() else QColor("#101216"))
         if self.image.isNull():
-            if self.waiting:
-                return
-            painter.setPen(theme.qcolor(theme.TEXT1 if self.transparent_background else theme.TEXT3))
-            painter.drawText(self.rect(), Qt.AlignCenter, "将左侧关注栏卡片拖到这里，加入比赛二路")
             return
         image = self.image
         source = self._source_rect()
@@ -1161,7 +1157,7 @@ class Viewer(QDialog):
         self.panel.body.setAcceptDrops(False)
         self.panel.body.viewport().setAcceptDrops(False)
         self.panel.setMinimumWidth(260)
-        self.panel.set_placeholder("各路弹幕以主播名称标注来源直播间")
+        self.panel.set_placeholder('')
         settings = getattr(context.window, "settings", {})
         self.video_danmaku = getattr(self.picture, "video_danmaku", None)
         if self.video_danmaku is not None:
@@ -1177,7 +1173,7 @@ class Viewer(QDialog):
         split.setHandleWidth(4)
         split.setStyleSheet("QSplitter::handle { background: transparent; } QSplitter::handle:hover { background: palette(mid); }")
         self.picture_split = split
-        self.notice = QLabel("自动匹配使用完整画面；可框选计时器放大对照，再按 0.1 秒手动微调偏移。")
+        self.notice = QLabel('')
         self.notice.setWordWrap(True)
         body = QWidget()
         body.setObjectName("MatchSyncRows")
@@ -1318,7 +1314,7 @@ class Viewer(QDialog):
         content.installEventFilter(self)
         for widget in self.add_controls:
             widget.hide()
-        self.notice.setText("从左侧关注栏拖入直播间；选择主画面，各路声音与弹幕会合并。")
+        self.notice.setText('')
 
     def _shortcut_action(self, watched, event):
         if not self.isVisible() or not isinstance(watched, QWidget):
@@ -2106,8 +2102,8 @@ class Viewer(QDialog):
         self._sync_sidebar_marks()
         if not self.rows:
             self.stop()
-            self.panel.set_placeholder("将左侧关注栏卡片拖到这里，加入比赛二路")
-            self.notice.setText("请从左侧关注栏拖入直播间")
+            self.panel.set_placeholder('')
+            self.notice.setText('')
         self.changed()
 
     def target_shifts(self):
