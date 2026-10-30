@@ -1,8 +1,8 @@
 """Independent platform composers below the merged chat, one per live room."""
 from PySide6.QtCore import QPointF, QPropertyAnimation, Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QCursor, QImage, QPalette
+from PySide6.QtGui import QAction, QColor, QCursor, QFont, QImage, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (QApplication, QBoxLayout, QFrame, QHBoxLayout, QListView, QListWidget,
-    QListWidgetItem, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
+    QListWidgetItem, QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 
 from ddm.widgets import DanmakuPanel, Tile
 from ddm.danmaku_actions import CommentToolbar
@@ -62,11 +62,23 @@ class SendingDanmakuPanel(DanmakuPanel):
 
     def _block_html(self, entry):
         if self._adding_divider or entry.get('_replay_divider'):
-            line = QImage(1, 1, QImage.Format_ARGB32)
-            line.fill(theme.qcolor(theme.TEXT1))
-            self._register_image('replay-separator', line)
             width = max(1, self.body.viewport().width() - 24)
-            return f'<p align="center" style="margin-top:16px; margin-bottom:16px;"><img src="replay-separator" width="{width}" height="1"></p>'
+            line = QImage(width, 80, QImage.Format_ARGB32)
+            line.fill(Qt.transparent)
+            painter = QPainter(line)
+            painter.setPen(QPen(theme.qcolor(theme.TEXT1), 1))
+            font = QFont(self.body.font())
+            font.setPixelSize(theme.FONT_CONTROL)
+            painter.setFont(font)
+            text = entry.get('text', '')
+            half = painter.fontMetrics().horizontalAdvance(text) / 2 + 12
+            painter.drawLine(0, 40, max(0, int(width / 2 - half)), 40)
+            painter.drawLine(min(width, int(width / 2 + half)), 40, width, 40)
+            painter.drawText(line.rect(), Qt.AlignCenter, text)
+            painter.end()
+            key = 'replay-separator-' + str(abs(hash(text)))
+            self._register_image(key, line)
+            return f'<p align="center" style="margin:0;"><img src="{key}" width="{width}" height="80"></p>'
         return super()._block_html(entry)
 
     def resizeEvent(self, event):
@@ -309,7 +321,7 @@ class SendConsole(SettingsPanel):
         c = colors()
         for row in self.rows.values():
             for entry in row.tile._plugin_controls.applicable():
-                align_composer(entry.control.widget)
+                align_composer(entry.control.widget, self)
         style_compose(self.batch_panel.edit, self.batch_panel.send)
         style_compose(self.saved_input, self.save_text)
         for editor in self.findChildren(QLineEdit):
@@ -320,6 +332,56 @@ class SendConsole(SettingsPanel):
         self.rooms.viewport().update()
         self.restore.setStyleSheet(console_button_style('QPushButton'))
         self.update()
+
+    def make_interactions(self, parent):
+        bar = QWidget(parent)
+        bar.setObjectName('SendInteractions')
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        for kind, label in (('emote', '选择平台表情'), ('gift', '选择平台礼物')):
+            button = ConsoleIconButton(kind, label, bar)
+            button.clicked.connect(lambda _checked=False, b=button, k=kind: self.show_interactions(k, b))
+            layout.addWidget(button)
+        return bar
+
+    def interaction_menu(self, kind, anchor):
+        menu = QMenu(anchor)
+        platforms = {}
+        for key, row in self.rows.items():
+            platform = row.tile.room.get('platform', 'bilibili')
+            label = {'bilibili': '哔哩哔哩', 'douyu': '斗鱼', 'huya': '虎牙', 'douyin': '抖音'}.get(platform, platform)
+            if platform not in platforms:
+                platforms[platform] = menu.addMenu(label)
+            action = platforms[platform].addAction(self.viewer.rows[key].label())
+            composer = next((entry.control.widget for entry in row.tile._plugin_controls.applicable()
+                             if callable(getattr(entry.control.widget, 'open_emoticons' if kind == 'emote' else 'open_gifts', None))), None)
+            supported = composer is not None and (kind != 'gift' or platform not in ('huya', 'douyin'))
+            action.setEnabled(supported)
+            if supported:
+                action.triggered.connect(lambda _checked=False, w=composer, k=kind: self.open_interaction(w, k, anchor))
+            else:
+                action.setText(action.text() + '（平台暂不支持）')
+        if not platforms:
+            menu.addAction('暂无直播间').setEnabled(False)
+        return menu
+
+    @staticmethod
+    def open_interaction(composer, kind, anchor):
+        attribute = 'emote_button' if kind == 'emote' else 'gift_button' if hasattr(composer, 'gift_button') else 'gifts'
+        original = getattr(composer, attribute)
+        setattr(composer, attribute, anchor)
+        try:
+            getattr(composer, 'open_emoticons' if kind == 'emote' else 'open_gifts')()
+        finally:
+            setattr(composer, attribute, original)
+
+    def show_interactions(self, kind, anchor):
+        menu = self.interaction_menu(kind, anchor)
+        try:
+            menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
+        finally:
+            menu.deleteLater()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -548,6 +610,8 @@ class BatchSend(QWidget):
         accessories.setFixedWidth(ACCESSORY_WIDTH)
         extras = QHBoxLayout(accessories)
         extras.setContentsMargins(0, 0, 0, 0)
+        self.interactions = console.make_interactions(accessories)
+        extras.addWidget(self.interactions)
         self.cancel = QPushButton('取消')
         self.cancel.clicked.connect(self.stop)
         self.cancel.hide()
@@ -579,6 +643,7 @@ class BatchSend(QWidget):
         self.event = dict(event) if event is not None else {'text': text}
         self.send.setEnabled(False)
         self.cancel.show()
+        self.interactions.hide()
         self.edit.setReadOnly(True)
         self.console.rooms.setEnabled(False)
         self.console.saved_texts.setEnabled(False)
@@ -632,6 +697,7 @@ class BatchSend(QWidget):
             self.active = None
         self.edit.setReadOnly(False)
         self.cancel.hide()
+        self.interactions.show()
         self.console.rooms.setEnabled(True)
         self.console.saved_texts.setEnabled(True)
         self.update_targets()

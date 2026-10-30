@@ -208,11 +208,11 @@ class ReplayRuler(QWidget):
         for tick in range(center - 10, center + 11):
             if not 0 <= tick <= self.duration:
                 continue
-            x = self.width() / 2 + (tick - self.seconds) * (self.width() - 40) / 20
+            x = self.width() / 2 + (tick - self.seconds) * self.width() / 20
             major = tick % 5 == 0
             painter.drawLine(QPointF(x, 0), QPointF(x, 12 if major else 6))
             if major:
-                painter.drawText(QRectF(x - 22, 14, 44, 16), Qt.AlignCenter, ReplayBar.format_time(tick))
+                painter.drawText(QRectF(max(0, min(self.width() - 44, x - 22)), 14, 44, 16), Qt.AlignCenter, ReplayBar.format_time(tick))
 
 
 class ReplayBar(QWidget):
@@ -286,7 +286,7 @@ class ReplayBar(QWidget):
         self.details.setStyleSheet('#ReplayDetails, #ReplayDetails QWidget {background: transparent; border: none;}'
             ' #ReplayDetails QLabel {color: palette(window-text); background: transparent; font-size: 11px;}')
         detail_layout = QVBoxLayout(self.details)
-        detail_layout.setContentsMargins(10, 5, 10, 5)
+        detail_layout.setContentsMargins(0, 5, 0, 5)
         detail_layout.setSpacing(2)
         self.detail_position = QLabel()
         self.detail_position.setFont(font)
@@ -321,10 +321,8 @@ class ReplayBar(QWidget):
         self.ruler.duration = self.slider.maximum() / 1000
         self.ruler.update()
         picture = self.viewer.picture
-        width = min(picture.width() - 16, max(300, min(520, self.width())))
-        position = self.mapTo(picture, QPoint())
-        x = max(8, min(picture.width() - width - 8, position.x() + (self.width() - width) // 2))
-        self.details.setGeometry(x, max(0, position.y() - 72), width, 66)
+        position = self.slider.mapTo(picture, QPoint())
+        self.details.setGeometry(position.x(), max(0, position.y() - 72), self.slider.width(), 66)
         self.details.show()
         self.details.raise_()
 

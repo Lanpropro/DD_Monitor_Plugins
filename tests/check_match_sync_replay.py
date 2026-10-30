@@ -116,6 +116,34 @@ def check(app, host, module, output=None):
                 for decoder, offset in zip(decoders, (0, 4))))
             pump._fill()
             assert device.data and struct.unpack('<h', device.data[:2])[0] == 1525
+            pump.replay_offset = None
+            with patch.object(pump, 'clock', return_value=now):
+                with patch.object(module.time, 'monotonic', return_value=now):
+                    pump.update_snapshot()
+                    first_shift = pump.snapshot[1][0][1]
+                with patch.object(module.time, 'monotonic', return_value=now + .017):
+                    pump.update_snapshot()
+                    assert abs(pump.snapshot[1][0][1] - first_shift) < 1 / module.RATE, 'GUI timing jitter must not move replay audio'
+            import numpy as np
+            class WaveHistory:
+                reads = []
+                def pcm_at(self, stamp, frames):
+                    start = round((stamp - (pump.anchor - 100)) * module.RATE)
+                    self.reads.append((start, frames))
+                    wave = np.rint(12000 * np.sin((np.arange(frames) + start) * 2 * np.pi * 440 / module.RATE)).astype(np.int16)
+                    return np.column_stack((wave, wave)).tobytes()
+            wave = WaveHistory()
+            pump.replay_offset = -100
+            pump.replay_cursors.clear()
+            device.data = b''
+            for jitter in (0, .006, -.004, .009):
+                pump.snapshot = (1.0, ((wave, -100 + jitter, .98, 0, 100),))
+                pump._fill()
+            assert all(abs(start + count - following[0]) <= 1 for (start, count), following in zip(wave.reads, wave.reads[1:])), 'Historical audio reads must join continuously'
+            samples = np.frombuffer(device.data, dtype=np.int16).reshape(-1, 2)[:, 0].astype(np.int32)
+            assert np.max(np.abs(np.diff(samples))) < 900, 'Replay block boundaries must not produce electrical clicks'
+            pump.replay_offset = None
+            pump.replay_cursors.clear()
             before_flush = pump.clock()
             module.AudioFeed(pump, None, None).flush()
             assert pump.sink.resets == 1 and abs(pump.clock() - before_flush) < .001
@@ -199,6 +227,8 @@ def check(app, host, module, output=None):
                     viewer.grab().save(str(output))
                 QTest.mousePress(bar.slider, Qt.LeftButton, pos=QPoint(bar.slider.width() // 2, bar.slider.height() // 2))
                 assert not bar.details.isHidden() and '.' in bar.detail_position.text()
+                assert bar.ruler.width() == bar.slider.width()
+                assert bar.ruler.mapTo(viewer.picture, QPoint()).x() == bar.slider.mapTo(viewer.picture, QPoint()).x()
                 assert 'background: transparent' in bar.details.styleSheet()
                 assert bar.ruler.duration > 0 and bar.ruler.height() >= 32
                 if output:
@@ -208,9 +238,12 @@ def check(app, host, module, output=None):
                 for mode in ('light', 'dark'):
                     module.theme.apply(mode)
                     QTest.qWait(20)
-                    line = viewer.panel.body.document().resource(QTextDocument.ImageResource, QUrl('replay-separator'))
-                    assert line.pixelColor(0, 0) == module.theme.qcolor(module.theme.TEXT1), mode
-                    point = bar.ruler.mapTo(viewer.picture, QPoint(0, 0))
+                    import re
+                    key = re.search(r'src="(replay-separator-[0-9]+)"', viewer.panel.body.toHtml()).group(1)
+                    line = viewer.panel.body.document().resource(QTextDocument.ImageResource, QUrl(key))
+                    assert line.pixelColor(0, 40) == module.theme.qcolor(module.theme.TEXT1), mode
+                    assert line.height() == 80 and line.pixelColor(0, 0).alpha() == 0
+                    point = bar.details.mapTo(viewer.picture, QPoint(1, 1))
                     shown = viewer.picture.grab().toImage()
                     bar.details.hide()
                     beneath = viewer.picture.grab().toImage()

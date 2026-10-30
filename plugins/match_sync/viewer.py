@@ -25,7 +25,7 @@ from .engine import route_pcm_s16_stereo, Alignment, Match, RATE, SafetyBuffer, 
 from .media import Chat, Decoder, PlatformChat
 from .fullscreen import mark_fullscreen
 from .sending import SendConsole, SendingDanmakuPanel
-from .panels import ConsoleIconButton, MatchSettingsDialog, SettingsPanel
+from .panels import ConsoleIconButton, MatchSettingsDialog, SettingsPanel, style_checkbox
 from .replay import ReplayBar, ReplayTimeline
 
 COLORS = ("#38bdf8", "#fb7185", "#a78bfa", "#4ade80", "#fbbf24", "#fb923c")
@@ -230,6 +230,7 @@ class AudioFeed(QObject):
             pump.media_written = 0.0
             pump.clock_segments.clear()
             pump.clock_snapshot = clock
+            pump.replay_cursors.clear()
 
     @Slot()
     def state_changed(self):
@@ -270,6 +271,8 @@ class AudioPump(QObject):
         self.played = 0
         self.clock_snapshot = None
         self.flush_clock = None
+        self.replay_offset = None
+        self.replay_cursors = {}
         self.timer = QTimer(self)
         self.timer.setInterval(10)
         self.timer.setTimerType(Qt.PreciseTimer)
@@ -323,6 +326,7 @@ class AudioPump(QObject):
         self.snapshot = (1.0, ())
 
     def flush(self, target_clock=None):
+        self.replay_offset = None
         self.update_snapshot()
         self.flush_clock = None if target_clock is None else target_clock - self.correction
         if self.thread is not None:
@@ -360,13 +364,25 @@ class AudioPump(QObject):
         shown_clock, shown_shifts = self.viewer.replay.presentation(clock, shifts)
         if replaying:
             rate = 1.0
+            if self.replay_offset is None:
+                self.replay_offset = shown_clock - clock
+            shown_clock = clock + self.replay_offset
+            shown_shifts = self.viewer.replay.shifts_at(shown_clock)
+            following = self.viewer.replay.shifts_at(shown_clock + .05)
+        else:
+            self.replay_offset = None
         inputs = []
         for room_id, row in self.viewer.rows.items():
             if (row.decoder is not None and row.audible.isChecked() and not row.paused
                     and room_id in shown_shifts
                     and (replaying or not self.viewer.sync_waiting and row.sync_state == "已同步")):
+                if replaying:
+                    change = following.get(room_id, shown_shifts[room_id]) - shown_shifts[room_id]
+                    local_rate = 1 + change / .05 if abs(change) < .1 else 1.0
+                else:
+                    local_rate = rate + self.viewer.relative_rates.get(room_id, 1.0) - 1.0
                 inputs.append((row.decoder.history, shown_clock + shown_shifts[room_id] - clock,
-                               1.0 if replaying else rate + self.viewer.relative_rates.get(room_id, 1.0) - 1.0,
+                               local_rate,
                                row.channel.currentData(), row.volume.value() * (1.0 if replaying else row.mix_gain)))
         self.snapshot = (rate, tuple(inputs))
 
@@ -395,8 +411,15 @@ class AudioPump(QObject):
             media_frames = max(1, round(frames * rate))
             clock = self.anchor + self.media_written + self.correction
             inputs = []
+            positions = []
             for history, shift, local_rate, channel, volume in sources:
-                pcm = history.pcm_at(clock + shift, max(1, round(frames * local_rate)))
+                target = clock + shift
+                cursor = self.replay_cursors.get(history) if self.replay_offset is not None else None
+                if cursor is not None and abs(clock - cursor[0]) < .01 and abs(target - cursor[1]) < .05:
+                    target = cursor[1]
+                source_frames = max(1, round(frames * local_rate))
+                pcm = history.pcm_at(target, source_frames)
+                positions.append((history, target, source_frames))
                 pcm = route_pcm_s16_stereo(pcm, channel)
                 inputs.append((resample_pcm(pcm, frames), volume))
             count = self.device.write(mix_pcm(inputs, frames))
@@ -406,6 +429,10 @@ class AudioPump(QObject):
             actual_rate = media_frames / frames
             self.clock_segments.append((self.written, self.written + written, self.media_written, actual_rate))
             self.media_written += written / RATE * actual_rate
+            if self.replay_offset is not None:
+                for history, target, source_frames in positions:
+                    self.replay_cursors[history] = (clock + written / RATE * actual_rate,
+                        target + source_frames / RATE * written / frames)
             self.written += written
         self.clock_snapshot = self._clock()
 
@@ -752,6 +779,8 @@ class RoomRow(QFrame):
         self.delay.installEventFilter(viewer)
         self.show_chat = QCheckBox("弹幕")
         self.show_chat.setChecked(preferences.get("show_chat", True))
+        for checkbox in (self.audible, self.show_chat):
+            style_checkbox(checkbox)
         self.color_choice = QComboBox()
         for name, value in zip(("蓝色", "粉色", "紫色", "绿色", "黄色", "橙色"), COLORS):
             swatch = QPixmap(16, 16)
@@ -1313,10 +1342,8 @@ class Viewer(QDialog):
         # A fully transparent panel cannot keep text legible over a detailed skin.
         # Keep a readable theme veil even at zero mask; the same slider strengthens it.
         self.panel_alpha = .72 + .28 * max(0, min(100, controller.layer.mask)) / 100 if self.skin_visible else 1.0
-        for checkbox in (self.automatic, self.compare):
-            checkbox.setCursor(Qt.PointingHandCursor)
-            styled(checkbox, f'''QCheckBox {{color: {theme.TEXT1}; border: none; border-radius: 5px; padding: 3px;}}
-                QCheckBox:hover {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}''')
+        for checkbox in self.settings_panel.findChildren(QCheckBox):
+            style_checkbox(checkbox)
         color = theme.qcolor(theme.CONTENT)
         background = (f"rgba({color.red()}, {color.green()}, {color.blue()}, {round(255 * self.panel_alpha)})"
                       if self.skin_visible else "palette(base)")

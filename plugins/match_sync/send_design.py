@@ -21,7 +21,7 @@ def colors():
 
 INPUT_HEIGHT = 32
 SEND_WIDTH = 32
-ACCESSORY_WIDTH = 56
+ACCESSORY_WIDTH = 60
 
 
 class SendIconFace(QObject):
@@ -67,7 +67,7 @@ def style_compose(editor, send):
                       if send.property('sendPrimary') else console_button_style('QPushButton'))
 
 
-def align_composer(widget):
+def align_composer(widget, console=None):
     """Arrange the existing platform widgets without replacing their send handlers."""
     layout = widget.layout()
     if not isinstance(layout, QHBoxLayout):
@@ -94,9 +94,9 @@ def align_composer(widget):
         extras.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         for child in widgets:
             if child is not None and child not in (editor, send):
-                hidden = child.isHidden()
-                extras.addWidget(child)
-                child.setVisible(not hidden)
+                child.hide()
+        if console is not None:
+            extras.addWidget(console.make_interactions(accessories))
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
         layout.addWidget(editor, 1)
@@ -318,15 +318,14 @@ class RecipientDelegate(QStyledItemDelegate):
         c = colors()
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing)
-        rect = QRectF(option.rect.adjusted(4, 3, -4, -3))
+        rect = QRectF(option.rect.adjusted(4, 3, -16, -3))
         checked = index.data(Qt.CheckStateRole)
         selected = (checked == Qt.Checked.value if checked is not None else
                     bool(option.state & QStyle.State_Selected))
         animation = self.animations.get(index.data(Qt.UserRole))
         progress = float(animation.currentValue()) if animation is not None else float(selected)
         painter.setClipRect(option.rect)
-        if animation is not None and animation.state() == QVariantAnimation.State.Running:
-            painter.translate(-12 * (1 - progress), 0)
+        painter.translate(12 * progress, 0)
         painter.setPen(Qt.NoPen)
         if progress or option.state & QStyle.State_MouseOver:
             color = QColor(c['raised'])

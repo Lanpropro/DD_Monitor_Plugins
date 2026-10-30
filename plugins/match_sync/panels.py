@@ -7,6 +7,14 @@ from PySide6.QtWidgets import QDialog, QDialogButtonBox, QFormLayout, QLabel, QP
 from ddm import theme
 
 
+def style_checkbox(checkbox):
+    checkbox.setCursor(Qt.PointingHandCursor)
+    checkbox.setAttribute(Qt.WA_Hover)
+    checkbox.setMouseTracking(True)
+    checkbox.setStyleSheet(f'''QCheckBox {{color: {theme.TEXT1}; border: none; border-radius: 5px; padding: 3px;}}
+        QCheckBox:hover {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}''')
+
+
 class ConsoleIconButton(QPushButton):
     def __init__(self, kind, tooltip, parent=None):
         super().__init__(parent)
@@ -18,6 +26,8 @@ class ConsoleIconButton(QPushButton):
         self.setDefault(False)
         self.setFocusPolicy(Qt.NoFocus)
         self.setCursor(Qt.PointingHandCursor)
+        self.setAttribute(Qt.WA_Hover)
+        self.setMouseTracking(True)
         self.setStyleSheet(f'''QPushButton {{background: transparent; border: none; padding: 0; border-radius: 6px;
             min-width: 28px; max-width: 28px; min-height: 26px; max-height: 26px;}}''')
 
@@ -47,6 +57,19 @@ class ConsoleIconButton(QPushButton):
             painter.drawEllipse(QRectF(-2, -2, 4, 4))
         elif self.kind == 'minimize':
             painter.drawLine(QPointF(-6, 3), QPointF(6, 3))
+        elif self.kind == 'emote':
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(QRectF(-7, -7, 14, 14))
+            painter.drawPoint(QPointF(-2.5, -2))
+            painter.drawPoint(QPointF(2.5, -2))
+            painter.drawArc(QRectF(-4, -2, 8, 6), 200 * 16, 140 * 16)
+        elif self.kind == 'gift':
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(QRectF(-6, -1, 12, 8), 1, 1)
+            painter.drawRect(QRectF(-7, -4, 14, 3))
+            painter.drawLine(QPointF(0, -4), QPointF(0, 7))
+            painter.drawEllipse(QRectF(-5, -8, 5, 4))
+            painter.drawEllipse(QRectF(0, -8, 5, 4))
         else:
             painter.drawLine(QPointF(-7, 0), QPointF(4, 0))
             painter.drawLine(QPointF(0, -4), QPointF(4, 0))

@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 def check_platform_controls(app, host, module, source):
     """Use the maintained domestic composers, with no credentials or requests."""
-    from PySide6.QtWidgets import QPushButton
+    from PySide6.QtWidgets import QPushButton, QWidget
     from ddm import plugins
     package = types.ModuleType('sending_domestic_fixture')
     package.__path__ = [str(source.resolve())]
@@ -69,6 +69,23 @@ def check_platform_controls(app, host, module, source):
                 assert 'QPushButton#TileCtrl:hover' in gift.styleSheet(), kind
                 assert 'border-radius: 12px' in gift.styleSheet(), kind
                 assert 'background: transparent' in send.styleSheet(), kind
+                shared = controls.applicable()[0].control.widget.findChild(QWidget, 'SendInteractions')
+                assert shared is not None and len(shared.findChildren(QPushButton)) == 2
+                assert all(not button.isHidden() for button in shared.findChildren(QPushButton))
+            console = viewer.send_console
+            anchor = console.batch_panel.interactions.findChildren(QPushButton)[1]
+            native = console.rows['douyu:12345'].tile._plugin_controls.applicable()[0].control.widget
+            seen = []
+            with patch.object(native, 'open_gifts', side_effect=lambda: seen.append(native.gifts is anchor)):
+                menu = console.interaction_menu('gift', anchor)
+                assert [action.text() for action in menu.actions()] == ['斗鱼', '虎牙', '抖音']
+                menu.actions()[0].menu().actions()[0].trigger()
+                assert seen == [True] and native.gifts is not anchor
+                assert not menu.actions()[1].menu().actions()[0].isEnabled()
+                menu.deleteLater()
+            menu = console.interaction_menu('emote', anchor)
+            assert all(not action.menu().actions()[0].isEnabled() for action in menu.actions())
+            menu.deleteLater()
             return {'domestic_controls': ['douyu', 'huya', 'douyin'], 'credentials_read': False}
         finally:
             manager.unload()
@@ -153,6 +170,10 @@ def check(app, host, module, output=None):
             viewer.show()
             QTest.qWait(80)
             console = viewer.send_console
+            for button in (viewer.automatic, viewer.compare, viewer.rows['1'].audible,
+                           viewer.match_settings_button, viewer.minimize_settings, console.minimize):
+                assert button.cursor().shape() == Qt.PointingHandCursor, button
+                assert button.testAttribute(Qt.WA_Hover), button
             assert not console.minimize.text() and not viewer.minimize_settings.text()
             assert not console.minimize.autoDefault() and not console.minimize.isDefault()
             viewer.panel.body.setFocus()
@@ -239,6 +260,21 @@ def check(app, host, module, output=None):
             sample = picture.toImage().pixelColor(round((rect.left() + 10) * picture.devicePixelRatio()),
                                                   round(rect.center().y() * picture.devicePixelRatio()))
             assert sample != module.theme.qcolor(module.theme.ACCENT), 'Do not outline selected avatars in blue'
+            def avatar_x():
+                image = console.rooms.viewport().grab().toImage()
+                ratio = console.rooms.devicePixelRatioF()
+                row_rect = console.rooms.visualItemRect(console.rooms.item(1))
+                pixels = [x for y in range(round(row_rect.top() * ratio), round(row_rect.bottom() * ratio))
+                          for x in range(round(row_rect.left() * ratio), round(row_rect.right() * ratio))
+                          if image.pixelColor(x, y) == QColor('#728B75')]
+                return sum(pixels) / len(pixels) / ratio
+            selected_x = avatar_x()
+            select(set())
+            QTest.qWait(200)
+            unselected_x = avatar_x()
+            assert 10 <= selected_x - unselected_x <= 14, 'Selected cards insert right; deselected cards retract left'
+            select({'2'})
+            QTest.qWait(200)
             assert viewer.panel.property('joined') is True
             joined_image = viewer.panel.grab().toImage()
             assert joined_image.pixelColor(0, joined_image.height() - 1) == joined_image.pixelColor(20, joined_image.height() - 1), 'Joined chat must have square lower corners'
@@ -417,6 +453,7 @@ def check(app, host, module, output=None):
             assert not console.pages.isHidden() and console.selected_room is None
             assert console.pages.currentWidget() is console.batch_panel
             assert not console.batch_panel.send.isEnabled()
+            assert console.batch_panel.interactions.isVisible(), 'Emote and gift icons stay visible without selected rooms'
             assert console.rooms.currentItem() is None, 'Unchecked rooms must immediately lose their focus frame'
             assert console.saved_texts.isEnabled(), 'Saved texts can still be managed without recipients'
             count = len(sent)
