@@ -1,7 +1,7 @@
 """Scoped, opaque sending-workspace styling and recipient rendering."""
 from PySide6.QtCore import QEvent, QObject, QPoint, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QLineEdit, QListWidget, QPushButton, QSizePolicy, QStyle, QStyleOptionButton, QStyledItemDelegate, QWidget
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QLineEdit, QListWidget, QPushButton, QSizePolicy, QStyle, QStyledItemDelegate, QWidget
 
 from ddm import motion, theme
 from .panels import console_button_style
@@ -29,12 +29,11 @@ class SendIconFace(QObject):
         if event.type() != QEvent.Paint:
             return False
         painter = QPainter(button)
-        option = QStyleOptionButton()
-        option.initFrom(button)
-        if button.isDown():
-            option.state |= QStyle.State_Sunken
-        button.style().drawControl(QStyle.CE_PushButtonBevel, option, painter, button)
         painter.setRenderHint(QPainter.Antialiasing)
+        if button.isEnabled() and (button.underMouse() or button.isDown()):
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(theme.qcolor(theme.ACCENT_SOFT))
+            painter.drawRoundedRect(QRectF(button.rect()).adjusted(1, 1, -1, -1), 8, 8)
         painter.translate(button.width() / 2, button.height() / 2)
         painter.setPen(QPen(theme.qcolor(theme.TEXT1 if button.isEnabled() else theme.TEXT4), 1.5))
         path = QPainterPath()
@@ -64,7 +63,8 @@ def style_compose(editor, send):
         send.installEventFilter(send._match_sync_face)
         send.setAccessibleName('发送弹幕')
         send.setToolTip('发送弹幕')
-    send.setStyleSheet(console_button_style('QPushButton'))
+    send.setStyleSheet('QPushButton {background: transparent; border: none; padding: 0;}'
+                      if send.property('sendPrimary') else console_button_style('QPushButton'))
 
 
 def align_composer(widget):
@@ -105,12 +105,15 @@ def align_composer(widget):
         widget.setFixedHeight(40)
         widget.setProperty('sendRowAligned', True)
     style_compose(editor, send)
-    # Platform icons paint dark strokes on hover, so retain their bright hover fill.
+    # Dark-mode icons use dark hover strokes; light-mode icons retain accent ink.
     for button in widget.findChildren(QPushButton):
-        if button is not send and button.window() is widget.window() and not button.property('sendIconStyled'):
-            button.setStyleSheet(button.styleSheet() + f'''
+        if button is not send and button.window() is widget.window():
+            if not button.property('sendIconStyled'):
+                button.setProperty('sendIconBaseStyle', button.styleSheet())
+            button.setStyleSheet(button.property('sendIconBaseStyle') + f'''
                 QPushButton#TileCtrl:hover, QPushButton#TileCtrl[hovered="true"] {{
-                    background: {colors()['accent']}; border: none;
+                    background: {theme.ACCENT_SOFT if theme.is_light() else colors()['accent']};
+                    border: none; border-radius: 12px; padding: 0;
                 }}''')
             button.setProperty('sendIconStyled', True)
 
@@ -126,7 +129,7 @@ def stylesheet():
         #MatchSyncSendConsole QStackedWidget, #MatchSyncSendConsole QFrame {{border: none;}}
         #MatchSyncSendConsole QScrollArea, #MatchSyncSendConsole QScrollArea > QWidget,
         #MatchSyncSendConsole QScrollArea > QWidget > QWidget {{background: transparent; border: none;}}
-        #MatchSyncSendConsole QListWidget {{background: {c['inset']}; border: none; border-radius: 8px;}}
+        #MatchSyncSendConsole QListWidget {{background: transparent; border: none; border-radius: 8px;}}
         #MatchSyncSendConsole #SavedTextList {{background: transparent;}}
         #MatchSyncSendConsole QLineEdit {{background: {c['input']}; color: {c['text']};
             border: 1px solid transparent; border-radius: 8px; padding: 6px 8px;}}
@@ -136,7 +139,8 @@ def stylesheet():
         #MatchSyncSendConsole QPushButton:hover {{border: 1px solid {c['secondary']};}}
         #MatchSyncSendConsole QPushButton:pressed {{background: {c['inset']};}}
         #MatchSyncSendConsole QPushButton:focus {{border: 1px solid {c['accent']};}}
-        #MatchSyncSendConsole QPushButton[sendPrimary="true"] {{background: {c['input']}; color: {c['text']};}}
+        #MatchSyncSendConsole QPushButton[sendPrimary="true"],
+        #MatchSyncSendConsole QPushButton[sendPrimary="true"]:disabled {{background: transparent; border: none;}}
         #MatchSyncSendConsole QPushButton:disabled {{background: {c['raised']}; color: {c['secondary']};}}
         #MatchSyncSendConsole #SendMinimize {{background: transparent;}}
     '''
@@ -281,7 +285,7 @@ class RecipientDelegate(QStyledItemDelegate):
             previous.stop()
             previous.deleteLater()
         animation = QVariantAnimation(self)
-        animation.setDuration(140 if self.pointer_change and motion.enabled() else 0)
+        animation.setDuration(180 if self.pointer_change and motion.enabled() else 0)
         animation.setEasingCurve(motion.THEME_WAVE_EASING)
         animation.setStartValue(start)
         animation.setEndValue(float(checked))
@@ -296,9 +300,12 @@ class RecipientDelegate(QStyledItemDelegate):
             animation.deleteLater()
 
     def editorEvent(self, event, model, option, index):
-        if (event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton
+        if (event.type() in (QEvent.MouseButtonPress, QEvent.MouseButtonDblClick, QEvent.MouseButtonRelease)
+                and event.button() == Qt.LeftButton
                 and index.flags() & Qt.ItemIsEnabled and index.flags() & Qt.ItemIsUserCheckable
                 and option.rect.contains(event.position().toPoint())):
+            if event.type() == QEvent.MouseButtonRelease:
+                return True
             checked = index.data(Qt.CheckStateRole) == Qt.Checked.value
             self.pointer_change = True
             try:
@@ -317,6 +324,9 @@ class RecipientDelegate(QStyledItemDelegate):
                     bool(option.state & QStyle.State_Selected))
         animation = self.animations.get(index.data(Qt.UserRole))
         progress = float(animation.currentValue()) if animation is not None else float(selected)
+        painter.setClipRect(option.rect)
+        if animation is not None and animation.state() == QVariantAnimation.State.Running:
+            painter.translate(-12 * (1 - progress), 0)
         painter.setPen(Qt.NoPen)
         if progress or option.state & QStyle.State_MouseOver:
             color = QColor(c['raised'])

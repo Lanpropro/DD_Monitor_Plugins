@@ -1,13 +1,12 @@
 """Independent platform composers below the merged chat, one per live room."""
 from PySide6.QtCore import QPointF, QPropertyAnimation, Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QCursor, QPalette
-from html import escape
+from PySide6.QtGui import QAction, QColor, QCursor, QImage, QPalette
 from PySide6.QtWidgets import (QApplication, QBoxLayout, QFrame, QHBoxLayout, QListView, QListWidget,
     QListWidgetItem, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 
 from ddm.widgets import DanmakuPanel, Tile
 from ddm.danmaku_actions import CommentToolbar
-from ddm import motion
+from ddm import motion, theme
 from .panels import ConsoleIconButton, SettingsPanel, console_button_style
 from .send_design import ACCESSORY_WIDTH, INPUT_HEIGHT, RecipientDelegate, SavedTextDelegate, SavedTextList, align_composer, colors, style_compose, stylesheet
 
@@ -63,8 +62,17 @@ class SendingDanmakuPanel(DanmakuPanel):
 
     def _block_html(self, entry):
         if self._adding_divider or entry.get('_replay_divider'):
-            return f'<p align="center" style="color:#8a8f98; margin:8px 0;">──── {escape(entry.get("text", ""))} ────</p>'
+            line = QImage(1, 1, QImage.Format_ARGB32)
+            line.fill(theme.qcolor(theme.TEXT1))
+            self._register_image('replay-separator', line)
+            width = max(1, self.body.viewport().width() - 24)
+            return f'<p align="center" style="margin-top:16px; margin-bottom:16px;"><img src="replay-separator" width="{width}" height="1"></p>'
         return super()._block_html(entry)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if any(entry.get('_replay_divider') for entry in getattr(self, '_blocks', ())):
+            self._render_all()
 
     def _message_clicked(self, index, position):
         if not 0 <= index < len(self._blocks) or self._blocks[index].get('_replay_divider'):
@@ -473,8 +481,8 @@ class SendConsole(SettingsPanel):
 
     def _update_selection(self):
         keys = self.checked_rooms()
-        self.pages.setCurrentIndex(1 if len(keys) > 1 else 0)
-        self.pages.setVisible(bool(keys))
+        self.pages.setCurrentIndex(0 if len(keys) == 1 else 1)
+        self.pages.setVisible(bool(self.rows))
         if not keys:
             self.selected_room = None
         elif len(keys) == 1:
@@ -529,7 +537,9 @@ class BatchSend(QWidget):
         compose.setContentsMargins(0, 0, 16, 0)
         compose.setSpacing(4)
         self.edit = QLineEdit()
-        self.edit.setPlaceholderText('发送给所选主播的相同内容')
+        self.edit.setPlaceholderText('输入弹幕，Enter 发送')
+        self.edit.textChanged.connect(lambda _text: self.update_targets())
+        self.edit.returnPressed.connect(self.start)
         compose.addWidget(self.edit, 1)
         self.send = QPushButton('发送')
         self.send.setProperty('sendPrimary', True)
@@ -554,7 +564,7 @@ class BatchSend(QWidget):
         if not self.timer.isActive():
             count = len(self.console.checked_rooms())
             self.send.setText('发送')
-            self.send.setEnabled(bool(count))
+            self.send.setEnabled(bool(count and self.edit.text().strip()))
 
     def start(self, *_args):
         self.begin(self.edit.text())

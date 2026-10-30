@@ -3,8 +3,8 @@ from bisect import bisect_right
 from collections import deque
 import time
 
-from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QFontDatabase
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
+from PySide6.QtGui import QFontDatabase, QPainter, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QSlider, QStyle, QToolTip, QVBoxLayout, QWidget
 from ddm import theme
 
@@ -191,6 +191,30 @@ class PlaybackTimeEdit(QLineEdit):
         self.parentWidget().refresh(force=True)
 
 
+class ReplayRuler(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.seconds = self.duration = 0.0
+        self.setFixedHeight(32)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(theme.qcolor(theme.TEXT1), 1))
+        font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
+        font.setPixelSize(10)
+        painter.setFont(font)
+        center = round(self.seconds)
+        for tick in range(center - 10, center + 11):
+            if not 0 <= tick <= self.duration:
+                continue
+            x = self.width() / 2 + (tick - self.seconds) * (self.width() - 40) / 20
+            major = tick % 5 == 0
+            painter.drawLine(QPointF(x, 0), QPointF(x, 12 if major else 6))
+            if major:
+                painter.drawText(QRectF(x - 22, 14, 44, 16), Qt.AlignCenter, ReplayBar.format_time(tick))
+
+
 class ReplayBar(QWidget):
     def __init__(self, viewer):
         slot = viewer.picture.status_label
@@ -259,8 +283,8 @@ class ReplayBar(QWidget):
         self.details.setObjectName('ReplayDetails')
         self.details.setAttribute(Qt.WA_StyledBackground)
         self.details.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.details.setStyleSheet(f'#ReplayDetails {{background: {theme.ELEVATED}; border-radius: 8px;}}'
-            f' #ReplayDetails QLabel {{color: {theme.TEXT1}; background: transparent; font-size: 11px;}}')
+        self.details.setStyleSheet('#ReplayDetails, #ReplayDetails QWidget {background: transparent; border: none;}'
+            ' #ReplayDetails QLabel {color: palette(window-text); background: transparent; font-size: 11px;}')
         detail_layout = QVBoxLayout(self.details)
         detail_layout.setContentsMargins(10, 5, 10, 5)
         detail_layout.setSpacing(2)
@@ -268,13 +292,8 @@ class ReplayBar(QWidget):
         self.detail_position.setFont(font)
         self.detail_position.setAlignment(Qt.AlignCenter)
         detail_layout.addWidget(self.detail_position)
-        detail_ticks = QHBoxLayout()
-        self.detail_ticks = [QLabel() for _ in range(5)]
-        for index, label in enumerate(self.detail_ticks):
-            if index:
-                detail_ticks.addStretch(1)
-            detail_ticks.addWidget(label)
-        detail_layout.addLayout(detail_ticks)
+        self.ruler = ReplayRuler(self.details)
+        detail_layout.addWidget(self.ruler)
         self.details.hide()
         self.refresh(force=True)
 
@@ -298,14 +317,14 @@ class ReplayBar(QWidget):
         self.slider.setValue(round(seconds * 1000))
         whole, millis = divmod(round(seconds * 1000), 1000)
         self.detail_position.setText(f'{self.format_time(whole)}.{millis:03d}  /  {self.format_time(self.slider.maximum() / 1000)}')
-        center = round(seconds / 5) * 5
-        for index, label in enumerate(self.detail_ticks):
-            label.setText(self.format_time(max(0, min(self.slider.maximum() / 1000, center + (index - 2) * 5))))
+        self.ruler.seconds = seconds
+        self.ruler.duration = self.slider.maximum() / 1000
+        self.ruler.update()
         picture = self.viewer.picture
         width = min(picture.width() - 16, max(300, min(520, self.width())))
         position = self.mapTo(picture, QPoint())
         x = max(8, min(picture.width() - width - 8, position.x() + (self.width() - width) // 2))
-        self.details.setGeometry(x, max(0, position.y() - 52), width, 46)
+        self.details.setGeometry(x, max(0, position.y() - 72), width, 66)
         self.details.show()
         self.details.raise_()
 

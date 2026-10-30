@@ -67,6 +67,8 @@ def check_platform_controls(app, host, module, source):
                 assert send.width() == 32 and hasattr(send, '_match_sync_face'), kind
                 gift = controls.applicable()[0].control.widget.gifts
                 assert 'QPushButton#TileCtrl:hover' in gift.styleSheet(), kind
+                assert 'border-radius: 12px' in gift.styleSheet(), kind
+                assert 'background: transparent' in send.styleSheet(), kind
             return {'domestic_controls': ['douyu', 'huya', 'douyin'], 'credentials_read': False}
         finally:
             manager.unload()
@@ -135,6 +137,16 @@ def check(app, host, module, output=None):
         assert not viewer.panel.body.toPlainText().strip(), 'No instructional text before a room is added'
         viewer.setAttribute(Qt.WA_DontShowOnScreen, host.testAttribute(Qt.WA_DontShowOnScreen))
         try:
+            viewer.resize(1320, 880)
+            viewer.show()
+            QTest.qWait(30)
+            empty_console = viewer.send_console
+            empty_image = empty_console.grab().toImage()
+            point = empty_console.rooms.mapTo(empty_console, empty_console.rooms.rect().center())
+            assert empty_image.pixelColor(point) == empty_image.pixelColor(empty_image.width() - 30, point.y()), 'Empty recipients must not leave a tinted rectangle'
+            if output:
+                output.parent.mkdir(parents=True, exist_ok=True)
+                empty_console.grab().save(str(output.with_name(output.stem + '-empty.png')))
             for key in ('1', '2', '3'):
                 viewer.add_room(key, {'alias': '主播' + key})
             viewer.resize(1320, 880)
@@ -184,6 +196,27 @@ def check(app, host, module, output=None):
             first.setText('draft 1')
             select({'2'})
             second.setText('draft 2')
+            item = console.rooms.item(1)
+            position = console.rooms.visualItemRect(item).center()
+            before_clicks = set(console.checked_rooms())
+            with patch.object(module.motion, 'enabled', return_value=True):
+                for index in range(6):
+                    QTest.mouseClick(console.rooms.viewport(), Qt.LeftButton, pos=position)
+                    assert ('2' in console.checked_rooms()) == (index % 2 == 1)
+                delegate = console.rooms.itemDelegate()
+                assert delegate.animations['2'].duration() == 180
+                assert delegate.animations['2'].state() == delegate.animations['2'].State.Running
+            assert set(console.checked_rooms()) == before_clicks
+            QTest.mouseDClick(console.rooms.viewport(), Qt.LeftButton, pos=position)
+            QTest.mouseRelease(console.rooms.viewport(), Qt.LeftButton, pos=position)
+            assert '2' not in console.checked_rooms(), 'Double-click must count the next press, not swallow it'
+            QTest.qWait(200)
+            with patch.object(module.motion, 'enabled', return_value=True):
+                select({'2'})
+                QTest.qWait(20)
+                entering = console.rooms.viewport().grab().toImage()
+                QTest.qWait(200)
+                assert entering != console.rooms.viewport().grab().toImage(), 'Card insertion must produce visible intermediate frames'
             assert console.stack.currentWidget() is console.rows['2']
             assert first.text() == 'draft 1' and not sent
             assert console.rooms.count() == 3
@@ -272,11 +305,10 @@ def check(app, host, module, output=None):
                 console.body_layout.minimumSize(), console.work.geometry(), console.pages.geometry())
             if output:
                 console.grab().save(str(output.with_name(output.stem + '-single-detail.png')))
-                with patch.object(module.theme, 'is_light', return_value=True):
-                    console.refresh_design()
-                    QTest.qWait(30)
-                    console.grab().save(str(output.with_name(output.stem + '-light.png')))
-                console.refresh_design()
+                module.theme.apply('light')
+                QTest.qWait(30)
+                console.grab().save(str(output.with_name(output.stem + '-light.png')))
+                module.theme.apply('dark')
             single_button = next(button for button in second.parentWidget().findChildren(QPushButton)
                                  if button.property('sendPrimary'))
             single_edit_geometry = (second.mapTo(console, QPoint()).x(), second.mapTo(console, QPoint()).y(),
@@ -287,6 +319,11 @@ def check(app, host, module, output=None):
             select({'1', '2', '3'})
             dialog = console.batch_panel
             assert console.pages.currentWidget() is dialog
+            dialog.edit.clear()
+            assert not dialog.send.isEnabled(), 'Empty multi-send must be disabled'
+            dialog.edit.setText('   ')
+            assert not dialog.send.isEnabled(), 'Whitespace is not a message'
+            dialog.edit.clear()
             QTest.qWait(40)
             assert (dialog.edit.mapTo(console, QPoint()).x(), dialog.edit.mapTo(console, QPoint()).y(),
                     dialog.edit.width(), dialog.edit.height()) == single_edit_geometry
@@ -377,7 +414,9 @@ def check(app, host, module, output=None):
             select(set())
             QTest.qWait(30)
             assert console.saved_input.mapTo(console, QPoint()).y() == saved_input_y, 'No selection must retain compose space'
-            assert console.pages.isHidden() and console.selected_room is None
+            assert not console.pages.isHidden() and console.selected_room is None
+            assert console.pages.currentWidget() is console.batch_panel
+            assert not console.batch_panel.send.isEnabled()
             assert console.rooms.currentItem() is None, 'Unchecked rooms must immediately lose their focus frame'
             assert console.saved_texts.isEnabled(), 'Saved texts can still be managed without recipients'
             count = len(sent)
@@ -450,7 +489,7 @@ def check(app, host, module, output=None):
             controls = console.rows['2'].tile._plugin_controls
             viewer.remove_room('2')
             assert controls._disposed and '2' not in console.rows
-            assert not console.checked_rooms() and console.pages.isHidden()
+            assert not console.checked_rooms() and not console.pages.isHidden()
             viewer.panel.set_placeholder('')
             for index in range(80):
                 viewer.panel.add_message('fixture', f'old section {index}')

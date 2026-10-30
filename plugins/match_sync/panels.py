@@ -1,4 +1,5 @@
 """Shared appearance of the playback and sending consoles."""
+import math
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QLinearGradient, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QFormLayout, QLabel, QPushButton, QVBoxLayout, QWidget
@@ -18,23 +19,32 @@ class ConsoleIconButton(QPushButton):
         self.setFocusPolicy(Qt.NoFocus)
         self.setCursor(Qt.PointingHandCursor)
         self.setStyleSheet(f'''QPushButton {{background: transparent; border: none; padding: 0; border-radius: 6px;
-            min-width: 28px; max-width: 28px; min-height: 26px; max-height: 26px;}}
-            QPushButton:hover {{background: {theme.ACCENT_SOFT};}}''')
+            min-width: 28px; max-width: 28px; min-height: 26px; max-height: 26px;}}''')
 
     def paintEvent(self, event):
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        if self.isEnabled() and (self.underMouse() or self.isDown()):
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(theme.qcolor(theme.ACCENT_SOFT))
+            painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 6, 6)
         painter.translate(self.width() / 2, self.height() / 2)
         color = theme.ACCENT if self.underMouse() else theme.TEXT1 if self.isEnabled() else theme.TEXT4
         pen = QPen(theme.qcolor(color), 1.6)
         pen.setCapStyle(Qt.RoundCap)
         painter.setPen(pen)
         if self.kind == 'settings':
-            painter.drawEllipse(QRectF(-5, -5, 10, 10))
-            painter.drawEllipse(QRectF(-1.5, -1.5, 3, 3))
-            for x, y in ((1, 0), (0, 1), (-1, 0), (0, -1)):
-                painter.drawLine(QPointF(5 * x, 5 * y), QPointF(7 * x, 7 * y))
+            gear = QPainterPath()
+            for index in range(24):
+                angle = math.radians(index * 15 - 7.5)
+                radius = 7 if index % 4 in (0, 1) else 5.3
+                point = QPointF(math.cos(angle) * radius, math.sin(angle) * radius)
+                gear.moveTo(point) if index == 0 else gear.lineTo(point)
+            gear.closeSubpath()
+            painter.setBrush(Qt.NoBrush)
+            painter.drawPath(gear)
+            painter.drawEllipse(QRectF(-2, -2, 4, 4))
         elif self.kind == 'minimize':
             painter.drawLine(QPointF(-6, 3), QPointF(6, 3))
         else:

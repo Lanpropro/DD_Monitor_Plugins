@@ -147,7 +147,8 @@ def check(app, host, module, output=None):
                 viewer.playback_rate = old_rate
                 assert 'before' in viewer.panel.body.toPlainText()
                 assert 'earlier live section' in viewer.panel.body.toPlainText()
-                assert '回看至' in viewer.panel.body.toPlainText()
+                assert any(entry.get('_replay_divider') for entry in viewer.panel._blocks)
+                assert 'replay-separator' in viewer.panel.body.toHtml()
                 assert viewer.panel._follow_tail, 'Jumping must reveal the newly separated chat section'
                 assert 'live only' not in viewer.panel.body.toPlainText()
                 viewer.audio.update_snapshot()
@@ -198,8 +199,27 @@ def check(app, host, module, output=None):
                     viewer.grab().save(str(output))
                 QTest.mousePress(bar.slider, Qt.LeftButton, pos=QPoint(bar.slider.width() // 2, bar.slider.height() // 2))
                 assert not bar.details.isHidden() and '.' in bar.detail_position.text()
+                assert 'background: transparent' in bar.details.styleSheet()
+                assert bar.ruler.duration > 0 and bar.ruler.height() >= 32
                 if output:
                     viewer.grab().save(str(output.with_name(output.stem + '-detail.png')))
+                from PySide6.QtCore import QUrl
+                from PySide6.QtGui import QTextDocument
+                for mode in ('light', 'dark'):
+                    module.theme.apply(mode)
+                    QTest.qWait(20)
+                    line = viewer.panel.body.document().resource(QTextDocument.ImageResource, QUrl('replay-separator'))
+                    assert line.pixelColor(0, 0) == module.theme.qcolor(module.theme.TEXT1), mode
+                    point = bar.ruler.mapTo(viewer.picture, QPoint(0, 0))
+                    shown = viewer.picture.grab().toImage()
+                    bar.details.hide()
+                    beneath = viewer.picture.grab().toImage()
+                    bar.details.show()
+                    ratio = viewer.picture.devicePixelRatioF()
+                    point = QPoint(round(point.x() * ratio), round(point.y() * ratio))
+                    assert shown.pixelColor(point) == beneath.pixelColor(point), 'Ruler background must reveal the picture'
+                    if output:
+                        viewer.grab().save(str(output.with_name(output.stem + '-detail-' + mode + '.png')))
                 QTest.mouseRelease(bar.slider, Qt.LeftButton, pos=QPoint(bar.slider.width() // 2, bar.slider.height() // 2))
                 assert bar.details.isHidden()
                 QTest.mouseClick(bar.slider, Qt.LeftButton, pos=QPoint(bar.slider.width() // 2, bar.slider.height() // 2))
@@ -230,7 +250,8 @@ def check(app, host, module, output=None):
                 assert not viewer.replay.active and viewer.audio.correction == correction
                 assert 'live only' in viewer.panel.body.toPlainText()
                 assert 'new incoming live' in viewer.panel.body.toPlainText()
-                assert '返回直播' in viewer.panel.body.toPlainText()
+                assert any(entry.get('_replay_divider') and '返回直播' in entry['text']
+                           for entry in viewer.panel._blocks)
                 assert viewer.audio.snapshot[0] == viewer.playback_rate
                 assert not bar.slider.isHidden(), 'Keep the timeline visible when returning live'
                 viewer.rows['2'].match_confirmed = False

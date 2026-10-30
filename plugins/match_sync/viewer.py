@@ -1313,6 +1313,10 @@ class Viewer(QDialog):
         # A fully transparent panel cannot keep text legible over a detailed skin.
         # Keep a readable theme veil even at zero mask; the same slider strengthens it.
         self.panel_alpha = .72 + .28 * max(0, min(100, controller.layer.mask)) / 100 if self.skin_visible else 1.0
+        for checkbox in (self.automatic, self.compare):
+            checkbox.setCursor(Qt.PointingHandCursor)
+            styled(checkbox, f'''QCheckBox {{color: {theme.TEXT1}; border: none; border-radius: 5px; padding: 3px;}}
+                QCheckBox:hover {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}''')
         color = theme.qcolor(theme.CONTENT)
         background = (f"rgba({color.red()}, {color.green()}, {color.blue()}, {round(255 * self.panel_alpha)})"
                       if self.skin_visible else "palette(base)")
@@ -1331,6 +1335,10 @@ class Viewer(QDialog):
         for label in panel_bar.findChildren(QLabel) if panel_bar is not None else ():
             styled(label, "color: palette(window-text); background: transparent;")
         self.panel.body.viewport().setAutoFillBackground(False)
+        if getattr(self, '_chat_light_theme', None) != theme.is_light():
+            self._chat_light_theme = theme.is_light()
+            if self.panel._blocks:
+                self.panel._render_all()
         styled(self.picture, f"#MatchSync #Tile {{ background: {background}; }} "
                                    "#MatchSync #TileVideo, #MatchSync #TileBottom { background: transparent; }"
                                    if self.skin_visible else "")
