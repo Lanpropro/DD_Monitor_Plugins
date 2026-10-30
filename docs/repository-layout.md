@@ -12,7 +12,7 @@
 | `tools/inspect_host_package.py` | 针对旧 `v0.2` PyInstaller 宿主附件的只读诊断工具，硬编码旧 EXE 名；保留供历史包排查，不适用于当前包的通用验收 |
 | [README](../README.md)、[贡献指南](../CONTRIBUTING.md)、`LICENSE`、`NOTICE.md` | 使用入口、开发约定及许可来源；保留 |
 | [WEBSITE.md](../WEBSITE.md) | 独立网站仓库的迁移与本地入口；保留 |
-| [releases/](releases/README.md) | 根目录原有的 9 份发布说明集中存放，保留正文和旧文件名 |
+| [releases/](releases/README.md) | 集中存放 10 份发布说明；4 份公开版本与 GitHub Releases 正文同步，其余保留历史正文和旧文件名 |
 | [archive/](archive/README.md) | 已完成的历史实施计划；不作为当前开发任务 |
 
 ## 本机资料

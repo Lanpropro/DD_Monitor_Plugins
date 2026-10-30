@@ -81,7 +81,7 @@ python -m compileall -q plugins tests tools
 ## 版本、打包与网站发布
 
 - 插件版本以各自的 `plugins/<ID>/plugin.json` 为准。发布前核对清单、README、发布说明、标签源码和安装包是否对应。
-- 新增发布说明放入 `docs/releases/`，同步更新该目录索引；历史说明保留原始内容，不随新版本改写。
+- 新增发布说明放入 `docs/releases/`，同步更新该目录索引；公开版本与 GitHub Releases 正文对齐并标注来源，历史说明保留原始内容，不随新版本改写。
 - 版本标签对应的源码清单必须与公开附件一致；不能只改版本号来认定与发布包一致。
 - 先明确暂存发布文件，再运行 `python tools/build_plugins.py`。它只读取 Git 跟踪文件；包结构及源码一致性检查使用 `python tests/check_packages.py --host ../DD_Monitor_CE`。
 - 网站下载数据与 SHA256 在独立网站仓库维护，来自已发布附件；本机重新打包的哈希不能替代公开附件哈希。

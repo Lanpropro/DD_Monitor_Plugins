@@ -53,6 +53,22 @@ class ContributionGuideTests(unittest.TestCase):
         self.assertFalse((ROOT / 'docs/superpowers' / relative).exists())
         self.assertTrue((ROOT / 'docs/archive' / relative).is_file())
 
+    def test_public_release_sources_have_matching_local_notes(self):
+        directory = ROOT / 'docs/releases'
+        index = (directory / 'README.md').read_text(encoding='utf-8')
+        tags = re.findall(
+            r'https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/([^\s)]+)',
+            index)
+        self.assertTrue(tags)
+        self.assertEqual(len(tags), len(set(tags)))
+        for tag in tags:
+            with self.subTest(tag=tag):
+                note = directory / f'RELEASE-{tag}.md'
+                self.assertIn(f']({note.name})', index)
+                heading = note.read_text(encoding='utf-8').splitlines()[0]
+                self.assertTrue(heading.startswith('# '))
+                self.assertTrue(heading.endswith(' v' + tag.rsplit('-v', 1)[1]))
+
 
 if __name__ == '__main__':
     unittest.main()
