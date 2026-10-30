@@ -1446,6 +1446,7 @@ class Viewer(QDialog):
         self.sidebar_marks_state, self.sidebar_marks_due = state, now + .25
         for row in self.rows.values():
             row.refresh_avatar()
+            self.send_console.refresh_avatar(row.room_id)
         if self.sidebar_style is None:
             self.sidebar_style = sidebar.styleSheet()
             sidebar.setStyleSheet(self.sidebar_style + """

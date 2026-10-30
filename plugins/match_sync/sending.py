@@ -1,8 +1,8 @@
 """Independent platform composers below the merged chat, one per live room."""
 from PySide6.QtCore import QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPalette
-from PySide6.QtWidgets import (QBoxLayout, QComboBox, QFrame, QHBoxLayout, QListView, QListWidget,
-    QListWidgetItem, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QTabBar, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QBoxLayout, QFrame, QHBoxLayout, QListView, QListWidget,
+    QListWidgetItem, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 
 from ddm.widgets import Tile
 from .panels import SettingsPanel, console_button_style
@@ -23,11 +23,15 @@ class SendRow(QFrame):
         composer_layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.composer_bar)
         self._tile_controls = None
-        self.tile = Tile({'room_id': row.room_id, 'uname': row.label()}, self)
+        room = next((dict(item) for item in getattr(viewer.context.window, 'rooms', [])
+                     if str(item.get('room_id') or '') == row.room_id), {})
+        room.update(room_id=row.room_id, uname=row.label(),
+                    platform=row.platform.kind if row.platform is not None else 'bilibili')
+        self.tile = Tile(room, self)
         self.tile.hide()
         self.manager.attach_tile(self.tile)
         self.tile._plugin_controls.set_panel(self)
-        self.unavailable = QLabel('请启用此平台的弹幕互动插件')
+        self.unavailable = QLabel('当前平台的发送控件不可用，请检查平台插件是否已启用。')
         self.unavailable.setWordWrap(True)
         layout.addWidget(self.unavailable)
         self.update_name(row)
@@ -52,6 +56,7 @@ class SendConsole(SettingsPanel):
         self.rows = {}
         self.statuses = {}
         self.batch_targets = set()
+        self.selected_room = None
         self.collapsed = False
         self.expanded_without_settings = False
         layout = QVBoxLayout(self)
@@ -61,13 +66,9 @@ class SendConsole(SettingsPanel):
         self.title = QLabel('弹幕发送')
         self.title.setObjectName('SendTitle')
         heading.addWidget(self.title, 1)
-        self.mode = QTabBar()
-        self.mode.addTab('单独发送')
-        self.mode.addTab('同文多发')
-        self.mode.setAccessibleName('弹幕发送模式')
-        self.mode.setDrawBase(False)
-        self.mode.currentChanged.connect(self._mode_changed)
-        heading.addWidget(self.mode)
+        self.selection_hint = QLabel('左键选择，可多选')
+        self.selection_hint.setObjectName('SendFeedback')
+        heading.addWidget(self.selection_hint)
         self.minimize = QPushButton('−')
         self.minimize.setObjectName('SendMinimize')
         self.minimize.setAccessibleName('最小化发送台')
@@ -89,18 +90,13 @@ class SendConsole(SettingsPanel):
         viewer.panel.layout().addWidget(self.restore_bar)
         self.restore_bar.hide()
         self.restore.hide()
-        self.target = QComboBox()
-        self.target.hide()
-        self.target.setAccessibleName('发送弹幕的直播间')
-        self.target.currentIndexChanged.connect(self._select_target)
         self.rooms = QListWidget()
-        self.rooms.setAccessibleName('发送弹幕的主播；多发模式可勾选多个主播')
+        self.rooms.setAccessibleName('左键勾选主播；选一位单发，选多位同文发送')
         self.rooms.setWrapping(False)
         self.rooms.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Ignored)
         self.rooms.setHorizontalScrollMode(QListWidget.ScrollPerPixel)
         self.rooms.setMouseTracking(True)
         self.rooms.setItemDelegate(RecipientDelegate(self.rooms))
-        self.rooms.currentItemChanged.connect(self._room_selected)
         self.rooms.itemChanged.connect(self._room_checked)
         body = QWidget()
         self.body_layout = QBoxLayout(QBoxLayout.LeftToRight, body)
@@ -133,7 +129,7 @@ class SendConsole(SettingsPanel):
         self.batch_panel = BatchSend(self)
         self.pages.addWidget(self.batch_panel)
         work_layout.addWidget(self.pages, 1)
-        self.feedback = QLabel('选择主播后发送；各房间草稿独立保留。')
+        self.feedback = QLabel('左键选择主播；选一位单发，选多位同文发送。')
         self.feedback.setTextFormat(Qt.PlainText)
         self.feedback.setObjectName('SendFeedback')
         self.feedback.setWordWrap(True)
@@ -163,7 +159,7 @@ class SendConsole(SettingsPanel):
         self.layout().setSpacing(10 if regular else 6)
         self.body_layout.setSpacing(12 if regular else 6)
         self.body_layout.setDirection(QBoxLayout.LeftToRight if regular else QBoxLayout.TopToBottom)
-        self.title.setVisible(self.width() >= 340)
+        self.selection_hint.setVisible(self.width() >= 400)
         row_height = max(52, self.rooms.fontMetrics().height() * 2 + 12)
         if regular:
             self.rooms.setFixedWidth(176)
@@ -188,10 +184,8 @@ class SendConsole(SettingsPanel):
         painter.fillPath(path, QColor(colors()['surface']))
 
     def sync_rooms(self):
-        selected = self.target.currentData()
+        had_rows = bool(self.rows)
         checked = set(self.checked_rooms())
-        self.target.blockSignals(True)
-        self.target.clear()
         for key in tuple(self.rows):
             if key not in self.viewer.rows:
                 row = self.rows.pop(key)
@@ -213,24 +207,21 @@ class SendConsole(SettingsPanel):
                             button.clicked.connect(lambda _checked=False, room_id=key:
                                                    self.set_status(room_id, '已请求发送'))
             self.rows[key].update_name(room)
-            self.target.addItem(f'{room.label()} · {key}', key)
-        self.target.setCurrentIndex(max(0, self.target.findData(selected)))
-        self.target.blockSignals(False)
+        if not had_rows and self.rows:
+            checked = {next(iter(self.rows))}
+        self.batch_targets = checked.intersection(self.rows)
         self.rooms.blockSignals(True)
         self.rooms.clear()
         for key in self.rows:
             item = QListWidgetItem()
             item.setData(Qt.UserRole, key)
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable if self.mode.currentIndex()
-                          else item.flags() & ~Qt.ItemIsUserCheckable)
-            if self.mode.currentIndex():
-                item.setCheckState(Qt.Checked if key in checked else Qt.Unchecked)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked if key in self.batch_targets else Qt.Unchecked)
             self.rooms.addItem(item)
             self.refresh_room(key)
         self.rooms.blockSignals(False)
         self.batch_targets.intersection_update(self.rows)
-        self._select_target()
-        self.empty.setVisible(not self.rows)
+        self._update_selection()
         self.refresh_design()
 
     def checked_rooms(self):
@@ -249,6 +240,7 @@ class SendConsole(SettingsPanel):
                 text = self.statuses.get(key, '')
                 item.setText(f"{row.label()}\n{'有草稿 · ' if draft else ''}{text or '待发送'}")
                 item.setToolTip(f'{row.label()} · {key}\n{item.text().partition(chr(10))[2]}')
+                self.refresh_avatar(key)
 
     def set_status(self, key, text):
         self.statuses[key] = text
@@ -257,55 +249,50 @@ class SendConsole(SettingsPanel):
                               if key in self.viewer.rows else f'{key}：{text}')
         self.feedback.setToolTip(self.feedback.text())
 
-    def _mode_changed(self, mode):
-        self.pages.setCurrentIndex(mode)
-        self.rooms.blockSignals(True)
+    def refresh_avatar(self, key):
+        row = self.viewer.rows.get(key)
+        if row is None:
+            return
+        pixmap = row.avatar.pixmap()
+        if pixmap is None or pixmap.isNull():
+            return
         for index in range(self.rooms.count()):
             item = self.rooms.item(index)
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable if mode
-                          else item.flags() & ~Qt.ItemIsUserCheckable)
-            if mode:
-                item.setCheckState(Qt.Checked if item.data(Qt.UserRole) in self.batch_targets else Qt.Unchecked)
-            else:
-                item.setData(Qt.CheckStateRole, None)
-        self.rooms.blockSignals(False)
-        self.rooms.setEnabled(not self.batch_panel.timer.isActive())
-        if mode and not self.checked_rooms():
-            item = self.rooms.currentItem()
-            if item is not None:
-                item.setCheckState(Qt.Checked)
-        self.batch_panel.update_targets()
-        self._update_context()
-
-    def _room_selected(self, item, _previous):
-        if item is not None and not self.mode.currentIndex():
-            self.target.setCurrentIndex(self.target.findData(item.data(Qt.UserRole)))
+            if item.data(Qt.UserRole) == key and item.data(Qt.UserRole + 3) != pixmap.cacheKey():
+                item.setData(Qt.DecorationRole, pixmap)
+                item.setData(Qt.UserRole + 3, pixmap.cacheKey())
 
     def _room_checked(self, item):
-        if self.mode.currentIndex() and item.data(Qt.CheckStateRole) is not None:
-            key = item.data(Qt.UserRole)
-            if item.checkState() == Qt.Checked:
-                self.batch_targets.add(key)
-            else:
-                self.batch_targets.discard(key)
-        self.batch_panel.update_targets()
-        self._update_context()
-
-    def _update_context(self):
-        if self.mode.currentIndex():
-            self.context.setText(f'已选择 {len(self.checked_rooms())} 个直播间')
+        key = item.data(Qt.UserRole)
+        checked = item.checkState() == Qt.Checked
+        if checked == (key in self.batch_targets):
+            return
+        if checked:
+            self.batch_targets.add(key)
         else:
-            room = self.viewer.rows.get(self.target.currentData())
-            self.context.setText(f'发送给 {room.label()}' if room else '选择一位主播')
+            self.batch_targets.discard(key)
+        self._update_selection()
 
-    def _select_target(self):
-        row = self.rows.get(self.target.currentData())
-        if row is not None:
-            self.stack.setCurrentWidget(row)
+    def _update_selection(self):
+        keys = self.checked_rooms()
+        self.pages.setCurrentIndex(1 if len(keys) > 1 else 0)
+        self.pages.setVisible(bool(keys))
+        self.empty.setVisible(not keys)
+        if not keys:
+            self.selected_room = None
+            self.empty.setText('左键选择主播；选一位单发，选多位同文发送。')
+            self.context.setText('选择接收弹幕的主播')
+        elif len(keys) == 1:
+            self.selected_room = keys[0]
+            self.stack.setCurrentWidget(self.rows[keys[0]])
+            self.context.setText(f'发送给 {self.viewer.rows[keys[0]].label()}')
             for index in range(self.rooms.count()):
-                if self.rooms.item(index).data(Qt.UserRole) == self.target.currentData():
+                if self.rooms.item(index).data(Qt.UserRole) == keys[0]:
                     self.rooms.setCurrentRow(index)
-        self._update_context()
+        else:
+            self.selected_room = None
+            self.context.setText(f'同文发送至 {len(keys)} 个直播间')
+        self.batch_panel.update_targets()
 
     def sync_height(self):
         settings = self.viewer.settings_panel
@@ -371,7 +358,6 @@ class BatchSend(QWidget):
         self.cancel.show()
         self.edit.setReadOnly(True)
         self.console.rooms.setEnabled(False)
-        self.console.mode.setEnabled(False)
         for key in self.pending:
             self.console.set_status(key, '待处理')
         self.timer.start()
@@ -418,5 +404,4 @@ class BatchSend(QWidget):
         self.edit.setReadOnly(False)
         self.cancel.hide()
         self.console.rooms.setEnabled(True)
-        self.console.mode.setEnabled(True)
         self.update_targets()

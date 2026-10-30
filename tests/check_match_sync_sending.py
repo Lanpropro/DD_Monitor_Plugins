@@ -1,16 +1,74 @@
 """Console geometry, room drafts and explicit multi-send; no real accounts."""
 import argparse
+from importlib import import_module
 import os
 from pathlib import Path
 import socket
 import sys
 import tempfile
+import types
 from unittest.mock import patch
+
+
+def check_platform_controls(app, host, module, source):
+    """Use the maintained domestic composers, with no credentials or requests."""
+    from ddm import plugins
+    package = types.ModuleType('sending_domestic_fixture')
+    package.__path__ = [str(source.resolve())]
+    sys.modules[package.__name__] = package
+    composers = import_module(package.__name__ + '.douyu_composer')
+
+    class Platform(plugins.Platform):
+        def __init__(self, kind):
+            self.kind = kind
+
+        def matches(self, room_id):
+            return str(room_id).startswith(self.kind + ':')
+
+        def normalize(self, room_id):
+            return str(room_id)
+
+        def _playback_cookies(self):
+            raise AssertionError('Credentials forbidden')
+
+    with tempfile.TemporaryDirectory() as directory:
+        host.settings, host.rooms = {}, []
+        manager = plugins.PluginManager(window=host, plugins_dir=directory)
+        context = plugins.PluginContext(manager, 'domestic_fixture')
+        for kind, composer in (('douyu', composers.DouyuComposer), ('huya', composers.HuyaComposer),
+                               ('douyin', composers.DouyinComposer)):
+            platform = Platform(kind)
+            context.register_platform(platform)
+            composers.DouyuInteraction(context, platform, composer_class=composer, control_id=kind)
+        from ddm.widgets import Tile
+        legacy = Tile({'room_id': 'douyu:12345', 'uname': 'fixture'}, host)
+        manager.attach_tile(legacy)
+        assert not legacy._plugin_controls.applicable(), 'Missing platform reproduces the old hidden-control bug'
+        manager.detach_tile(legacy)
+        legacy.deleteLater()
+        viewer = module.Viewer(plugins.PluginContext(manager, 'platform_check'), {})
+        try:
+            for kind in ('douyu', 'huya', 'douyin'):
+                key = kind + ':12345'
+                viewer.add_room(key)
+                row = viewer.send_console.rows[key]
+                controls = row.tile._plugin_controls
+                assert row.tile.room['platform'] == kind
+                assert len(controls.applicable()) == 1, kind
+                assert controls._repeat_editor() is not None, kind
+                assert row.unavailable.isHidden(), kind
+            return {'domestic_controls': ['douyu', 'huya', 'douyin'], 'credentials_read': False}
+        finally:
+            manager.unload()
+            viewer.close()
+            viewer.deleteLater()
+            app.processEvents()
 
 
 def check(app, host, module, output=None):
     from PySide6.QtCore import QPoint, Qt, QTimer
     from PySide6.QtTest import QTest
+    from PySide6.QtGui import QColor, QPixmap
     from PySide6.QtWidgets import QBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QWidget
     from ddm import plugins
     from ddm.plugin_controls import TileControl
@@ -69,20 +127,34 @@ def check(app, host, module, output=None):
             console = viewer.send_console
             first = console.rows['1'].tile._plugin_controls.entries[0].control.edit
             second = console.rows['2'].tile._plugin_controls.entries[0].control.edit
+            def select(keys):
+                for index in range(console.rooms.count()):
+                    item = console.rooms.item(index)
+                    if (item.data(Qt.UserRole) in keys) != (item.checkState() == Qt.Checked):
+                        console.rooms.scrollToItem(item)
+                        QTest.mouseClick(console.rooms.viewport(), Qt.LeftButton,
+                                         pos=console.rooms.visualItemRect(item).center())
+                assert set(console.checked_rooms()) == set(keys)
+
             first.setText('draft 1')
-            console.target.setCurrentIndex(console.target.findData('2'))
+            select({'2'})
             second.setText('draft 2')
             assert console.stack.currentWidget() is console.rows['2']
             assert first.text() == 'draft 1' and not sent
             assert console.rooms.count() == 3
             assert '有草稿' in console.rooms.item(0).text()
-            console.rooms.setCurrentRow(0)
+            select({'1'})
             assert console.stack.currentWidget() is console.rows['1']
-            console.rooms.setCurrentRow(1)
+            select({'2'})
             console.rooms.setFocus()
             console.rooms.setCurrentRow(0)
             QTest.keyClick(console.rooms, Qt.Key_Down if console.width() >= 520 else Qt.Key_Right)
-            assert console.target.currentData() == '2' and not sent
+            assert console.checked_rooms() == ['2'] and not sent
+            avatar = QPixmap(32, 32)
+            avatar.fill(QColor('#728B75'))
+            viewer.rows['2'].avatar.set_pixmap_image(avatar)
+            console.refresh_avatar('2')
+            assert isinstance(console.rooms.item(1).data(Qt.DecorationRole), QPixmap)
             assert isinstance(console, module.SettingsPanel), 'Keep the existing console size and visibility contract'
             panel_height = viewer.panel.height()
             console_height = console.height()
@@ -119,7 +191,7 @@ def check(app, host, module, output=None):
                     regular = console.width() >= 520
                     assert console.body_layout.direction() == (QBoxLayout.LeftToRight if regular
                                                               else QBoxLayout.TopToBottom)
-                    assert console.mode.isVisible() and first.isVisible() == (console.target.currentData() == '1')
+                    assert first.isVisible() == (console.selected_room == '1')
             assert console.context.text().startswith('发送给')
             for right_width in (640, 300):
                 viewer.resize(1500, 880)
@@ -150,15 +222,9 @@ def check(app, host, module, output=None):
                     QTest.qWait(30)
                     console.grab().save(str(output.with_name(output.stem + '-light.png')))
                 console.refresh_design()
-            console.mode.setCurrentIndex(1)
+            select({'1', '2', '3'})
             dialog = console.batch_panel
             assert console.pages.currentWidget() is dialog
-            first_rect = console.rooms.visualItemRect(console.rooms.item(0))
-            checked_before = '1' in console.checked_rooms()
-            QTest.mouseClick(console.rooms.viewport(), Qt.LeftButton, pos=first_rect.center())
-            assert ('1' in console.checked_rooms()) != checked_before
-            for index in range(console.rooms.count()):
-                console.rooms.item(index).setCheckState(Qt.Checked)
             dialog.edit.setText('shared')
             dialog.start()
             QTest.qWait(250)
@@ -185,10 +251,11 @@ def check(app, host, module, output=None):
             assert sent[-1] == ('1', 'cancel rest') and len(sent) == 4
             assert not active, 'Closing stops further targets and shuts down the pending composer'
             assert console.statuses['2'] == '已取消，未发送'
-            console.mode.setCurrentIndex(0)
+            select(set())
+            assert console.pages.isHidden() and console.selected_room is None
+            select({'2'})
             assert console.pages.currentWidget() is console.stack
-            assert all(console.rooms.item(index).data(Qt.CheckStateRole) is None
-                       for index in range(console.rooms.count()))
+            assert second.text() == 'draft 2'
             viewer.rows['2'].alias.setText('changed name')
             assert 'changed name' in console.rooms.currentItem().text()
             viewer.set_settings_visible(False)
@@ -199,7 +266,7 @@ def check(app, host, module, output=None):
             controls = console.rows['2'].tile._plugin_controls
             viewer.remove_room('2')
             assert controls._disposed and '2' not in console.rows
-            assert console.target.currentData() in ('1', '3')
+            assert not console.checked_rooms() and console.pages.isHidden()
             if output:
                 output.parent.mkdir(parents=True, exist_ok=True)
                 viewer.grab().save(str(output))
@@ -216,6 +283,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--host', type=Path, required=True)
     parser.add_argument('--output', type=Path)
+    parser.add_argument('--platform-source', type=Path)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     sys.path[:0] = [str(args.host.resolve()), str(root)]
@@ -228,6 +296,8 @@ def main():
     module.theme.apply('dark')
     with patch.object(socket.socket, 'connect', side_effect=AssertionError('Network forbidden')):
         print(check(app, QWidget(), module, args.output))
+        if args.platform_source:
+            print(check_platform_controls(app, QWidget(), module, args.platform_source))
     if dll:
         dll.close()
 

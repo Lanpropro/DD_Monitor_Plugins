@@ -1,16 +1,16 @@
 """Scoped, opaque sending-workspace styling and recipient rendering."""
 from PySide6.QtCore import QEvent, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QStyle, QStyledItemDelegate
 
 from ddm import theme
 
 
 def colors():
-    return (dict(surface='#F5F6F8', inset='#FFFFFF', raised='#E7EAF0', text='#202631',
-                 secondary='#57616F', accent='#006F8F', ink='#FFFFFF') if theme.is_light() else
-            dict(surface='#25282E', inset='#1D2025', raised='#30343B', text='#F4F6FA',
-                 secondary='#B4BBC6', accent='#48C8F0', ink='#10232A'))
+    return (dict(surface='#F5F5F3', inset='#FCFCFB', raised='#E7E7E1', input='#ECECE7', text='#282824',
+                 secondary='#60605A', accent='#52524A', ink='#FCFCFB') if theme.is_light() else
+            dict(surface='#151515', inset='#1A1A19', raised='#252523', input='#20201E', text='#EAEAE5',
+                 secondary='#B3B3A9', accent='#D4D4CB', ink='#151515'))
 
 
 def stylesheet():
@@ -25,14 +25,8 @@ def stylesheet():
         #MatchSyncSendConsole QScrollArea, #MatchSyncSendConsole QScrollArea > QWidget,
         #MatchSyncSendConsole QScrollArea > QWidget > QWidget {{background: transparent; border: none;}}
         #MatchSyncSendConsole QListWidget {{background: {c['inset']}; border: none; border-radius: 8px;}}
-        #MatchSyncSendConsole QTabBar {{background: {c['inset']}; border: none; border-radius: 8px;}}
-        #MatchSyncSendConsole QTabBar::tab {{color: {c['secondary']}; background: transparent;
-            border: none; border-radius: 6px; padding: 5px 8px; margin: 3px;}}
-        #MatchSyncSendConsole QTabBar::tab:selected {{color: {c['text']}; background: {c['raised']};}}
-        #MatchSyncSendConsole QTabBar::tab:hover {{color: {c['text']};}}
-        #MatchSyncSendConsole QTabBar::tab:focus {{border: 1px solid {c['accent']};}}
-        #MatchSyncSendConsole QLineEdit {{background: {c['inset']}; color: {c['text']};
-            border: 1px solid {c['raised']}; border-radius: 8px; padding: 6px 8px;}}
+        #MatchSyncSendConsole QLineEdit {{background: {c['input']}; color: {c['text']};
+            border: 1px solid transparent; border-radius: 8px; padding: 6px 8px;}}
         #MatchSyncSendConsole QLineEdit:focus {{border-color: {c['accent']};}}
         #MatchSyncSendConsole QPushButton {{background: {c['raised']}; color: {c['text']};
             border: none; border-radius: 8px; padding: 5px 10px; min-height: 18px;}}
@@ -70,15 +64,31 @@ class RecipientDelegate(QStyledItemDelegate):
             painter.setPen(QPen(QColor(c['accent']), 1))
             painter.setBrush(Qt.NoBrush)
             painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 6, 6)
-        stripe = QColor(index.data(Qt.UserRole + 2) or c['accent'])
+        avatar = QRectF(rect.left() + 8, rect.center().y() - 16, 32, 32)
+        pixmap = index.data(Qt.DecorationRole)
+        if isinstance(pixmap, QPixmap) and not pixmap.isNull():
+            painter.save()
+            clip = QPainterPath()
+            clip.addEllipse(avatar)
+            painter.setClipPath(clip)
+            painter.drawPixmap(avatar, pixmap, QRectF(pixmap.rect()))
+            painter.restore()
+        else:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(c['raised']))
+            painter.drawEllipse(avatar)
+            painter.setPen(QColor(c['text']))
+            painter.drawText(avatar, Qt.AlignCenter, str(index.data(Qt.DisplayRole) or '?')[:1])
         painter.setPen(Qt.NoPen)
-        painter.setBrush(stripe)
-        painter.drawRoundedRect(QRectF(rect.left() + 7, rect.top() + 10, 3, rect.height() - 20), 1.5, 1.5)
+        if selected:
+            painter.setPen(QPen(QColor(c['accent']), 1.5))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(avatar.adjusted(-2, -2, 2, 2))
         text = str(index.data(Qt.DisplayRole) or '').split('\n', 1)
         font = QFont(option.font)
         font.setWeight(QFont.DemiBold if selected else QFont.Normal)
         metrics = QFontMetrics(font)
-        left, width = int(rect.left() + 18), max(0, int(rect.width() - 45))
+        left, width = int(rect.left() + 48), max(0, int(rect.width() - 74))
         line_height = metrics.height()
         top = int(rect.top() + (rect.height() - 2 * line_height) / 2)
         painter.setFont(font)
@@ -95,9 +105,6 @@ class RecipientDelegate(QStyledItemDelegate):
             if selected:
                 painter.drawLine(x, y + 6, x + 4, y + 10)
                 painter.drawLine(x + 4, y + 10, x + 12, y + 1)
-            else:
-                painter.setBrush(Qt.NoBrush)
-                painter.drawRoundedRect(QRectF(x, y, 12, 12), 3, 3)
         painter.restore()
 
     def sizeHint(self, option, index):
