@@ -63,6 +63,9 @@ def check_platform_controls(app, host, module, source):
                             if button.property('sendPrimary'))
                 assert editor.height() == viewer.send_console.batch_panel.edit.height() == 32, kind
                 assert send.size() == viewer.send_console.batch_panel.send.size(), kind
+                assert send.width() == 60, kind
+                gift = controls.applicable()[0].control.widget.gifts
+                assert 'QPushButton#TileCtrl:hover' in gift.styleSheet(), kind
             return {'domestic_controls': ['douyu', 'huya', 'douyin'], 'credentials_read': False}
         finally:
             manager.unload()
@@ -271,11 +274,44 @@ def check(app, host, module, output=None):
             assert sent[-1] == ('1', 'cancel rest') and len(sent) == 4
             assert not active, 'Closing stops further targets and shuts down the pending composer'
             assert console.statuses['2'] == '已取消，未发送'
+            assert dialog.send.text() == '发送'
+            assert console.context.text() == '同文发送'
+            select({'2'})
+            second.setText('saved message')
+            console.save_text.click()
+            console.save_text.click()
+            assert console.saved_texts.count() == 1, 'Do not duplicate saved texts'
+            assert viewer.context.setting('saved_send_texts') == ['saved message']
+            if output:
+                console.grab().save(str(output.with_name(output.stem + '-stored-text.png')))
+            before_saved_send = len(sent)
+            QTest.mouseClick(console.saved_texts.viewport(), Qt.LeftButton,
+                             pos=console.saved_texts.visualItemRect(console.saved_texts.item(0)).center())
+            QTest.qWait(130)
+            assert sent[before_saved_send:] == [('2', 'saved message')]
+            assert second.text() == 'saved message', 'Quick send must preserve the independent draft'
+            select({'1', '2'})
+            console.saved_texts.itemClicked.emit(console.saved_texts.item(0))
+            QTest.qWait(200)
+            assert sent[-2:] == [('1', 'saved message'), ('2', 'saved message')]
+            assert first.text() == 'draft 1' and second.text() == 'saved message'
+            second.setText('draft 2')
             select(set())
             assert console.pages.isHidden() and console.selected_room is None
+            assert not console.saved_texts.isEnabled()
+            count = len(sent)
+            console.saved_texts.itemClicked.emit(console.saved_texts.item(0))
+            assert len(sent) == count
+            position = console.saved_texts.visualItemRect(console.saved_texts.item(0)).center()
+            with patch.object(import_module(module.SendConsole.__module__), 'QMenu') as menu_type:
+                menu = menu_type.return_value
+                menu.exec.return_value = menu.addAction.return_value
+                console.saved_menu(position)
+            assert console.saved_texts.count() == 0 and viewer.context.setting('saved_send_texts') == []
             select({'2'})
             assert console.pages.currentWidget() is console.stack
             assert second.text() == 'draft 2'
+            console.save_text.click()
             viewer.rows['2'].alias.setText('changed name')
             assert 'changed name' in console.rooms.currentItem().text()
             viewer.set_settings_visible(False)
@@ -290,8 +326,16 @@ def check(app, host, module, output=None):
             if output:
                 output.parent.mkdir(parents=True, exist_ok=True)
                 viewer.grab().save(str(output))
+            viewer.close()
+            reopened = module.Viewer(plugins.PluginContext(manager, 'sending_check'), {})
+            try:
+                assert reopened.send_console.saved_texts.item(0).text() == 'draft 2'
+                assert reopened.send_console.saved_texts.isEnabled() == bool(reopened.send_console.checked_rooms())
+            finally:
+                reopened.close()
+                reopened.deleteLater()
             return {'passed': True, 'synthetic_sends': sent, 'drafts_preserved': True,
-                    'aligned_console': True, 'outgoing_real_messages': 0}
+                    'aligned_console': True, 'saved_texts_reopened': True, 'outgoing_real_messages': 0}
         finally:
             manager.unload()
             viewer.close()

@@ -4,6 +4,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, Q
 from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QPushButton, QSizePolicy, QStyle, QStyledItemDelegate, QWidget
 
 from ddm import theme
+from .panels import console_button_style
 
 
 def colors():
@@ -19,7 +20,7 @@ def colors():
 
 
 INPUT_HEIGHT = 32
-SEND_WIDTH = 124
+SEND_WIDTH = 60
 ACCESSORY_WIDTH = 56
 
 
@@ -33,12 +34,7 @@ def style_compose(editor, send):
         font-size: {theme.FONT_CONTROL}px;}}
         QLineEdit:focus {{border-color: {c['accent']};}}''')
     send.setFixedSize(SEND_WIDTH, INPUT_HEIGHT)
-    send.setStyleSheet(f'''QPushButton {{background: {c['input']}; color: {c['text']};
-        border: none; border-radius: 8px; padding: 4px 8px; font-size: {theme.FONT_CONTROL}px;}}
-        QPushButton:hover {{background: {c['raised']};}}
-        QPushButton:focus {{border: 1px solid {c['accent']};}}
-        QPushButton:pressed {{background: {c['inset']};}}
-        QPushButton:disabled {{color: {c['secondary']}; background: {c['raised']};}}''')
+    send.setStyleSheet(console_button_style('QPushButton'))
 
 
 def align_composer(widget):
@@ -79,6 +75,14 @@ def align_composer(widget):
         widget.setFixedHeight(40)
         widget.setProperty('sendRowAligned', True)
     style_compose(editor, send)
+    # Platform icons paint dark strokes on hover, so retain their bright hover fill.
+    for button in widget.findChildren(QPushButton):
+        if button is not send and button.window() is widget.window() and not button.property('sendIconStyled'):
+            button.setStyleSheet(button.styleSheet() + f'''
+                QPushButton#TileCtrl:hover, QPushButton#TileCtrl[hovered="true"] {{
+                    background: {colors()['accent']}; border: none;
+                }}''')
+            button.setProperty('sendIconStyled', True)
 
 
 def stylesheet():

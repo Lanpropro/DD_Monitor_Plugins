@@ -2,7 +2,7 @@
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (QBoxLayout, QFrame, QHBoxLayout, QListView, QListWidget,
-    QListWidgetItem, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
+    QListWidgetItem, QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 
 from ddm.widgets import Tile
 from .panels import SettingsPanel, console_button_style
@@ -119,11 +119,32 @@ class SendConsole(SettingsPanel):
         layout.addWidget(self.body_scroll, 1)
         self.stack = QStackedWidget()
         self.pages = QStackedWidget()
-        self.pages.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
+        self.pages.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.pages.setFixedHeight(48)
         self.pages.addWidget(self.stack)
         self.batch_panel = BatchSend(self)
         self.pages.addWidget(self.batch_panel)
-        work_layout.addWidget(self.pages, 1)
+        work_layout.addWidget(self.pages)
+        saved_heading = QHBoxLayout()
+        saved_heading.addWidget(QLabel('暂存文本'), 1)
+        self.save_text = QPushButton('暂存当前文本')
+        self.save_text.setToolTip('保存输入框中的文字；左键点击暂存条目即可发送，右键可删除。')
+        self.save_text.clicked.connect(self.store_text)
+        saved_heading.addWidget(self.save_text)
+        work_layout.addLayout(saved_heading)
+        self.saved_texts = QListWidget()
+        self.saved_texts.setAccessibleName('暂存文本，左键发送，右键删除')
+        self.saved_texts.setMinimumHeight(36)
+        self.saved_texts.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        self.saved_texts.setEnabled(False)
+        self.saved_texts.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.saved_texts.setTextElideMode(Qt.ElideRight)
+        self.saved_texts.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.saved_texts.customContextMenuRequested.connect(self.saved_menu)
+        self.saved_texts.itemClicked.connect(lambda item: self.batch_panel.begin(item.text()))
+        for text in viewer.context.setting('saved_send_texts', []):
+            self.add_saved_text(text)
+        work_layout.addWidget(self.saved_texts, 1)
         self.feedback = QLabel('')
         self.feedback.setTextFormat(Qt.PlainText)
         self.feedback.setObjectName('SendFeedback')
@@ -132,6 +153,36 @@ class SendConsole(SettingsPanel):
         work_layout.addWidget(self.feedback)
         self.feedback.hide()
         self.refresh_design()
+
+    def add_saved_text(self, text):
+        item = QListWidgetItem(text)
+        item.setToolTip(text)
+        self.saved_texts.addItem(item)
+
+    def store_text(self):
+        editor = (self.batch_panel.edit if len(self.checked_rooms()) > 1 else
+                  self.rows[self.selected_room].tile._plugin_controls._repeat_editor()
+                  if self.selected_room in self.rows else None)
+        text = editor.text() if editor is not None else ''
+        if not text.strip():
+            return
+        if not any(self.saved_texts.item(i).text() == text for i in range(self.saved_texts.count())):
+            self.add_saved_text(text)
+            self.persist_texts()
+
+    def persist_texts(self):
+        self.viewer.context.set_setting('saved_send_texts',
+            [self.saved_texts.item(i).text() for i in range(self.saved_texts.count())])
+
+    def saved_menu(self, position):
+        item = self.saved_texts.itemAt(position)
+        if item is None:
+            return
+        menu = QMenu(self)
+        remove = menu.addAction('删除暂存文本')
+        if menu.exec(self.saved_texts.viewport().mapToGlobal(position)) is remove:
+            self.saved_texts.takeItem(self.saved_texts.row(item))
+            self.persist_texts()
 
     def refresh_design(self):
         self.setStyleSheet(stylesheet())
@@ -282,8 +333,9 @@ class SendConsole(SettingsPanel):
                     self.rooms.setCurrentRow(index)
         else:
             self.selected_room = None
-            self.context.setText(f'同文发送至 {len(keys)} 个直播间')
+            self.context.setText('同文发送')
         self.batch_panel.update_targets()
+        self.saved_texts.setEnabled(bool(keys) and not self.batch_panel.timer.isActive())
 
     def sync_height(self):
         settings = self.viewer.settings_panel
@@ -323,7 +375,7 @@ class BatchSend(QWidget):
         self.edit = QLineEdit()
         self.edit.setPlaceholderText('发送给所选主播的相同内容')
         compose.addWidget(self.edit, 1)
-        self.send = QPushButton('发送到所选主播')
+        self.send = QPushButton('发送')
         self.send.setProperty('sendPrimary', True)
         self.send.clicked.connect(self.start)
         accessories = QWidget(self.compose)
@@ -345,20 +397,24 @@ class BatchSend(QWidget):
     def update_targets(self):
         if not self.timer.isActive():
             count = len(self.console.checked_rooms())
-            self.send.setText(f'发送至 {count} 个房间')
+            self.send.setText('发送')
             self.send.setEnabled(bool(count))
 
-    def start(self):
-        if self.timer.isActive() or not self.edit.text().strip():
+    def start(self, *_args):
+        self.begin(self.edit.text())
+
+    def begin(self, text):
+        if self.timer.isActive() or not text.strip():
             return
         self.pending = self.console.checked_rooms()
         if not self.pending:
             return
-        self.text = self.edit.text()
+        self.text = text
         self.send.setEnabled(False)
         self.cancel.show()
         self.edit.setReadOnly(True)
         self.console.rooms.setEnabled(False)
+        self.console.saved_texts.setEnabled(False)
         for key in self.pending:
             self.console.set_status(key, '待处理')
         self.timer.start()
@@ -405,4 +461,5 @@ class BatchSend(QWidget):
         self.edit.setReadOnly(False)
         self.cancel.hide()
         self.console.rooms.setEnabled(True)
+        self.console.saved_texts.setEnabled(bool(self.console.checked_rooms()))
         self.update_targets()
