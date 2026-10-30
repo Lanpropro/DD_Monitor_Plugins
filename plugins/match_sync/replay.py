@@ -4,7 +4,7 @@ from collections import deque
 import time
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSlider, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy, QSlider, QStyle, QToolTip, QVBoxLayout, QWidget
 
 from .engine import RATE
 from .panels import console_button_style
@@ -103,14 +103,56 @@ class ReplayTimeline:
         return [dict(self.messages[index][1]) for index in range(first, last)]
 
 
+class TimelineSlider(QSlider):
+    def position_value(self, event):
+        return QStyle.sliderValueFromPosition(self.minimum(), self.maximum(),
+            round(event.position().x()), max(1, self.width() - 1))
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.setSliderDown(True)
+            self.setValue(self.position_value(event))
+            self.sliderMoved.emit(self.value())
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self.isSliderDown():
+            self.setValue(self.position_value(event))
+            self.sliderMoved.emit(self.value())
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self.isSliderDown():
+            self.setValue(self.position_value(event))
+            self.setSliderDown(False)
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+
+
+class PlaybackTimeEdit(QLineEdit):
+    def focusInEvent(self, event):
+        self.parentWidget().edit_origin = self.parentWidget().window_start
+        super().focusInEvent(event)
+
+    def focusOutEvent(self, event):
+        super().focusOutEvent(event)
+        self.parentWidget().refresh(force=True)
+
+
 class ReplayBar(QWidget):
     def __init__(self, viewer):
         slot = viewer.picture.status_label
         slot.setAttribute(Qt.WA_TransparentForMouseEvents, False)
         super().__init__(slot)
         self.viewer = viewer
-        self.setObjectName('MatchSyncReplayBar')
         self.setFixedHeight(26)
+        self.window_start = self.edit_origin = 0.0
+        self.last_update = 0.0
         centered = QHBoxLayout(slot)
         centered.setContentsMargins(0, 0, 0, 0)
         centered.addStretch(1)
@@ -119,66 +161,103 @@ class ReplayBar(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
-        self.toggle = QPushButton('重放')
-        self.toggle.setFixedWidth(44)
-        self.toggle.setFixedHeight(26)
-        self.toggle.setStyleSheet(console_button_style('QPushButton'))
-        self.toggle.clicked.connect(self.open_replay)
-        self.slider = QSlider(Qt.Horizontal)
-        self.slider.setRange(0, REPLAY_SECONDS * 1000)
-        self.slider.setInvertedAppearance(True)
-        self.slider.setInvertedControls(True)
+        timeline = QWidget()
+        timeline.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        track = QVBoxLayout(timeline)
+        track.setContentsMargins(0, 0, 0, 0)
+        track.setSpacing(0)
+        self.slider = TimelineSlider(Qt.Horizontal)
+        self.slider.setMinimumWidth(0)
+        self.slider.setFixedHeight(12)
         self.slider.setSingleStep(1000)
         self.slider.setPageStep(10000)
-        self.slider.setAccessibleName('整组重放，最多回看十分钟')
-        self.slider.setToolTip('拖动后松开：主画面、各路声音和弹幕一起回看')
+        self.slider.setAccessibleName('整组回看进度')
         self.slider.sliderReleased.connect(self.seek)
-        self.label = QLabel('直播')
-        self.slider.sliderMoved.connect(lambda value: self.label.setText(f'−{value // 60000:02d}:{value // 1000 % 60:02d}'))
-        self.back = QPushButton('返回直播')
-        self.back.setFixedWidth(64)
-        self.back.setFixedHeight(26)
+        self.slider.sliderMoved.connect(lambda value: self.time_edit.setText(self.format_time(value / 1000)))
+        track.addWidget(self.slider)
+        ticks = QHBoxLayout()
+        ticks.setContentsMargins(0, 0, 0, 0)
+        self.start_tick, self.middle_tick, self.end_tick = QLabel('00:00'), QLabel('00:00'), QLabel('00:00')
+        for label in (self.start_tick, self.middle_tick, self.end_tick):
+            label.setFixedHeight(12)
+            label.setStyleSheet('font-size: 10px; background: transparent;')
+        ticks.addWidget(self.start_tick)
+        ticks.addStretch(1)
+        ticks.addWidget(self.middle_tick)
+        ticks.addStretch(1)
+        ticks.addWidget(self.end_tick)
+        track.addLayout(ticks)
+        self.time_edit = PlaybackTimeEdit(self)
+        self.time_edit.setFixedSize(56, 24)
+        self.time_edit.setAlignment(Qt.AlignCenter)
+        self.time_edit.setAccessibleName('当前播放时间，可输入调整')
+        self.time_edit.setToolTip('输入 mm:ss 并按 Enter 跳转；00:00 为当前可回看窗口的起点')
+        self.time_edit.returnPressed.connect(self.enter_time)
+        self.back = QPushButton('直播')
+        self.back.setFixedSize(44, 24)
+        self.back.setToolTip('返回直播')
         self.back.setStyleSheet(console_button_style('QPushButton'))
         self.back.clicked.connect(viewer.return_live)
-        layout.addWidget(self.toggle)
-        layout.addWidget(self.slider, 1)
-        layout.addWidget(self.label)
+        layout.addWidget(timeline, 1)
+        layout.addWidget(self.time_edit)
         layout.addWidget(self.back)
-        self.expanded = False
-        self.last_update = 0.0
         self.refresh(force=True)
 
-    def open_replay(self):
-        if self.viewer.replay.active and self.back.isHidden():
-            self.viewer.return_live()
-            return
-        self.expanded = not self.expanded
-        self.refresh(force=True)
+    @staticmethod
+    def format_time(seconds):
+        seconds = max(0, int(seconds))
+        return f'{seconds // 60:02d}:{seconds % 60:02d}'
 
     def seek(self):
-        self.viewer.seek_replay(time.monotonic() - self.slider.value() / 1000)
+        if self.slider.value() >= self.slider.maximum() - 200:
+            self.viewer.return_live()
+        else:
+            self.viewer.seek_replay(self.window_start + self.slider.value() / 1000)
+
+    def enter_time(self):
+        parts = self.time_edit.text().strip().split(':')
+        valid = 1 <= len(parts) <= 3 and all(part.isdigit() for part in parts)
+        if valid and len(parts) > 1:
+            valid = all(int(part) < 60 for part in parts[1:])
+        seconds = sum(int(part) * 60 ** index for index, part in enumerate(reversed(parts))) if valid else -1
+        origin = self.edit_origin if self.time_edit.hasFocus() else self.window_start
+        if seconds < 0 or seconds * 1000 > self.slider.maximum():
+            QToolTip.showText(self.time_edit.mapToGlobal(self.time_edit.rect().bottomLeft()),
+                '请输入可用范围内的时间，例如 02:30', self.time_edit)
+            return
+        if seconds * 1000 >= self.slider.maximum() - 200:
+            self.viewer.return_live()
+        else:
+            self.viewer.seek_replay(origin + seconds)
+        self.time_edit.clearFocus()
+        self.refresh(force=True)
 
     def refresh(self, force=False):
         now = time.monotonic()
         if not force and now - self.last_update < .25:
             return
         self.last_update = now
+        self.setVisible(bool(self.viewer.rows))
         width = min(360, max(44, self.parentWidget().width() - 40))
-        self.setFixedWidth(width if self.expanded or self.viewer.replay.active else 44)
+        self.setFixedWidth(width)
+        self.time_edit.setVisible(width >= 130)
+        self.middle_tick.setVisible(width >= 210)
+        self.end_tick.setVisible(width >= 130)
+        self.back.setVisible(width >= 210)
         timeline = self.viewer.replay
         bounds = timeline.available(now, self.viewer.replay_histories())
-        maximum = min(REPLAY_SECONDS, max(0, now - bounds[0])) if bounds else 0
-        enabled = maximum > .5 and self.viewer.running
-        self.toggle.setEnabled(enabled)
-        self.toggle.setToolTip(f'整组回看：当前可用 {int(maximum)} 秒，最多 10 分钟')
-        self.slider.setVisible((self.expanded or timeline.active) and width >= 100)
-        self.label.setVisible((self.expanded or timeline.active) and width >= 250)
-        self.back.setVisible(timeline.active and width >= 320)
-        self.toggle.setText('直播' if timeline.active and self.back.isHidden() else '重放')
+        self.window_start = bounds[0] if bounds else now
+        duration = min(REPLAY_SECONDS, max(0, now - self.window_start)) if bounds else 0
+        enabled = duration > .5 and self.viewer.running
         self.slider.setEnabled(enabled)
+        self.time_edit.setEnabled(enabled)
+        self.back.setEnabled(timeline.active)
+        self.slider.setToolTip(f'当前可回看 {self.format_time(duration)}，最多 10 分钟')
+        current = max(0, min(duration, now - timeline.delay - self.window_start))
         if not self.slider.isSliderDown():
-            self.slider.setMinimum(max(0, round((now - bounds[1]) * 1000)) if bounds else 0)
-            self.slider.setMaximum(round(maximum * 1000))
-            self.slider.setValue(round(timeline.delay * 1000))
-        seconds = max(0, round(timeline.delay))
-        self.label.setText(f'−{seconds // 60:02d}:{seconds % 60:02d}' if timeline.active else '直播')
+            self.slider.setRange(0, round(duration * 1000))
+            self.slider.setValue(round(current * 1000))
+        if not self.time_edit.hasFocus() and not self.slider.isSliderDown():
+            self.time_edit.setText(self.format_time(current))
+        self.middle_tick.setText(self.format_time(duration / 2))
+        self.end_tick.setText(self.format_time(duration))

@@ -29,6 +29,7 @@ def check(app, host, module, output=None):
         host.settings, host.rooms = {}, []
         manager = plugins.PluginManager(window=host, plugins_dir=Path(directory) / 'plugins')
         viewer = module.Viewer(plugins.PluginContext(manager, 'replay_check'), {})
+        assert viewer.replay_bar.isHidden()
         viewer.setAttribute(Qt.WA_DontShowOnScreen, host.testAttribute(Qt.WA_DontShowOnScreen))
         decoders = []
         base = time.monotonic() - 625
@@ -172,7 +173,6 @@ def check(app, host, module, output=None):
                 assert 'new incoming live' not in viewer.panel.body.toPlainText()
                 viewer.resize(1320, 880)
                 viewer.show()
-                viewer.replay_bar.expanded = True
                 viewer.replay_bar.refresh(force=True)
                 QTest.qWait(40)
                 bar = viewer.replay_bar
@@ -181,16 +181,38 @@ def check(app, host, module, output=None):
                 assert abs(bar.geometry().center().x() - slot.rect().center().x()) <= 1
                 assert bar.mapTo(viewer.picture.bottom, QPoint()).x() > viewer.picture.volume_label.geometry().right()
                 assert bar.width() <= slot.width() - 30, 'Keep visible space around the centered replay controls'
+                assert not bar.isHidden() and not bar.slider.isHidden(), 'Show the timeline without a toggle'
+                assert bar.start_tick.mapTo(bar, QPoint()).y() > bar.slider.mapTo(bar, QPoint()).y()
+                assert bar.start_tick.mapTo(slot, QPoint(0, bar.start_tick.height())).y() <= slot.height(), 'Do not clip the timestamps'
                 if output:
                     output.parent.mkdir(parents=True, exist_ok=True)
                     viewer.grab().save(str(output))
+                QTest.mouseClick(bar.slider, Qt.LeftButton, pos=QPoint(bar.slider.width() // 2, bar.slider.height() // 2))
+                assert abs(viewer.replay.delay - bar.slider.maximum() / 2000) < 3
+                origin = bar.window_start
+                bar.time_edit.setFocus()
+                QTest.qWait(10)
+                bar.time_edit.setText('02:30')
+                QTest.keyClick(bar.time_edit, Qt.Key_Return)
+                assert abs(time.monotonic() - viewer.replay.delay - (origin + 150)) < 1
+                expected_delay = viewer.replay.delay
+                with patch.object(import_module(module.__package__ + '.replay').QToolTip, 'showText') as tooltip:
+                    bar.time_edit.setText('99:99')
+                    bar.enter_time()
+                    tooltip.assert_called_once()
+                assert viewer.replay.delay == expected_delay
                 viewer.return_live()
                 assert not viewer.replay.active and viewer.audio.correction == correction
                 assert 'live only' in viewer.panel.body.toPlainText()
                 assert 'new incoming live' in viewer.panel.body.toPlainText()
                 assert viewer.audio.snapshot[0] == viewer.playback_rate
+                assert not bar.slider.isHidden(), 'Keep the timeline visible when returning live'
             decoders[0].history.trim_bytes(0)
             assert viewer.replay.available(time.monotonic(), histories) is None, 'Do not offer evicted media'
+            viewer.stop()
+            for key in tuple(viewer.rows):
+                viewer.remove_room(key)
+            assert viewer.replay_bar.isHidden() and viewer.send_console.work.isHidden()
             return {'passed': True, 'replay_seconds': 600, 'real_h264_seek': True,
                     'pcm_picture_alignment': True, 'background_live_health': True,
                     'historical_chat': True, 'return_live': True, 'real_network_requests': 0}

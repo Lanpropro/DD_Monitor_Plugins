@@ -6,6 +6,7 @@ from pathlib import Path
 import socket
 import sys
 import tempfile
+import time
 import types
 from unittest.mock import patch
 
@@ -128,6 +129,8 @@ def check(app, host, module, output=None):
         manager.register_tile_control('fixture', 'send', Composer)
         viewer = module.Viewer(plugins.PluginContext(manager, 'sending_check'), {})
         assert not viewer.send_console.context.text()
+        assert viewer.send_console.work.isHidden()
+        assert viewer.send_console.title.text() == '弹幕控制台'
         assert not viewer.notice.text()
         assert not viewer.panel.body.toPlainText().strip(), 'No instructional text before a room is added'
         viewer.setAttribute(Qt.WA_DontShowOnScreen, host.testAttribute(Qt.WA_DontShowOnScreen))
@@ -138,6 +141,12 @@ def check(app, host, module, output=None):
             viewer.show()
             QTest.qWait(80)
             console = viewer.send_console
+            def finish_batch():
+                deadline = time.monotonic() + 2
+                while console.batch_panel.timer.isActive() and time.monotonic() < deadline:
+                    QTest.qWait(20)
+                assert not console.batch_panel.timer.isActive(), 'The synthetic send queue must finish'
+            assert not console.saved_input.isHidden() and not console.work.isHidden()
             assert not console.feedback.isVisible()
             assert not any('左键选择主播；' in label.text() for label in console.findChildren(module.QLabel))
             first = console.rows['1'].tile._plugin_controls.entries[0].control.edit
@@ -254,7 +263,7 @@ def check(app, host, module, output=None):
                     dialog.send.width(), dialog.send.height()) == single_button_geometry
             dialog.edit.setText('shared')
             dialog.start()
-            QTest.qWait(250)
+            finish_batch()
             assert sent == [('1', 'shared'), ('2', 'shared'), ('3', 'shared')]
             assert first.text() == 'draft 1' and second.text() == 'draft 2'
             assert not dialog.timer.isActive()
@@ -323,12 +332,12 @@ def check(app, host, module, output=None):
             before_saved_send = len(sent)
             QTest.mouseClick(console.saved_texts.viewport(), Qt.LeftButton,
                              pos=console.saved_texts.visualItemRect(console.saved_texts.item(0)).center())
-            QTest.qWait(130)
+            finish_batch()
             assert sent[before_saved_send:] == [('2', 'saved message')]
             assert second.text() == 'draft 2', 'Quick send must preserve the independent draft'
             select({'1', '2'})
             console.saved_texts.itemClicked.emit(console.saved_texts.item(0))
-            QTest.qWait(200)
+            finish_batch()
             assert sent[-2:] == [('1', 'saved message'), ('2', 'saved message')]
             assert first.text() == 'draft 1' and second.text() == 'draft 2'
             second.setText('draft 2')
@@ -362,7 +371,7 @@ def check(app, host, module, output=None):
             count = len(sent)
             with patch.object(console, 'create_chat_toolbar', return_value=menu), patch.object(menu, 'exec', return_value=menu.repeat_action):
                 console.show_chat_actions(event, QPoint(20, 20))
-            QTest.qWait(130)
+            finish_batch()
             assert sent[count:] == [('1', 'message to save')], '+1 must target selected recipients, not the source'
             assert second.text() == 'draft 2'
             assert first.text() == 'draft 1'
@@ -371,7 +380,7 @@ def check(app, host, module, output=None):
             count = len(sent)
             with patch.object(console, 'create_chat_toolbar', return_value=menu), patch.object(menu, 'exec', return_value=menu.repeat_action):
                 console.show_chat_actions(event, QPoint(20, 20))
-            QTest.qWait(200)
+            finish_batch()
             assert sent[count:] == [('1', 'message to save'), ('2', 'message to save')]
             assert first.text() == 'draft 1' and second.text() == 'draft 2'
             unavailable_menu = console.create_chat_toolbar({**event, 'source_room': 'missing'})

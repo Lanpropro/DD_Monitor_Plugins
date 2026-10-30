@@ -95,7 +95,7 @@ class SendConsole(SettingsPanel):
         layout.setContentsMargins(16, 10, 16, 10)
         layout.setSpacing(10)
         heading = QHBoxLayout()
-        self.title = QLabel('弹幕发送')
+        self.title = QLabel('弹幕控制台')
         self.title.setObjectName('SendTitle')
         heading.addWidget(self.title, 1)
         self.minimize = QPushButton('−')
@@ -198,6 +198,7 @@ class SendConsole(SettingsPanel):
         self.feedback.setMaximumHeight(self.feedback.fontMetrics().height() * 2 + 4)
         work_layout.addWidget(self.feedback)
         self.feedback.hide()
+        self.work.hide()
         self.refresh_design()
 
     def add_saved_text(self, text):
@@ -341,6 +342,8 @@ class SendConsole(SettingsPanel):
         self.rooms.blockSignals(False)
         self.batch_targets.intersection_update(self.rows)
         self._update_selection()
+        self.work.setVisible(bool(self.rows))
+        self.viewer.replay_bar.refresh(force=True)
         self.refresh_design()
 
     def checked_rooms(self):
