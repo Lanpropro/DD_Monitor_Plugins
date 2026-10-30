@@ -225,7 +225,7 @@ class DanmakuComposer(QWidget):
         if self.edit.text().strip():
             self._send(self.edit.text(), 0)
 
-    def _send(self, message, dm_type):
+    def _send(self, message, dm_type, *, check_emoticon=False):
         cookies = self.sync_credentials()
         if self._closing or self.busy or not self.supported:
             return
@@ -235,10 +235,28 @@ class DanmakuComposer(QWidget):
             return
         context = (*self._context(), self._revision, dm_type)
         self._pending = context
-        self._feedback("正在发送…")
+        self._feedback("正在检测表情权限…" if check_emoticon else "正在发送…")
         self._update_buttons()
         room_id = self._room_id
-        worker = Request(context, lambda local: bili.send_danmaku(room_id, message, dm_type=dm_type, cookies=local, still_current=worker.still_current),
+        def send(local):
+            if check_emoticon:
+                try:
+                    packages = bili.get_emoticons(room_id, cookies=local)
+                except (ValueError, requests.RequestException) as error:
+                    raise ValueError("无法检测表情权限，未发送：" + request_message(error)) from error
+                if not worker.still_current():
+                    return
+                # Only the current account's live response can authorize a repeat.
+                emote = next((emote for package in packages
+                              for emote in (package.get("emoticons") or [])
+                              if emote.get("emoticon_unique") == message), None)
+                if emote is None:
+                    raise ValueError("当前账号在该直播间无法使用此表情，未发送")
+                if emote.get("perm") != 1:
+                    raise ValueError("当前账号未解锁该表情，未发送")
+            return bili.send_danmaku(room_id, message, dm_type=dm_type, cookies=local,
+                                     still_current=worker.still_current)
+        worker = Request(context, send,
                          cookies=cookies, account_generation=self._account_generation(), require_device=True)
         worker.completed.connect(self._sent)
         worker.failed.connect(self._send_failed)
@@ -285,6 +303,14 @@ class DanmakuComposer(QWidget):
         self.deviceCookieReady.emit()
         if self._finish_send(context):
             self._feedback(request_message(error, sending=True),error=error)
+
+    def repeat_message(self, event):
+        identifier = event.get("emoticon_unique")
+        if (event.get("dm_type") != 1 or not identifier or self._closing or
+                self.busy or not self.supported):
+            return False
+        self._send(str(identifier), 1, check_emoticon=True)
+        return self._pending is not None
 
     def choose_emoticon(self, pkg_type, emote):
         if self._closing:
