@@ -299,7 +299,11 @@ def check(app, host, module, output=None):
             assert sent[-2:] == [('1', 'saved message'), ('2', 'saved message')]
             assert first.text() == 'draft 1' and second.text() == 'draft 2'
             second.setText('draft 2')
+            QTest.qWait(30)
+            saved_input_y = console.saved_input.mapTo(console, QPoint()).y()
             select(set())
+            QTest.qWait(30)
+            assert console.saved_input.mapTo(console, QPoint()).y() == saved_input_y, 'No selection must retain compose space'
             assert console.pages.isHidden() and console.selected_room is None
             assert console.saved_texts.isEnabled(), 'Saved texts can still be managed without recipients'
             count = len(sent)
