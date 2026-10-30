@@ -10,20 +10,22 @@ from dataclasses import replace
 from urllib.parse import urlsplit
 
 from PySide6.QtCore import QEasingCurve, QEvent, QMetaObject, QMimeData, QObject, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, Qt, QThread, QTimer, Signal, Slot
-from PySide6.QtGui import QColor, QCursor, QDrag, QIcon, QImage, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QRegion
+from PySide6.QtGui import QColor, QCursor, QDrag, QIcon, QImage, QKeySequence, QPainter, QPen, QPixmap, QRegion
 from PySide6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices
 from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QCheckBox, QComboBox, QDialog,
     QDialogButtonBox, QDoubleSpinBox, QFrame,
     QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLayout, QLineEdit,
     QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QSlider, QSplitter, QStyle, QTextEdit, QToolTip, QVBoxLayout, QWidget)
 
-from ddm.widgets import AUTO_QUALITY, Avatar, DanmakuPanel, ROOM_MIME, Tile
+from ddm.widgets import AUTO_QUALITY, Avatar, ROOM_MIME, Tile
 from ddm.fullscreen_cursor import FullscreenCursor
 from ddm.dialogs import SHORTCUT_ACTIONS
 from ddm import config as config_module, motion, theme
 from .engine import route_pcm_s16_stereo, Alignment, Match, RATE, SafetyBuffer, LateBuffer, match_scenes, refine_match, mix_pcm, resample_pcm
 from .media import Chat, Decoder, PlatformChat
 from .fullscreen import mark_fullscreen
+from .sending import SendConsole, SendingDanmakuPanel
+from .panels import SettingsPanel
 
 COLORS = ("#38bdf8", "#fb7185", "#a78bfa", "#4ade80", "#fbbf24", "#fb923c")
 ROW_MIME = "application/x-ddm-match-sync-row"
@@ -148,10 +150,6 @@ class Canvas(QFrame):
         if not self.transparent_background:
             painter.fillRect(self.rect(), theme.qcolor(theme.CONTENT) if theme.is_light() else QColor("#101216"))
         if self.image.isNull():
-            if self.waiting:
-                return
-            painter.setPen(theme.qcolor(theme.TEXT1 if self.transparent_background else theme.TEXT3))
-            painter.drawText(self.rect(), Qt.AlignCenter, "将左侧关注栏卡片拖到这里，加入比赛二路")
             return
         image = self.image
         source = self._source_rect()
@@ -549,54 +547,6 @@ class ComparisonPanel(QFrame):
             text = f"{position} · {playback}"
             if state.text() != text:
                 state.setText(text)
-
-
-class SettingsPanel(QWidget):
-    def __init__(self, viewer):
-        super().__init__(viewer)
-        self.viewer = viewer
-        self.setObjectName("MatchSyncSettings")
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setMinimumHeight(130)
-        self.setMaximumHeight(240)
-        self.setStyleSheet(f"""
-            #MatchSyncSettings, #MatchSyncRows {{
-                background: transparent; border: none;
-            }}
-            #MatchSyncSettings QLabel, #MatchSyncSettings QCheckBox {{ color: palette(window-text); }}
-            #MatchSyncSettings QScrollArea, #MatchSyncSettings QScrollArea > QWidget {{
-                background: transparent; border: none;
-            }}
-            #MatchSyncSettings QPushButton, #MatchSyncSettings QLineEdit,
-            #MatchSyncSettings QComboBox, #MatchSyncSettings QDoubleSpinBox {{
-                background: palette(button); color: palette(window-text);
-                border: 1px solid palette(mid);
-                border-radius: {theme.RADIUS_MD}px; padding: 4px 6px;
-            }}
-            #MatchSyncSettings QPushButton:hover {{
-                background: palette(light); border-color: palette(highlight);
-            }}
-            #MatchSyncSettings QPushButton:checked {{
-                background: rgba(251, 114, 153, 45); border-color: palette(highlight);
-            }}
-        """)
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        path = QPainterPath()
-        path.addRoundedRect(QRectF(self.rect()), theme.RADIUS_LG, theme.RADIUS_LG)
-        top = QPainterPath()
-        top.addRoundedRect(QRectF(0, 0, self.width(), self.height() / 2),
-                           theme.RADIUS_MD, theme.RADIUS_MD)
-        path = path.united(top)
-        tint = QLinearGradient(0, 0, 0, self.height())
-        top_color, bottom_color = theme.qcolor(theme.CONTENT), theme.qcolor(theme.BG)
-        top_color.setAlpha(round(255 * self.viewer.panel_alpha) if self.viewer.skin_visible else 238)
-        bottom_color.setAlpha(round(255 * self.viewer.panel_alpha) if self.viewer.skin_visible else 245)
-        tint.setColorAt(0, top_color)
-        tint.setColorAt(1, bottom_color)
-        painter.fillPath(path, tint)
 
 
 class CompactStatus(QLabel):
@@ -1202,12 +1152,12 @@ class Viewer(QDialog):
         self.picture.recordingRequested.connect(self._record_picture)
         self.picture.videoDanmakuAdvancedRequested.connect(self._open_danmaku_settings)
         self.fullscreen_dialog = None
-        self.panel = DanmakuPanel(self)
+        self.panel = SendingDanmakuPanel(self)
         self.panel.roomDropped.connect(self._add_dragged)
         self.panel.body.setAcceptDrops(False)
         self.panel.body.viewport().setAcceptDrops(False)
         self.panel.setMinimumWidth(260)
-        self.panel.set_placeholder("各路弹幕以主播名称标注来源直播间")
+        self.panel.set_placeholder('')
         settings = getattr(context.window, "settings", {})
         self.video_danmaku = getattr(self.picture, "video_danmaku", None)
         if self.video_danmaku is not None:
@@ -1223,7 +1173,7 @@ class Viewer(QDialog):
         split.setHandleWidth(4)
         split.setStyleSheet("QSplitter::handle { background: transparent; } QSplitter::handle:hover { background: palette(mid); }")
         self.picture_split = split
-        self.notice = QLabel("自动匹配使用完整画面；可框选计时器放大对照，再按 0.1 秒手动微调偏移。")
+        self.notice = QLabel('')
         self.notice.setWordWrap(True)
         body = QWidget()
         body.setObjectName("MatchSyncRows")
@@ -1270,7 +1220,15 @@ class Viewer(QDialog):
         left_layout.setSpacing(4)
         left_layout.addWidget(self.body_split, 1)
         split.addWidget(self.left_pane)
-        split.addWidget(self.panel)
+        self.send_console = SendConsole(self)
+        right_pane = QWidget()
+        right_layout = QVBoxLayout(right_pane)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
+        right_layout.addWidget(self.panel, 1)
+        right_layout.addWidget(self.send_console)
+        split.addWidget(right_pane)
+        self.settings_panel.installEventFilter(self)
         split.setSizes([930, 330])
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1328,10 +1286,12 @@ class Viewer(QDialog):
             #MatchSyncCompare QScrollArea, #MatchSyncCompare QScrollArea > QWidget {{ background: transparent; border: none; }}
         """)
         styled(self.panel, f"#MatchSync #DanmakuPanel {{ background: {background}; border: none; }}")
-        for widget, name in ((self.panel.bar, "DanmakuBar"),
+        panel_bar = getattr(self.panel, 'bar', None)
+        for widget, name in ((panel_bar, "DanmakuBar"),
                              (self.panel.findChild(QWidget, "DanmakuHeader"), "DanmakuHeader")):
-            styled(widget, f"#MatchSync #{name} {{ background: transparent; border: none; }}")
-        for label in self.panel.bar.findChildren(QLabel):
+            if widget is not None:
+                styled(widget, f"#MatchSync #{name} {{ background: transparent; border: none; }}")
+        for label in panel_bar.findChildren(QLabel) if panel_bar is not None else ():
             styled(label, "color: palette(window-text); background: transparent;")
         self.panel.body.viewport().setAutoFillBackground(False)
         styled(self.picture, f"#MatchSync #Tile {{ background: {background}; }} "
@@ -1345,6 +1305,7 @@ class Viewer(QDialog):
             canvas._sync_opaque_paint()
             canvas.update()
         self.settings_panel.update()
+        self.send_console.refresh_design()
 
     def embed(self, content):
         self.embedded = True
@@ -1353,7 +1314,7 @@ class Viewer(QDialog):
         content.installEventFilter(self)
         for widget in self.add_controls:
             widget.hide()
-        self.notice.setText("从左侧关注栏拖入直播间；选择主画面，各路声音与弹幕会合并。")
+        self.notice.setText('')
 
     def _shortcut_action(self, watched, event):
         if not self.isVisible() or not isinstance(watched, QWidget):
@@ -1432,6 +1393,8 @@ class Viewer(QDialog):
             event.acceptProposedAction()
             return True
         elif kind == QEvent.Resize:
+            if watched is self.settings_panel and hasattr(self, 'send_console'):
+                self.send_console.sync_height()
             if watched is self.picture.bottom:
                 QTimer.singleShot(0, self._layout_restore_control)
             if self.embedded and watched is self.parentWidget():
@@ -1459,6 +1422,7 @@ class Viewer(QDialog):
                     widget.installEventFilter(self)
                     widget.hide()
         self._sync_sidebar_marks()
+        self.send_console.sync_height()
         super().showEvent(event)
 
     def hideEvent(self, event):
@@ -1478,6 +1442,7 @@ class Viewer(QDialog):
         self.sidebar_marks_state, self.sidebar_marks_due = state, now + .25
         for row in self.rows.values():
             row.refresh_avatar()
+            self.send_console.refresh_avatar(row.room_id)
         if self.sidebar_style is None:
             self.sidebar_style = sidebar.styleSheet()
             sidebar.setStyleSheet(self.sidebar_style + """
@@ -1528,6 +1493,7 @@ class Viewer(QDialog):
             self.settings_height = self.settings_panel.height()
             self.compare.setChecked(False)
         self.settings_panel.setVisible(visible)
+        self.send_console.sync_height()
         self.restore_settings.setVisible(not visible)
         self._layout_restore_control()
         if visible:
@@ -1847,6 +1813,7 @@ class Viewer(QDialog):
                     self.add_room(room_id, {"alias": room.get("uname") or ""})
 
     def update_main_choices(self):
+        self.send_console.sync_rooms()
         selected = self.main.currentData()
         self.main.blockSignals(True)
         self.main.clear()
@@ -1907,7 +1874,9 @@ class Viewer(QDialog):
 
     def sync_picture(self, *_args):
         row = self.rows.get(self.main.currentData())
-        interval = max(4, int(1000 / getattr(row.decoder, "fps", 30))) if row is not None else 33
+        # Poll twice per source frame: Qt paint/chat work can delay a timer by
+        # several milliseconds. The audio clock still owns playback speed.
+        interval = max(4, int(500 / getattr(row.decoder, "fps", 30))) if row is not None else 33
         if self.render_timer.interval() != interval:
             self.render_timer.setInterval(interval)
         tile = self.picture
@@ -2133,8 +2102,8 @@ class Viewer(QDialog):
         self._sync_sidebar_marks()
         if not self.rows:
             self.stop()
-            self.panel.set_placeholder("将左侧关注栏卡片拖到这里，加入比赛二路")
-            self.notice.setText("请从左侧关注栏拖入直播间")
+            self.panel.set_placeholder('')
+            self.notice.setText('')
         self.changed()
 
     def target_shifts(self):
