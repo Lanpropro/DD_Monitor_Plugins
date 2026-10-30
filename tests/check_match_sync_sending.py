@@ -11,7 +11,7 @@ from unittest.mock import patch
 def check(app, host, module, output=None):
     from PySide6.QtCore import QPoint, Qt, QTimer
     from PySide6.QtTest import QTest
-    from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QPushButton, QWidget
+    from PySide6.QtWidgets import QBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QWidget
     from ddm import plugins
     from ddm.plugin_controls import TileControl
     sent, active = [], []
@@ -79,8 +79,11 @@ def check(app, host, module, output=None):
             console.rooms.setCurrentRow(0)
             assert console.stack.currentWidget() is console.rows['1']
             console.rooms.setCurrentRow(1)
-            assert isinstance(console, module.SettingsPanel), 'Both consoles must use the same style and paint'
-            assert console.layout().contentsMargins() == viewer.settings_panel.layout().contentsMargins()
+            console.rooms.setFocus()
+            console.rooms.setCurrentRow(0)
+            QTest.keyClick(console.rooms, Qt.Key_Down if console.width() >= 520 else Qt.Key_Right)
+            assert console.target.currentData() == '2' and not sent
+            assert isinstance(console, module.SettingsPanel), 'Keep the existing console size and visibility contract'
             panel_height = viewer.panel.height()
             console_height = console.height()
             console.minimize.click()
@@ -113,11 +116,47 @@ def check(app, host, module, output=None):
                     left = viewer.settings_panel.mapTo(viewer, QPoint()).y()
                     right = console.mapTo(viewer, QPoint()).y()
                     assert abs(left - right) <= 1, (left, right)
+                    regular = console.width() >= 520
+                    assert console.body_layout.direction() == (QBoxLayout.LeftToRight if regular
+                                                              else QBoxLayout.TopToBottom)
+                    assert console.mode.isVisible() and first.isVisible() == (console.target.currentData() == '1')
+            assert console.context.text().startswith('发送给')
+            for right_width in (640, 300):
+                viewer.resize(1500, 880)
+                viewer.picture_split.setSizes([1500 - right_width, right_width])
+                QTest.qWait(60)
+                assert (console.width() >= 520) == (right_width == 640), console.width()
+                if right_width == 300:
+                    assert console.body_scroll.horizontalScrollBar().maximum() == 0
+                    button = second.parentWidget().findChildren(QPushButton)[0]
+                    assert button.mapTo(console, QPoint(button.width(), 0)).x() <= console.width()
+                if output:
+                    viewer.grab().save(str(output.with_name(output.stem + f'-width-{right_width}.png')))
             viewer.resize(1320, 880)
+            viewer.picture_split.setSizes([700, 620])
             QTest.qWait(40)
+            feedback_bottom = console.feedback.mapTo(console.body_scroll.viewport(),
+                                                      QPoint(0, console.feedback.height())).y()
+            assert feedback_bottom <= console.body_scroll.viewport().height(), (
+                feedback_bottom, console.body_scroll.viewport().height(),
+                console.body_scroll.widget().minimumSizeHint(), console.work.minimumSizeHint(),
+                console.pages.minimumSizeHint(), console.feedback.sizeHint(),
+                console.body_scroll.widget().minimumSize(), console.body_scroll.widget().size(),
+                console.body_layout.minimumSize(), console.work.geometry(), console.pages.geometry())
+            if output:
+                console.grab().save(str(output.with_name(output.stem + '-single-detail.png')))
+                with patch.object(module.theme, 'is_light', return_value=True):
+                    console.refresh_design()
+                    QTest.qWait(30)
+                    console.grab().save(str(output.with_name(output.stem + '-light.png')))
+                console.refresh_design()
             console.mode.setCurrentIndex(1)
             dialog = console.batch_panel
             assert console.pages.currentWidget() is dialog
+            first_rect = console.rooms.visualItemRect(console.rooms.item(0))
+            checked_before = '1' in console.checked_rooms()
+            QTest.mouseClick(console.rooms.viewport(), Qt.LeftButton, pos=first_rect.center())
+            assert ('1' in console.checked_rooms()) != checked_before
             for index in range(console.rooms.count()):
                 console.rooms.item(index).setCheckState(Qt.Checked)
             dialog.edit.setText('shared')
@@ -127,10 +166,13 @@ def check(app, host, module, output=None):
             assert first.text() == 'draft 1' and second.text() == 'draft 2'
             assert not dialog.timer.isActive()
             assert all(console.statuses[key] == '已处理' for key in ('1', '2', '3'))
+            assert all(console.rooms.item(index).data(Qt.CheckStateRole) == Qt.Checked.value
+                       for index in range(console.rooms.count())), 'Visual checks must match the actual send targets'
             assert '已处理' in console.feedback.text()
             if output:
                 output.parent.mkdir(parents=True, exist_ok=True)
                 viewer.grab().save(str(output.with_name(output.stem + '-multi.png')))
+                console.grab().save(str(output.with_name(output.stem + '-multi-detail.png')))
             dialog.edit.setText('x' * 21)
             dialog.start()
             QTest.qWait(100)
@@ -161,10 +203,10 @@ def check(app, host, module, output=None):
             if output:
                 output.parent.mkdir(parents=True, exist_ok=True)
                 viewer.grab().save(str(output))
-            manager.unload()
             return {'passed': True, 'synthetic_sends': sent, 'drafts_preserved': True,
                     'aligned_console': True, 'outgoing_real_messages': 0}
         finally:
+            manager.unload()
             viewer.close()
             viewer.deleteLater()
             app.processEvents()
@@ -183,6 +225,7 @@ def main():
     from PySide6.QtWidgets import QApplication, QWidget
     from plugins.match_sync import viewer as module
     app = QApplication([])
+    module.theme.apply('dark')
     with patch.object(socket.socket, 'connect', side_effect=AssertionError('Network forbidden')):
         print(check(app, QWidget(), module, args.output))
     if dll:

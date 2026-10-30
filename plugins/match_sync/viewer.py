@@ -1309,6 +1309,7 @@ class Viewer(QDialog):
             canvas._sync_opaque_paint()
             canvas.update()
         self.settings_panel.update()
+        self.send_console.refresh_design()
 
     def embed(self, content):
         self.embedded = True
