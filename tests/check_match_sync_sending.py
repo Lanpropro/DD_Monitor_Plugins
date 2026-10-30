@@ -1,6 +1,5 @@
 """Console geometry, room drafts and explicit multi-send; no real accounts."""
 import argparse
-from importlib import import_module
 import os
 from pathlib import Path
 import socket
@@ -15,7 +14,6 @@ def check(app, host, module, output=None):
     from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QPushButton, QWidget
     from ddm import plugins
     from ddm.plugin_controls import TileControl
-    BatchSend = import_module(module.SendConsole.__module__).BatchSend
     sent, active = [], []
 
     class Composer(TileControl):
@@ -76,6 +74,11 @@ def check(app, host, module, output=None):
             second.setText('draft 2')
             assert console.stack.currentWidget() is console.rows['2']
             assert first.text() == 'draft 1' and not sent
+            assert console.rooms.count() == 3
+            assert '有草稿' in console.rooms.item(0).text()
+            console.rooms.setCurrentRow(0)
+            assert console.stack.currentWidget() is console.rows['1']
+            console.rooms.setCurrentRow(1)
             assert isinstance(console, module.SettingsPanel), 'Both consoles must use the same style and paint'
             assert console.layout().contentsMargins() == viewer.settings_panel.layout().contentsMargins()
             panel_height = viewer.panel.height()
@@ -112,27 +115,40 @@ def check(app, host, module, output=None):
                     assert abs(left - right) <= 1, (left, right)
             viewer.resize(1320, 880)
             QTest.qWait(40)
-            dialog = BatchSend(console)
-            for choice, _status in dialog.choices.values():
-                choice.setChecked(True)
+            console.mode.setCurrentIndex(1)
+            dialog = console.batch_panel
+            assert console.pages.currentWidget() is dialog
+            for index in range(console.rooms.count()):
+                console.rooms.item(index).setCheckState(Qt.Checked)
             dialog.edit.setText('shared')
             dialog.start()
             QTest.qWait(250)
             assert sent == [('1', 'shared'), ('2', 'shared'), ('3', 'shared')]
             assert first.text() == 'draft 1' and second.text() == 'draft 2'
             assert not dialog.timer.isActive()
+            assert all(console.statuses[key] == '已处理' for key in ('1', '2', '3'))
+            assert '已处理' in console.feedback.text()
+            if output:
+                output.parent.mkdir(parents=True, exist_ok=True)
+                viewer.grab().save(str(output.with_name(output.stem + '-multi.png')))
             dialog.edit.setText('x' * 21)
             dialog.start()
             QTest.qWait(100)
             assert len(sent) == 3, 'Do not truncate and send overlong text'
             dialog.edit.setText('cancel rest')
             dialog.start()
-            dialog.reject()
+            assert dialog.cancel.isVisible()
+            dialog.cancel.click()
             QTest.qWait(100)
             assert sent[-1] == ('1', 'cancel rest') and len(sent) == 4
             assert not active, 'Closing stops further targets and shuts down the pending composer'
+            assert console.statuses['2'] == '已取消，未发送'
+            console.mode.setCurrentIndex(0)
+            assert console.pages.currentWidget() is console.stack
+            assert all(console.rooms.item(index).data(Qt.CheckStateRole) is None
+                       for index in range(console.rooms.count()))
             viewer.rows['2'].alias.setText('changed name')
-            assert 'changed name' in console.target.currentText()
+            assert 'changed name' in console.rooms.currentItem().text()
             viewer.set_settings_visible(False)
             assert console.isHidden()
             viewer.set_settings_visible(True)
