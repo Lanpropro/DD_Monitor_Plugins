@@ -1,6 +1,6 @@
 """In-application crops keep source pixels and are independent of the video tile."""
 from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QRegion
+from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen, QTransform
 from PySide6.QtWidgets import QWidget
 
 from ddm import theme
@@ -20,7 +20,7 @@ class FloatingCrop(QWidget):
         self.hover_point = QPoint(-1, -1)
         self.aspect = 16 / 9
         self.setMouseTracking(True)
-        self.setAttribute(Qt.WA_OpaquePaintEvent)
+        self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.setToolTip('拖动画面移动；滚轮或右下角缩放；双击重新框选；右上角关闭。')
         self.setAccessibleName(label + '：悬浮画面')
@@ -56,13 +56,6 @@ class FloatingCrop(QWidget):
     def close_rect(self):
         return QRect(self.width() - 32, 8, 24, 24)
 
-    def resizeEvent(self, event):
-        path = QPainterPath()
-        path.addRoundedRect(QRectF(self.rect()), 10, 10)
-        # An opaque masked child avoids repainting the covered video every frame.
-        self.setMask(QRegion(path.toFillPolygon().toPolygon()))
-        super().resizeEvent(event)
-
     def enterEvent(self, event):
         self.tools_visible = True
         self.update()
@@ -81,12 +74,19 @@ class FloatingCrop(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.fillRect(self.rect(), theme.qcolor(theme.CONTENT))
+        painter.setPen(Qt.NoPen)
+        brush = QBrush(theme.qcolor(theme.CONTENT))
         if not self.image.isNull():
             source = QRectF(self.crop.x() * self.image.width(), self.crop.y() * self.image.height(),
-                            self.crop.width() * self.image.width(), self.crop.height() * self.image.height())
+                            self.crop.width() * self.image.width(), self.crop.height() * self.image.height()).intersected(QRectF(self.image.rect()))
             painter.setRenderHint(QPainter.SmoothPixmapTransform)
-            painter.drawImage(QRectF(self.rect()), self.image, source)
+            if not source.isEmpty():
+                brush = QBrush(self.image)
+                transform = QTransform.fromScale(self.width() / source.width(), self.height() / source.height())
+                transform.translate(-source.x(), -source.y())
+                brush.setTransform(transform)
+        painter.setBrush(brush)
+        painter.drawRoundedRect(QRectF(self.rect()), 10, 10)
         if not self.tools_visible:
             return
         text = painter.fontMetrics().elidedText(self.label + ' · 悬浮画面', Qt.ElideRight, max(0, self.width() - 64))

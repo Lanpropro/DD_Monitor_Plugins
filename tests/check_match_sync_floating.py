@@ -58,7 +58,12 @@ def check(app, host, module, output=None):
             app.sendEvent(floating, QEvent(QEvent.Leave))
             assert not floating.tools_visible
             assert floating.grab().toImage().pixelColor(floating.width() // 2, 2) == QColor('lime'), 'The image must fill the former header space'
-            assert not floating.mask().contains(QPoint(0, 0)) and floating.mask().contains(floating.rect().center())
+            assert floating.mask().isEmpty(), 'Do not use an integer region mask for rounded video'
+            rounded = floating.grab().toImage()
+            assert rounded.pixelColor(0, 0).alpha() == 0
+            assert any(0 < rounded.pixelColor(x, y).alpha() < 255 for x in range(20) for y in range(20)), 'Rounded corners need fractional alpha coverage'
+            edge = rounded.width() - 1
+            assert rounded.pixelColor(edge, rounded.height() // 2) == QColor('lime'), 'Source pixels must reach the right edge without a black strip'
             app.sendEvent(floating, QEnterEvent(QPointF(20, 20), QPointF(20, 20), QPointF(20, 20)))
             assert floating.tools_visible and floating.close_rect().top() > 0
             ratio = floating.devicePixelRatioF()
