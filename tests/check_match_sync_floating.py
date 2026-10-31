@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 
 def check(app, host, module, output=None):
-    from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
-    from PySide6.QtGui import QColor, QImage, QPainter, QWheelEvent
+    from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt
+    from PySide6.QtGui import QColor, QEnterEvent, QImage, QPainter, QWheelEvent
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QDialog, QWidget
     from ddm import plugins
@@ -55,6 +55,14 @@ def check(app, host, module, output=None):
             assert floating.parentWidget() is host and floating.window() is host
             assert floating.image.size() == source.size(), 'Do not crop an already downscaled tile screenshot'
             assert floating.grab().toImage().pixelColor(floating.width() // 2, floating.height() // 2) == QColor('lime')
+            app.sendEvent(floating, QEvent(QEvent.Leave))
+            assert not floating.tools_visible
+            assert floating.grab().toImage().pixelColor(floating.width() // 2, 2) == QColor('lime'), 'The image must fill the former header space'
+            assert not floating.mask().contains(QPoint(0, 0)) and floating.mask().contains(floating.rect().center())
+            app.sendEvent(floating, QEnterEvent(QPointF(20, 20), QPointF(20, 20), QPointF(20, 20)))
+            assert floating.tools_visible and floating.close_rect().top() > 0
+            ratio = floating.devicePixelRatioF()
+            assert floating.grab().toImage().pixelColor(round(20 * ratio), round(20 * ratio)) != QColor('lime'), 'Hover tools overlay the image'
             assert row.crop == original_crop, 'Floating crop must not modify comparison or alignment'
             start = floating.pos()
             QTest.mousePress(floating, Qt.LeftButton, pos=QPoint(40, 40))
@@ -72,7 +80,7 @@ def check(app, host, module, output=None):
             QTest.mouseMove(floating, corner + QPoint(80, 40))
             QTest.mouseRelease(floating, Qt.LeftButton, pos=corner)
             assert floating.width() > width * 1.2
-            assert abs(floating.width() / (floating.height() - floating.HEADER) - 16 / 9) < .02
+            assert abs(floating.width() / floating.height() - 16 / 9) < .02
             viewer.render_floating_crops(100, {'1': 0, '2': -4})
             assert floating.frame_key == 96, 'Use the displayed source timeline, including replay shifts'
             viewer._configure_picture_budget()
@@ -97,11 +105,15 @@ def check(app, host, module, output=None):
             host.resize(1400, 900)
             if output:
                 output.parent.mkdir(parents=True, exist_ok=True)
+                app.sendEvent(floating, QEnterEvent(QPointF(20, 20), QPointF(20, 20), QPointF(20, 20)))
                 host.grab().save(str(output))
+                app.sendEvent(floating, QEvent(QEvent.Leave))
+                host.grab().save(str(output.with_name(output.stem + '-clean.png')))
             with patch.object(viewer, '_stop_row', side_effect=lambda item: setattr(item, 'decoder', None)):
                 viewer.remove_room('2')
             assert not viewer.floating_crops
             other = viewer.show_floating_crop(viewer.rows['1'], (0, 0, .5, .5), (1, source))
+            app.sendEvent(other, QEnterEvent(QPointF(20, 20), QPointF(20, 20), QPointF(20, 20)))
             QTest.mouseClick(other, Qt.LeftButton, pos=other.close_rect().center())
             assert not viewer.floating_crops
             viewer.show_floating_crop(viewer.rows['1'], (0, 0, 1, 1), (1, source))

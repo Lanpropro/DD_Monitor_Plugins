@@ -1,6 +1,6 @@
 """In-application crops keep source pixels and are independent of the video tile."""
 from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, Qt, Signal
-from PySide6.QtGui import QImage, QPainter, QPen
+from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QRegion
 from PySide6.QtWidgets import QWidget
 
 from ddm import theme
@@ -9,7 +9,6 @@ from ddm import theme
 class FloatingCrop(QWidget):
     closed = Signal()
     recrop = Signal()
-    HEADER = 24
 
     def __init__(self, parent, label, crop):
         super().__init__(parent)
@@ -17,6 +16,8 @@ class FloatingCrop(QWidget):
         self.image = QImage()
         self.frame_key = None
         self.drag = None
+        self.tools_visible = False
+        self.hover_point = QPoint(-1, -1)
         self.aspect = 16 / 9
         self.setMouseTracking(True)
         self.setAttribute(Qt.WA_OpaquePaintEvent)
@@ -41,9 +42,9 @@ class FloatingCrop(QWidget):
 
     def fit_geometry(self, x, y, width):
         parent = self.parentWidget()
-        maximum = min(parent.width(), max(1, parent.height() - self.HEADER) * self.aspect)
+        maximum = min(parent.width(), parent.height() * self.aspect)
         width = max(1, min(maximum, max(120, width)))
-        height = min(parent.height(), round(width / self.aspect) + self.HEADER)
+        height = min(parent.height(), round(width / self.aspect))
         self.setGeometry(round(max(0, min(parent.width() - width, x))),
                          round(max(0, min(parent.height() - height, y))), round(width), height)
 
@@ -53,33 +54,61 @@ class FloatingCrop(QWidget):
         return False
 
     def close_rect(self):
-        return QRect(self.width() - 24, 0, 24, self.HEADER)
+        return QRect(self.width() - 32, 8, 24, 24)
+
+    def resizeEvent(self, event):
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()), 10, 10)
+        # An opaque masked child avoids repainting the covered video every frame.
+        self.setMask(QRegion(path.toFillPolygon().toPolygon()))
+        super().resizeEvent(event)
+
+    def enterEvent(self, event):
+        self.tools_visible = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        if self.drag is None:
+            self.tools_visible = False
+        self.hover_point = QPoint(-1, -1)
+        self.update()
+        super().leaveEvent(event)
 
     def resize_hit(self, point):
         return point.x() >= self.width() - 18 and point.y() >= self.height() - 18
 
     def paintEvent(self, event):
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
         painter.fillRect(self.rect(), theme.qcolor(theme.CONTENT))
         if not self.image.isNull():
             source = QRectF(self.crop.x() * self.image.width(), self.crop.y() * self.image.height(),
                             self.crop.width() * self.image.width(), self.crop.height() * self.image.height())
             painter.setRenderHint(QPainter.SmoothPixmapTransform)
-            painter.drawImage(QRectF(0, self.HEADER, self.width(), self.height() - self.HEADER), self.image, source)
-        painter.setPen(theme.qcolor(theme.TEXT1))
-        text = painter.fontMetrics().elidedText(self.label + ' · 悬浮画面', Qt.ElideRight, max(0, self.width() - 40))
-        painter.drawText(QRect(8, 0, self.width() - 36, self.HEADER), Qt.AlignVCenter, text)
+            painter.drawImage(QRectF(self.rect()), self.image, source)
+        if not self.tools_visible:
+            return
+        text = painter.fontMetrics().elidedText(self.label + ' · 悬浮画面', Qt.ElideRight, max(0, self.width() - 64))
+        title = QRectF(8, 8, min(self.width() - 56, painter.fontMetrics().horizontalAdvance(text) + 16), 24)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 170))
+        painter.drawRoundedRect(title, 12, 12)
+        painter.setBrush(theme.qcolor(theme.ACCENT) if self.close_rect().contains(self.hover_point) else QColor(0, 0, 0, 170))
+        painter.drawRoundedRect(QRectF(self.close_rect()), 12, 12)
+        painter.setPen(QColor('#e7ebf0'))
+        painter.drawText(title.adjusted(8, 0, -8, 0), Qt.AlignVCenter, text)
         close = self.close_rect().center()
         painter.drawLine(close + QPoint(-4, -4), close + QPoint(4, 4))
         painter.drawLine(close + QPoint(-4, 4), close + QPoint(4, -4))
-        painter.setPen(QPen(theme.qcolor(theme.TEXT1), 1.5))
+        painter.setPen(QPen(QColor('#e7ebf0'), 1.5))
         for offset in (5, 10):
             painter.drawLine(self.width() - offset, self.height() - 3,
                              self.width() - 3, self.height() - offset)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            if self.close_rect().contains(event.position().toPoint()):
+            if self.tools_visible and self.close_rect().contains(event.position().toPoint()):
                 self.close()
                 return
             self.raise_()
@@ -88,6 +117,7 @@ class FloatingCrop(QWidget):
             event.accept()
 
     def mouseMoveEvent(self, event):
+        self.hover_point = event.position().toPoint()
         if self.drag is not None:
             origin, geometry, resizing = self.drag
             delta = event.globalPosition().toPoint() - origin
@@ -99,10 +129,13 @@ class FloatingCrop(QWidget):
         else:
             self.setCursor(Qt.PointingHandCursor if self.close_rect().contains(event.position().toPoint())
                            else Qt.SizeFDiagCursor if self.resize_hit(event.position()) else Qt.OpenHandCursor)
+        self.update()
 
     def mouseReleaseEvent(self, event):
         self.drag = None
+        self.tools_visible = self.underMouse()
         self.setCursor(Qt.OpenHandCursor)
+        self.update()
 
     def wheelEvent(self, event):
         width = self.width() * 1.12 ** (event.angleDelta().y() / 120)
