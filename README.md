@@ -82,7 +82,7 @@ ZIP 内只有插件 ID 对应的顶层文件夹。GitHub 自动生成的 **Sourc
 
 ## 开发与文档
 
-[开发与贡献](CONTRIBUTING.md) · [仓库目录](docs/repository-layout.md) · [发布记录](docs/releases/README.md) · [展示网站仓库与迁移说明](WEBSITE.md)
+[开发与贡献](CONTRIBUTING.md) · [待发布更新](docs/changes/README.md) · [仓库目录](docs/repository-layout.md) · [发布记录](docs/releases/README.md) · [展示网站仓库与迁移说明](WEBSITE.md)
 
 插件源码位于 `plugins/<ID>/`，包含清单、实现、资源和各自的 README。网站独立维护，插件安装与更新仍由本仓库提供。
 
