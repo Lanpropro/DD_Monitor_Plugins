@@ -270,6 +270,11 @@ class SendConsole(SettingsPanel):
         row = self.rows.get(self.selected_room)
         return row.tile._plugin_controls._repeat_editor() if row is not None else None
 
+    def refresh_store_state(self):
+        editor = self.active_editor()
+        self.save_text.setEnabled(bool(editor is not None and editor.isEnabled() and not editor.isReadOnly()
+                                       and editor.text().strip() and not self.batch_panel.timer.isActive()))
+
     def store_text(self):
         editor = self.active_editor()
         if editor is None or editor.isReadOnly() or not editor.isEnabled():
@@ -481,6 +486,7 @@ class SendConsole(SettingsPanel):
                 item.setText(f"{row.label()}\n{detail}")
                 item.setToolTip(f'{row.label()} · {key}\n{item.text().partition(chr(10))[2]}')
                 self.refresh_avatar(key)
+        self.refresh_store_state()
 
     def set_status(self, key, text):
         if key in self.status_timers:
@@ -563,6 +569,7 @@ class SendConsole(SettingsPanel):
             self.selected_room = None
         self.batch_panel.update_targets()
         self.saved_texts.setEnabled(not self.batch_panel.timer.isActive())
+        self.refresh_store_state()
 
     def sync_height(self):
         settings = self.viewer.settings_panel
@@ -635,6 +642,7 @@ class BatchSend(QWidget):
             count = len(self.console.checked_rooms())
             self.send.setText('发送')
             self.send.setEnabled(bool(count and self.edit.text().strip()))
+        self.console.refresh_store_state()
 
     def start(self, *_args):
         self.begin(self.edit.text())
@@ -656,6 +664,7 @@ class BatchSend(QWidget):
         for key in self.pending:
             self.console.set_status(key, '待处理')
         self.timer.start()
+        self.console.refresh_store_state()
         self.advance()
 
     def advance(self):

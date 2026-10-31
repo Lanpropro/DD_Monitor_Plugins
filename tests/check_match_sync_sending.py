@@ -233,6 +233,18 @@ def check(app, host, module, output=None):
                 assert set(console.checked_rooms()) == set(keys)
 
             first.setText('draft 1')
+            assert console.save_text.isEnabled()
+            first.setText('   ')
+            assert not console.save_text.isEnabled(), 'Whitespace-only drafts must disable the bookmark'
+            console.save_text.setAttribute(Qt.WA_UnderMouse, True)
+            disabled_bookmark = console.save_text.grab().toImage()
+            first.setText('draft 1')
+            assert console.save_text.isEnabled()
+            enabled_bookmark = console.save_text.grab().toImage()
+            ratio = console.save_text.devicePixelRatioF()
+            sample = QPoint(round(3 * ratio), round(13 * ratio))
+            assert enabled_bookmark.pixelColor(sample) != disabled_bookmark.pixelColor(sample), 'Only enabled bookmarks show blue hover fill'
+            console.save_text.setAttribute(Qt.WA_UnderMouse, False)
             select({'2'})
             second.setText('draft 2')
             item = console.rooms.item(1)
@@ -375,6 +387,7 @@ def check(app, host, module, output=None):
             assert console.pages.currentWidget() is dialog
             dialog.edit.clear()
             assert not dialog.send.isEnabled(), 'Empty multi-send must be disabled'
+            assert not console.save_text.isEnabled()
             dialog.edit.setText('   ')
             assert not dialog.send.isEnabled(), 'Whitespace is not a message'
             dialog.edit.clear()
@@ -384,7 +397,9 @@ def check(app, host, module, output=None):
             assert (dialog.send.mapTo(console, QPoint()).x(), dialog.send.mapTo(console, QPoint()).y(),
                     dialog.send.width(), dialog.send.height()) == single_button_geometry
             dialog.edit.setText('shared')
+            assert console.save_text.isEnabled()
             dialog.start()
+            assert not console.save_text.isEnabled(), 'Do not save a busy composer'
             finish_batch()
             assert sent == [('1', 'shared'), ('2', 'shared'), ('3', 'shared')]
             assert first.text() == 'draft 1' and second.text() == 'draft 2'
@@ -416,6 +431,7 @@ def check(app, host, module, output=None):
             console.active_editor().setText('saved message')
             console.save_text.click()
             assert not console.active_editor().text()
+            assert not console.save_text.isEnabled(), 'Clearing after save must immediately gray the bookmark'
             console.active_editor().setText('saved message')
             console.save_text.click()
             assert console.saved_texts.count() == 1, 'Do not duplicate saved texts'
@@ -472,9 +488,12 @@ def check(app, host, module, output=None):
             assert not console.pages.isHidden() and console.selected_room is None
             assert console.pages.currentWidget() is console.batch_panel
             assert not console.batch_panel.send.isEnabled()
+            console.active_editor().clear()
+            assert not console.save_text.isEnabled()
             assert console.batch_panel.interactions.isVisible(), 'Emote and gift icons stay visible without selected rooms'
             count_before_store = len(sent)
             console.active_editor().setText('no target saved')
+            assert console.save_text.isEnabled(), 'Saving does not require a selected recipient'
             console.save_text.click()
             assert console.saved_texts.item(console.saved_texts.count() - 1).text() == 'no target saved'
             assert len(sent) == count_before_store and not console.active_editor().text()

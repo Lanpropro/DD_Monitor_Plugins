@@ -63,7 +63,7 @@ class ConsoleIconButton(QPushButton):
             painter.setBrush(theme.qcolor(theme.ACCENT_SOFT))
             painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 6, 6)
         painter.translate(self.width() / 2, self.height() / 2)
-        color = theme.ACCENT if self.underMouse() else theme.TEXT1 if self.isEnabled() else theme.TEXT4
+        color = theme.TEXT4 if not self.isEnabled() else theme.ACCENT if self.underMouse() else theme.TEXT1
         pen = QPen(theme.qcolor(color), 1.6)
         pen.setCapStyle(Qt.RoundCap)
         painter.setPen(pen)
