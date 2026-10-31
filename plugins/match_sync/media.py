@@ -6,6 +6,7 @@ import http.cookies
 import subprocess
 import threading
 import time
+from collections import deque
 
 from PySide6.QtCore import QObject, Signal, Qt
 from PySide6.QtGui import QImage
@@ -117,6 +118,7 @@ class Decoder:
         self.crop = (0.0, 0.0, 1.0, 1.0)
         self.crop_generation = 0
         self.analysis_size = (640, 360)
+        self.region_frames = deque(maxlen=600)
         self.cancelled = threading.Event()
         self.process = None
         self.thread = None
@@ -308,6 +310,9 @@ class Decoder:
             watchdog.start()
             next_sample = 0.0
             next_detail = 0.0
+            next_region = next_region_large = 0.0
+            with self.lock:
+                self.region_frames.clear()
             with av.open(StreamInput(process.stdout), "r", format="nut",
                          options={"probesize": "65536", "analyzeduration": "100000"}) as container:
                 stream = container.streams.video[0]
@@ -343,6 +348,21 @@ class Decoder:
                         timestamp = (self.history.origin or 0) + pts
                         self.video_size = (frame.width, frame.height)
                         self.history.video_size = self.video_size
+                        if pts + .0001 >= next_region:
+                            next_region = pts + .1
+                            large = pts + .0001 >= next_region_large
+                            if large:
+                                next_region_large = pts + 1
+                            gray = reformat_frame(frame, width=320 if large else 160,
+                                                  height=180 if large else 90, format='gray')
+                            image = QImage(memoryview(gray.planes[0]), gray.width, gray.height,
+                                           gray.planes[0].line_size, QImage.Format_Grayscale8)
+                            full = image.copy() if large else None
+                            small = image.scaled(160, 90, Qt.IgnoreAspectRatio, Qt.SmoothTransformation) if large else image.copy()
+                            with self.lock:
+                                self.region_frames.append((timestamp, small, full))
+                                while self.region_frames and timestamp - self.region_frames[0][0] > 60:
+                                    self.region_frames.popleft()
                         sample = None
                         if pts + .0001 >= next_detail:
                             while next_detail <= pts + .0001:

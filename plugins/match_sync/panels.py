@@ -58,12 +58,13 @@ class ConsoleIconButton(QPushButton):
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        if self.isEnabled() and (self.underMouse() or self.isDown()):
+        hovered = self.isEnabled() and QApplication.widgetAt(QCursor.pos()) is self
+        if hovered:
             painter.setPen(Qt.NoPen)
             painter.setBrush(theme.qcolor(theme.ACCENT_SOFT))
             painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 6, 6)
         painter.translate(self.width() / 2, self.height() / 2)
-        color = theme.ACCENT if self.underMouse() else theme.TEXT1 if self.isEnabled() else theme.TEXT4
+        color = theme.TEXT4 if not self.isEnabled() else theme.ACCENT if hovered else theme.TEXT1
         pen = QPen(theme.qcolor(color), 1.6)
         pen.setCapStyle(Qt.RoundCap)
         painter.setPen(pen)
@@ -93,6 +94,16 @@ class ConsoleIconButton(QPushButton):
             painter.drawLine(QPointF(0, -4), QPointF(0, 7))
             painter.drawEllipse(QRectF(-5, -8, 5, 4))
             painter.drawEllipse(QRectF(0, -8, 5, 4))
+        elif self.kind == 'save':
+            painter.setBrush(Qt.NoBrush)
+            bookmark = QPainterPath()
+            bookmark.moveTo(-5, -7)
+            bookmark.lineTo(5, -7)
+            bookmark.lineTo(5, 7)
+            bookmark.lineTo(0, 3)
+            bookmark.lineTo(-5, 7)
+            bookmark.closeSubpath()
+            painter.drawPath(bookmark)
         else:
             painter.drawLine(QPointF(-7, 0), QPointF(4, 0))
             painter.drawLine(QPointF(0, -4), QPointF(4, 0))
