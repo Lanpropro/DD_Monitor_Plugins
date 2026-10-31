@@ -93,6 +93,16 @@ class ConsoleIconButton(QPushButton):
             painter.drawLine(QPointF(0, -4), QPointF(0, 7))
             painter.drawEllipse(QRectF(-5, -8, 5, 4))
             painter.drawEllipse(QRectF(0, -8, 5, 4))
+        elif self.kind == 'save':
+            painter.setBrush(Qt.NoBrush)
+            bookmark = QPainterPath()
+            bookmark.moveTo(-5, -7)
+            bookmark.lineTo(5, -7)
+            bookmark.lineTo(5, 7)
+            bookmark.lineTo(0, 3)
+            bookmark.lineTo(-5, 7)
+            bookmark.closeSubpath()
+            painter.drawPath(bookmark)
         else:
             painter.drawLine(QPointF(-7, 0), QPointF(4, 0))
             painter.drawLine(QPointF(0, -4), QPointF(4, 0))

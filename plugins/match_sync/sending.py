@@ -218,18 +218,15 @@ class SendConsole(SettingsPanel):
         self.pages.addWidget(self.stack)
         self.batch_panel = BatchSend(self)
         self.pages.addWidget(self.batch_panel)
-        work_layout.addWidget(self.pages)
-        saved_heading = QHBoxLayout()
-        self.saved_input = QLineEdit()
-        self.saved_input.setPlaceholderText('输入暂存文本，Enter 保存')
-        self.saved_input.setAccessibleName('输入暂存文本')
-        self.saved_input.returnPressed.connect(self.store_text)
-        saved_heading.addWidget(self.saved_input, 1)
-        self.save_text = QPushButton('暂存')
-        self.save_text.setToolTip('保存文字；左键发送，长按拖动排序，右键显示删除小标。')
+        compose_layout = QHBoxLayout()
+        compose_layout.setContentsMargins(0, 0, 0, 0)
+        compose_layout.setSpacing(4)
+        compose_layout.addWidget(self.pages, 1)
+        self.save_text = ConsoleIconButton('save', '暂存当前输入')
+        self.save_text.setToolTip('将当前弹幕输入框的内容保存为暂存文本；Enter 仍用于发送。')
         self.save_text.clicked.connect(self.store_text)
-        saved_heading.addWidget(self.save_text)
-        work_layout.addLayout(saved_heading)
+        compose_layout.addWidget(self.save_text, 0, Qt.AlignVCenter)
+        work_layout.addLayout(compose_layout)
         self.saved_texts = SavedTextList()
         self.saved_texts.setObjectName('SavedTextList')
         self.saved_texts.setViewMode(QListView.IconMode)
@@ -267,12 +264,21 @@ class SendConsole(SettingsPanel):
         item.setToolTip(text)
         self.saved_texts.addItem(item)
 
+    def active_editor(self):
+        if self.pages.currentWidget() is self.batch_panel:
+            return self.batch_panel.edit
+        row = self.rows.get(self.selected_room)
+        return row.tile._plugin_controls._repeat_editor() if row is not None else None
+
     def store_text(self):
-        text = self.saved_input.text().strip()
+        editor = self.active_editor()
+        if editor is None or editor.isReadOnly() or not editor.isEnabled():
+            return
+        text = editor.text().strip()
         if not text.strip():
             return
         self.store_phrase(text)
-        self.saved_input.clear()
+        editor.clear()
 
     def store_phrase(self, text):
         if not text.strip():
@@ -323,7 +329,6 @@ class SendConsole(SettingsPanel):
             for entry in row.tile._plugin_controls.applicable():
                 align_composer(entry.control.widget, self)
         style_compose(self.batch_panel.edit, self.batch_panel.send)
-        style_compose(self.saved_input, self.save_text)
         for editor in self.findChildren(QLineEdit):
             palette = editor.palette()
             palette.setColor(QPalette.Text, QColor(c['text']))
@@ -543,7 +548,8 @@ class SendConsole(SettingsPanel):
 
     def _update_selection(self):
         keys = self.checked_rooms()
-        self.pages.setCurrentIndex(0 if len(keys) == 1 else 1)
+        single = len(keys) == 1 and self.rows[keys[0]].tile._plugin_controls._repeat_editor() is not None
+        self.pages.setCurrentIndex(0 if single else 1)
         self.pages.setVisible(bool(self.rows))
         if not keys:
             self.selected_room = None
