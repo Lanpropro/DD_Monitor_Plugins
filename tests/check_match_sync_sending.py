@@ -237,12 +237,17 @@ def check(app, host, module, output=None):
             first.setText('   ')
             assert not console.save_text.isEnabled(), 'Whitespace-only drafts must disable the bookmark'
             console.save_text.setAttribute(Qt.WA_UnderMouse, True)
-            disabled_bookmark = console.save_text.grab().toImage()
+            with patch.object(panels.QApplication, 'widgetAt', return_value=None):
+                disabled_bookmark = console.save_text.grab().toImage()
             first.setText('draft 1')
             assert console.save_text.isEnabled()
-            enabled_bookmark = console.save_text.grab().toImage()
+            with patch.object(panels.QApplication, 'widgetAt', return_value=None):
+                idle_bookmark = console.save_text.grab().toImage()
+            with patch.object(panels.QApplication, 'widgetAt', return_value=console.save_text):
+                enabled_bookmark = console.save_text.grab().toImage()
             ratio = console.save_text.devicePixelRatioF()
             sample = QPoint(round(3 * ratio), round(13 * ratio))
+            assert idle_bookmark.pixelColor(sample) == disabled_bookmark.pixelColor(sample), 'Text alone and a stale Qt hover flag must not highlight the bookmark'
             assert enabled_bookmark.pixelColor(sample) != disabled_bookmark.pixelColor(sample), 'Only enabled bookmarks show blue hover fill'
             console.save_text.setAttribute(Qt.WA_UnderMouse, False)
             select({'2'})
