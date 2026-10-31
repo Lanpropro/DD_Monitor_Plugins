@@ -14,6 +14,8 @@ class FloatingCrop(QWidget):
         super().__init__(parent)
         self.label, self.crop = label, QRectF(*crop)
         self.image = QImage()
+        self.avatar = QImage()
+        self.avatar_key = None
         self.frame_key = None
         self.drag = None
         self.tools_visible = False
@@ -23,9 +25,16 @@ class FloatingCrop(QWidget):
         # Ordinary child transparency restores the backing store behind moved crops.
         self.setAutoFillBackground(False)
         self.setAttribute(Qt.WA_DeleteOnClose)
-        self.setToolTip('拖动画面移动；滚轮或右下角缩放；双击重新框选；右上角关闭。')
+        self.setToolTip(label + '\n拖动画面移动；滚轮或右下角缩放；双击重新框选；右上角关闭。')
         self.setAccessibleName(label + '：悬浮画面')
         parent.installEventFilter(self)
+
+    def set_avatar(self, pixmap):
+        if pixmap is not None and not pixmap.isNull() and pixmap.cacheKey() != self.avatar_key:
+            self.avatar_key = pixmap.cacheKey()
+            self.avatar = pixmap.toImage()
+            self.avatar.setDevicePixelRatio(1)
+            self.update()
 
     def set_frame(self, frame):
         if frame is None:
@@ -96,15 +105,18 @@ class FloatingCrop(QWidget):
         self.paint_picture(painter)
         if not self.tools_visible:
             return
-        text = painter.fontMetrics().elidedText(self.label + ' · 悬浮画面', Qt.ElideRight, max(0, self.width() - 64))
-        title = QRectF(8, 8, min(self.width() - 56, painter.fontMetrics().horizontalAdvance(text) + 16), 24)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(0, 0, 0, 170))
-        painter.drawRoundedRect(title, 12, 12)
+        if not self.avatar.isNull():
+            avatar = QBrush(self.avatar)
+            transform = QTransform()
+            transform.translate(8, 8)
+            transform.scale(24 / self.avatar.width(), 24 / self.avatar.height())
+            avatar.setTransform(transform)
+            painter.setBrush(avatar)
+            painter.drawEllipse(QRectF(8, 8, 24, 24))
         painter.setBrush(theme.qcolor(theme.ACCENT) if self.close_rect().contains(self.hover_point) else QColor(0, 0, 0, 170))
         painter.drawRoundedRect(QRectF(self.close_rect()), 12, 12)
         painter.setPen(QColor('#e7ebf0'))
-        painter.drawText(title.adjusted(8, 0, -8, 0), Qt.AlignVCenter, text)
         close = self.close_rect().center()
         painter.drawLine(close + QPoint(-4, -4), close + QPoint(4, 4))
         painter.drawLine(close + QPoint(-4, 4), close + QPoint(4, -4))
@@ -131,7 +143,7 @@ class FloatingCrop(QWidget):
             origin, geometry, resizing = self.drag
             delta = event.globalPosition().toPoint() - origin
             if resizing:
-                change = delta.x() if abs(delta.x()) >= abs(delta.y() * self.aspect) else delta.y() * self.aspect
+                change = (delta.x() * self.aspect ** 2 + delta.y() * self.aspect) / (self.aspect ** 2 + 1)
                 self.fit_geometry(geometry.x(), geometry.y(), geometry.width() + change)
             else:
                 self.fit_geometry(geometry.x() + delta.x(), geometry.y() + delta.y(), geometry.width())

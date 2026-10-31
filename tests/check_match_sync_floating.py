@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 def check(app, host, module, output=None):
     from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt
-    from PySide6.QtGui import QColor, QEnterEvent, QImage, QPainter, QWheelEvent
+    from PySide6.QtGui import QColor, QEnterEvent, QImage, QPainter, QPixmap, QWheelEvent
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QDialog, QWidget
     from ddm import plugins
@@ -30,6 +30,9 @@ def check(app, host, module, output=None):
             viewer.add_room('1', {'alias': 'Main'})
             viewer.add_room('2', {'alias': 'Camera'})
             row = viewer.rows['2']
+            avatar = QPixmap(48, 48)
+            avatar.fill(QColor('magenta'))
+            row.avatar.set_pixmap_image(avatar)
             source = QImage(1920, 1080, QImage.Format_RGB32)
             source.fill(QColor('red'))
             painter = QPainter(source)
@@ -75,7 +78,9 @@ def check(app, host, module, output=None):
             app.sendEvent(floating, QEnterEvent(QPointF(20, 20), QPointF(20, 20), QPointF(20, 20)))
             assert floating.tools_visible and floating.close_rect().top() > 0
             ratio = floating.devicePixelRatioF()
-            assert floating.grab().toImage().pixelColor(round(20 * ratio), round(20 * ratio)) != QColor('lime'), 'Hover tools overlay the image'
+            hover_image = floating.grab().toImage()
+            assert hover_image.pixelColor(round(20 * ratio), round(20 * ratio)) == QColor('magenta'), 'Show only the source broadcaster avatar'
+            assert hover_image.pixelColor(round(48 * ratio), round(20 * ratio)) == QColor('lime'), 'Do not leave a title label behind the avatar'
             assert row.crop == original_crop, 'Floating crop must not modify comparison or alignment'
             start = floating.pos()
             QTest.mousePress(floating, Qt.LeftButton, pos=QPoint(40, 40))
@@ -94,6 +99,14 @@ def check(app, host, module, output=None):
             QTest.mouseRelease(floating, Qt.LeftButton, pos=corner)
             assert floating.width() > width * 1.2
             assert abs(floating.width() / floating.height() - 16 / 9) < .02
+            floating.fit_geometry(10, 10, 400)
+            anchor = floating.mapTo(host, floating.rect().bottomRight() - QPoint(4, 4))
+            QTest.mousePress(host.windowHandle(), Qt.LeftButton, pos=anchor)
+            QTest.mouseMove(host.windowHandle(), anchor + QPoint(106, -60))
+            before_crossing = floating.width()
+            QTest.mouseMove(host.windowHandle(), anchor + QPoint(108, -60))
+            assert abs(floating.width() - before_crossing) <= 3, 'Crossing axis dominance must not jump from shrinking to growing'
+            QTest.mouseRelease(host.windowHandle(), Qt.LeftButton, pos=anchor + QPoint(108, -60))
             viewer.render_floating_crops(100, {'1': 0, '2': -4})
             assert floating.frame_key == 96, 'Use the displayed source timeline, including replay shifts'
             viewer._configure_picture_budget()

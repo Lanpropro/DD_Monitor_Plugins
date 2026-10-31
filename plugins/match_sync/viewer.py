@@ -3227,6 +3227,8 @@ class Viewer(QDialog):
             floating.recrop.connect(lambda: self.choose_crop(row, floating=True))
             floating.move(40 + len(self.floating_crops) * 24, 40 + len(self.floating_crops) * 24)
         floating.crop = QRectF(*crop)
+        pixmap = row.avatar.pixmap()
+        floating.set_avatar(pixmap if pixmap is not None and not pixmap.isNull() else row.avatar.grab())
         floating.frame_key = None
         floating.set_frame(frame)
         floating.fit_geometry(floating.x(), floating.y(), floating.width() if floating.isVisible() else 320)
@@ -3239,6 +3241,7 @@ class Viewer(QDialog):
             row = self.rows.get(key)
             if row is not None and row.decoder is not None and not row.paused and key in shifts:
                 floating.label = row.label()
+                floating.set_avatar(row.avatar.pixmap())
                 frame = row.decoder.picture_at(clock + shifts[key])
                 if frame is not None:
                     floating.set_frame(frame)
