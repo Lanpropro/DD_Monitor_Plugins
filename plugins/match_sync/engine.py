@@ -44,6 +44,7 @@ class Match:
     playback_error: float | None = None
     candidates: tuple[float, ...] = ()
     evidence_end: float | None = None
+    regions: tuple = ()
 
 
 def feature_distances(a, b):

@@ -28,6 +28,7 @@ from .sending import SendConsole, SendingDanmakuPanel
 from .panels import ConsoleIconButton, MatchSettingsDialog, SettingsPanel, style_checkbox
 from .replay import ReplayBar, ReplayTimeline
 from .floating import FloatingCrop
+from .regions import match_regions
 
 COLORS = ("#38bdf8", "#fb7185", "#a78bfa", "#4ade80", "#fbbf24", "#fb923c")
 ROW_MIME = "application/x-ddm-match-sync-row"
@@ -2958,11 +2959,15 @@ class Viewer(QDialog):
         self.analysis_cursor += 1
         others = {key: others[key]}
         details = {}
+        region_frames = {}
         for key, value in self.rows.items():
             if value.decoder is not None:
                 with value.decoder.history.lock:
                     details[key] = (list(getattr(value.decoder.history, "details", ()))
                                     if value.decoder.history.origin is not None else [])
+                if hasattr(value.decoder, 'region_frames'):
+                    with value.decoder.lock:
+                        region_frames[key] = list(value.decoder.region_frames)
         known = dict(self.alignment.lags)
         for key in self.rematch_rooms:
             if not self.rows[key].rematch_locally:
@@ -2973,6 +2978,8 @@ class Viewer(QDialog):
                           if value.match_confirmed and key in known and key not in self.rematch_rooms}
         reacquiring_rooms = {key for key, value in self.rows.items() if value.needs_epoch_samples}
         reference_id = row.room_id
+        cached_regions = {key: value.auto_regions[1] for key, value in self.rows.items()
+                          if getattr(value, 'auto_regions', (None, ()))[0] == reference_id}
         clock, shifts = self.live_clock(), self.shifts()
         positions = {key: clock + shifts[key] for key in details}
         has_picture = self.canvas.frame_key is not None and not self.replay.active
@@ -3031,6 +3038,19 @@ class Viewer(QDialog):
                         and min(reference_details[-1].time - reference_details[0].time,
                                 other_details[-1].time - other_details[0].time) < 4):
                     candidate = Match(None, 0, "恢复精校正需要连续至少 4 秒比赛画面，继续收集")
+                if candidate.lag is None and region_frames.get(reference_id) and region_frames.get(key):
+                    regional = match_regions(region_frames[reference_id], region_frames[key],
+                                             cached_regions.get(key, ()), known.get(key))
+                    if regional.lag is not None:
+                        peers = [peer for peer in known if peer not in (key, reference_id)
+                                 and peer in confirmed_peers and region_frames.get(peer)]
+                        if peers:
+                            peer = peers[0]
+                            checked = match_regions(region_frames[peer], region_frames[key],
+                                                    expected=regional.lag - known[peer])
+                            if checked.lag is None or abs(checked.lag - (regional.lag - known[peer])) > .2:
+                                regional = Match(None, 0, '共同区域的三路时间差尚未一致')
+                        candidate = regional
                 results[key] = candidate
             return results
 
@@ -3054,6 +3074,8 @@ class Viewer(QDialog):
             row = self.rows.get(room_id)
             if row is None:
                 continue
+            if match.regions and match.lag is not None and match.confidence >= .65:
+                row.auto_regions = (self.alignment.reference, match.regions)
             if match.reason.startswith("匹配异常："):
                 row.match_text = match.reason + "；稍后自动重试"
                 row.next_analysis = time.monotonic() + 2
