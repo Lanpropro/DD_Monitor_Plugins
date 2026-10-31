@@ -6,6 +6,7 @@ import http.cookies
 import subprocess
 import threading
 import time
+from collections import deque
 
 from PySide6.QtCore import QObject, Signal, Qt
 from PySide6.QtGui import QImage
@@ -14,6 +15,7 @@ from ddm import bili, danmaku, recording
 from ddm.auto_quality import AUTO_QUALITY
 from .engine import FPS, Sample, SIGNATURE_BITS, np
 from .video import av, VideoHistory, PictureReader, StreamInput, reformat_frame
+from .replay_cache import CACHE_BYTES, CACHE_SECONDS
 
 FRAME_TIMEOUT = 8.0
 
@@ -108,7 +110,7 @@ class Decoder:
         self.source_url = ""
         self.source_headers = {}
         self.events = Events()
-        self.history = VideoHistory()
+        self.history = self._history()
         self.playback_timestamp = None
         self.pictures = PictureReader()
         self.video_size = (0, 0)
@@ -116,10 +118,15 @@ class Decoder:
         self.crop = (0.0, 0.0, 1.0, 1.0)
         self.crop_generation = 0
         self.analysis_size = (640, 360)
+        self.region_frames = deque(maxlen=600)
         self.cancelled = threading.Event()
         self.process = None
         self.thread = None
         self.lock = threading.RLock()
+
+    @staticmethod
+    def _history():
+        return VideoHistory(seconds=CACHE_SECONDS, byte_limit=CACHE_BYTES, disk_cache=True)
 
     def start(self) -> None:
         self.thread = threading.Thread(target=self._run,
@@ -169,13 +176,30 @@ class Decoder:
                     "picture_decode_ms": self.pictures.decode_ms,
                     "rgb_frames": self.pictures.decoded}
 
+    def _bili_options(self) -> list[dict]:
+        # One app-channel request per row start: the tiers differ by codec and
+        # by login state, so a static table would offer qualities nobody can play.
+        cached = getattr(self, "_quality_options", None)
+        if cached is not None:
+            return cached
+        try:
+            cached = bili.room_quality_options(self.room_id)
+        except Exception:
+            cached = []
+        self._quality_options = cached
+        return cached
+
     def _resolve(self, attempt: int) -> tuple[str, dict]:
         if self.cancelled.is_set():
             raise bili.Cancelled()
+        if self.platform is None:
+            options = self._bili_options()
+            if options:
+                self.events.information.emit({"quality_options": options})
         if self.seed.get("highest_quality"):
             # The host lists tiers from highest to lowest; IDs are platform-specific.
             options = (self.platform.room_quality_options(self.room_id) if self.platform is not None
-                       else bili.room_quality_options(self.room_id))
+                       else self._bili_options())
             if self.cancelled.is_set():
                 raise bili.Cancelled()
             self.seed["quality"] = next((int(item["qn"]) for item in options if int(item["qn"]) != AUTO_QUALITY), 10000)
@@ -211,7 +235,8 @@ class Decoder:
             self.events.information.emit(info)
         url, quality, _profile, headers = bili.play_url(
             self.room_id, self.seed.get("quality", 250), cancelled=self.cancelled.is_set, source_offset=attempt)
-        self.events.information.emit({"actual_quality": quality})
+        self.events.information.emit({"actual_quality": quality,
+                                      "quality_options": self._bili_options()})
         self.source_url, self.source_headers = url, headers
         return url, headers
 
@@ -237,7 +262,7 @@ class Decoder:
                     previous = (self.history.segment_at(self.playback_timestamp)
                                 if self.playback_timestamp is not None else None) or self.history
                     previous.previous = None
-                    self.history = VideoHistory()
+                    self.history = self._history()
                     self.history.previous = previous
                     self.events.reset.emit()
                 self._capture(executable, url, headers)
@@ -303,6 +328,9 @@ class Decoder:
             watchdog.start()
             next_sample = 0.0
             next_detail = 0.0
+            next_region = next_region_large = 0.0
+            with self.lock:
+                self.region_frames.clear()
             with av.open(StreamInput(process.stdout), "r", format="nut",
                          options={"probesize": "65536", "analyzeduration": "100000"}) as container:
                 stream = container.streams.video[0]
@@ -338,6 +366,21 @@ class Decoder:
                         timestamp = (self.history.origin or 0) + pts
                         self.video_size = (frame.width, frame.height)
                         self.history.video_size = self.video_size
+                        if pts + .0001 >= next_region:
+                            next_region = pts + .1
+                            large = pts + .0001 >= next_region_large
+                            if large:
+                                next_region_large = pts + 1
+                            gray = reformat_frame(frame, width=320 if large else 160,
+                                                  height=180 if large else 90, format='gray')
+                            image = QImage(memoryview(gray.planes[0]), gray.width, gray.height,
+                                           gray.planes[0].line_size, QImage.Format_Grayscale8)
+                            full = image.copy() if large else None
+                            small = image.scaled(160, 90, Qt.IgnoreAspectRatio, Qt.SmoothTransformation) if large else image.copy()
+                            with self.lock:
+                                self.region_frames.append((timestamp, small, full))
+                                while self.region_frames and timestamp - self.region_frames[0][0] > 60:
+                                    self.region_frames.popleft()
                         sample = None
                         if pts + .0001 >= next_detail:
                             while next_detail <= pts + .0001:
@@ -353,7 +396,7 @@ class Decoder:
                                 if crop_generation == self.crop_generation:
                                     with self.history.lock:
                                         self.history.details.append(detail)
-                                        while self.history.details and timestamp - self.history.details[0].time > self.history.seconds:
+                                        while self.history.details and timestamp - self.history.details[0].time > self.history.analysis_seconds:
                                             self.history.details.popleft()
                                     if pts + .0001 >= next_sample:
                                         next_sample = pts + .5

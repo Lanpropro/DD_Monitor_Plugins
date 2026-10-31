@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from collections import deque
+from bisect import bisect_right
+from itertools import islice
 from dataclasses import dataclass, replace
 import threading
 import time
@@ -16,6 +18,7 @@ except ImportError:
     VideoReformatter = None
 
 from .engine import History, np
+from .replay_cache import DiskAudioRing, PacketStore
 
 
 class StreamInput:
@@ -66,7 +69,7 @@ class EncodedPacket:
         return float((self.pts if self.pts is not None else self.dts or 0) * self.time_base)
 
     def decode_packet(self):
-        packet = av.Packet(self.data)
+        packet = av.Packet(bytes(self.data))
         packet.pts, packet.dts = self.pts, self.dts
         packet.duration, packet.time_base = self.duration, self.time_base
         return packet
@@ -75,9 +78,14 @@ class EncodedPacket:
 class VideoHistory(History):
     """Retain complete GOPs under the existing time/byte limits, without JPEG."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, disk_cache=False, **kwargs):
+        if disk_cache:
+            kwargs['audio_factory'] = DiskAudioRing
         super().__init__(**kwargs)
+        self.analysis_seconds = 60
+        self.packet_store = PacketStore() if disk_cache else None
         self.packets = deque()
+        self.keyframes = deque()
         self.codec = None
         self.video_size = (0, 0)
         self.sequence = 0
@@ -125,7 +133,9 @@ class VideoHistory(History):
         bounds = self.bounds_at(timestamp)
         if bounds is None or not bounds[0] <= timestamp <= bounds[1] + .05:
             return None
-        return super().frame_at(timestamp)
+        with self.lock:
+            index = bisect_right(self.frames, (timestamp, float('inf'))) - 1
+            return self.frames[index] if index >= 0 else None
 
     def pcm_at(self, timestamp, frames):
         segment = self.segment_at(timestamp)
@@ -140,8 +150,14 @@ class VideoHistory(History):
                 while self.packets and not self.packets[0].keyframe:
                     self.byte_size -= len(self.packets.popleft().data)
             first = self.packets[0].time + (self.origin or 0) if self.packets else float('inf')
+            self._trim_keyframes()
             while self.frames and self.frames[0][0] < first:
                 self.frames.popleft()
+
+    def _trim_keyframes(self):
+        first = self.packets[0].sequence if self.packets else float('inf')
+        while self.keyframes and self.keyframes[0].sequence < first:
+            self.keyframes.popleft()
 
     def set_origin(self, origin):
         with self.lock:
@@ -157,13 +173,18 @@ class VideoHistory(History):
         return super().snapshots() if self.origin is not None else []
 
     def append_packet(self, packet):
+        data = bytes(packet)
+        if self.packet_store is not None:
+            data = self.packet_store.append(data)
         with self.lock:
-            record = EncodedPacket(self.sequence, bytes(packet), packet.pts, packet.dts,
+            record = EncodedPacket(self.sequence, data, packet.pts, packet.dts,
                                    packet.duration, packet.time_base, packet.is_keyframe)
             self.sequence += 1
             if not self.packets and not record.keyframe:
                 return
             self.packets.append(record)
+            if record.keyframe:
+                self.keyframes.append(record)
             self.byte_size += len(record.data)
             if self.previous is not None:
                 self.previous.trim_bytes(max(0, self.byte_limit - self.byte_size))
@@ -174,6 +195,7 @@ class VideoHistory(History):
                 while self.packets and not self.packets[0].keyframe:
                     self.byte_size -= len(self.packets.popleft().data)
             first = self.packets[0].time if self.packets else float("inf")
+            self._trim_keyframes()
             if self.origin is None:
                 while self.pending_frames and self.pending_frames[0] < first:
                     self.pending_frames.popleft()
@@ -193,7 +215,7 @@ class VideoHistory(History):
             self.received_frames += 1
             if sample is not None:
                 self.samples.append(sample)
-            while self.samples and timestamp - self.samples[0].time > self.seconds:
+            while self.samples and timestamp - self.samples[0].time > self.analysis_seconds:
                 self.samples.popleft()
 
     def packet_range(self, sequence, target):
@@ -201,16 +223,13 @@ class VideoHistory(History):
             if not self.packets or self.codec is None:
                 return None
             reset = sequence is None or sequence < self.packets[0].sequence
-            packets = []
-            for packet in reversed(self.packets):
-                if not reset and packet.sequence < sequence:
-                    break
-                packets.append(packet)
-                if reset and packet.keyframe and packet.time <= target:
-                    break
-            if reset and (not packets or not packets[-1].keyframe or packets[-1].time > target):
-                return None
-            packets.reverse()
+            if reset:
+                index = bisect_right(self.keyframes, target, key=lambda packet: packet.time) - 1
+                if index < 0:
+                    return None
+                sequence = self.keyframes[index].sequence
+            first = max(0, sequence - self.packets[0].sequence)
+            packets = list(islice(self.packets, first, first + 512))
             return self.codec, packets, reset
 
 
