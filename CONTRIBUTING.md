@@ -16,6 +16,7 @@
 - 网站内容、前端依赖与网站测试已迁出；入口和迁移说明见 [WEBSITE.md](WEBSITE.md)。
 - `tools/`、其他 `tests/`：打包工具与专项检查。
 - `dist/`、`node_modules/`、`work/`、网站构建输出：本机产物，遵循 Git 忽略规则。
+- 发布说明集中在 [docs/releases/](docs/releases/README.md)，已完成的实施计划放入 [docs/archive/](docs/archive/README.md)；具体分类与保留原则见[仓库目录说明](docs/repository-layout.md)。
 
 已有 `function/domestic-huya-4k` 和 `function/website` 是整理后的功能快照，已汇总到 `develop`，无需重复合并。三个 `release/` 分支分别对应国内插件 1.2、海外插件 1.1 和二路插件 1.2 的既有标签。插件独立管理版本，不沿用软件本体的 0.4.1 开发标识。
 
@@ -30,7 +31,7 @@ git pull --ff-only origin develop
 git switch -c function/domestic-quality-fix
 ```
 
-1. 插件按任务分别开发，补充相关测试；网站改动在独立网站仓库完成。
+1. 插件按任务分别开发，补充相关测试；每次单项验收通过后，立即在 [docs/changes/](docs/changes/README.md) 对应插件文件追加更新内容、验收证据、提交或 PR、集成状态及发布注意，随该项改动提交，不等发布时回忆汇总。网站改动在独立网站仓库完成。
 2. 维护者的小型文档或注释修改可以直接在 `develop` 验证、提交，不强制创建 PR 或 Draft PR。
 3. 功能、修复和外部贡献通过 PR 合入 `develop`。未完成时可使用 Draft PR，完成后使用普通 PR。
 4. PR 写明目的、修改范围、验证命令与结果、软件接口依赖和已知限制。界面修改提供截图或复现步骤。
@@ -80,6 +81,8 @@ python -m compileall -q plugins tests tools
 ## 版本、打包与网站发布
 
 - 插件版本以各自的 `plugins/<ID>/plugin.json` 为准。发布前核对清单、README、发布说明、标签源码和安装包是否对应。
+- 从 [插件增量记录](docs/changes/README.md) 汇总本次实际包含且已验收的条目，并核对上次公开标签之后的源码差异；正式发布后归入各插件记录的已发布段，更新基线，未包含的条目保留待发布。
+- 新增发布说明放入 `docs/releases/`，同步更新该目录索引；公开版本与 GitHub Releases 正文对齐并标注来源，历史说明保留原始内容，不随新版本改写。
 - 版本标签对应的源码清单必须与公开附件一致；不能只改版本号来认定与发布包一致。
 - 先明确暂存发布文件，再运行 `python tools/build_plugins.py`。它只读取 Git 跟踪文件；包结构及源码一致性检查使用 `python tests/check_packages.py --host ../DD_Monitor_CE`。
 - 网站下载数据与 SHA256 在独立网站仓库维护，来自已发布附件；本机重新打包的哈希不能替代公开附件哈希。

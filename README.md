@@ -1,65 +1,129 @@
-# DD 监控室 CE 插件
+<div align="center">
 
-[DD 监控室 CE](https://github.com/Lanpropro/DD_Monitor_CE) 的独立插件集合。
-每个插件单独启用、单独维护版本并提供一个可导入的 ZIP。
+# DD监控室CE · 插件
 
-软件与插件展示网站已独立至 [DD_Monitor_Website](https://github.com/Lanpropro/DD_Monitor_Website)，本仓库仅维护插件。迁移与本地入口见 [WEBSITE.md](WEBSITE.md)。
+让喜欢的直播，多一种看法。
 
-## 插件
+为 DD监控室CE 扩展直播平台、比赛二路与直播互动。
 
-| 插件 | ID | 版本 | 支持平台 |
-| --- | --- | --- | --- |
-| [国内直播平台](plugins/domestic_live/README.md) | `domestic_live` | 1.4 | 提供虎牙、斗鱼、抖音的主播，直播流解析 |
-| [海外直播平台](plugins/global_live/README.md) | `global_live` | 1.2 | 提供Twitch、YouTube平台的主播，直播流解析 |
-| [比赛二路同步](plugins/match_sync/README.md) | `match_sync` | 1.5 | 提供保持单一直播流情况下的多路混音，合并弹幕观看 |
-| [B站直播互动](plugins/bili_live/README.md) | `bili_live` | 1.0 | 弹幕、表情、礼物互动；作者 [@reon-nynes](https://github.com/reon-nynes) |
+[![DD监控室CE](https://img.shields.io/badge/DD监控室CE-插件扩展-5cd6ff)](https://github.com/Lanpropro/DD_Monitor_CE) [![插件](https://img.shields.io/badge/插件-4_款-5cd6ff)](#插件一览) [![许可](https://img.shields.io/badge/License-LGPL--2.1-blue.svg)](LICENSE)
 
-## 安装
+[下载插件](https://github.com/Lanpropro/DD_Monitor_Plugins/releases) · [插件一览](#插件一览) · [安装与更新](#安装与更新) · [开发与文档](#开发与文档) · [反馈问题](https://github.com/Lanpropro/DD_Monitor_Plugins/issues)
 
-1. 使用最新版 DD 监控室 CE。
-2. 从 [Releases](https://github.com/Lanpropro/DD_Monitor_Plugins/releases) 下载需要的插件 ZIP。
-3. 在软件“设置 → 插件”选择“装载插件…”或将 ZIP 拖入插件页面。
-4. 勾选插件，点击“保存并重启”。
+</div>
 
-ZIP 内必须只有插件 ID 对应的顶层文件夹。GitHub 自动生成的 Source code ZIP
-包含整个仓库，不能直接作为单插件安装包导入。
-手动安装时，将 `plugins/<ID>` 文件夹复制到软件的 `plugins_user/<ID>`。
-已存在同 ID 的插件不能重复导入；更新前通过插件页面删除旧版本，再导入新包并重启。
+## 插件一览
 
-## 软件依赖
+按需安装，独立启用。每个插件分别维护版本，选择你需要的平台与功能即可。
 
-需要包含直播平台扩展支持的配套软件构建，源码基线为 `4bf84bc` 或之后的版本。
-当前软件公开仓库的 `main` 尚未同步该开发基线；安装前请确认使用配套更新的软件。
-软件显示的 `v0.2` 名称不足以判断是否包含这些接口。
+<table>
+<tr>
+<td width="50%" valign="top">
+<h3><a href="plugins/domestic_live/README.md">国内直播平台</a></h3>
+<p><img src="docs/assets/platforms/huya.png" alt="虎牙" width="24" height="24"> &nbsp; <img src="docs/assets/platforms/douyu.png" alt="斗鱼" width="24" height="24"> &nbsp; <img src="docs/assets/platforms/douyin.png" alt="抖音" width="24" height="24"></p>
+<p><strong>虎牙 · 斗鱼 · 抖音</strong></p>
+<p>将国内平台的直播间加入关注与画面墙，解析直播流，在同一套界面里观看。</p>
+<p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
+<p><a href="plugins/domestic_live/README.md">功能与兼容说明</a> · <a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v1.5">下载插件</a></p>
+</td>
+<td width="50%" valign="top">
+<h3><a href="plugins/global_live/README.md">海外直播平台</a></h3>
+<p><img src="docs/assets/platforms/twitch.png" alt="Twitch" width="24" height="24"> &nbsp; <img src="docs/assets/platforms/youtube.png" alt="YouTube" width="24" height="24"></p>
+<p><strong>Twitch · YouTube</strong></p>
+<p>接入海外平台直播，提供关注、播放、悬停预览与聊天弹幕，支持自动画质。</p>
+<p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
+<p><a href="plugins/global_live/README.md">功能与兼容说明</a> · <a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2">下载插件</a></p>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<h3><a href="plugins/match_sync/README.md">比赛二路同步</a></h3>
+<p><img src="docs/assets/platforms/bilibili.png" alt="哔哩哔哩" width="24" height="24"> &nbsp; <img src="docs/assets/platforms/huya.png" alt="虎牙" width="24" height="24"> &nbsp; <img src="docs/assets/platforms/douyu.png" alt="斗鱼" width="24" height="24"> &nbsp; <img src="docs/assets/platforms/douyin.png" alt="抖音" width="24" height="24"> &nbsp; <img src="docs/assets/platforms/twitch.png" alt="Twitch" width="24" height="24"> &nbsp; <img src="docs/assets/platforms/youtube.png" alt="YouTube" width="24" height="24"></p>
+<p><strong>一路主画面，多路解说</strong></p>
+<p>对齐比赛主画面与二路直播，混合解说声音、合并带来源标记的弹幕。其他平台需先启用对应平台插件。</p>
+<p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
+<p><a href="plugins/match_sync/README.md">功能与兼容说明</a> · <a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.4">下载插件</a></p>
+</td>
+<td width="50%" valign="top">
+<h3><a href="plugins/bili_live/README.md">B站直播互动</a></h3>
+<p><img src="docs/assets/platforms/bilibili.png" alt="哔哩哔哩" width="24" height="24"></p>
+<p><strong>弹幕 · 表情 · 礼物</strong></p>
+<p>使用本体登录，在直播格子里发送文字与表情，浏览礼物目录和背包并参与互动。</p>
+<p>作者：<a href="https://github.com/reon-nynes">@reon-nynes</a><br>兼容维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
+<p><a href="plugins/bili_live/README.md">功能与兼容说明</a> · <a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.0">下载插件</a></p>
+</td>
+</tr>
+</table>
 
-插件通过软件提供的 `ddm.plugins` 平台接口、VLC 播放器、FFmpeg 转流、预览和弹幕模块运行。
-海外自动画质需要软件提供 HLS 下载监测与自动画质控制；建议使用软件最新版本。
-源码运行时，在软件仓库安装其 `requirements.txt`，其中固定 `streamlink==8.6.1`。
-便携版使用软件随附的依赖。直播平台请求使用软件当前网络及代理配置。
-YouTube 已结束的直播可保留关注，但不会将录像当作正在直播播放。
+比赛二路同步测试版：[v1.5-pre.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.5-pre.1)。
 
-## 开发与打包
+插件依赖配套的 [DD监控室CE](https://github.com/Lanpropro/DD_Monitor_CE/releases/latest) 运行。具体能力、账号要求与最低本体版本，以各插件说明及对应 Release 为准。
 
-分支、PR、提交整理和验证流程见[开发与贡献指南](CONTRIBUTING.md)。
+## 安装与更新
 
-目录 `plugins/<ID>/` 包含 `plugin.json`、`plugin.py`、README 和所需资源。
-清单 `id` 必须与目录名一致，版本填写在各插件的 `plugin.json` 中。
+在软件内打开插件商店，选择需要的插件，按提示安装、启用并重启。
 
-先将发布文件加入 Git，再执行：
+也可以手动导入：
+
+1. 从上方插件下载入口或 [Releases](https://github.com/Lanpropro/DD_Monitor_Plugins/releases) 下载对应的插件 ZIP。
+2. 在软件“设置 → 插件”选择“装载插件…”，或将 ZIP 拖入插件页面。
+3. 勾选插件，点击“保存并重启”。
+
+更新优先使用软件内的插件更新入口，并按提示重启。各插件独立更新，无需一起替换。
+
+<details>
+<summary>手动安装与安装包格式</summary>
+
+ZIP 内只有插件 ID 对应的顶层文件夹。GitHub 自动生成的 **Source code ZIP** 包含整个仓库，不能作为单插件安装包导入。
+
+手动复制时，将插件文件夹放入软件的 `plugins_user/<ID>/`。已存在同 ID 的插件不能重复导入；手动更新前请退出软件，按对应 Release 的步骤操作。
+
+源码运行需要安装本体的 `requirements.txt`；安装版与便携版使用本体随附的运行环境。平台请求使用本体的网络与代理配置。
+
+</details>
+
+## 开发与文档
+
+[开发与贡献](CONTRIBUTING.md) · [待发布更新](docs/changes/README.md) · [仓库目录](docs/repository-layout.md) · [发布记录](docs/releases/README.md) · [展示网站仓库与迁移说明](WEBSITE.md)
+
+插件源码位于 `plugins/<ID>/`，包含清单、实现、资源和各自的 README。网站独立维护，插件安装与更新仍由本仓库提供。
+
+<details>
+<summary>查看源码版本与本地打包方式</summary>
+
+以下是**当前分支的源码版本**，不代表最新公开安装包。下载请使用上方入口，公开版本以 Releases 为准。
+
+| 插件 | ID | 源码版本 |
+| --- | --- | --- |
+| 国内直播平台 | `domestic_live` | 1.4 |
+| 海外直播平台 | `global_live` | 1.2 |
+| 比赛二路同步 | `match_sync` | 1.5 |
+| B站直播互动 | `bili_live` | 1.0 |
+
+先按文件明确暂存需要发布的源码，再执行：
 
 ```powershell
-git add plugins tools tests README.md LICENSE NOTICE.md .gitignore
 python tools/build_plugins.py
 python tests/check_packages.py --host ../DD_Monitor_CE
 ```
 
 输出为 `dist/domestic_live-1.4.zip`、`dist/global_live-1.2.zip`、`dist/match_sync-1.5.zip` 和 `dist/bili_live-1.0.zip`。
-每个插件单独发布：国内使用 `domestic-live-v<版本>`，海外使用 `global-live-v<版本>`，二路使用 `match-sync-v<版本>`；同一个 Release 不混放不同插件的 ZIP。
-`plugin-catalog.json` 是汇总在线更新信息的目录，可以列出各插件独立 Release 的地址。
 构建只读取 Git 跟踪文件，并将许可与来源说明放入每个安装包。
-各插件 README 中的播放、预览和弹幕集成测试在软件源码仓库执行，需先安装对应插件。
 
-## 来源
+每个插件使用独立的版本标签和 Release，同一个 Release 不混放不同插件的 ZIP。`plugin-catalog.json` 汇总各插件独立 Release 的在线更新信息。
 
-首次提取自 DD 监控室 CE 的 `4bf84bc`，插件源码在本仓库维护。
-保留原项目 LGPL-2.1 许可及现有第三方声明，详见 [LICENSE](LICENSE) 和 [NOTICE.md](NOTICE.md)。
+相关专项、宿主集成和验收方式见贡献指南与各插件 README。
+
+</details>
+
+## 作者与贡献
+
+感谢 [@reon-nynes](https://github.com/reon-nynes) 提供 B站直播互动插件，感谢 [@Soraray](https://github.com/Soraray) 对 Enter 交互的贡献。
+国内、海外和比赛二路插件由 [@Lanpropro](https://github.com/Lanpropro) 维护；B站插件的本体兼容适配与集成验收也由本仓库维护者完成。
+
+欢迎通过 [Issue](https://github.com/Lanpropro/DD_Monitor_Plugins/issues) 反馈问题，或提交 Pull Request 贡献插件与改进。提交时请注明适用插件、本体版本及复现步骤。
+
+## 来源与许可
+
+插件首次提取自 [DD监控室CE](https://github.com/Lanpropro/DD_Monitor_CE) 的 `4bf84bc` 基线，后续在本仓库独立维护。
+保留原项目的 GNU LGPL v2.1 许可，第三方来源与声明见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE.md)。
