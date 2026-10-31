@@ -30,8 +30,10 @@ class ContributionGuideTests(unittest.TestCase):
     def test_readme_entry_and_local_links(self):
         readme = (ROOT / 'README.md').read_text(encoding='utf-8')
         self.assertIn('(CONTRIBUTING.md)', readme)
-        for relative in ('README.md', 'CONTRIBUTING.md', 'docs/repository-layout.md',
-                         'docs/releases/README.md', 'docs/archive/README.md'):
+        documents = ['README.md', 'CONTRIBUTING.md', 'docs/repository-layout.md',
+                     'docs/releases/README.md', 'docs/archive/README.md']
+        documents += [str(path.relative_to(ROOT)) for path in (ROOT / 'docs/changes').glob('*.md')]
+        for relative in documents:
             document = ROOT / relative
             source = document.read_text(encoding='utf-8')
             links = re.findall(r'\]\(([^)]+)\)', source)
@@ -74,6 +76,21 @@ class ContributionGuideTests(unittest.TestCase):
         for note in notes:
             with self.subTest(note=note.name):
                 self.assertIn(f']({note.name})', index)
+
+    def test_each_plugin_has_an_incremental_change_log(self):
+        directory = ROOT / 'docs/changes'
+        index = (directory / 'README.md').read_text(encoding='utf-8')
+        for manifest in (ROOT / 'plugins').glob('*/plugin.json'):
+            plugin_id = manifest.parent.name
+            with self.subTest(plugin=plugin_id):
+                note = directory / f'{plugin_id}.md'
+                source = note.read_text(encoding='utf-8')
+                self.assertIn(f']({note.name})', index)
+                self.assertIn(f'`{plugin_id}`', source)
+                self.assertIn('## 待发布', source)
+                self.assertRegex(source, r'https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/')
+        self.assertIn('(docs/changes/README.md)', (ROOT / 'README.md').read_text(encoding='utf-8'))
+        self.assertIn('(docs/changes/README.md)', (ROOT / 'CONTRIBUTING.md').read_text(encoding='utf-8'))
 
     def test_completed_plan_is_archived(self):
         relative = 'plans/2026-10-23-bili-live-experience.md'

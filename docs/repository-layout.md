@@ -13,6 +13,7 @@
 | [README](../README.md)、[贡献指南](../CONTRIBUTING.md)、`LICENSE`、`NOTICE.md` | 使用入口、开发约定及许可来源；保留 |
 | [WEBSITE.md](../WEBSITE.md) | 独立网站仓库的迁移与本地入口；保留 |
 | [releases/](releases/README.md) | 集中存放 10 份发布说明；4 份公开版本与 GitHub Releases 正文同步，其余保留历史正文和旧文件名 |
+| [changes/](changes/README.md) | 按插件保存上次公开发布后的单项验收记录；每次通过后追加，发布时汇总并保留历史 |
 | [archive/](archive/README.md) | 已完成的历史实施计划；不作为当前开发任务 |
 
 ## 本机资料
