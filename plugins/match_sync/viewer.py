@@ -27,6 +27,7 @@ from .fullscreen import mark_fullscreen
 from .sending import SendConsole, SendingDanmakuPanel
 from .panels import ConsoleIconButton, MatchSettingsDialog, SettingsPanel, style_checkbox
 from .replay import ReplayBar, ReplayTimeline
+from .floating import FloatingCrop
 
 COLORS = ("#38bdf8", "#fb7185", "#a78bfa", "#4ade80", "#fbbf24", "#fb923c")
 ROW_MIME = "application/x-ddm-match-sync-row"
@@ -804,6 +805,9 @@ class RoomRow(QFrame):
         region.setFixedWidth(112)
         region.setToolTip("仅用于放大对照：框选计时器后手动微调偏移；自动匹配始终使用完整画面。")
         region.clicked.connect(lambda: viewer.choose_crop(self))
+        floating = QPushButton('裁取悬浮画面')
+        floating.setToolTip('框选摄像头等区域，在软件内自由移动、缩放；双击悬浮画面可重新框选。')
+        floating.clicked.connect(lambda: viewer.choose_crop(self, floating=True))
         self.realign = QPushButton("重新对齐")
         policy = self.realign.sizePolicy()
         policy.setRetainSizeWhenHidden(True)
@@ -818,7 +822,7 @@ class RoomRow(QFrame):
         self.join.setToolTip("本路内容到达更晚；增加整组观看延迟后加入，原有各路保持相对同步。")
         self.join.clicked.connect(lambda: viewer.confirm_alignment(room_id))
         self.join.hide()
-        self.control_widgets = (self.avatar, self.main_button, self.realign, self.join, self.audible, self.volume,
+        self.control_widgets = (self.avatar, self.main_button, floating, self.realign, self.join, self.audible, self.volume,
                                 self.volume_number, self.channel,
                                 self.show_chat, self.color_choice, QLabel("偏移"), self.decrease,
                                 self.delay, self.increase, region, remove)
@@ -829,7 +833,7 @@ class RoomRow(QFrame):
         columns = []
         column = 0
         for index, widget in enumerate(self.control_widgets):
-            if index in (4, 8, 10, 14):
+            if index in (5, 9, 11, 15):
                 controls.setColumnStretch(column, 1)
                 column += 1
             columns.append(column)
@@ -1123,6 +1127,7 @@ class Viewer(QDialog):
         self.suppressed = {}
         self.prefer_highest = False
         self.embedded = False
+        self.floating_crops = {}
         self.hidden_host_widgets = {}
         self.sidebar_style = None
         self.setAcceptDrops(True)
@@ -2041,6 +2046,8 @@ class Viewer(QDialog):
             self.canvas.set_frame(None)
             self._rebuild_replay_chat(now - self.replay.delay)
             self.audio.flush()
+            for floating in self.floating_crops.values():
+                floating.set_frame(None)
             self.replay_bar.refresh(force=True)
 
     def return_live(self):
@@ -2049,6 +2056,8 @@ class Viewer(QDialog):
         self.canvas.set_frame(None)
         self._rebuild_replay_chat(time.monotonic(), live=True)
         self.audio.flush(clock)
+        for floating in self.floating_crops.values():
+            floating.set_frame(None)
         self.replay_bar.refresh(force=True)
 
     def _picture_setting(self, key, value):
@@ -2115,10 +2124,12 @@ class Viewer(QDialog):
             self.body_split.insertWidget(0, self.picture)
             self.body_split.setSizes(sizes)
             self.fullscreen_dialog = None
+            self.reparent_floating_crops(self.floating_surface())
             dialog.deleteLater()
         dialog.finished.connect(restore)
         self.fullscreen_dialog = dialog
         dialog.showFullScreen()
+        self.reparent_floating_crops(dialog)
         if sys.platform == 'win32' and QApplication.platformName() == 'windows':
             fullscreen_hwnd = int(dialog.winId())
             mark_fullscreen(fullscreen_hwnd, True)
@@ -2208,6 +2219,8 @@ class Viewer(QDialog):
         self.changed()
 
     def remove_room(self, room_id):
+        if room_id in self.floating_crops:
+            self.floating_crops[room_id].close()
         row = self.rows.pop(room_id)
         self.rematch_rooms.discard(room_id)
         self.rematch_admit.discard(room_id)
@@ -2818,6 +2831,7 @@ class Viewer(QDialog):
             self.return_live()
             shown_clock, shown_shifts = clock, shifts
         self.replay_bar.refresh()
+        self.render_floating_crops(shown_clock, shown_shifts)
         row = self.rows.get(self.alignment.reference)
         if row is not None and row.decoder is not None and not row.paused and row.room_id in shown_shifts:
             frame = self.canvas.show_at(row.decoder, shown_clock + shown_shifts[row.room_id])
@@ -2906,7 +2920,8 @@ class Viewer(QDialog):
 
     def _configure_picture_budget(self):
         reference = self.alignment.reference
-        shown = self.comparison_panel.rooms_to_show() if self.compare.isChecked() else (reference,)
+        shown = set(self.comparison_panel.rooms_to_show() if self.compare.isChecked() else (reference,))
+        shown.update(self.floating_crops)
         comparisons = max(0, len(shown) - 1)
         inactive = max(1, len(self.rows) - len(shown))
         for key, row in self.rows.items():
@@ -3164,7 +3179,51 @@ class Viewer(QDialog):
                                       f"置信度 {match.confidence:.0%}")
             row.refresh_status()
 
-    def choose_crop(self, row):
+    def floating_surface(self):
+        if self.fullscreen_dialog is not None:
+            return self.fullscreen_dialog
+        host = self.context.window if self.embedded else self
+        central = getattr(host, 'centralWidget', None)
+        return (central() if callable(central) else None) or host
+
+    def reparent_floating_crops(self, parent):
+        for floating in self.floating_crops.values():
+            geometry = floating.geometry()
+            floating.parentWidget().removeEventFilter(floating)
+            floating.setParent(parent)
+            parent.installEventFilter(floating)
+            floating.fit_geometry(geometry.x(), geometry.y(), geometry.width())
+            floating.show()
+            floating.raise_()
+
+    def show_floating_crop(self, row, crop, frame):
+        floating = self.floating_crops.get(row.room_id)
+        if floating is None:
+            floating = FloatingCrop(self.floating_surface(), row.label(), crop)
+            self.floating_crops[row.room_id] = floating
+            floating.closed.connect(lambda key=row.room_id: self.floating_crops.pop(key, None))
+            floating.recrop.connect(lambda: self.choose_crop(row, floating=True))
+            floating.move(40 + len(self.floating_crops) * 24, 40 + len(self.floating_crops) * 24)
+        floating.crop = QRectF(*crop)
+        floating.frame_key = None
+        floating.set_frame(frame)
+        floating.fit_geometry(floating.x(), floating.y(), floating.width() if floating.isVisible() else 320)
+        floating.show()
+        floating.raise_()
+        return floating
+
+    def render_floating_crops(self, clock, shifts):
+        for key, floating in self.floating_crops.items():
+            row = self.rows.get(key)
+            if row is not None and row.decoder is not None and not row.paused and key in shifts:
+                floating.label = row.label()
+                frame = row.decoder.picture_at(clock + shifts[key])
+                if frame is not None:
+                    floating.set_frame(frame)
+            elif key not in shifts:
+                floating.set_frame(None)
+
+    def choose_crop(self, row, floating=False):
         frozen = None
         if row.room_id == self.alignment.reference:
             frame = self.canvas.frame
@@ -3181,12 +3240,13 @@ class Viewer(QDialog):
             self.notice.setText("请先开始观看，收到画面后再选择对照区域")
             return
         dialog = QDialog(self)
-        dialog.setWindowTitle(f"{row.label()}：拖选计时器或共同内容，仅用于放大对照")
+        dialog.setWindowTitle(f"{row.label()}：" + ('框选悬浮画面' if floating else '拖选计时器或共同内容，仅用于放大对照'))
         dialog.resize(900, 600)
         canvas = Canvas(selecting=True)
         canvas.set_frame(frame)
         canvas.waiting = frame is None
-        canvas.crop = QRectF(*row.crop)
+        canvas.crop = (QRectF(self.floating_crops[row.room_id].crop) if floating and row.room_id in self.floating_crops
+                       else QRectF(0, 0, 1, 1) if floating else QRectF(*row.crop))
         reset = QPushButton("使用整个画面")
         reset.clicked.connect(lambda: (setattr(canvas, "crop", QRectF(0, 0, 1, 1)), canvas.update()))
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -3225,7 +3285,8 @@ class Viewer(QDialog):
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         layout = QVBoxLayout(dialog)
-        hint = QLabel("自动匹配始终使用完整画面；框选仅用于放大对照、人工微调偏移。"
+        hint = QLabel('拖选摄像头等区域；确认后可在软件内拖动、缩放，双击重新框选。使用原分辨率画面，不改变对齐和对照区域。'
+                      if floating else "自动匹配始终使用完整画面；框选仅用于放大对照、人工微调偏移。"
                       "两路请选择相同计时器，框选不会改变自动匹配或读取计时器数字。")
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -3234,6 +3295,9 @@ class Viewer(QDialog):
         layout.addWidget(buttons)
         if dialog.exec() == QDialog.Accepted and canvas.crop.width() > 0.02 and canvas.crop.height() > 0.02:
             rect = canvas.crop
+            if floating:
+                self.show_floating_crop(row, (rect.x(), rect.y(), rect.width(), rect.height()), canvas.frame)
+                return
             row.crop = (rect.x(), rect.y(), rect.width(), rect.height())
             self.comparison_panel.zoom.setChecked(True)
             self.show_comparison(row.room_id)
@@ -3285,6 +3349,8 @@ class Viewer(QDialog):
         row.refresh_status()
 
     def stop(self):
+        for floating in list(self.floating_crops.values()):
+            floating.close()
         self.analysis_serial += 1
         self.late_buffer = LateBuffer(self.reserve_seconds)
         self.late_notice.hide()
