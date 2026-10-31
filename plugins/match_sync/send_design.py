@@ -1,10 +1,10 @@
 """Scoped, opaque sending-workspace styling and recipient rendering."""
-from PySide6.QtCore import QEvent, QPoint, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QLineEdit, QListWidget, QPushButton, QSizePolicy, QStyle, QStyledItemDelegate, QWidget
 
-from ddm import theme
-from .panels import console_button_style
+from ddm import motion, theme
+from .panels import console_button_style, use_link_cursor
 
 
 def colors():
@@ -20,12 +20,37 @@ def colors():
 
 
 INPUT_HEIGHT = 32
-SEND_WIDTH = 60
-ACCESSORY_WIDTH = 56
+SEND_WIDTH = 32
+ACCESSORY_WIDTH = 60
+
+
+class SendIconFace(QObject):
+    def eventFilter(self, button, event):
+        if event.type() != QEvent.Paint:
+            return False
+        painter = QPainter(button)
+        painter.setRenderHint(QPainter.Antialiasing)
+        if button.isEnabled() and (button.underMouse() or button.isDown()):
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(theme.qcolor(theme.ACCENT_SOFT))
+            painter.drawRoundedRect(QRectF(button.rect()).adjusted(1, 1, -1, -1), 8, 8)
+        painter.translate(button.width() / 2, button.height() / 2)
+        painter.setPen(QPen(theme.qcolor(theme.TEXT1 if button.isEnabled() else theme.TEXT4), 1.5))
+        path = QPainterPath()
+        path.moveTo(7, -7)
+        path.lineTo(-7, -2)
+        path.lineTo(-1, 1)
+        path.lineTo(2, 7)
+        path.closeSubpath()
+        path.moveTo(-1, 1)
+        path.lineTo(7, -7)
+        painter.drawPath(path)
+        return True
 
 
 def style_compose(editor, send):
     c = colors()
+    use_link_cursor(send)
     editor.setMinimumWidth(0)
     editor.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     editor.setFixedHeight(INPUT_HEIGHT)
@@ -33,11 +58,17 @@ def style_compose(editor, send):
         border: 1px solid transparent; border-radius: 8px; padding: 4px 8px;
         font-size: {theme.FONT_CONTROL}px;}}
         QLineEdit:focus {{border-color: {c['accent']};}}''')
-    send.setFixedSize(SEND_WIDTH, INPUT_HEIGHT)
-    send.setStyleSheet(console_button_style('QPushButton'))
+    send.setFixedSize(SEND_WIDTH if send.property('sendPrimary') else 60, INPUT_HEIGHT)
+    if send.property('sendPrimary') and not hasattr(send, '_match_sync_face'):
+        send._match_sync_face = SendIconFace(send)
+        send.installEventFilter(send._match_sync_face)
+        send.setAccessibleName('发送弹幕')
+        send.setToolTip('发送弹幕')
+    send.setStyleSheet('QPushButton {background: transparent; border: none; padding: 0;}'
+                      if send.property('sendPrimary') else console_button_style('QPushButton'))
 
 
-def align_composer(widget):
+def align_composer(widget, console=None):
     """Arrange the existing platform widgets without replacing their send handlers."""
     layout = widget.layout()
     if not isinstance(layout, QHBoxLayout):
@@ -64,9 +95,9 @@ def align_composer(widget):
         extras.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         for child in widgets:
             if child is not None and child not in (editor, send):
-                hidden = child.isHidden()
-                extras.addWidget(child)
-                child.setVisible(not hidden)
+                child.hide()
+        if console is not None:
+            extras.addWidget(console.make_interactions(accessories))
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
         layout.addWidget(editor, 1)
@@ -75,12 +106,15 @@ def align_composer(widget):
         widget.setFixedHeight(40)
         widget.setProperty('sendRowAligned', True)
     style_compose(editor, send)
-    # Platform icons paint dark strokes on hover, so retain their bright hover fill.
+    # Dark-mode icons use dark hover strokes; light-mode icons retain accent ink.
     for button in widget.findChildren(QPushButton):
-        if button is not send and button.window() is widget.window() and not button.property('sendIconStyled'):
-            button.setStyleSheet(button.styleSheet() + f'''
+        if button is not send and button.window() is widget.window():
+            if not button.property('sendIconStyled'):
+                button.setProperty('sendIconBaseStyle', button.styleSheet())
+            button.setStyleSheet(button.property('sendIconBaseStyle') + f'''
                 QPushButton#TileCtrl:hover, QPushButton#TileCtrl[hovered="true"] {{
-                    background: {colors()['accent']}; border: none;
+                    background: {theme.ACCENT_SOFT if theme.is_light() else colors()['accent']};
+                    border: none; border-radius: 12px; padding: 0;
                 }}''')
             button.setProperty('sendIconStyled', True)
 
@@ -96,7 +130,7 @@ def stylesheet():
         #MatchSyncSendConsole QStackedWidget, #MatchSyncSendConsole QFrame {{border: none;}}
         #MatchSyncSendConsole QScrollArea, #MatchSyncSendConsole QScrollArea > QWidget,
         #MatchSyncSendConsole QScrollArea > QWidget > QWidget {{background: transparent; border: none;}}
-        #MatchSyncSendConsole QListWidget {{background: {c['inset']}; border: none; border-radius: 8px;}}
+        #MatchSyncSendConsole QListWidget {{background: transparent; border: none; border-radius: 8px;}}
         #MatchSyncSendConsole #SavedTextList {{background: transparent;}}
         #MatchSyncSendConsole QLineEdit {{background: {c['input']}; color: {c['text']};
             border: 1px solid transparent; border-radius: 8px; padding: 6px 8px;}}
@@ -106,7 +140,8 @@ def stylesheet():
         #MatchSyncSendConsole QPushButton:hover {{border: 1px solid {c['secondary']};}}
         #MatchSyncSendConsole QPushButton:pressed {{background: {c['inset']};}}
         #MatchSyncSendConsole QPushButton:focus {{border: 1px solid {c['accent']};}}
-        #MatchSyncSendConsole QPushButton[sendPrimary="true"] {{background: {c['input']}; color: {c['text']};}}
+        #MatchSyncSendConsole QPushButton[sendPrimary="true"],
+        #MatchSyncSendConsole QPushButton[sendPrimary="true"]:disabled {{background: transparent; border: none;}}
         #MatchSyncSendConsole QPushButton:disabled {{background: {c['raised']}; color: {c['secondary']};}}
         #MatchSyncSendConsole #SendMinimize {{background: transparent;}}
     '''
@@ -239,30 +274,65 @@ class SavedTextDelegate(QStyledItemDelegate):
 
 
 class RecipientDelegate(QStyledItemDelegate):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.animations = {}
+        self.pointer_change = False
+
+    def animate(self, key, checked):
+        previous = self.animations.get(key)
+        start = previous.currentValue() if previous is not None else float(not checked)
+        if previous is not None:
+            previous.stop()
+            previous.deleteLater()
+        animation = QVariantAnimation(self)
+        animation.setDuration(180 if self.pointer_change and motion.enabled() else 0)
+        animation.setEasingCurve(motion.THEME_WAVE_EASING)
+        animation.setStartValue(start)
+        animation.setEndValue(float(checked))
+        animation.valueChanged.connect(lambda _value: self.parent().viewport().update())
+        self.animations[key] = animation
+        animation.start()
+
+    def forget(self, key):
+        animation = self.animations.pop(key, None)
+        if animation is not None:
+            animation.stop()
+            animation.deleteLater()
+
     def editorEvent(self, event, model, option, index):
-        if (event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton
+        if (event.type() in (QEvent.MouseButtonPress, QEvent.MouseButtonDblClick, QEvent.MouseButtonRelease)
+                and event.button() == Qt.LeftButton
                 and index.flags() & Qt.ItemIsEnabled and index.flags() & Qt.ItemIsUserCheckable
                 and option.rect.contains(event.position().toPoint())):
+            if event.type() == QEvent.MouseButtonRelease:
+                return True
             checked = index.data(Qt.CheckStateRole) == Qt.Checked.value
-            return model.setData(index, (Qt.Unchecked if checked else Qt.Checked).value, Qt.CheckStateRole)
+            self.pointer_change = True
+            try:
+                return model.setData(index, (Qt.Unchecked if checked else Qt.Checked).value, Qt.CheckStateRole)
+            finally:
+                self.pointer_change = False
         return super().editorEvent(event, model, option, index)
 
     def paint(self, painter, option, index):
         c = colors()
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing)
-        rect = QRectF(option.rect.adjusted(4, 3, -4, -3))
+        rect = QRectF(option.rect.adjusted(4, 3, -16, -3))
         checked = index.data(Qt.CheckStateRole)
         selected = (checked == Qt.Checked.value if checked is not None else
                     bool(option.state & QStyle.State_Selected))
+        animation = self.animations.get(index.data(Qt.UserRole))
+        progress = float(animation.currentValue()) if animation is not None else float(selected)
+        painter.setClipRect(option.rect)
+        painter.translate(12 * progress, 0)
         painter.setPen(Qt.NoPen)
-        if selected or option.state & QStyle.State_MouseOver:
-            painter.setBrush(QColor(c['raised']))
+        if progress or option.state & QStyle.State_MouseOver:
+            color = QColor(c['raised'])
+            color.setAlphaF(max(progress, .5 if option.state & QStyle.State_MouseOver else 0))
+            painter.setBrush(color)
             painter.drawRoundedRect(rect, 6, 6)
-        if selected and option.state & QStyle.State_HasFocus:
-            painter.setPen(QPen(QColor(c['accent']), 1))
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 6, 6)
         avatar = QRectF(rect.left() + 8, rect.center().y() - 16, 32, 32)
         pixmap = index.data(Qt.DecorationRole)
         if isinstance(pixmap, QPixmap) and not pixmap.isNull():
@@ -279,13 +349,9 @@ class RecipientDelegate(QStyledItemDelegate):
             painter.setPen(QColor(c['text']))
             painter.drawText(avatar, Qt.AlignCenter, str(index.data(Qt.DisplayRole) or '?')[:1])
         painter.setPen(Qt.NoPen)
-        if selected:
-            painter.setPen(QPen(QColor(c['accent']), 1.5))
-            painter.setBrush(Qt.NoBrush)
-            painter.drawEllipse(avatar.adjusted(-2, -2, 2, 2))
         text = str(index.data(Qt.DisplayRole) or '').split('\n', 1)
         font = QFont(option.font)
-        font.setWeight(QFont.DemiBold if selected else QFont.Normal)
+        font.setWeight(QFont.Normal)
         metrics = QFontMetrics(font)
         left, width = int(rect.left() + 48), max(0, int(rect.width() - 74))
         line_height = metrics.height()
@@ -301,7 +367,11 @@ class RecipientDelegate(QStyledItemDelegate):
         if checked is not None:
             painter.setPen(QPen(QColor(c['accent'] if selected else c['secondary']), 1.5))
             x, y = int(rect.right() - 21), int(rect.center().y() - 6)
-            if selected:
+            if progress > 0:
+                painter.setOpacity(progress)
+                painter.translate(x + 6, y + 6)
+                painter.scale(.94 + .06 * progress, .94 + .06 * progress)
+                painter.translate(-x - 6, -y - 6)
                 painter.drawLine(x, y + 6, x + 4, y + 10)
                 painter.drawLine(x + 4, y + 10, x + 12, y + 1)
         painter.restore()

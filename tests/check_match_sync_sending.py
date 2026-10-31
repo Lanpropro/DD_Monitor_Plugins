@@ -6,13 +6,14 @@ from pathlib import Path
 import socket
 import sys
 import tempfile
+import time
 import types
 from unittest.mock import patch
 
 
 def check_platform_controls(app, host, module, source):
     """Use the maintained domestic composers, with no credentials or requests."""
-    from PySide6.QtWidgets import QPushButton
+    from PySide6.QtWidgets import QPushButton, QWidget
     from ddm import plugins
     package = types.ModuleType('sending_domestic_fixture')
     package.__path__ = [str(source.resolve())]
@@ -63,9 +64,28 @@ def check_platform_controls(app, host, module, source):
                             if button.property('sendPrimary'))
                 assert editor.height() == viewer.send_console.batch_panel.edit.height() == 32, kind
                 assert send.size() == viewer.send_console.batch_panel.send.size(), kind
-                assert send.width() == 60, kind
+                assert send.width() == 32 and hasattr(send, '_match_sync_face'), kind
                 gift = controls.applicable()[0].control.widget.gifts
                 assert 'QPushButton#TileCtrl:hover' in gift.styleSheet(), kind
+                assert 'border-radius: 12px' in gift.styleSheet(), kind
+                assert 'background: transparent' in send.styleSheet(), kind
+                shared = controls.applicable()[0].control.widget.findChild(QWidget, 'SendInteractions')
+                assert shared is not None and len(shared.findChildren(QPushButton)) == 2
+                assert all(not button.isHidden() for button in shared.findChildren(QPushButton))
+            console = viewer.send_console
+            anchor = console.batch_panel.interactions.findChildren(QPushButton)[1]
+            native = console.rows['douyu:12345'].tile._plugin_controls.applicable()[0].control.widget
+            seen = []
+            with patch.object(native, 'open_gifts', side_effect=lambda: seen.append(native.gifts is anchor)):
+                menu = console.interaction_menu('gift', anchor)
+                assert [action.text() for action in menu.actions()] == ['斗鱼', '虎牙', '抖音']
+                menu.actions()[0].menu().actions()[0].trigger()
+                assert seen == [True] and native.gifts is not anchor
+                assert not menu.actions()[1].menu().actions()[0].isEnabled()
+                menu.deleteLater()
+            menu = console.interaction_menu('emote', anchor)
+            assert all(not action.menu().actions()[0].isEnabled() for action in menu.actions())
+            menu.deleteLater()
             return {'domestic_controls': ['douyu', 'huya', 'douyin'], 'credentials_read': False}
         finally:
             manager.unload()
@@ -127,17 +147,75 @@ def check(app, host, module, output=None):
         manager = plugins.PluginManager(window=host, plugins_dir=directory)
         manager.register_tile_control('fixture', 'send', Composer)
         viewer = module.Viewer(plugins.PluginContext(manager, 'sending_check'), {})
-        assert not viewer.send_console.context.text()
+        assert viewer.send_console.findChild(module.QLabel, 'SendContext') is None
+        assert viewer.send_console.work.isHidden()
+        assert viewer.send_console.title.text() == '弹幕控制台'
         assert not viewer.notice.text()
         assert not viewer.panel.body.toPlainText().strip(), 'No instructional text before a room is added'
         viewer.setAttribute(Qt.WA_DontShowOnScreen, host.testAttribute(Qt.WA_DontShowOnScreen))
         try:
+            viewer.resize(1320, 880)
+            viewer.show()
+            QTest.qWait(30)
+            empty_console = viewer.send_console
+            empty_image = empty_console.grab().toImage()
+            point = empty_console.rooms.mapTo(empty_console, empty_console.rooms.rect().center())
+            assert empty_image.pixelColor(point) == empty_image.pixelColor(empty_image.width() - 30, point.y()), 'Empty recipients must not leave a tinted rectangle'
+            if output:
+                output.parent.mkdir(parents=True, exist_ok=True)
+                empty_console.grab().save(str(output.with_name(output.stem + '-empty.png')))
             for key in ('1', '2', '3'):
                 viewer.add_room(key, {'alias': '主播' + key})
             viewer.resize(1320, 880)
             viewer.show()
             QTest.qWait(80)
             console = viewer.send_console
+            for button in (viewer.automatic, viewer.compare, viewer.rows['1'].audible,
+                           viewer.match_settings_button, viewer.minimize_settings, console.minimize):
+                assert button.cursor().shape() == Qt.PointingHandCursor, button
+                assert button.testAttribute(Qt.WA_Hover), button
+            panels = import_module(module.__package__ + '.panels')
+            from PySide6.QtCore import QEvent
+            if sys.platform == 'win32':
+                with patch.object(panels.QApplication, 'platformName', return_value='windows'), \
+                        patch.object(panels.QApplication, 'widgetAt', return_value=viewer.automatic), \
+                        patch.object(panels.ctypes.windll.user32, 'LoadCursorW', return_value=123) as load, \
+                        patch.object(panels.ctypes.windll.user32, 'SetCursor') as apply:
+                    override = panels.QApplication.overrideCursor()
+                    assert not viewer.automatic._match_link_cursor.eventFilter(viewer.automatic, QEvent(QEvent.Enter))
+                    load.assert_called_once_with(None, 32649)
+                    apply.assert_called_once_with(123)
+                    load.reset_mock()
+                    viewer.automatic._match_link_cursor.eventFilter(viewer.automatic, QEvent(QEvent.Leave))
+                    load.assert_not_called()
+                    assert panels.QApplication.overrideCursor() is override, 'Do not leave a global cursor override'
+            assert not console.minimize.text() and not viewer.minimize_settings.text()
+            assert not console.minimize.autoDefault() and not console.minimize.isDefault()
+            viewer.panel.body.setFocus()
+            viewer.panel.bottom_button.show()
+            QTest.mouseClick(viewer.panel.bottom_button, Qt.LeftButton)
+            assert not console.minimize.hasFocus(), 'Returning to chat bottom must not focus the minimize icon'
+            assert not hasattr(console, 'settings_button')
+            assert console.minimize.size() == viewer.minimize_settings.size(), (console.minimize.size(), viewer.minimize_settings.size())
+            assert console.minimize.styleSheet() == viewer.minimize_settings.styleSheet()
+            QTest.mouseClick(viewer.match_settings_button, Qt.LeftButton)
+            assert viewer.match_settings is not None and viewer.match_settings.isVisible()
+            assert viewer.buffer_reserve.parentWidget() is viewer.match_settings
+            assert viewer.automatic.parentWidget() is viewer.settings_panel
+            assert viewer.compare.parentWidget() is viewer.settings_panel
+            old_reserve = viewer.buffer_reserve.currentIndex()
+            viewer.buffer_reserve.setCurrentIndex(viewer.buffer_reserve.findData(8))
+            assert viewer.reserve_seconds == 8
+            viewer.buffer_reserve.setCurrentIndex(old_reserve)
+            if output:
+                viewer.match_settings.grab().save(str(output.with_name(output.stem + '-settings.png')))
+            viewer.match_settings.close()
+            def finish_batch():
+                deadline = time.monotonic() + 2
+                while console.batch_panel.timer.isActive() and time.monotonic() < deadline:
+                    QTest.qWait(20)
+                assert not console.batch_panel.timer.isActive(), 'The synthetic send queue must finish'
+            assert not console.saved_input.isHidden() and not console.work.isHidden()
             assert not console.feedback.isVisible()
             assert not any('左键选择主播；' in label.text() for label in console.findChildren(module.QLabel))
             first = console.rows['1'].tile._plugin_controls.entries[0].control.edit
@@ -154,6 +232,27 @@ def check(app, host, module, output=None):
             first.setText('draft 1')
             select({'2'})
             second.setText('draft 2')
+            item = console.rooms.item(1)
+            position = console.rooms.visualItemRect(item).center()
+            before_clicks = set(console.checked_rooms())
+            with patch.object(module.motion, 'enabled', return_value=True):
+                for index in range(6):
+                    QTest.mouseClick(console.rooms.viewport(), Qt.LeftButton, pos=position)
+                    assert ('2' in console.checked_rooms()) == (index % 2 == 1)
+                delegate = console.rooms.itemDelegate()
+                assert delegate.animations['2'].duration() == 180
+                assert delegate.animations['2'].state() == delegate.animations['2'].State.Running
+            assert set(console.checked_rooms()) == before_clicks
+            QTest.mouseDClick(console.rooms.viewport(), Qt.LeftButton, pos=position)
+            QTest.mouseRelease(console.rooms.viewport(), Qt.LeftButton, pos=position)
+            assert '2' not in console.checked_rooms(), 'Double-click must count the next press, not swallow it'
+            QTest.qWait(200)
+            with patch.object(module.motion, 'enabled', return_value=True):
+                select({'2'})
+                QTest.qWait(20)
+                entering = console.rooms.viewport().grab().toImage()
+                QTest.qWait(200)
+                assert entering != console.rooms.viewport().grab().toImage(), 'Card insertion must produce visible intermediate frames'
             assert console.stack.currentWidget() is console.rows['2']
             assert first.text() == 'draft 1' and not sent
             assert console.rooms.count() == 3
@@ -170,12 +269,37 @@ def check(app, host, module, output=None):
             viewer.rows['2'].avatar.set_pixmap_image(avatar)
             console.refresh_avatar('2')
             assert isinstance(console.rooms.item(1).data(Qt.DecorationRole), QPixmap)
+            QTest.qWait(160)
+            picture = console.rooms.viewport().grab()
+            rect = console.rooms.visualItemRect(console.rooms.item(1))
+            sample = picture.toImage().pixelColor(round((rect.left() + 10) * picture.devicePixelRatio()),
+                                                  round(rect.center().y() * picture.devicePixelRatio()))
+            assert sample != module.theme.qcolor(module.theme.ACCENT), 'Do not outline selected avatars in blue'
+            def avatar_x():
+                image = console.rooms.viewport().grab().toImage()
+                ratio = console.rooms.devicePixelRatioF()
+                row_rect = console.rooms.visualItemRect(console.rooms.item(1))
+                pixels = [x for y in range(round(row_rect.top() * ratio), round(row_rect.bottom() * ratio))
+                          for x in range(round(row_rect.left() * ratio), round(row_rect.right() * ratio))
+                          if image.pixelColor(x, y) == QColor('#728B75')]
+                return sum(pixels) / len(pixels) / ratio
+            selected_x = avatar_x()
+            select(set())
+            QTest.qWait(200)
+            unselected_x = avatar_x()
+            assert 10 <= selected_x - unselected_x <= 14, 'Selected cards insert right; deselected cards retract left'
+            select({'2'})
+            QTest.qWait(200)
+            assert viewer.panel.property('joined') is True
+            joined_image = viewer.panel.grab().toImage()
+            assert joined_image.pixelColor(0, joined_image.height() - 1) == joined_image.pixelColor(20, joined_image.height() - 1), 'Joined chat must have square lower corners'
             assert isinstance(console, module.SettingsPanel), 'Keep the existing console size and visibility contract'
             panel_height = viewer.panel.height()
             console_height = console.height()
             console.minimize.click()
             QTest.qWait(40)
             assert console.isHidden() and console.restore.isVisible()
+            assert viewer.panel.property('joined') is False
             assert viewer.settings_panel.isVisible(), 'Sending minimizes independently'
             assert viewer.panel.height() >= panel_height + console_height - 1
             viewer.resize(900, 720)
@@ -207,7 +331,7 @@ def check(app, host, module, output=None):
                     assert console.body_layout.direction() == (QBoxLayout.LeftToRight if regular
                                                               else QBoxLayout.TopToBottom)
                     assert first.isVisible() == (console.selected_room == '1')
-            assert console.context.text().startswith('发送给')
+            assert console.findChild(module.QLabel, 'SendContext') is None
             for right_width in (640, 300):
                 viewer.resize(1500, 880)
                 viewer.picture_split.setSizes([1500 - right_width, right_width])
@@ -232,11 +356,10 @@ def check(app, host, module, output=None):
                 console.body_layout.minimumSize(), console.work.geometry(), console.pages.geometry())
             if output:
                 console.grab().save(str(output.with_name(output.stem + '-single-detail.png')))
-                with patch.object(module.theme, 'is_light', return_value=True):
-                    console.refresh_design()
-                    QTest.qWait(30)
-                    console.grab().save(str(output.with_name(output.stem + '-light.png')))
-                console.refresh_design()
+                module.theme.apply('light')
+                QTest.qWait(30)
+                console.grab().save(str(output.with_name(output.stem + '-light.png')))
+                module.theme.apply('dark')
             single_button = next(button for button in second.parentWidget().findChildren(QPushButton)
                                  if button.property('sendPrimary'))
             single_edit_geometry = (second.mapTo(console, QPoint()).x(), second.mapTo(console, QPoint()).y(),
@@ -247,6 +370,11 @@ def check(app, host, module, output=None):
             select({'1', '2', '3'})
             dialog = console.batch_panel
             assert console.pages.currentWidget() is dialog
+            dialog.edit.clear()
+            assert not dialog.send.isEnabled(), 'Empty multi-send must be disabled'
+            dialog.edit.setText('   ')
+            assert not dialog.send.isEnabled(), 'Whitespace is not a message'
+            dialog.edit.clear()
             QTest.qWait(40)
             assert (dialog.edit.mapTo(console, QPoint()).x(), dialog.edit.mapTo(console, QPoint()).y(),
                     dialog.edit.width(), dialog.edit.height()) == single_edit_geometry
@@ -254,7 +382,7 @@ def check(app, host, module, output=None):
                     dialog.send.width(), dialog.send.height()) == single_button_geometry
             dialog.edit.setText('shared')
             dialog.start()
-            QTest.qWait(250)
+            finish_batch()
             assert sent == [('1', 'shared'), ('2', 'shared'), ('3', 'shared')]
             assert first.text() == 'draft 1' and second.text() == 'draft 2'
             assert not dialog.timer.isActive()
@@ -279,7 +407,7 @@ def check(app, host, module, output=None):
             assert not active, 'Closing stops further targets and shuts down the pending composer'
             assert console.statuses['2'] == '已取消，未发送'
             assert dialog.send.text() == '发送'
-            assert console.context.text() == '同文发送'
+            assert hasattr(dialog.send, '_match_sync_face')
             select({'2'})
             second.setText('draft 2')
             console.saved_input.setText('saved message')
@@ -323,12 +451,12 @@ def check(app, host, module, output=None):
             before_saved_send = len(sent)
             QTest.mouseClick(console.saved_texts.viewport(), Qt.LeftButton,
                              pos=console.saved_texts.visualItemRect(console.saved_texts.item(0)).center())
-            QTest.qWait(130)
+            finish_batch()
             assert sent[before_saved_send:] == [('2', 'saved message')]
             assert second.text() == 'draft 2', 'Quick send must preserve the independent draft'
             select({'1', '2'})
             console.saved_texts.itemClicked.emit(console.saved_texts.item(0))
-            QTest.qWait(200)
+            finish_batch()
             assert sent[-2:] == [('1', 'saved message'), ('2', 'saved message')]
             assert first.text() == 'draft 1' and second.text() == 'draft 2'
             second.setText('draft 2')
@@ -337,7 +465,10 @@ def check(app, host, module, output=None):
             select(set())
             QTest.qWait(30)
             assert console.saved_input.mapTo(console, QPoint()).y() == saved_input_y, 'No selection must retain compose space'
-            assert console.pages.isHidden() and console.selected_room is None
+            assert not console.pages.isHidden() and console.selected_room is None
+            assert console.pages.currentWidget() is console.batch_panel
+            assert not console.batch_panel.send.isEnabled()
+            assert console.batch_panel.interactions.isVisible(), 'Emote and gift icons stay visible without selected rooms'
             assert console.rooms.currentItem() is None, 'Unchecked rooms must immediately lose their focus frame'
             assert console.saved_texts.isEnabled(), 'Saved texts can still be managed without recipients'
             count = len(sent)
@@ -362,7 +493,7 @@ def check(app, host, module, output=None):
             count = len(sent)
             with patch.object(console, 'create_chat_toolbar', return_value=menu), patch.object(menu, 'exec', return_value=menu.repeat_action):
                 console.show_chat_actions(event, QPoint(20, 20))
-            QTest.qWait(130)
+            finish_batch()
             assert sent[count:] == [('1', 'message to save')], '+1 must target selected recipients, not the source'
             assert second.text() == 'draft 2'
             assert first.text() == 'draft 1'
@@ -371,7 +502,7 @@ def check(app, host, module, output=None):
             count = len(sent)
             with patch.object(console, 'create_chat_toolbar', return_value=menu), patch.object(menu, 'exec', return_value=menu.repeat_action):
                 console.show_chat_actions(event, QPoint(20, 20))
-            QTest.qWait(200)
+            finish_batch()
             assert sent[count:] == [('1', 'message to save'), ('2', 'message to save')]
             assert first.text() == 'draft 1' and second.text() == 'draft 2'
             unavailable_menu = console.create_chat_toolbar({**event, 'source_room': 'missing'})
@@ -406,10 +537,27 @@ def check(app, host, module, output=None):
             viewer.set_settings_visible(True)
             QTest.qWait(50)
             assert console.isVisible() and second.text() == 'draft 2'
+            assert viewer.panel.property('joined') is True
             controls = console.rows['2'].tile._plugin_controls
             viewer.remove_room('2')
             assert controls._disposed and '2' not in console.rows
-            assert not console.checked_rooms() and console.pages.isHidden()
+            assert not console.checked_rooms() and not console.pages.isHidden()
+            viewer.panel.set_placeholder('')
+            for index in range(80):
+                viewer.panel.add_message('fixture', f'old section {index}')
+            QTest.qWait(20)
+            viewer.panel.jump_to_bottom()
+            scrollbar = viewer.panel.body.verticalScrollBar()
+            old_scroll = scrollbar.value()
+            viewer.panel.begin_replay_section()
+            viewer.panel.add_event({'text': '回看分段', '_replay_divider': True})
+            for index in range(12):
+                viewer.panel.add_message('fixture', f'replayed section {index}')
+            viewer.panel.end_replay_section()
+            if module.motion.enabled():
+                assert scrollbar.value() < scrollbar.maximum(), 'Replay should scroll into the new section, not jump'
+            QTest.qWait(260)
+            assert scrollbar.value() == scrollbar.maximum() and scrollbar.maximum() >= old_scroll
             if output:
                 output.parent.mkdir(parents=True, exist_ok=True)
                 viewer.grab().save(str(output))

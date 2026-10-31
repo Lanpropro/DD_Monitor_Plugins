@@ -1,12 +1,13 @@
 """Independent platform composers below the merged chat, one per live room."""
-from PySide6.QtCore import QPointF, Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QCursor, QPalette
+from PySide6.QtCore import QPointF, QPropertyAnimation, Qt, QTimer
+from PySide6.QtGui import QAction, QColor, QCursor, QFont, QImage, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (QApplication, QBoxLayout, QFrame, QHBoxLayout, QListView, QListWidget,
-    QListWidgetItem, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
+    QListWidgetItem, QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 
 from ddm.widgets import DanmakuPanel, Tile
 from ddm.danmaku_actions import CommentToolbar
-from .panels import SettingsPanel, console_button_style
+from ddm import motion, theme
+from .panels import ConsoleIconButton, SettingsPanel, console_button_style
 from .send_design import ACCESSORY_WIDTH, INPUT_HEIGHT, RecipientDelegate, SavedTextDelegate, SavedTextList, align_composer, colors, style_compose, stylesheet
 
 
@@ -14,13 +15,79 @@ class SendingDanmakuPanel(DanmakuPanel):
     def __init__(self, viewer):
         super().__init__(viewer)
         self.viewer = viewer
+        self._adding_divider = False
+        self._replay_section = False
+        self._scroll_animation = QPropertyAnimation(self.body.verticalScrollBar(), b'value', self)
+        self._scroll_animation.setDuration(220)
+        self._scroll_animation.setEasingCurve(motion.THEME_WAVE_EASING)
+        self.body.userScrolled.connect(self._scroll_animation.stop)
+        self.bottom_button.setAutoDefault(False)
+        self.bottom_button.setDefault(False)
+        self.bottom_button.setFocusPolicy(Qt.NoFocus)
+
+    def begin_replay_section(self):
+        self._scroll_animation.stop()
+        self._replay_section = True
+        self._section_scroll = self.body.verticalScrollBar().value()
+        self._scroll_revision += 1
+
+    def _restore_scroll_state(self, state):
+        if self._replay_section:
+            self._scroll_restore_id += 1
+            self._follow_tail = True
+            self.body.verticalScrollBar().setValue(self._section_scroll)
+            return
+        if self._scroll_animation.state() == QPropertyAnimation.Running and state[0]:
+            self._scroll_animation.setEndValue(self.body.verticalScrollBar().maximum())
+            return
+        super()._restore_scroll_state(state)
+
+    def end_replay_section(self):
+        self._replay_section = False
+        self._update_bottom_button()
+        bar = self.body.verticalScrollBar()
+        if motion.enabled():
+            self._scroll_animation.setStartValue(bar.value())
+            self._scroll_animation.setEndValue(bar.maximum())
+            self._scroll_animation.start()
+        else:
+            bar.setValue(bar.maximum())
 
     def add_event(self, event):
+        self._adding_divider = bool(event.get('_replay_divider'))
         super().add_event(event)
         self._blocks[-1]['source_room'] = str(event.get('source_room') or '')
+        self._blocks[-1]['_replay_divider'] = self._adding_divider
+        self._adding_divider = False
+
+    def _block_html(self, entry):
+        if self._adding_divider or entry.get('_replay_divider'):
+            width = max(1, self.body.viewport().width() - 24)
+            line = QImage(width, 80, QImage.Format_ARGB32)
+            line.fill(Qt.transparent)
+            painter = QPainter(line)
+            painter.setPen(QPen(theme.qcolor(theme.TEXT1), 1))
+            font = QFont(self.body.font())
+            font.setPixelSize(theme.FONT_CONTROL)
+            painter.setFont(font)
+            text = entry.get('text', '')
+            half = painter.fontMetrics().horizontalAdvance(text) / 2 + 12
+            painter.drawLine(0, 40, max(0, int(width / 2 - half)), 40)
+            painter.drawLine(min(width, int(width / 2 + half)), 40, width, 40)
+            painter.drawText(line.rect(), Qt.AlignCenter, text)
+            painter.end()
+            key = 'replay-separator-' + str(abs(hash(text)))
+            self._register_image(key, line)
+            return f'<p align="center" style="margin:0;"><img src="{key}" width="{width}" height="80"></p>'
+        return super()._block_html(entry)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if any(entry.get('_replay_divider') for entry in getattr(self, '_blocks', ())):
+            self._render_all()
 
     def _message_clicked(self, index, position):
-        if not 0 <= index < len(self._blocks):
+        if not 0 <= index < len(self._blocks) or self._blocks[index].get('_replay_divider'):
             return
         self._scroll_revision += 1
         self._scroll_trim_remainder = 0.0
@@ -95,13 +162,12 @@ class SendConsole(SettingsPanel):
         layout.setContentsMargins(16, 10, 16, 10)
         layout.setSpacing(10)
         heading = QHBoxLayout()
-        self.title = QLabel('弹幕发送')
+        self.title = QLabel('弹幕控制台')
         self.title.setObjectName('SendTitle')
         heading.addWidget(self.title, 1)
-        self.minimize = QPushButton('−')
+        self.minimize = ConsoleIconButton('minimize', '最小化弹幕控制台')
         self.minimize.setObjectName('SendMinimize')
         self.minimize.setAccessibleName('最小化发送台')
-        self.minimize.setFixedSize(28, 28)
         self.minimize.setToolTip('收起发送控制台，保留草稿并扩展弹幕栏。')
         self.minimize.clicked.connect(lambda: self.set_collapsed(True))
         heading.addWidget(self.minimize)
@@ -137,11 +203,6 @@ class SendConsole(SettingsPanel):
         work_layout = QVBoxLayout(self.work)
         work_layout.setContentsMargins(0, 0, 0, 0)
         work_layout.setSpacing(6)
-        self.context = QLabel('')
-        self.context.setObjectName('SendContext')
-        self.context.setTextFormat(Qt.PlainText)
-        self.context.setWordWrap(True)
-        work_layout.addWidget(self.context)
         self.body_layout.addWidget(self.work, 1)
         self.body_scroll = QScrollArea()
         self.body_scroll.setFrameShape(QFrame.NoFrame)
@@ -198,6 +259,7 @@ class SendConsole(SettingsPanel):
         self.feedback.setMaximumHeight(self.feedback.fontMetrics().height() * 2 + 4)
         work_layout.addWidget(self.feedback)
         self.feedback.hide()
+        self.work.hide()
         self.refresh_design()
 
     def add_saved_text(self, text):
@@ -259,7 +321,7 @@ class SendConsole(SettingsPanel):
         c = colors()
         for row in self.rows.values():
             for entry in row.tile._plugin_controls.applicable():
-                align_composer(entry.control.widget)
+                align_composer(entry.control.widget, self)
         style_compose(self.batch_panel.edit, self.batch_panel.send)
         style_compose(self.saved_input, self.save_text)
         for editor in self.findChildren(QLineEdit):
@@ -270,6 +332,56 @@ class SendConsole(SettingsPanel):
         self.rooms.viewport().update()
         self.restore.setStyleSheet(console_button_style('QPushButton'))
         self.update()
+
+    def make_interactions(self, parent):
+        bar = QWidget(parent)
+        bar.setObjectName('SendInteractions')
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        for kind, label in (('emote', '选择平台表情'), ('gift', '选择平台礼物')):
+            button = ConsoleIconButton(kind, label, bar)
+            button.clicked.connect(lambda _checked=False, b=button, k=kind: self.show_interactions(k, b))
+            layout.addWidget(button)
+        return bar
+
+    def interaction_menu(self, kind, anchor):
+        menu = QMenu(anchor)
+        platforms = {}
+        for key, row in self.rows.items():
+            platform = row.tile.room.get('platform', 'bilibili')
+            label = {'bilibili': '哔哩哔哩', 'douyu': '斗鱼', 'huya': '虎牙', 'douyin': '抖音'}.get(platform, platform)
+            if platform not in platforms:
+                platforms[platform] = menu.addMenu(label)
+            action = platforms[platform].addAction(self.viewer.rows[key].label())
+            composer = next((entry.control.widget for entry in row.tile._plugin_controls.applicable()
+                             if callable(getattr(entry.control.widget, 'open_emoticons' if kind == 'emote' else 'open_gifts', None))), None)
+            supported = composer is not None and (kind != 'gift' or platform not in ('huya', 'douyin'))
+            action.setEnabled(supported)
+            if supported:
+                action.triggered.connect(lambda _checked=False, w=composer, k=kind: self.open_interaction(w, k, anchor))
+            else:
+                action.setText(action.text() + '（平台暂不支持）')
+        if not platforms:
+            menu.addAction('暂无直播间').setEnabled(False)
+        return menu
+
+    @staticmethod
+    def open_interaction(composer, kind, anchor):
+        attribute = 'emote_button' if kind == 'emote' else 'gift_button' if hasattr(composer, 'gift_button') else 'gifts'
+        original = getattr(composer, attribute)
+        setattr(composer, attribute, anchor)
+        try:
+            getattr(composer, 'open_emoticons' if kind == 'emote' else 'open_gifts')()
+        finally:
+            setattr(composer, attribute, original)
+
+    def show_interactions(self, kind, anchor):
+        menu = self.interaction_menu(kind, anchor)
+        try:
+            menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
+        finally:
+            menu.deleteLater()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -306,6 +418,7 @@ class SendConsole(SettingsPanel):
                 self.stack.removeWidget(row)
                 row.shutdown()
                 self.statuses.pop(key, None)
+                self.rooms.itemDelegate().forget(key)
                 self.send_watches.pop(key, None)
                 timer = self.status_timers.pop(key, None)
                 if timer is not None:
@@ -341,6 +454,8 @@ class SendConsole(SettingsPanel):
         self.rooms.blockSignals(False)
         self.batch_targets.intersection_update(self.rows)
         self._update_selection()
+        self.work.setVisible(bool(self.rows))
+        self.viewer.replay_bar.refresh(force=True)
         self.refresh_design()
 
     def checked_rooms(self):
@@ -423,25 +538,23 @@ class SendConsole(SettingsPanel):
             if self.rooms.currentItem() is item:
                 self.rooms.setCurrentItem(None)
             self.rooms.viewport().update()
+        self.rooms.itemDelegate().animate(key, checked)
         self._update_selection()
 
     def _update_selection(self):
         keys = self.checked_rooms()
-        self.pages.setCurrentIndex(1 if len(keys) > 1 else 0)
-        self.pages.setVisible(bool(keys))
+        self.pages.setCurrentIndex(0 if len(keys) == 1 else 1)
+        self.pages.setVisible(bool(self.rows))
         if not keys:
             self.selected_room = None
-            self.context.setText('选择接收弹幕的主播' if self.rows else '')
         elif len(keys) == 1:
             self.selected_room = keys[0]
             self.stack.setCurrentWidget(self.rows[keys[0]])
-            self.context.setText(f'发送给 {self.viewer.rows[keys[0]].label()}')
             for index in range(self.rooms.count()):
                 if self.rooms.item(index).data(Qt.UserRole) == keys[0]:
                     self.rooms.setCurrentRow(index)
         else:
             self.selected_room = None
-            self.context.setText('同文发送')
         self.batch_panel.update_targets()
         self.saved_texts.setEnabled(not self.batch_panel.timer.isActive())
 
@@ -452,6 +565,11 @@ class SendConsole(SettingsPanel):
             self.setFixedHeight(settings.height())
         visible = not self.collapsed and (not settings.isHidden() or self.expanded_without_settings)
         self.setVisible(visible)
+        if self.viewer.panel.property('joined') != visible:
+            self.viewer.panel.setProperty('joined', visible)
+            self.viewer.panel.style().unpolish(self.viewer.panel)
+            self.viewer.panel.style().polish(self.viewer.panel)
+            self.viewer.panel.update()
         self.restore.setVisible(not visible)
         self.restore_bar.setVisible(not visible)
 
@@ -481,7 +599,9 @@ class BatchSend(QWidget):
         compose.setContentsMargins(0, 0, 16, 0)
         compose.setSpacing(4)
         self.edit = QLineEdit()
-        self.edit.setPlaceholderText('发送给所选主播的相同内容')
+        self.edit.setPlaceholderText('输入弹幕，Enter 发送')
+        self.edit.textChanged.connect(lambda _text: self.update_targets())
+        self.edit.returnPressed.connect(self.start)
         compose.addWidget(self.edit, 1)
         self.send = QPushButton('发送')
         self.send.setProperty('sendPrimary', True)
@@ -490,6 +610,8 @@ class BatchSend(QWidget):
         accessories.setFixedWidth(ACCESSORY_WIDTH)
         extras = QHBoxLayout(accessories)
         extras.setContentsMargins(0, 0, 0, 0)
+        self.interactions = console.make_interactions(accessories)
+        extras.addWidget(self.interactions)
         self.cancel = QPushButton('取消')
         self.cancel.clicked.connect(self.stop)
         self.cancel.hide()
@@ -506,7 +628,7 @@ class BatchSend(QWidget):
         if not self.timer.isActive():
             count = len(self.console.checked_rooms())
             self.send.setText('发送')
-            self.send.setEnabled(bool(count))
+            self.send.setEnabled(bool(count and self.edit.text().strip()))
 
     def start(self, *_args):
         self.begin(self.edit.text())
@@ -521,6 +643,7 @@ class BatchSend(QWidget):
         self.event = dict(event) if event is not None else {'text': text}
         self.send.setEnabled(False)
         self.cancel.show()
+        self.interactions.hide()
         self.edit.setReadOnly(True)
         self.console.rooms.setEnabled(False)
         self.console.saved_texts.setEnabled(False)
@@ -574,6 +697,7 @@ class BatchSend(QWidget):
             self.active = None
         self.edit.setReadOnly(False)
         self.cancel.hide()
+        self.interactions.show()
         self.console.rooms.setEnabled(True)
         self.console.saved_texts.setEnabled(True)
         self.update_targets()
