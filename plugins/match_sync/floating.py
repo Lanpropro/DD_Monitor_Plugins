@@ -20,7 +20,8 @@ class FloatingCrop(QWidget):
         self.hover_point = QPoint(-1, -1)
         self.aspect = 16 / 9
         self.setMouseTracking(True)
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        # Ordinary child transparency restores the backing store behind moved crops.
+        self.setAutoFillBackground(False)
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.setToolTip('拖动画面移动；滚轮或右下角缩放；双击重新框选；右上角关闭。')
         self.setAccessibleName(label + '：悬浮画面')
@@ -42,11 +43,14 @@ class FloatingCrop(QWidget):
 
     def fit_geometry(self, x, y, width):
         parent = self.parentWidget()
+        previous = self.geometry()
         maximum = min(parent.width(), parent.height() * self.aspect)
         width = max(1, min(maximum, max(120, width)))
         height = min(parent.height(), round(width / self.aspect))
         self.setGeometry(round(max(0, min(parent.width() - width, x))),
                          round(max(0, min(parent.height() - height, y))), round(width), height)
+        if previous != self.geometry():
+            parent.update(previous)
 
     def eventFilter(self, watched, event):
         if watched is self.parentWidget() and event.type() == QEvent.Resize:
@@ -71,8 +75,7 @@ class FloatingCrop(QWidget):
     def resize_hit(self, point):
         return point.x() >= self.width() - 18 and point.y() >= self.height() - 18
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
+    def paint_picture(self, painter):
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(Qt.NoPen)
         brush = QBrush(theme.qcolor(theme.CONTENT))
@@ -87,6 +90,10 @@ class FloatingCrop(QWidget):
                 brush.setTransform(transform)
         painter.setBrush(brush)
         painter.drawRoundedRect(QRectF(self.rect()), 10, 10)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        self.paint_picture(painter)
         if not self.tools_visible:
             return
         text = painter.fontMetrics().elidedText(self.label + ' · 悬浮画面', Qt.ElideRight, max(0, self.width() - 64))
@@ -108,7 +115,8 @@ class FloatingCrop(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            if self.tools_visible and self.close_rect().contains(event.position().toPoint()):
+            self.tools_visible = True
+            if self.close_rect().contains(event.position().toPoint()):
                 self.close()
                 return
             self.raise_()
@@ -117,6 +125,7 @@ class FloatingCrop(QWidget):
             event.accept()
 
     def mouseMoveEvent(self, event):
+        self.tools_visible = True
         self.hover_point = event.position().toPoint()
         if self.drag is not None:
             origin, geometry, resizing = self.drag

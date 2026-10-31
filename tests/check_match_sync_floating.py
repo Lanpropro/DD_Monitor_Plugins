@@ -53,13 +53,21 @@ def check(app, host, module, output=None):
             floating = viewer.show_floating_crop(row, (.5, .5, .5, .5), (1, source))
             QTest.qWait(30)
             assert floating.parentWidget() is host and floating.window() is host
+            assert not floating.testAttribute(Qt.WA_TranslucentBackground)
+            assert not floating.testAttribute(Qt.WA_NoSystemBackground), 'Moving crops require background restoration'
             assert floating.image.size() == source.size(), 'Do not crop an already downscaled tile screenshot'
             assert floating.grab().toImage().pixelColor(floating.width() // 2, floating.height() // 2) == QColor('lime')
             app.sendEvent(floating, QEvent(QEvent.Leave))
             assert not floating.tools_visible
             assert floating.grab().toImage().pixelColor(floating.width() // 2, 2) == QColor('lime'), 'The image must fill the former header space'
             assert floating.mask().isEmpty(), 'Do not use an integer region mask for rounded video'
-            rounded = floating.grab().toImage()
+            ratio = floating.devicePixelRatioF()
+            rounded = QImage(round(floating.width() * ratio), round(floating.height() * ratio), QImage.Format_ARGB32_Premultiplied)
+            rounded.setDevicePixelRatio(ratio)
+            rounded.fill(Qt.transparent)
+            painting = QPainter(rounded)
+            floating.paint_picture(painting)
+            painting.end()
             assert rounded.pixelColor(0, 0).alpha() == 0
             assert any(0 < rounded.pixelColor(x, y).alpha() < 255 for x in range(20) for y in range(20)), 'Rounded corners need fractional alpha coverage'
             edge = rounded.width() - 1
@@ -108,6 +116,21 @@ def check(app, host, module, output=None):
             QTest.qWait(20)
             assert host.rect().contains(floating.geometry()), 'Keep the crop accessible after app resizing'
             host.resize(1400, 900)
+            for index in range(12):
+                floating.fit_geometry(40 + index * 8, 40 + index * 4, 240 + (index % 3) * 75)
+                moving = source.copy()
+                painting = QPainter(moving)
+                painting.fillRect(1000 + index * 30, 600, 80, 120, QColor('blue'))
+                painting.end()
+                floating.set_frame((1000 + index, moving))
+                app.processEvents()
+            before_move = floating.pos()
+            position = floating.mapTo(host, QPoint(40, 40))
+            assert host.childAt(position) is floating
+            QTest.mousePress(host.windowHandle(), Qt.LeftButton, pos=position)
+            QTest.mouseMove(host.windowHandle(), position + QPoint(90, 45))
+            QTest.mouseRelease(host.windowHandle(), Qt.LeftButton, pos=position + QPoint(90, 45))
+            assert floating.pos() == before_move + QPoint(90, 45), 'Resize/frame updates must preserve hit-tested dragging'
             if output:
                 output.parent.mkdir(parents=True, exist_ok=True)
                 app.sendEvent(floating, QEnterEvent(QPointF(20, 20), QPointF(20, 20), QPointF(20, 20)))
@@ -118,8 +141,9 @@ def check(app, host, module, output=None):
                 viewer.remove_room('2')
             assert not viewer.floating_crops
             other = viewer.show_floating_crop(viewer.rows['1'], (0, 0, .5, .5), (1, source))
-            app.sendEvent(other, QEnterEvent(QPointF(20, 20), QPointF(20, 20), QPointF(20, 20)))
-            QTest.mouseClick(other, Qt.LeftButton, pos=other.close_rect().center())
+            position = other.mapTo(host, other.close_rect().center())
+            assert host.childAt(position) is other
+            QTest.mouseClick(host.windowHandle(), Qt.LeftButton, pos=position)
             assert not viewer.floating_crops
             viewer.show_floating_crop(viewer.rows['1'], (0, 0, 1, 1), (1, source))
             viewer.stop()
