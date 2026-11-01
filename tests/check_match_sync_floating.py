@@ -10,10 +10,11 @@ from unittest.mock import patch
 
 
 def check_selection(app, module, source):
-    from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
-    from PySide6.QtTest import QTest
+    from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt
+    from PySide6.QtGui import QMouseEvent
 
     canvas = module.Canvas(selecting=True)
+    canvas.setAttribute(Qt.WA_DontShowOnScreen)
     canvas.resize(960, 640)  # Include letterboxing in coordinate checks.
     canvas.set_frame((1, source))
     canvas.show()
@@ -24,9 +25,13 @@ def check_selection(app, module, source):
         return QPoint(round(area.x() + x * area.width()), round(area.y() + y * area.height()))
 
     def drag(start, end):
-        QTest.mousePress(canvas, Qt.LeftButton, pos=start)
-        QTest.mouseMove(canvas, end)
-        QTest.mouseRelease(canvas, Qt.LeftButton, pos=end)
+        # Native QTest.mouseMove moves the shared desktop pointer. Deliver local
+        # gestures directly so user/parallel-window movement cannot interleave.
+        for kind, point, button, buttons in ((QEvent.MouseButtonPress, start, Qt.LeftButton, Qt.LeftButton),
+                                             (QEvent.MouseMove, end, Qt.NoButton, Qt.LeftButton),
+                                             (QEvent.MouseButtonRelease, end, Qt.LeftButton, Qt.NoButton)):
+            app.sendEvent(canvas, QMouseEvent(kind, QPointF(point), QPointF(canvas.mapToGlobal(point)),
+                                              button, buttons, Qt.NoModifier))
 
     try:
         drag(position(.2, .2), position(.6, .6))
