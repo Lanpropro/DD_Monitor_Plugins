@@ -9,11 +9,63 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 
+def check_selection(app, module, source):
+    from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
+    from PySide6.QtTest import QTest
+
+    canvas = module.Canvas(selecting=True)
+    canvas.resize(960, 640)  # Include letterboxing in coordinate checks.
+    canvas.set_frame((1, source))
+    canvas.show()
+    app.processEvents()
+
+    def position(x, y):
+        area = canvas.image_rect
+        return QPoint(round(area.x() + x * area.width()), round(area.y() + y * area.height()))
+
+    def drag(start, end):
+        QTest.mousePress(canvas, Qt.LeftButton, pos=start)
+        QTest.mouseMove(canvas, end)
+        QTest.mouseRelease(canvas, Qt.LeftButton, pos=end)
+
+    try:
+        drag(position(.2, .2), position(.6, .6))
+        original = QRectF(canvas.crop)
+        drag(position(.4, .4), position(.45, .45))
+        assert abs(canvas.crop.width() - original.width()) < .003, 'Dragging inside must move, not replace, the selection'
+        assert abs(canvas.crop.x() - .25) < .003
+        for start, end in (((.25, .45), (.2, .45)), ((.65, .45), (.7, .45)),
+                           ((.45, .25), (.45, .2)), ((.45, .65), (.45, .7))):
+            drag(position(*start), position(*end))
+        assert abs(canvas.crop.x() - .2) < .003 and abs(canvas.crop.width() - .5) < .003
+        assert abs(canvas.crop.y() - .2) < .003 and abs(canvas.crop.height() - .5) < .003
+        for start, end in (((.2, .2), (.15, .15)), ((.7, .15), (.75, .1)),
+                           ((.15, .7), (.1, .75)), ((.75, .75), (.8, .8))):
+            drag(position(*start), position(*end))
+        assert abs(canvas.crop.x() - .1) < .003 and abs(canvas.crop.width() - .7) < .003
+        original = QRectF(canvas.crop)
+        drag(position(.9, .9), position(.95, .95))
+        assert canvas.crop == original, 'Outside drags must not discard the selection'
+        drag(position(.4, .4), position(-1, -1))
+        assert canvas.crop.topLeft() == QPointF(0, 0)
+        assert abs(canvas.crop.width() - original.width()) < .003
+        drag(position(0, .35), position(.9, .35))
+        assert canvas.crop.width() > 0 and canvas.crop.right() <= 1, 'An edge cannot cross its opposite edge'
+        canvas.reset_selection()
+        assert canvas.crop == QRectF(0, 0, 1, 1)
+        drag(position(.7, .7), position(.3, .3))
+        assert abs(canvas.crop.x() - .3) < .003 and abs(canvas.crop.width() - .4) < .003, 'Reset allows an explicit new selection'
+    finally:
+        canvas.close()
+        canvas.deleteLater()
+        app.processEvents()
+
+
 def check(app, host, module, output=None):
     from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt
     from PySide6.QtGui import QColor, QEnterEvent, QImage, QPainter, QPixmap, QWheelEvent
     from PySide6.QtTest import QTest
-    from PySide6.QtWidgets import QDialog, QWidget
+    from PySide6.QtWidgets import QDialog, QDialogButtonBox, QPushButton, QWidget
     from ddm import plugins
     host.settings, host.rooms = {}, []
     host.resize(1400, 900)
@@ -38,6 +90,7 @@ def check(app, host, module, output=None):
             painter = QPainter(source)
             painter.fillRect(960, 540, 960, 540, QColor('lime'))
             painter.end()
+            check_selection(app, module, source)
             requests = []
             reader = SimpleNamespace(configure=lambda *args, **kwargs: requests.append(kwargs['active']))
             decoder = SimpleNamespace(picture_at=lambda stamp, exact=False: (stamp, source), pictures=reader,
@@ -48,7 +101,23 @@ def check(app, host, module, output=None):
             def select_region(dialog):
                 selecting = dialog.findChild(module.Canvas)
                 assert selecting.selecting and '悬浮画面' in dialog.windowTitle()
+                dialog.setAttribute(Qt.WA_DontShowOnScreen)
+                dialog.show()
+                app.processEvents()
+                buttons = dialog.findChild(QDialogButtonBox)
+                reset = next(button for button in dialog.findChildren(QPushButton) if button.text() == '使用整个画面')
+                confirm = buttons.button(QDialogButtonBox.Ok)
+                cancel = buttons.button(QDialogButtonBox.Cancel)
+                centers = [button.mapTo(dialog, button.rect().center()).y() for button in (reset, confirm, cancel)]
+                assert max(centers) - min(centers) <= 1, 'All crop actions belong on the same row'
+                gap = confirm.mapTo(dialog, QPoint()).x() - reset.mapTo(dialog, reset.rect().topRight()).x()
+                assert 0 <= gap <= 24, 'Keep full-frame, confirm and cancel adjacent'
                 selecting.crop = QRectF(.5, .5, .5, .5)
+                selecting.selection_ready = True
+                if output:
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    dialog.grab().save(str(output.with_name('selection.png')))
+                dialog.hide()
                 return QDialog.Accepted
             with patch.object(module.QDialog, 'exec', select_region):
                 viewer.choose_crop(row, floating=True)
@@ -99,6 +168,42 @@ def check(app, host, module, output=None):
             QTest.mouseRelease(floating, Qt.LeftButton, pos=corner)
             assert floating.width() > width * 1.2
             assert abs(floating.width() / floating.height() - 16 / 9) < .02
+            for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
+                floating.fit_geometry(400, 300, 320)
+                original = floating.geometry()
+                corner = QPoint(4 if dx < 0 else floating.width() - 4, 4 if dy < 0 else floating.height() - 4)
+                point = floating.mapTo(host, corner)
+                QTest.mousePress(host.windowHandle(), Qt.LeftButton, pos=point)
+                QTest.mouseMove(host.windowHandle(), point + QPoint(dx * 80, dy * 45))
+                QTest.mouseRelease(host.windowHandle(), Qt.LeftButton, pos=point + QPoint(dx * 80, dy * 45))
+                assert floating.width() > original.width() + 60, f'Corner {dx, dy} must resize'
+                anchor = lambda rect: QPoint(rect.x() if dx > 0 else rect.x() + rect.width(),
+                                             rect.y() if dy > 0 else rect.y() + rect.height())
+                assert (anchor(floating.geometry()) - anchor(original)).manhattanLength() <= 1, 'Keep the opposite corner fixed'
+                point = floating.mapTo(host, QPoint(4 if dx < 0 else floating.width() - 4,
+                                                    4 if dy < 0 else floating.height() - 4))
+                QTest.mousePress(host.windowHandle(), Qt.LeftButton, pos=point)
+                QTest.mouseMove(host.windowHandle(), point - QPoint(dx * 60, dy * 34))
+                QTest.mouseRelease(host.windowHandle(), Qt.LeftButton, pos=point - QPoint(dx * 60, dy * 34))
+                assert floating.width() < original.width() + 40, f'Corner {dx, dy} must shrink'
+                assert (anchor(floating.geometry()) - anchor(original)).manhattanLength() <= 1
+            adjusted = []
+            def adjust_region(dialog):
+                selecting = dialog.findChild(module.Canvas)
+                assert selecting.crop == floating.crop and selecting.selection_ready, 'Reopen the existing editable crop'
+                selecting.crop = QRectF(.4, .4, .5, .5)
+                adjusted.append(True)
+                return QDialog.Accepted
+            with patch.object(module.QDialog, 'exec', adjust_region):
+                QTest.mouseClick(floating, Qt.LeftButton, pos=floating.adjust_rect().center())
+            assert adjusted and floating.crop == QRectF(.4, .4, .5, .5)
+            assert row.crop == original_crop, 'Fine tuning must not change alignment/comparison crops'
+            def cancel_adjustment(dialog):
+                dialog.findChild(module.Canvas).crop = QRectF(0, 0, 1, 1)
+                return QDialog.Rejected
+            with patch.object(module.QDialog, 'exec', cancel_adjustment):
+                QTest.mouseClick(floating, Qt.LeftButton, pos=floating.adjust_rect().center())
+            assert floating.crop == QRectF(.4, .4, .5, .5), 'Cancel must preserve the applied crop'
             floating.fit_geometry(10, 10, 400)
             anchor = floating.mapTo(host, floating.rect().bottomRight() - QPoint(4, 4))
             QTest.mousePress(host.windowHandle(), Qt.LeftButton, pos=anchor)
@@ -134,6 +239,12 @@ def check(app, host, module, output=None):
                                 QPoint(), QPoint(0, 120), Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
             app.sendEvent(floating, wheel)
             assert floating.geometry() == locked, 'Position lock prevents dragging and wheel resize'
+            for point in (QPoint(4, 4), QPoint(floating.width() - 4, 4),
+                          QPoint(4, floating.height() - 4), floating.rect().bottomRight() - QPoint(4, 4)):
+                QTest.mousePress(floating, Qt.LeftButton, pos=point)
+                QTest.mouseMove(floating, point + QPoint(20, 20))
+                QTest.mouseRelease(floating, Qt.LeftButton, pos=point + QPoint(20, 20))
+                assert floating.geometry() == locked, 'Position lock must cover every corner'
             QTest.mouseClick(floating, Qt.LeftButton, pos=floating.lock_rect().center())
             assert floating.lock_mode == 0
             viewer.render_floating_crops(100, {'1': 0, '2': -4})
@@ -208,7 +319,8 @@ def check(app, host, module, output=None):
             viewer.stop()
             assert not viewer.floating_crops
             return {'passed': True, 'source_resolution': '1920x1080', 'app_wide_drag': True,
-                    'wheel_corner_resize': True, 'replay_source_time': True, 'network_requests': 0}
+                    'wheel_corner_resize': True, 'four_corner_resize': True, 'editable_selection': True,
+                    'inline_actions': True, 'fine_tune_button': True, 'replay_source_time': True, 'network_requests': 0}
         finally:
             row.decoder = None
             viewer.embedded = False
