@@ -30,6 +30,9 @@ from .sending import SendConsole, SendingDanmakuPanel
 from .panels import ConsoleIconButton, MatchSettingsDialog, SettingsPanel, style_checkbox
 from .replay import ReplayBar, ReplayTimeline
 from .regions import match_regions
+import numpy as np
+
+from .autocrop import Follower as CropFollower, clamp as clamp_auto_crop
 from .pip import (CORNERS as PIP_CORNERS, DEFAULT_WIDTH, HANDLE, MAX_WIDTH, MIN_BOX, MIN_WIDTH,
                 clamp_box, clamp_crop, crop_pixels, fit, from_normalized, inset as pip_inset,
                 resize_keeping_aspect, to_normalized)
@@ -1475,6 +1478,13 @@ class Viewer(QDialog):
         self.pip_source = QComboBox()
         self.pip_source.setMinimumWidth(150)
         self.pip_source.setToolTip("画中画取自哪一路：通常是画质较糊、但想看到人脸的那一路。")
+        self.pip_follow = QCheckBox("自动跟随摄像头")
+        self.pip_follow.setChecked(bool(saved_pip.get("follow", False)))
+        self.pip_follow.setToolTip(
+            "自动识别这一路画面里的摄像头小窗并裁剪，主播挪动摄像头后会自动跟过去；"
+            "识别不到时沿用左键「框选画面」手动框选的区域。")
+        self.pip_follower = CropFollower()
+        self.pip_auto_crop = None
         self.pip_crop_button = QPushButton("框选画面")
         self.pip_crop_button.setToolTip("拖选画中画要显示的部分，例如二路解说的人脸。")
         self.pip_hint = QLabel("小窗可拖动，拖右下角缩放")
@@ -1483,10 +1493,12 @@ class Viewer(QDialog):
         self.pip_check.toggled.connect(self._pip_changed)
         self.pip_source.currentIndexChanged.connect(self._pip_changed)
         self.pip_crop_button.clicked.connect(self._pip_crop_clicked)
+        self.pip_follow.toggled.connect(self._pip_follow_toggled)
         self.pip_row = QHBoxLayout()
         self.pip_row.setSpacing(6)
         self.pip_row.addWidget(self.pip_check)
         self.pip_row.addWidget(self.pip_source, 1)
+        self.pip_row.addWidget(self.pip_follow)
         self.pip_row.addWidget(self.pip_crop_button)
         self.pip_row.addWidget(self.pip_hint)
         self.hidden_host_widgets = {}
@@ -2322,6 +2334,7 @@ class Viewer(QDialog):
             "rect": list(self.pip_rect) if self.pip_rect else None,
             "corner": self.pip_corner,
             "width": self.pip_width,
+            "follow": self.pip_follow.isChecked(),
         })
 
     def _buffer_reserve_changed(self):
@@ -3802,7 +3815,10 @@ class Viewer(QDialog):
 
     def _sync_pip_geometry(self):
         row = self.rows.get(self.pip_room)
-        self.canvas.pip_crop = tuple(row.pip_crop) if row is not None else (0.0, 0.0, 1.0, 1.0)
+        crop = tuple(row.pip_crop) if row is not None else (0.0, 0.0, 1.0, 1.0)
+        if self.pip_follow.isChecked() and self.pip_auto_crop is not None:
+            crop = tuple(self.pip_auto_crop)
+        self.canvas.pip_crop = crop
         self.canvas.pip_rect = self.pip_rect
         self.canvas.pip_default = (self.pip_corner, self.pip_width)
 
@@ -3817,6 +3833,7 @@ class Viewer(QDialog):
             self.pip_room = str(data)
         self.pip_source.setEnabled(self.pip_enabled)
         self.pip_crop_button.setEnabled(self.pip_enabled and bool(self.pip_room))
+        self.pip_follow.setEnabled(self.pip_enabled and bool(self.pip_room))
         self.pip_hint.setEnabled(self.pip_enabled)
         if self.pip_enabled and not self.pip_room:
             self.notice.setText("画中画没有可选来源：请再拖入至少一位主播，或先取消勾选")
@@ -3845,6 +3862,56 @@ class Viewer(QDialog):
         self.pip_crop_button.setEnabled(self.pip_enabled and bool(self.pip_room))
         self._sync_pip_geometry()
 
+    def _pip_follow_toggled(self, checked):
+        self.pip_follower.reset()
+        self.pip_auto_crop = None
+        if checked and not self.pip_enabled:
+            self.pip_check.setChecked(True)
+        if checked:
+            # 手动框过的区域当起点：跟随从这块开始，比整帧靠谱
+            row = self.rows.get(self.pip_room)
+            crop = tuple(row.pip_crop) if row is not None else None
+            if crop is not None and max(abs(value - pad) for value, pad in
+                                        zip(crop, (0.0, 0.0, 1.0, 1.0))) > 0.02:
+                self.pip_follower.rect = crop
+                self.pip_auto_crop = crop
+        self._sync_pip_geometry()
+        self.render()
+        self.changed()
+
+    @staticmethod
+    def _pip_thumb(image, width=320, height=180):
+        """Small grayscale copy of the inset picture, or None."""
+        if not isinstance(image, QImage):
+            image = QImage.fromData(image) if image else None
+        if image is None or image.isNull():
+            return None
+        small = image.scaled(width, height, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        small = small.convertToFormat(QImage.Format_Grayscale8)
+        stride = small.bytesPerLine()
+        data = np.frombuffer(small.constBits(), dtype=np.uint8, count=stride * small.height())
+        return data.reshape(small.height(), stride)[:, :small.width()].copy()
+
+    def _follow_pip_crop(self, picture):
+        """Run the detector on schedule and keep the inset crop in sync."""
+        if not self.pip_enabled or not self.pip_follow.isChecked() or picture is None:
+            return
+        now = time.monotonic()
+        if not self.pip_follower.due(now):
+            return
+        image = picture[1] if isinstance(picture, (tuple, list)) and len(picture) > 1 else picture
+        gray = self._pip_thumb(image)
+        if gray is None:
+            return
+        rect = self.pip_follower.update(gray, now)
+        if rect is None:
+            return
+        previous = self.pip_auto_crop
+        self.pip_auto_crop = clamp_auto_crop(rect)
+        if previous is None or max(abs(a - b) for a, b in zip(previous, self.pip_auto_crop)) > 0.01:
+            self._sync_pip_geometry()
+            self.changed()
+
     def _pip_crop_clicked(self):
         row = self.rows.get(self.pip_source.currentData() or self.pip_room)
         if row is None:
@@ -3857,6 +3924,8 @@ class Viewer(QDialog):
         if rect is None:
             return
         row.pip_crop = rect
+        self.pip_follower.reset()
+        self.pip_auto_crop = None
         self._sync_pip_geometry()
         self.render()
         self.changed()
@@ -3878,6 +3947,7 @@ class Viewer(QDialog):
             # Keep the last inset frame: picture_at returns None while a decode is
             # still running, and clearing here would make the inset flicker.
             return
+        self._follow_pip_crop(picture)
         self.canvas.set_pip(picture)
 
     def _suppress_host_audio(self):
@@ -3927,6 +3997,8 @@ class Viewer(QDialog):
 
     def stop(self):
         self.analysis_serial += 1
+        self.pip_follower.reset()
+        self.pip_auto_crop = None
         self.late_buffer = LateBuffer(self.reserve_seconds)
         self.late_notice.hide()
         self.matching = False

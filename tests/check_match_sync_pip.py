@@ -177,8 +177,16 @@ class ViewerWiringTests(unittest.TestCase):
                 self.assertIn(text, self.source)
 
     def test_the_crop_reaches_the_canvas_as_a_plain_tuple(self):
-        self.assertIn('self.canvas.pip_crop = tuple(row.pip_crop)', self.source)
+        self.assertIn('self.canvas.pip_crop = crop', self.source)
+        self.assertIn('tuple(row.pip_crop) if row is not None else (0.0, 0.0, 1.0, 1.0)', self.source)
         self.assertNotIn('self.canvas.pip_crop = QRectF(', self.source)
+
+    def test_the_follow_crop_overrides_the_manual_box(self):
+        for text in ('if self.pip_follow.isChecked() and self.pip_auto_crop is not None:',
+                     'crop = tuple(self.pip_auto_crop)',
+                     'self.pip_auto_crop = clamp_auto_crop(rect)'):
+            with self.subTest(text=text):
+                self.assertIn(text, self.source)
 
     def test_the_inset_has_no_accent_border(self):
         start = self.source.index('def _paint_pip')
