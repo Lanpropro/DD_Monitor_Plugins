@@ -2859,7 +2859,9 @@ class Viewer(QDialog):
             return
         if not self.embedded:
             self._suppress_host_audio()
-        self._sync_sidebar_marks()
+        dragging_crop = any(crop.drag is not None for crop in self.floating_crops.values())
+        if not dragging_crop:
+            self._sync_sidebar_marks()
         self.sync_picture()
         clock = self.live_clock()
         wanted = self.target_shifts()
@@ -2922,7 +2924,7 @@ class Viewer(QDialog):
             self.notice.setText('整组回看中；后台继续接收直播并自动对齐')
         self._update_sync_health(clock, shifts)
         eligible = []
-        chat_budget = min(80, max(1, 200 // max(1, len(self.rows))))
+        chat_budget = min(2 if dragging_crop else 80, max(1, 200 // max(1, len(self.rows))))
         for room_id, row in self.rows.items():
             bounds = row.decoder.history.bounds_at(clock + shifts[room_id]) if row.decoder is not None else None
             text = ""
@@ -2942,7 +2944,7 @@ class Viewer(QDialog):
                 reference = self.alignment.reference
                 text += (f" · 播放偏移：目标 {wanted[reference] - wanted[room_id]:+.2f} 秒，"
                          f"当前 {shifts[reference] - shifts[room_id]:+.2f} 秒")
-            if row.buffer_text != text:
+            if not dragging_crop and row.buffer_text != text:
                 row.buffer_text = text
                 row.refresh_status()
             target = clock + shifts[room_id]
