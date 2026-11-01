@@ -281,10 +281,14 @@ class PictureReader:
             if self.history is not history:
                 self.images.clear()
                 self.history = history
-            self.requested = time.monotonic()
+            now = time.monotonic()
+            elapsed = max(0, now - self.requested)
+            self.requested = now
             cached_backward = frame[0] in self.images and self.target is not None and frame[0] < self.target[0]
             if not cached_backward and (frame != self.target or frame[0] not in self.images):
-                if self.target is not None and (frame[1] < self.target[1] - .05 or frame[1] > self.target[1] + .5):
+                # A delayed GUI poll advances with elapsed playback time; it is
+                # not a seek and must not restart decoding from a keyframe.
+                if self.target is not None and (frame[1] < self.target[1] - .05 or frame[1] > self.target[1] + elapsed + .5):
                     self.reset_requested = True
                 self.target = frame
                 self.wake.set()
@@ -309,7 +313,7 @@ class PictureReader:
             while not self.cancelled.is_set():
                 if not self.wake.wait(1):
                     with self.lock:
-                        if time.monotonic() - self.requested >= 1:
+                        if self.target is None or not self.active:
                             self.images.clear()
                             codec = owner = sequence = decoded_until = None
                     continue
