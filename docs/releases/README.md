@@ -21,6 +21,7 @@
 | 版本 | 本地说明 | GitHub 来源 |
 | --- | --- | --- |
 | 1.10.0 | [1.10.0](RELEASE-match-sync-v1.10.0.md) | [match-sync-v1.10.0（本 Fork）](https://github.com/Sarff11/DD_Monitor_Plugins/releases/tag/match-sync-v1.10.0) |
+| 1.11.0 | [1.11.0](RELEASE-match-sync-v1.11.0.md) | [match-sync-v1.11.0（本 Fork）](https://github.com/Sarff11/DD_Monitor_Plugins/releases/tag/match-sync-v1.11.0) |
 | 1.9.2 | [1.9.2](RELEASE-match-sync-v1.9.2.md) | [match-sync-v1.9.2（本 Fork）](https://github.com/Sarff11/DD_Monitor_Plugins/releases/tag/match-sync-v1.9.2) |
 | 1.9.1、1.9、1.8 | [1.9.1](RELEASE-match-sync-v1.9.1.md)、[1.9](RELEASE-match-sync-v1.9.md)、[1.8](RELEASE-match-sync-v1.8.md) | 仅本机构建，未单独发布 |
 | 1.7 | [1.7](RELEASE-match-sync-v1.7.md) | [1.0.0-alpha（本 Fork，资产 `match_sync-1.7.zip`）](https://github.com/Sarff11/DD_Monitor_Plugins/releases/tag/1.0.0-alpha) |

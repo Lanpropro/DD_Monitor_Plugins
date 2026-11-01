@@ -1,6 +1,6 @@
 # DD监控室CE · 二路插件（分支修改版）
 
-这是 [DD 监控室 CE](https://github.com/Lanpropro/DD_Monitor_CE) 二路插件 `match_sync` 的**分支修改版**：基于原作者 `1.5` 修改，当前版本 `1.10.0`。
+这是 [DD 监控室 CE](https://github.com/Lanpropro/DD_Monitor_CE) 二路插件 `match_sync` 的**分支修改版**：基于原作者 `1.5` 修改，当前版本 `1.11.0`。
 
 本仓库只包含二路插件本体，不包含其他插件，也没有其他插件的下载入口。
 
@@ -12,25 +12,25 @@
 
 ## 下载
 
-- 最新安装包：[match-sync-v1.10.0](https://github.com/Sarff11/DD_Monitor_Plugins/releases/tag/match-sync-v1.10.0)，文件名 `match_sync-1.10.0.zip`
+- 最新安装包：[match-sync-v1.10.0](https://github.com/Sarff11/DD_Monitor_Plugins/releases/tag/match-sync-v1.11.0)，文件名 `match_sync-1.11.0.zip`
 - 逐版本变化：[plugins/match_sync/CHANGELOG.md](plugins/match_sync/CHANGELOG.md)
 - 版本与发布规则：[docs/versioning.md](docs/versioning.md)、[docs/releases.md](docs/releases.md)
 
 | 插件 | ID | 版本 |
 | --- | --- | --- |
-| 比赛二路同步 | `match_sync` | 1.10.0 |
+| 比赛二路同步 | `match_sync` | 1.11.0 |
 
 ## 修改版做了什么
 
 - **画中画**：把二路解说的框选区域叠在主画面里，可拖动、拖右下角等比缩放，位置随设置保存
-- **自动跟随**：勾选后自动识别副直播间的摄像头窗口并跟随，主播挪位置也不用手动回框
+- **自动框选**：点「自动框选」一次识别副直播间里的摄像头窗口并设成裁剪区域；手动框选松手后四边自动贴合画面分界，不再多裁少裁
 - **每路画质**：下方控制台每一路单独换档，不必切主画面，换档只重启该路
 - **声道**：点按循环 原始 → 仅左 → 仅右，右键直接选，不依赖弹出菜单
 - **分隔条**：弹幕栏宽度跟随光标，双击恢复默认，拖动时不再回弹
 
 ## 安装
 
-1. 下载 `match_sync-1.10.0.zip`；GitHub 自动生成的 Source code ZIP 不能当作安装包
+1. 下载 `match_sync-1.11.0.zip`；GitHub 自动生成的 Source code ZIP 不能当作安装包
 2. 先在「设置 → 插件」删除旧的 `match_sync`（本体不支持同 ID 覆盖）
 3. 「装载插件…」选择该 ZIP，或把 ZIP 拖入插件页面
 4. 勾选插件，点「保存并重启」

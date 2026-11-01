@@ -181,12 +181,15 @@ class ViewerWiringTests(unittest.TestCase):
         self.assertIn('tuple(row.pip_crop) if row is not None else (0.0, 0.0, 1.0, 1.0)', self.source)
         self.assertNotIn('self.canvas.pip_crop = QRectF(', self.source)
 
-    def test_the_follow_crop_overrides_the_manual_box(self):
-        for text in ('if self.pip_follow.isChecked() and self.pip_auto_crop is not None:',
-                     'crop = tuple(self.pip_auto_crop)',
-                     'self.pip_auto_crop = clamp_auto_crop(rect)'):
+    def test_the_auto_crop_button_writes_the_detected_box(self):
+        for text in ('QPushButton("自动框选")', 'self.pip_auto_button.clicked.connect(self._auto_pip_crop_clicked)',
+                     'row.pip_crop = clamp_auto_crop(snapped if snapped is not None else rect)',
+                     'detect_best(frames, faces=True)', 'snap_auto_crop(frames[0], rect)'):
             with self.subTest(text=text):
                 self.assertIn(text, self.source)
+        for stale in ('自动跟随摄像头', 'pip_follow', 'pip_follower'):
+            with self.subTest(stale=stale):
+                self.assertNotIn(stale, self.source)
 
     def test_the_inset_has_no_accent_border(self):
         start = self.source.index('def _paint_pip')

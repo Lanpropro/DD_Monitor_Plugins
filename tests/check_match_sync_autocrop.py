@@ -1,4 +1,4 @@
-"""Checks the webcam auto-crop detector, its tracker and the viewer wiring."""
+"""Checks the webcam auto-crop detector and the viewer wiring around it."""
 
 import sys
 import unittest
@@ -43,6 +43,13 @@ def scene(rect=None, seed=7, size=(320, 180)):
     return np.clip(image, 0, 255).astype(np.uint8)
 
 
+def scaled(gray, factor):
+    height, width = gray.shape[:2]
+    rows = np.repeat(np.arange(height), factor)
+    cols = np.repeat(np.arange(width), factor)
+    return gray[np.ix_(rows, cols)]
+
+
 class DetectTests(unittest.TestCase):
     def test_finds_the_window_in_every_position(self):
         for name, wanted in CORNERS.items():
@@ -85,89 +92,80 @@ class DetectTests(unittest.TestCase):
             self.assertAlmostEqual(got, want, places=6)
         self.assertEqual(autocrop.clamp((0.2, 0.2, 0.3, 0.3)), (0.2, 0.2, 0.3, 0.3))
 
-
-class MatchTests(unittest.TestCase):
-    def test_tracks_the_window_after_it_moves(self):
-        before = scene(CORNERS["top-right"])
-        after = scene(CORNERS["top-right"])
-        moved = np.roll(after, 6, axis=1)
-        rect, quality = autocrop.match(before, moved, CORNERS["top-right"])
-        self.assertIsNotNone(rect, msg=f"correlation too low: {quality}")
-        self.assertGreater(quality, 0.6)
-        self.assertAlmostEqual(rect[0] * 320, CORNERS["top-right"][0] * 320 + 6, delta=3)
-
-    def test_unrelated_frames_do_not_match(self):
-        rect, quality = autocrop.match(scene(CORNERS["top-right"]), scene(None, seed=5),
-                                       CORNERS["top-right"])
-        self.assertLess(quality, 0.9)
-        if rect is not None:
-            self.assertLess(quality, 0.6)
-
-
-class FollowerTests(unittest.TestCase):
-    def test_first_hit_is_used_at_once(self):
-        follower = autocrop.Follower()
-        found = follower.update(scene(CORNERS["top-right"]), 0.0)
+    def test_the_big_frame_wins_when_both_resolutions_agree(self):
+        small = scene(CORNERS["top-right"])
+        big = scaled(small, 2)
+        found, score = autocrop.detect_best([big, small], faces=False)
         self.assertIsNotNone(found)
         self.assertGreaterEqual(autocrop._iou(found, CORNERS["top-right"]), 0.85)
-        self.assertEqual(follower.rect, found)
+        self.assertGreater(score, autocrop.SCORE_FLOOR)
 
-    def test_throttles_between_passes(self):
-        follower = autocrop.Follower(interval=1.5)
-        follower.update(scene(CORNERS["top-right"]), 10.0)
-        self.assertFalse(follower.due(10.4))
-        self.assertTrue(follower.due(11.5))
+    def test_detect_best_skips_empty_frames(self):
+        self.assertEqual(autocrop.detect_best([None, np.zeros((0, 0), dtype=np.uint8)]),
+                         (None, 0.0))
 
-    def test_follows_a_shifted_window_without_re_detecting(self):
-        follower = autocrop.Follower(interval=0)
-        first = follower.update(scene(CORNERS["top-right"]), 0.0)
-        self.assertIsNotNone(first)
-        shifted = np.roll(scene(CORNERS["top-right"]), 5, axis=0)
-        found = follower.update(shifted, 1.0)
+    def test_borders_join_the_two_pixels_of_a_border_line(self):
+        frame = autocrop.analyse(scene(CORNERS["top-right"]))
+        positions = [line.pos for line in frame["columns"]]
+        self.assertTrue(any(abs(pos - 224) <= 2 for pos in positions), msg=positions)
+        self.assertTrue(any(abs(pos - 308) <= 2 for pos in positions), msg=positions)
+
+
+class SnapTests(unittest.TestCase):
+    def test_a_loose_box_is_pulled_in(self):
+        wanted = CORNERS["top-right"]
+        gray = scene(wanted)
+        loose = (wanted[0] - 0.035, wanted[1] - 0.035, wanted[2] + 0.05, wanted[3] + 0.05)
+        found = autocrop.snap(gray, loose)
         self.assertIsNotNone(found)
-        self.assertAlmostEqual(found[1] * 180, first[1] * 180 + 5, delta=3)
-        self.assertAlmostEqual(found[2], first[2], places=6)
+        self.assertGreaterEqual(autocrop._iou(found, wanted), 0.85)
 
-    def test_seeded_crop_is_kept_until_tracking_fails(self):
-        follower = autocrop.Follower(interval=0)
-        follower.rect = CORNERS["top-right"]
-        first = follower.update(scene(CORNERS["top-right"]), 0.0)
-        self.assertIsNotNone(first)
-        self.assertGreaterEqual(autocrop._iou(first, CORNERS["top-right"]), 0.8)
+    def test_a_tight_box_is_pushed_out(self):
+        wanted = CORNERS["bottom-left"]
+        gray = scene(wanted)
+        tight = (wanted[0] + 0.03, wanted[1] + 0.03, wanted[2] - 0.06, wanted[3] - 0.06)
+        found = autocrop.snap(gray, tight)
+        self.assertIsNotNone(found)
+        self.assertGreaterEqual(autocrop._iou(found, wanted), 0.8)
 
-    def test_four_misses_release_the_lock(self):
-        follower = autocrop.Follower(interval=0)
-        follower.update(scene(CORNERS["top-right"]), 0.0)
-        for step in range(5):
-            self.assertIsNone(follower.update(scene(None, seed=step), step + 1.0))
-        self.assertIsNone(follower.rect)
+    def test_a_flat_frame_keeps_the_box(self):
+        flat = np.full((180, 320), 90, np.float32)
+        self.assertEqual(autocrop.snap(flat, (0.2, 0.2, 0.3, 0.3)), (0.2, 0.2, 0.3, 0.3))
+
+    def test_the_dialog_snaps_after_a_drag(self):
+        self.source = (ROOT / "plugins/match_sync/viewer.py").read_text(encoding="utf-8")
+        self.assertIn("self.snap_gray = None", self.source)
+        self.assertIn("if self.selecting and self.snap_gray is not None and event.button() == Qt.LeftButton:", self.source)
+        self.assertIn("def _snap_selection(self):", self.source)
+        self.assertIn("canvas.snap_gray = self._pip_thumb(", self.source)
 
 
 class WiringTests(unittest.TestCase):
     def setUp(self):
         self.source = (ROOT / "plugins/match_sync/viewer.py").read_text(encoding="utf-8")
 
-    def test_the_row_exposes_the_toggle(self):
-        self.assertIn('QCheckBox("自动跟随摄像头")', self.source)
-        self.assertIn("self.pip_follow.toggled.connect(self._pip_follow_toggled)", self.source)
-        self.assertIn("self.pip_row.addWidget(self.pip_follow)", self.source)
+    def test_the_row_exposes_the_auto_crop_button(self):
+        self.assertIn('QPushButton("自动框选")', self.source)
+        self.assertIn("self.pip_auto_button.clicked.connect(self._auto_pip_crop_clicked)", self.source)
+        self.assertIn("self.pip_row.addWidget(self.pip_auto_button)", self.source)
 
-    def test_the_detected_crop_wins_while_following(self):
-        self.assertIn("if self.pip_follow.isChecked() and self.pip_auto_crop is not None:", self.source)
-        self.assertIn("self._follow_pip_crop(picture)", self.source)
+    def test_the_button_runs_the_detector(self):
+        self.assertIn("def _auto_pip_crop_for(", self.source)
+        self.assertIn("detect_best(frames, faces=True)", self.source)
+        self.assertIn("snapped = snap_auto_crop(frames[0], rect)", self.source)
+        self.assertIn("row.pip_crop = clamp_auto_crop(snapped if snapped is not None else rect)", self.source)
 
-    def test_the_toggle_is_persisted(self):
-        self.assertIn('"follow": self.pip_follow.isChecked(),', self.source)
+    def test_the_first_enable_detects_once(self):
+        self.assertIn("QTimer.singleShot(1200, self._auto_pip_first)", self.source)
+        self.assertIn("self.auto_pip_done = False", self.source)
 
     def test_detection_runs_on_a_small_grayscale_copy(self):
         self.assertIn("QImage.Format_Grayscale8", self.source)
         self.assertIn("def _pip_thumb(", self.source)
 
-    def test_manual_crop_resets_the_detector(self):
-        self.assertIn("self.pip_follower.reset()", self.source)
-
-    def test_following_starts_from_a_manual_crop(self):
-        self.assertIn("self.pip_follower.rect = crop", self.source)
+    def test_following_is_gone(self):
+        for text in ("pip_follow", "自动跟随摄像头", "pip_follower"):
+            self.assertNotIn(text, self.source)
 
 
 if __name__ == "__main__":
