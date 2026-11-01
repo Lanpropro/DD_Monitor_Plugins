@@ -320,13 +320,16 @@ class RecipientDelegate(QStyledItemDelegate):
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing)
         rect = QRectF(option.rect.adjusted(4, 3, -16, -3))
+        compact = bool(self.parent().property('avatarOnly'))
+        if compact:
+            rect = QRectF(option.rect.adjusted(2, 2, -2, -2))
         checked = index.data(Qt.CheckStateRole)
         selected = (checked == Qt.Checked.value if checked is not None else
                     bool(option.state & QStyle.State_Selected))
         animation = self.animations.get(index.data(Qt.UserRole))
         progress = float(animation.currentValue()) if animation is not None else float(selected)
         painter.setClipRect(option.rect)
-        painter.translate(12 * progress, 0)
+        painter.translate(0 if compact else 12 * progress, 0)
         painter.setPen(Qt.NoPen)
         if progress or option.state & QStyle.State_MouseOver:
             color = QColor(c['raised'])
@@ -334,6 +337,8 @@ class RecipientDelegate(QStyledItemDelegate):
             painter.setBrush(color)
             painter.drawRoundedRect(rect, 6, 6)
         avatar = QRectF(rect.left() + 8, rect.center().y() - 16, 32, 32)
+        if compact:
+            avatar.moveCenter(rect.center())
         pixmap = index.data(Qt.DecorationRole)
         if isinstance(pixmap, QPixmap) and not pixmap.isNull():
             painter.save()
@@ -348,6 +353,13 @@ class RecipientDelegate(QStyledItemDelegate):
             painter.drawEllipse(avatar)
             painter.setPen(QColor(c['text']))
             painter.drawText(avatar, Qt.AlignCenter, str(index.data(Qt.DisplayRole) or '?')[:1])
+        if compact:
+            if selected:
+                painter.setPen(QPen(QColor(c['accent']), 2))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawEllipse(avatar.adjusted(-2, -2, 2, 2))
+            painter.restore()
+            return
         painter.setPen(Qt.NoPen)
         text = str(index.data(Qt.DisplayRole) or '').split('\n', 1)
         font = QFont(option.font)
@@ -377,4 +389,6 @@ class RecipientDelegate(QStyledItemDelegate):
         painter.restore()
 
     def sizeHint(self, option, index):
+        if self.parent().property('avatarOnly'):
+            return QSize(48, 44)
         return QSize(164, max(52, option.fontMetrics.height() * 2 + 12))

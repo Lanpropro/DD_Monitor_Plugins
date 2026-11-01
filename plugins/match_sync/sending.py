@@ -2,7 +2,7 @@
 from PySide6.QtCore import QEvent, QPointF, QPropertyAnimation, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QCursor, QFont, QImage, QPainter, QPalette, QPen, QTextCursor
 from PySide6.QtWidgets import (QApplication, QBoxLayout, QFrame, QHBoxLayout, QListView, QListWidget,
-    QListWidgetItem, QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
+    QListWidgetItem, QLabel, QLayout, QLineEdit, QMenu, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 
 from ddm.widgets import DanmakuPanel, Tile
 from ddm.danmaku_actions import CommentToolbar
@@ -218,6 +218,7 @@ class SendConsole(SettingsPanel):
         body = QWidget()
         self.body_layout = QBoxLayout(QBoxLayout.LeftToRight, body)
         self.body_layout.setContentsMargins(0, 0, 0, 0)
+        self.body_layout.setSizeConstraint(QLayout.SetMinimumSize)
         self.body_layout.setSpacing(12)
         self.body_layout.addWidget(self.rooms)
         self.work = QWidget()
@@ -420,13 +421,19 @@ class SendConsole(SettingsPanel):
         if not hasattr(self, 'body_layout'):
             return
         regular = self.width() >= 520
+        compact = self.width() < 380
+        if bool(self.rooms.property('avatarOnly')) != compact:
+            self.rooms.setProperty('avatarOnly', compact)
+            self.rooms.doItemsLayout()
+            self.rooms.viewport().update()
         self.layout().setContentsMargins(16 if regular else 12, 10 if regular else 8,
                                         16 if regular else 12, 10 if regular else 8)
         self.layout().setSpacing(10 if regular else 6)
         self.body_layout.setSpacing(12 if regular else 6)
         self.body_layout.setDirection(QBoxLayout.LeftToRight if regular else QBoxLayout.TopToBottom)
-        row_height = max(52, self.rooms.fontMetrics().height() * 2 + 12)
+        row_height = 44 if compact else max(52, self.rooms.fontMetrics().height() * 2 + 12)
         if regular:
+            self.rooms.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Ignored)
             self.rooms.setFixedWidth(176)
             self.rooms.setMinimumHeight(0)
             self.rooms.setMaximumHeight(16777215)
@@ -434,6 +441,7 @@ class SendConsole(SettingsPanel):
             self.rooms.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             self.rooms.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         else:
+            self.rooms.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
             self.rooms.setMinimumWidth(0)
             self.rooms.setMaximumWidth(16777215)
             self.rooms.setFixedHeight(row_height + 8)
@@ -590,6 +598,15 @@ class SendConsole(SettingsPanel):
         else:
             self.selected_room = None
         self.batch_panel.update_targets()
+        bookmark_layout = self.batch_panel.compose.layout()
+        if single:
+            editor = self.rows[keys[0]].tile._plugin_controls._repeat_editor()
+            if isinstance(editor.parentWidget().layout(), QHBoxLayout):
+                bookmark_layout = editor.parentWidget().layout()
+        if bookmark_layout.indexOf(self.save_text) < 0:
+            self.save_text.parentWidget().layout().removeWidget(self.save_text)
+            bookmark_layout.addWidget(self.save_text, 0, Qt.AlignVCenter)
+            self.save_text.show()
         self.saved_texts.setEnabled(not self.batch_panel.timer.isActive())
         self.refresh_store_state()
 

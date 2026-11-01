@@ -307,7 +307,10 @@ def check(app, host, module, output=None):
             select(set())
             QTest.qWait(200)
             unselected_x = avatar_x()
-            assert 10 <= selected_x - unselected_x <= 14, 'Selected cards insert right; deselected cards retract left'
+            if console.rooms.property('avatarOnly'):
+                assert abs(selected_x - unselected_x) < 1, 'Compact avatars stay centered'
+            else:
+                assert 10 <= selected_x - unselected_x <= 14, 'Selected cards insert right; deselected cards retract left'
             select({'2'})
             QTest.qWait(200)
             assert viewer.panel.property('joined') is True
@@ -358,6 +361,15 @@ def check(app, host, module, output=None):
                 QTest.qWait(60)
                 assert (console.width() >= 520) == (right_width == 640), console.width()
                 if right_width == 300:
+                    assert console.rooms.property('avatarOnly')
+                    assert console.work.y() >= console.rooms.geometry().bottom() + 1, 'Avatar row must not overlap the composer'
+                    assert console.save_text.isVisible()
+                    primary = next(button for button in second.parentWidget().findChildren(QPushButton)
+                                   if button.property('sendPrimary'))
+                    bookmark = console.save_text.mapTo(console, QPoint())
+                    send_right = primary.mapTo(console, QPoint(primary.width(), 0))
+                    assert 0 <= bookmark.x() - send_right.x() <= 4, 'Keep all four icons together'
+                    assert bookmark.x() + console.save_text.width() <= console.width()
                     assert console.body_scroll.horizontalScrollBar().maximum() == 0
                     button = second.parentWidget().findChildren(QPushButton)[0]
                     assert button.mapTo(console, QPoint(button.width(), 0)).x() <= console.width()
