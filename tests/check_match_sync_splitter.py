@@ -25,7 +25,7 @@ def check(app, host, module):
         viewer = module.Viewer(plugins.PluginContext(
             plugins.PluginManager(window=host, plugins_dir=directory), 'splitter'), {})
         viewer.setAttribute(Qt.WA_DontShowOnScreen)
-        viewer.resize(1600, 950)
+        viewer.resize(2800, 950)
         viewer.show()
         for index in range(200):
             viewer.panel.add_event({'text': 'fixture message ' * 8 + str(index), 'uname': 'fixture'})
@@ -36,10 +36,15 @@ def check(app, host, module):
         paints = Paints()
         viewer.panel.body.viewport().installEventFilter(paints)
         text = viewer.panel.body.toPlainText()
+        split = viewer.picture_split
+        low = split.closestLegalPosition(0, 1)
+        high = split.closestLegalPosition(split.width(), 1)
+        assert high - low > 200, (low, high)
+        positions_for = lambda fractions: tuple(round(low + (high - low) * fraction) for fraction in fractions)
         try:
             with patch.object(viewer.panel, '_render_all', side_effect=AssertionError('Full chat rebuild')), \
                     patch.object(viewer.panel.body.viewport(), 'repaint', wraps=viewer.panel.body.viewport().repaint) as restore:
-                for positions in ((700, 1100, 800, 1000), (1050, 600, 950, 750)):
+                for positions in (positions_for((.2, .8, .3, .6)), positions_for((.7, .1, .6, .3))):
                     paints.regions.clear()
                     before = restore.call_count
                     for position in positions:
