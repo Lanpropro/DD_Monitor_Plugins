@@ -1,7 +1,7 @@
 """Independent platform composers below the merged chat, one per live room."""
 from PySide6.QtCore import QPointF, QPropertyAnimation, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QCursor, QFont, QImage, QPainter, QPalette, QPen
-from PySide6.QtWidgets import (QApplication, QBoxLayout, QFrame, QHBoxLayout, QListView, QListWidget,
+from PySide6.QtWidgets import (QApplication, QBoxLayout, QFrame, QHBoxLayout, QLayout, QListView, QListWidget,
     QListWidgetItem, QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 
 from ddm.widgets import DanmakuPanel, Tile
@@ -201,6 +201,7 @@ class SendConsole(SettingsPanel):
         self.body_layout = QBoxLayout(QBoxLayout.LeftToRight, body)
         self.body_layout.setContentsMargins(0, 0, 0, 0)
         self.body_layout.setSpacing(12)
+        self.body_layout.setSizeConstraint(QLayout.SetMinimumSize)
         self.body_layout.addWidget(self.rooms)
         self.work = QWidget()
         self.work.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
@@ -429,10 +430,16 @@ class SendConsole(SettingsPanel):
         self.body_layout.setDirection(QBoxLayout.LeftToRight if regular else QBoxLayout.TopToBottom)
         row_height = max(52, self.rooms.fontMetrics().height() * 2 + 12)
         if regular:
-            self.rooms.setMinimumWidth(0)
+            # The author's 1.5 keeps the room column at a fixed 176 px. Only
+            # bounding the maximum lets the column collapse to zero, which is
+            # how the selector disappeared behind the composer.
+            self.rooms.setMinimumWidth(176)
             self.rooms.setMaximumWidth(176)
             self.rooms.setMinimumHeight(0)
             self.rooms.setMaximumHeight(16777215)
+            # Ignored makes qSmartMinSize report zero, so the min/max bounds
+            # above are dropped and the column collapses behind the composer.
+            self.rooms.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
             self.rooms.setFlow(QListView.TopToBottom)
             self.rooms.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             self.rooms.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
@@ -440,9 +447,20 @@ class SendConsole(SettingsPanel):
             self.rooms.setMinimumWidth(0)
             self.rooms.setMaximumWidth(16777215)
             self.rooms.setFixedHeight(row_height + 8)
+            # Ignored vertically makes the list report a zero size hint, and the
+            # stretched composer below then takes the whole body: the strip is
+            # painted on top of the input row. Fixed keeps the strip in place.
+            self.rooms.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
             self.rooms.setFlow(QListView.LeftToRight)
             self.rooms.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
             self.rooms.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # setFixedHeight/setFlow only invalidate the layout; without an
+        # explicit activation the stacked body keeps the old geometry until the
+        # next unrelated resize, which paints the room strip over the composer.
+        self.body_layout.invalidate()
+        self.body_layout.activate()
+        if getattr(self, 'rows', None):
+            self.sync_height()
 
     def minimumSizeHint(self):
         # The splitter must be able to narrow this console; the composer clips
@@ -602,11 +620,16 @@ class SendConsole(SettingsPanel):
         self.saved_texts.setEnabled(not self.batch_panel.timer.isActive())
         self.refresh_store_state()
 
+    def strip_height(self):
+        if getattr(self, '_regular_layout', True) or not getattr(self, 'rows', None):
+            return 0
+        return self.rooms.height() + max(0, self.body_layout.spacing())
+
     def sync_height(self):
         settings = self.viewer.settings_panel
         if not settings.isHidden():
             self.expanded_without_settings = False
-            self.setFixedHeight(settings.height())
+            self.setFixedHeight(settings.height() + self.strip_height())
         visible = not self.collapsed and (not settings.isHidden() or self.expanded_without_settings)
         self.setVisible(visible)
         if self.viewer.panel.property('joined') != visible:
