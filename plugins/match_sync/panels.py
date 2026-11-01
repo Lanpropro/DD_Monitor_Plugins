@@ -163,9 +163,9 @@ class MatchSettingsDialog(QDialog):
         note = QLabel('自动对齐和对照微调保留在外部控制栏。\n重放最多回看十分钟，实际范围取主画面可用缓存。')
         note.setWordWrap(True)
         layout.addWidget(note)
-        quality_note = QLabel('最高画质与来源共享直播流，切换时可能重新缓冲。\n'
-                              '超分仅增强裁切区域；副路优先720P，否则使用中间档，主画面不降档。\n'
-                              '大选区、超分超时或不可用时使用普通缩放。')
+        quality_note = QLabel('两种模式共用来源，副路优先720P，否则使用中间档；主画面不降档。\n'
+                              '轻量增强只处理摄像头选区，切换模式不重连来源。\n'
+                              '处理跟不上时，本次观看保持普通缩放；重新选择增强可重试。')
         quality_note.setWordWrap(True)
         layout.addWidget(quality_note)
         self.quality_status = QLabel()
@@ -179,13 +179,14 @@ class MatchSettingsDialog(QDialog):
 
     def refresh_quality_status(self):
         crops = list(self.viewer.floating_crops.values())
-        if self.viewer.crop_quality.currentData() != 'superres':
+        if self.viewer.crop_quality.currentData() != 'light':
             self.quality_status.setText('')
         elif not crops:
-            self.quality_status.setText('局部超分：等待添加画中画')
+            self.quality_status.setText('轻量增强：等待添加画中画')
         else:
             enhanced = sum(not crop.enhanced.isNull() for crop in crops)
-            self.quality_status.setText(f'局部超分：{enhanced} 路增强，{len(crops) - enhanced} 路普通缩放／等待处理')
+            fallback = sum(crop.enhance_state == 'fallback' for crop in crops)
+            self.quality_status.setText(f'轻量增强：{enhanced} 路增强，{fallback} 路已回退，{len(crops) - enhanced - fallback} 路准备中')
 
     def showEvent(self, event):
         super().showEvent(event)

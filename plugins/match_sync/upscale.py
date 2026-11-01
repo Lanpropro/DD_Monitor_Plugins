@@ -1,74 +1,38 @@
-"""Bounded asynchronous crop enhancement; source timestamps remain authoritative."""
+"""Small CPU crop filter with a single replaceable pending frame."""
 import logging
-from pathlib import Path
+import math
 import threading
 import time
 
-from PySide6.QtCore import QRectF
+from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QImage
 
 
-_layer_lock = threading.Lock()
-_layer_registered = False
-
-
-class DepthToSpace:
-    """TensorFlow NHWC pixel shuffle, missing from standard OpenCV's TF importer."""
-    def __init__(self, params, blobs):
-        self.scale = int(params['block_size'])
-
-    def getMemoryShapes(self, inputs):
-        n, c, h, w = inputs[0]
-        s = self.scale
-        return [[n, c // (s * s), h * s, w * s]]
-
-    def forward(self, inputs):
-        n, c, h, w = inputs[0].shape
-        s = self.scale
-        return [inputs[0].reshape(n, s, s, c // (s * s), h, w)
-                .transpose(0, 3, 4, 1, 5, 2).reshape(n, c // (s * s), h * s, w * s)]
-
-
-class Fsrcnn2x:
-    """Small bundled neural model; replace this backend to add other SR models."""
+class LightScaler:
+    """Qt smooth resize and limited sharpening; no model or GPU runtime required."""
     def __init__(self):
-        import cv2
-        global _layer_registered
-        with _layer_lock:
-            if not _layer_registered:
-                cv2.dnn_registerLayer('DepthToSpace', DepthToSpace)
-                _layer_registered = True
-        self.net = cv2.dnn.readNetFromTensorflow(str(Path(__file__).with_name('models') / 'FSRCNN_x2.pb'))
-        self.backend = 'CPU'
-        if cv2.dnn.DNN_TARGET_OPENCL in cv2.dnn.getAvailableTargets(cv2.dnn.DNN_BACKEND_OPENCV):
-            self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_OPENCL)
-            self.backend = 'OpenCL'
+        import numpy
+        self.np = numpy
+        self.backend = 'CPU / Qt + NumPy'
 
-    def upscale(self, image):
-        import cv2
-        import numpy as np
+    def upscale(self, image, target):
+        np = self.np
         rgb = image.convertToFormat(QImage.Format_RGB888)
+        scale = min(2., max(target.width() / rgb.width(), target.height() / rgb.height()),
+                    math.sqrt(CropEnhancer.MAX_PIXELS / (rgb.width() * rgb.height())))
+        size = (max(1, int(rgb.width() * scale)), max(1, int(rgb.height() * scale)))
+        rgb = rgb.scaled(*size, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
         pixels = np.frombuffer(rgb.constBits(), np.uint8).reshape(rgb.height(), rgb.bytesPerLine())
         pixels = pixels[:, :rgb.width() * 3].reshape(rgb.height(), rgb.width(), 3)
-        ycrcb = cv2.cvtColor(pixels, cv2.COLOR_RGB2YCrCb).astype(np.float32) / 255
-        self.net.setInput(cv2.dnn.blobFromImage(ycrcb[:, :, 0]))
-        try:
-            y = self.net.forward()[0, 0]
-        except cv2.error:
-            if self.backend == 'CPU':
-                raise
-            self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
-            self.backend = 'CPU'
-            y = self.net.forward()[0, 0]
-        output = cv2.resize(ycrcb, (rgb.width() * 2, rgb.height() * 2), interpolation=cv2.INTER_CUBIC)
-        output[:, :, 0] = y
-        output = np.clip(cv2.cvtColor(output, cv2.COLOR_YCrCb2RGB) * 255, 0, 255).astype(np.uint8)
+        padded = np.pad(pixels.astype(np.int16), ((1, 1), (1, 1), (0, 0)), mode='edge')
+        center = padded[1:-1, 1:-1]
+        laplacian = 4 * center - padded[:-2, 1:-1] - padded[2:, 1:-1] - padded[1:-1, :-2] - padded[1:-1, 2:]
+        detail = np.clip(np.rint(laplacian.astype(np.float32) / 32), -4, 4)
+        output = np.clip(center + detail, 0, 255).astype(np.uint8)
         return QImage(output.data, output.shape[1], output.shape[0], output.strides[0], QImage.Format_RGB888).copy()
 
 
 class CropEnhancer:
-    # One running job and one replaceable pending frame, never a growing FIFO.
-    MAX_AGE = .080
     MAX_PIXELS = 640 * 360
 
     def __init__(self):
@@ -78,32 +42,30 @@ class CropEnhancer:
         self.closed = False
         self.generation = 0
         self.thread = None
-        self.stats = dict(completed=0, superseded=0, expired=0, bypassed=0, failures=0,
-                          inference_ms=0.0, backend='', error='')
+        self.stats = dict(ready=False, completed=0, superseded=0, bypassed=0,
+                          inference_ms=0., backend='', error='')
 
     def reset(self):
         with self.condition:
             self.generation += 1
             self.pending = self.result = None
 
-    def submit(self, timestamp, image, crop):
+    def submit(self, timestamp, image, crop, target):
         with self.condition:
             if self.closed or self.stats['error']:
                 return
             if self.pending is not None:
                 self.stats['superseded'] += 1
-            self.pending = (self.generation, timestamp, time.perf_counter(), QImage(image), QRectF(crop))
+            self.pending = (self.generation, timestamp, QImage(image), QRectF(crop), QSize(target))
             if self.thread is None:
-                self.thread = threading.Thread(target=self._run, name='match-crop-upscale', daemon=True)
+                self.thread = threading.Thread(target=self._run, name='match-crop-enhance', daemon=True)
                 self.thread.start()
             self.condition.notify()
 
-    def image_at(self, timestamp):
+    def take_result(self):
         with self.condition:
-            result = self.result
-        if result is not None and 0 <= timestamp - result[0] <= self.MAX_AGE:
-            return result[1]
-        return None
+            result, self.result = self.result, None
+            return result
 
     def diagnostics(self):
         with self.condition:
@@ -122,7 +84,7 @@ class CropEnhancer:
                 self.condition.wait_for(lambda: self.closed or self.pending is not None)
                 if self.closed:
                     return
-                generation, timestamp, submitted, image, crop = self.pending
+                generation, timestamp, image, crop, target = self.pending
                 self.pending = None
             area = QRectF(crop.x() * image.width(), crop.y() * image.height(),
                           crop.width() * image.width(), crop.height() * image.height()).toAlignedRect().intersected(image.rect())
@@ -132,22 +94,20 @@ class CropEnhancer:
                 continue
             try:
                 if backend is None:
-                    backend = Fsrcnn2x()
+                    backend = LightScaler()
+                    with self.condition:
+                        self.stats.update(ready=True, backend=backend.backend)
                 started = time.perf_counter()
-                output = backend.upscale(image.copy(area))
+                output = backend.upscale(image.copy(area), target)
                 duration = (time.perf_counter() - started) * 1000
                 with self.condition:
-                    self.stats.update(inference_ms=duration, backend=backend.backend)
+                    self.stats['inference_ms'] = duration
                     self.stats['completed'] += 1
                     if not self.closed and generation == self.generation:
-                        # A paused frame is still current even after a cold model load.
-                        if self.pending is None or time.perf_counter() - submitted <= self.MAX_AGE:
-                            self.result = (timestamp, output)
-                        else:
-                            self.stats['expired'] += 1
+                        self.result = (timestamp, image, output, area, duration)
             except Exception as error:
                 with self.condition:
-                    self.stats['failures'] += 1
+                    self.pending = None
                     self.stats['error'] = str(error)
-                logging.getLogger(__name__).exception('Crop super-resolution unavailable; using source pixels')
+                logging.getLogger(__name__).exception('Crop enhancement unavailable; using source pixels')
                 return

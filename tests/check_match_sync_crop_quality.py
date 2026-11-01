@@ -1,6 +1,5 @@
-"""Offline quality routing, real neural inference, and bounded asynchronous work."""
+"""Light crop filtering, monotonic presentation, stable fallback and source routing."""
 import argparse
-import hashlib
 import importlib
 import os
 from pathlib import Path
@@ -12,142 +11,172 @@ from unittest.mock import patch
 
 
 def check_backend(module):
-    import cv2
     import numpy as np
+    from PySide6.QtCore import QSize, Qt
     from PySide6.QtGui import QImage
     upscale = importlib.import_module(module.__package__ + '.upscale')
-    model = Path(upscale.__file__).with_name('models') / 'FSRCNN_x2.pb'
-    assert hashlib.sha256(model.read_bytes()).hexdigest() == '366b33f0084c7b3f2bf6724f0a2c77bca94fcec9d7b6d72389d330073b380d5c'
-    # Odd width exercises RGB row padding; fine edges distinguish inference from resize.
-    image = QImage(101, 60, QImage.Format_RGB888)
-    image.fill(0xff305080)
-    for x in range(0, 101, 3):
-        for y in range(0, 60, 3):
-            image.setPixel(x, y, 0xfff0e0d0)
-    backend = upscale.Fsrcnn2x()
-    started = time.monotonic()
-    output = backend.upscale(image)
-    assert output.width() == 202 and output.height() == 120
-    actual = np.frombuffer(output.constBits(), np.uint8).reshape(120, output.bytesPerLine())[:, :606].reshape(120, 202, 3)
-    original = np.frombuffer(image.constBits(), np.uint8).reshape(60, image.bytesPerLine())[:, :303].reshape(60, 101, 3)
-    baseline = cv2.resize(original, (202, 120), interpolation=cv2.INTER_CUBIC)
-    assert np.mean(np.abs(actual.astype(float) - baseline)) > .1, 'SR must actually run the neural model'
-    return dict(backend=backend.backend, cold_ms=round((time.monotonic() - started) * 1000, 2), neural_output=True)
+    # RGB padding, flat colors, deterministic output and a strict sharpening limit.
+    source = QImage(101, 60, QImage.Format_RGB888)
+    source.fill(0xff507090)
+    backend = upscale.LightScaler()
+    assert backend.upscale(source, QSize(202, 120)).pixelColor(100, 50).getRgb()[:3] == (80, 112, 144)
+    for x in range(101):
+        for y in range(60):
+            source.setPixel(x, y, 0xfff0f0f0 if (x // 3 + y // 3) % 2 else 0xff303030)
+    output = backend.upscale(source, QSize(202, 120))
+    repeated = backend.upscale(source, QSize(202, 120))
+    assert output == repeated
+    smooth = source.scaled(202, 120, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    baseline = np.frombuffer(smooth.constBits(), np.uint8).reshape(120, smooth.bytesPerLine())[:, :606].reshape(120, 202, 3)
+    pixels = np.frombuffer(output.constBits(), np.uint8).reshape(120, output.bytesPerLine())[:, :606].reshape(120, 202, 3)
+    difference = np.abs(pixels.astype(float) - baseline)
+    assert 0 < difference.mean() and difference.max() <= 4
+    bounded = backend.upscale(source, QSize(4000, 3000))
+    assert bounded.width() <= 202 and bounded.height() <= 120
+    return dict(cpu_only=True, deterministic=True, sharpening_limit=4, padded_rgb=True)
 
 
 def check_worker(module):
-    from PySide6.QtCore import QRectF
+    from PySide6.QtCore import QRectF, QSize
     from PySide6.QtGui import QImage
     upscale = importlib.import_module(module.__package__ + '.upscale')
-    entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+    entered, release = threading.Event(), threading.Event()
     calls = []
     class Backend:
         backend = 'test'
-        def upscale(self, image):
-            calls.append((image.width(), image.height()))
+        def upscale(self, image, target):
+            calls.append(image.size())
             entered.set()
             assert release.wait(5)
-            finished.set()
-            return image.scaled(image.width() * 2, image.height() * 2)
-    image = QImage(1000, 600, QImage.Format_RGB32)
-    image.fill(0xff00ff00)
+            return image
+    source = QImage(1000, 600, QImage.Format_RGB32)
+    source.fill(0xff507090)
     worker = upscale.CropEnhancer()
     try:
-        with patch.object(upscale, 'Fsrcnn2x', Backend):
-            worker.submit(1, image, QRectF(.1, .2, .1, .1))
+        with patch.object(upscale, 'LightScaler', Backend):
+            worker.submit(1, source, QRectF(.1, .2, .1, .1), QSize(200, 120))
             assert entered.wait(3)
             for stamp in range(2, 102):
-                worker.submit(stamp, image, QRectF(.1, .2, .1, .1))
-            assert worker.diagnostics()['pending'] == 1
-            assert worker.diagnostics()['superseded'] == 99
+                worker.submit(stamp, source, QRectF(.1, .2, .1, .1), QSize(200, 120))
+            assert worker.diagnostics()['pending'] == 1 and worker.diagnostics()['superseded'] == 99
             worker.reset()
             release.set()
-            assert finished.wait(3)
-            deadline = time.monotonic() + 3
-            while not worker.diagnostics()['completed'] and time.monotonic() < deadline:
+            deadline = time.perf_counter() + 3
+            while not worker.diagnostics()['completed'] and time.perf_counter() < deadline:
                 time.sleep(.005)
-            assert worker.image_at(1) is None, 'Recrop/mode changes must discard in-flight results'
-            assert calls == [(100, 60)], 'Only the selected source region is inferred'
-            worker.submit(200, image, QRectF(.1, .2, .1, .1))
-            deadline = time.monotonic() + 3
-            while worker.image_at(200) is None and time.monotonic() < deadline:
+            assert worker.take_result() is None
+            assert calls == [QSize(100, 60)]
+            worker.submit(200, source, QRectF(.1, .2, .1, .1), QSize(200, 120))
+            deadline = time.perf_counter() + 3
+            result = None
+            while result is None and time.perf_counter() < deadline:
+                result = worker.take_result()
                 time.sleep(.005)
-            assert worker.image_at(200) is not None
-            assert worker.image_at(199) is None and worker.image_at(200.2) is None
-            worker.stop()
-            worker.thread.join(3)
-            assert not worker.thread.is_alive()
+            assert result[0] == 200 and result[1].size() == source.size()
+            assert result[2].size() == QSize(100, 60), 'Keep the exact source alongside its filtered result'
             entered.clear()
             release.clear()
-            stopped = upscale.CropEnhancer()
-            stopped.submit(300, image, QRectF(.1, .2, .1, .1))
+            worker.submit(201, source, QRectF(.1, .2, .1, .1), QSize(200, 120))
             assert entered.wait(3)
-            stopped.stop()
-            assert stopped.thread.is_alive(), 'Stop must return without waiting for in-flight inference'
-            release.set()
-            stopped.thread.join(3)
-            assert not stopped.thread.is_alive()
+            worker.stop()
+            assert worker.thread.is_alive(), 'Closing must not wait for a busy filter'
     finally:
         release.set()
         worker.stop()
-    return dict(single_pending=True, crop_only=True, stale_generation_rejected=True, timestamps_checked=True)
+        if worker.thread is not None:
+            worker.thread.join(3)
+            assert not worker.thread.is_alive()
+    return dict(single_pending=True, crop_only=True, old_generation_discarded=True, nonblocking_stop=True)
 
 
-def check_enhanced_picture(app, module):
-    from PySide6.QtCore import QEventLoop, QRectF, QTimer
-    from PySide6.QtGui import QImage
+def check_timeline(app, module):
+    from PySide6.QtCore import QRect, QRectF
+    from PySide6.QtGui import QImage, QPainter
     from PySide6.QtWidgets import QWidget
+    floating_module = importlib.import_module(module.__package__ + '.floating')
+    class Worker:
+        def __init__(self):
+            self.result = None
+            self.requests = []
+            self.closed = False
+        def submit(self, *args):
+            self.requests.append(args)
+        def reset(self):
+            self.result = None
+        def stop(self):
+            self.closed = True
+        def diagnostics(self):
+            return dict(ready=True, error='', bypassed=0)
+        def take_result(self):
+            value, self.result = self.result, None
+            return value
     host = QWidget()
-    host.resize(640, 360)
-    floating = module.FloatingCrop(host, 'fixture', (.25, .25, .5, .5))
-    source = QImage(192, 128, QImage.Format_RGB32)
-    source.fill(0xff507090)
-    floating.set_quality_mode('superres')
-    loop, feed = QEventLoop(), QTimer()
-    count, enhanced, sizes = [0], [0], set()
-    started = time.monotonic()
-    def frame():
-        count[0] += 1
-        floating.set_frame((time.monotonic() - started, source))
-        if not floating.enhanced.isNull():
-            enhanced[0] += 1
-            sizes.add((floating.enhanced.width(), floating.enhanced.height()))
-    feed.timeout.connect(frame)
-    feed.start(16)
-    QTimer.singleShot(2000, loop.quit)
-    try:
-        loop.exec()
-        diagnostics = floating.diagnostics()
-        assert count[0] > 5 and enhanced[0] > 0, diagnostics
-        assert sizes == {(192, 128)}, sizes
-        floating.set_quality_mode('source')
-        assert floating.enhanced.isNull() and floating.image.size() == source.size()
-        return dict(passed=True, input_frames=count[0], enhanced_frames=enhanced[0], diagnostics=diagnostics)
-    finally:
-        feed.stop()
-        floating.close()
-        host.close()
-        host.deleteLater()
-        app.processEvents()
+    source = QImage(256, 128, QImage.Format_RGB32)
+    for x in range(256):
+        for y in range(128):
+            source.setPixel(x, y, 0xffeeeeee if (x // 4) % 2 else 0xff222222)
+    with patch.object(floating_module, 'CropEnhancer', Worker):
+        floating = module.FloatingCrop(host, 'fixture', (.12345, .13, .4, .3))
+        floating.resize(200, 80)
+        floating.set_quality_mode('light')
+        try:
+            floating.set_frame((100., source))
+            worker = floating.enhancer
+            floating.set_frame((100.02, source))
+            assert floating.frame_key == 100., 'Do not jump to raw input before the corresponding enhanced frame'
+            area = QRectF(.12345 * 256, .13 * 128, .4 * 256, .3 * 128).toAlignedRect()
+            worker.result = (100.02, source, source.copy(area), area, 1.)
+            floating._refresh_enhancement()
+            assert floating.frame_key == 100.02 and not floating.enhanced.isNull()
+            # The filtered crop and full source must use identical fractional coordinates.
+            filtered = QImage(floating.size(), QImage.Format_RGB32)
+            painter = QPainter(filtered)
+            floating.paint_picture(painter)
+            painter.end()
+            floating.enhanced = QImage()
+            plain = QImage(floating.size(), QImage.Format_RGB32)
+            painter = QPainter(plain)
+            floating.paint_picture(painter)
+            painter.end()
+            assert filtered.copy(QRect(15, 15, 170, 50)) == plain.copy(QRect(15, 15, 170, 50)), 'Fractional crops must not shift when changing the filter'
+            floating.set_frame((100.04, source))
+            worker.result = (100., source, source.copy(area), area, 1.)
+            floating._refresh_enhancement()
+            assert floating.frame_key == 100.02, 'A late result must never move playback backwards'
+            with patch.object(floating_module.time, 'perf_counter', return_value=floating.enhance_progress + .061):
+                floating._refresh_enhancement()
+            assert floating.enhance_state == 'fallback' and floating.frame_key == 100.04 and worker.closed
+            count = len(worker.requests)
+            for index in range(20):
+                worker.result = (100.02, source, source.copy(area), area, 1.)
+                floating.set_frame((100.06 + index * .02, source))
+            assert floating.enhanced.isNull() and len(worker.requests) == count, 'Fallback must remain stable'
+            floating.set_quality_mode('source')
+            floating.set_quality_mode('light')
+            floating.set_frame((10., source))
+            assert floating.frame_key == 10. and floating.enhance_state == 'active', 'Explicit seeks start a new timeline'
+            return dict(monotonic=True, stable_fallback=True, exact_crop_geometry=True, seek_reset=True)
+        finally:
+            floating.close()
+            host.close()
+            host.deleteLater()
+            app.processEvents()
 
 
 def check_routing(app, host, module):
-    from PySide6.QtCore import QRectF, Qt
+    from PySide6.QtCore import Qt
     from PySide6.QtGui import QImage
     from ddm import plugins
-    media = importlib.import_module(module.__package__ + '.media')
     host.settings, host.rooms = {}, []
     with tempfile.TemporaryDirectory() as directory:
         manager = plugins.PluginManager(window=host, plugins_dir=directory)
         context = plugins.PluginContext(manager, 'crop_quality_check')
         viewer = module.Viewer(context, {})
         viewer.setAttribute(Qt.WA_DontShowOnScreen)
-        image = QImage(100, 60, QImage.Format_RGB32)
-        image.fill(0xff336699)
+        source = QImage(100, 60, QImage.Format_RGB32)
+        source.fill(0xff507090)
         try:
-            with patch.object(module.Decoder, 'start', lambda _self: None), \
-                    patch.object(module.Chat, 'start', lambda _self: None), \
-                    patch.object(module.AudioPump, 'start', lambda _self: None):
+            with patch.object(module.Decoder, 'start', lambda _self: None), patch.object(module.Chat, 'start', lambda _self: None), patch.object(module.AudioPump, 'start', lambda _self: None):
                 viewer.add_room('1')
                 viewer.add_room('2')
                 viewer.toggle_running()
@@ -155,58 +184,36 @@ def check_routing(app, host, module):
                 viewer.match_timer.stop()
                 viewer.audio.timer.stop()
                 row = viewer.rows['2']
-                original_quality = row.quality
-                crop = viewer.show_floating_crop(row, (.1, .2, .2, .3), (1, image))
+                preference = row.quality
+                crop = viewer.show_floating_crop(row, (.1, .2, .2, .3), (1, source))
+                assert row.decoder.seed['balanced_quality'] and not viewer.rows['1'].decoder.seed['balanced_quality']
                 viewer.open_match_settings()
-                assert viewer.crop_quality.parentWidget() is viewer.match_settings
-                assert viewer.crop_quality.count() == 3
-                viewer.crop_quality.setCurrentIndex(viewer.crop_quality.findData('highest'))
-                assert row.decoder.seed['highest_quality'] and 'url' not in row.decoder.seed
-                viewer._information(row, row.decoder, {'requested_quality': 10000, 'actual_quality': 10000})
-                assert row.quality == original_quality, 'A crop override must preserve the source preference'
-                viewer.crop_quality.setCurrentIndex(viewer.crop_quality.findData('superres'))
-                assert row.decoder.seed['balanced_quality'] and not row.decoder.seed['highest_quality']
-                assert not viewer.rows['1'].decoder.seed['balanced_quality'], 'Main picture must not be downgraded'
-                viewer.select_main('2')
-                assert not row.decoder.seed['balanced_quality'], 'Promoting a cropped source must restore main-picture quality'
-                viewer.select_main('1')
-                assert row.decoder.seed['balanced_quality']
-                original_quality = row.quality  # Selecting it as main explicitly promotes its source quality.
+                assert viewer.crop_quality.count() == 2 and viewer.crop_quality.parentWidget() is viewer.match_settings
+                decoder = row.decoder
+                with patch.object(viewer, '_start_row', wraps=viewer._start_row) as start:
+                    viewer.crop_quality.setCurrentIndex(viewer.crop_quality.findData('light'))
+                    viewer.crop_quality.setCurrentIndex(viewer.crop_quality.findData('source'))
+                    viewer.crop_quality.setCurrentIndex(viewer.crop_quality.findData('light'))
+                    assert start.call_count == 0 and row.decoder is decoder, 'Changing the filter must not reconnect'
+                viewer._information(row, decoder, {'requested_quality': 64, 'actual_quality': 64})
+                assert row.quality == preference
                 viewer.save()
-                assert context.setting('crop_quality') == 'superres'
-                viewer.crop_quality.setCurrentIndex(viewer.crop_quality.findData('source'))
-                assert row.decoder.seed['quality'] == original_quality and not row.decoder.seed['balanced_quality']
-                viewer.crop_quality.setCurrentIndex(viewer.crop_quality.findData('highest'))
+                assert context.setting('crop_quality') == 'light'
                 crop.close()
-                assert row.decoder.seed['crop_quality_policy'] == 'source'
-                assert row.quality == original_quality
-                # Stopping must not restart a decoder while closing its crop.
-                viewer.show_floating_crop(row, (.1, .2, .2, .3), (2, image))
+                assert row.decoder.seed['crop_quality_policy'] == 'source' and row.quality == preference
+                viewer.select_main('2')
+                crop = viewer.show_floating_crop(row, (.1, .2, .2, .3), (2, source))
+                assert not row.decoder.seed['balanced_quality']
                 with patch.object(viewer, '_start_row', wraps=viewer._start_row) as start:
                     viewer.stop()
                     assert start.call_count == 0
-                viewer.save()
-            restored = module.Viewer(context, {})
-            assert restored.crop_quality.currentData() == 'highest'
-            restored.close()
-            restored.deleteLater()
-            # Resolve tiers in the worker, including URL invalidation and no-720 fallback.
-            options = [{'qn': 10000, 'desc': '原画'}, {'qn': 80, 'desc': '1080P'}, {'qn': 64, 'desc': '720P'}, {'qn': 32, 'desc': '流畅'}]
-            from types import SimpleNamespace
-            requests = []
-            platform = SimpleNamespace(kind='test', room_quality_options=lambda _: options,
-                room_info=lambda _: None, play_url=lambda _, q: requests.append(q) or ('fixture', q, 0))
-            decoder = media.Decoder('2', {'quality': 80, 'balanced_quality': True, 'url': 'stale'}, platform)
-            assert decoder._resolve(0)[0] == 'fixture' and requests[-1] == 64
-            options[:] = [{'qn': 900, 'desc': '原画'}, {'qn': 7, 'desc': '高清'}, {'qn': 999, 'desc': '流畅'}]
-            decoder._resolve(0)
-            assert requests[-1] == 7, 'Use platform order, not numeric quality IDs'
-            decoder.seed['balanced_quality'] = False
-            decoder.seed['highest_quality'] = True
-            decoder._resolve(0)
-            assert requests[-1] == 900
-            decoder.stop()
-            return dict(passed=True, persisted=True, main_protected=True, source_restored=True, worker_tiers=True)
+            for saved, expected in [('superres', 'light'), ('highest', 'source'), ('unknown', 'source')]:
+                context.set_setting('crop_quality', saved)
+                restored = module.Viewer(context, {})
+                assert restored.crop_quality.currentData() == expected
+                restored.close()
+                restored.deleteLater()
+            return dict(passed=True, two_modes=True, persisted=True, main_protected=True, no_mode_reconnect=True, legacy_migrated=True)
         finally:
             viewer.close()
             viewer.deleteLater()
@@ -214,8 +221,8 @@ def check_routing(app, host, module):
 
 
 def check(app, host, module):
-    return dict(passed=True, routing=check_routing(app, host, module),
-                worker=check_worker(module), model=check_backend(module), picture=check_enhanced_picture(app, module))
+    return dict(passed=True, routing=check_routing(app, host, module), backend=check_backend(module),
+                worker=check_worker(module), timeline=check_timeline(app, module))
 
 
 def main():

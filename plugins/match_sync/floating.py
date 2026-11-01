@@ -1,4 +1,5 @@
 """In-application crops keep source pixels and are independent of the video tile."""
+import time
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen, QTransform
 from PySide6.QtWidgets import QWidget
@@ -23,8 +24,17 @@ class FloatingCrop(QWidget):
         self.quality_mode = 'source'
         self.enhancer = None
         self.enhanced = QImage()
+        self.enhanced_area = QRect()
+        self.input_frame = None
+        self.request_key = None
+        self.enhance_state = 'off'
+        self.enhance_reason = ''
+        self.enhance_progress = 0.
+        self.source_interval = 1 / 30
+        self.slow_results = 0
         self.enhance_timer = QTimer(self)
-        self.enhance_timer.setInterval(16)
+        self.enhance_timer.setTimerType(Qt.PreciseTimer)
+        self.enhance_timer.setInterval(8)
         self.enhance_timer.timeout.connect(self._refresh_enhancement)
         self.drag = None
         self.lock_mode = 0
@@ -51,54 +61,111 @@ class FloatingCrop(QWidget):
     def set_frame(self, frame):
         if frame is None:
             self.reset_enhancement()
+            self.input_frame = None
             self.frame_key = None
             self.image = QImage()
             self.update()
             return
-        if frame[0] == self.frame_key:
+        if self.input_frame is not None:
+            delta = frame[0] - self.input_frame[0]
+            if delta < 0 or delta > .2:
+                self.reset_enhancement()
+                self.frame_key = None
+            elif delta > .001:
+                self.source_interval = delta
+        image = frame[1] if isinstance(frame[1], QImage) else QImage.fromData(frame[1])
+        self.input_frame = (frame[0], image)
+        if self.quality_mode != 'light' or self.enhance_state == 'fallback':
+            self._present(frame[0], image)
             return
-        if self.frame_key is not None and frame[0] < self.frame_key:
-            self.reset_enhancement()
-        self.frame_key = frame[0]
-        self.image = frame[1] if isinstance(frame[1], QImage) else QImage.fromData(frame[1])
+        # While the background filter imports, keep showing current source frames.
+        if self.enhance_state == 'warming':
+            self._present(frame[0], image)
+        target = self.size() * self.devicePixelRatioF()
+        key = (frame[0], target.width(), target.height())
+        if key != self.request_key and not image.isNull():
+            self.request_key = key
+            self.enhancer.submit(frame[0], image, self.crop, target)
+        self._refresh_enhancement()
+
+    def _present(self, timestamp, image, enhanced=None, area=None):
+        if timestamp == self.frame_key and enhanced is None and self.enhanced.isNull():
+            return
+        self.frame_key, self.image = timestamp, image
+        self.enhanced = enhanced if enhanced is not None else QImage()
+        self.enhanced_area = area if area is not None else QRect()
         if not self.image.isNull():
             self.aspect = self.image.width() * self.crop.width() / max(1, self.image.height() * self.crop.height())
-            if self.quality_mode == 'superres':
-                self.enhancer.submit(self.frame_key, self.image, self.crop)
-                self._refresh_enhancement()
         self.update()
 
     def set_quality_mode(self, mode):
         if mode == self.quality_mode:
             return
+        if self.enhancer is not None:
+            self.enhancer.stop()
+        self.enhancer = None
         self.quality_mode = mode
         self.reset_enhancement()
-        if mode == 'superres':
-            if self.enhancer is None:
-                self.enhancer = CropEnhancer()
+        self.enhance_reason = ''
+        self.enhance_state = 'warming' if mode == 'light' else 'off'
+        if mode == 'light':
+            self.enhancer = CropEnhancer()
             self.enhance_timer.start()
-            if not self.image.isNull():
-                self.enhancer.submit(self.frame_key, self.image, self.crop)
         else:
             self.enhance_timer.stop()
+        if self.input_frame is not None:
+            self.set_frame(self.input_frame)
         self.update()
 
     def reset_enhancement(self):
         self.enhanced = QImage()
+        self.enhanced_area = QRect()
+        self.request_key = None
+        self.slow_results = 0
+        self.enhance_progress = time.perf_counter()
+        if self.quality_mode == 'light' and self.enhance_state != 'fallback':
+            self.enhance_state = 'warming'
         if self.enhancer is not None:
             self.enhancer.reset()
 
     def diagnostics(self):
         return dict(mode=self.quality_mode, source_size=(self.image.width(), self.image.height()),
                     enhanced=not self.enhanced.isNull(),
+                    state=self.enhance_state, reason=self.enhance_reason, displayed_timestamp=self.frame_key,
+                    source_timestamp=self.input_frame[0] if self.input_frame is not None else None,
                     upscale=self.enhancer.diagnostics() if self.enhancer is not None else {})
 
+    def _fallback_enhancement(self, reason):
+        self.enhance_state, self.enhance_reason = 'fallback', reason
+        self.enhancer.stop()
+        self.enhance_timer.stop()
+        if self.input_frame is not None:
+            self._present(*self.input_frame)
+
     def _refresh_enhancement(self):
-        image = self.enhancer.image_at(self.frame_key) if self.frame_key is not None else None
-        image = image if image is not None else QImage()
-        if image.cacheKey() != self.enhanced.cacheKey():
-            self.enhanced = image
-            self.update()
+        if self.input_frame is None or self.enhance_state not in ('warming', 'active'):
+            return
+        stats = self.enhancer.diagnostics()
+        if stats['error'] or stats['bypassed']:
+            self._fallback_enhancement('unavailable' if stats['error'] else 'large_crop')
+            return
+        if self.enhance_state == 'warming' and stats['ready']:
+            self.enhance_state = 'active'
+            self.enhance_progress = time.perf_counter()
+        result = self.enhancer.take_result()
+        if result is not None:
+            timestamp, image, enhanced, area, duration = result
+            # Present the source and filtered image atomically; never move backwards.
+            if (self.frame_key is None or timestamp >= self.frame_key) and timestamp <= self.input_frame[0]:
+                self.slow_results = self.slow_results + 1 if duration > max(10, self.source_interval * 1250) else 0
+                if self.slow_results >= 3 or self.input_frame[0] - timestamp > .080:
+                    self._fallback_enhancement('slow')
+                    return
+                self._present(timestamp, image, enhanced, area)
+                self.enhance_progress = time.perf_counter()
+        if (self.enhance_state == 'active' and self.input_frame[0] != self.frame_key
+                and time.perf_counter() - self.enhance_progress > .060):
+            self._fallback_enhancement('slow')
 
     def fit_geometry(self, x, y, width, remember=True):
         parent = self.parentWidget()
@@ -183,7 +250,10 @@ class FloatingCrop(QWidget):
                 image = self.image
                 if not self.enhanced.isNull():
                     image = self.enhanced
-                    source = QRectF(image.rect())
+                    area = self.enhanced_area
+                    sx, sy = image.width() / area.width(), image.height() / area.height()
+                    source = QRectF((source.x() - area.x()) * sx, (source.y() - area.y()) * sy,
+                                    source.width() * sx, source.height() * sy)
                 brush = QBrush(image)
                 transform = QTransform.fromScale(self.width() / source.width(), self.height() / source.height())
                 transform.translate(-source.x(), -source.y())

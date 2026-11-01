@@ -1255,9 +1255,10 @@ class Viewer(QDialog):
         self.embedded = False
         self.floating_crops = {}
         self.crop_quality = QComboBox(self)
-        for label, mode in (('跟随来源', 'source'), ('平台最高画质裁切', 'highest'), ('适中画质＋局部超分（2倍）', 'superres')):
+        for label, mode in (('流畅优先：直接裁切', 'source'), ('轻量增强：放大与轻锐化', 'light')):
             self.crop_quality.addItem(label, mode)
         mode = context.setting('crop_quality', 'source')
+        mode = {'highest': 'source', 'superres': 'light'}.get(mode, mode)
         self.crop_quality.setCurrentIndex(max(0, self.crop_quality.findData(mode)))
         self.crop_quality.setAccessibleName('画中画画质')
         self.crop_quality.hide()
@@ -2021,10 +2022,7 @@ class Viewer(QDialog):
     def _crop_source_policy(self, row):
         if row.room_id not in self.floating_crops:
             return 'source'
-        mode = self.crop_quality.currentData()
-        if mode == 'highest':
-            return 'highest'
-        if mode == 'superres' and row.room_id != self.alignment.reference:
+        if row.room_id != self.alignment.reference:
             return 'balanced'
         return 'source'
 
@@ -2655,7 +2653,7 @@ class Viewer(QDialog):
         policy = self._crop_source_policy(row)
         seed['crop_quality_policy'] = policy
         seed['balanced_quality'] = policy == 'balanced'
-        seed["highest_quality"] = policy == 'highest' or (self.prefer_highest and row.room_id == self.alignment.reference)
+        seed["highest_quality"] = self.prefer_highest and row.room_id == self.alignment.reference
         if policy != 'source':
             seed.pop('url', None)
         row.decoder = Decoder(row.room_id, seed, row.platform)
