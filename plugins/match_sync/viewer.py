@@ -1316,6 +1316,9 @@ class Viewer(QDialog):
         heading.addWidget(self.match_settings_button)
         heading.addWidget(self.minimize_settings)
         self.picture = Tile({})
+        # Keep pixel hover inside the tile instead of dispatching it through
+        # every surrounding layout and application event filter again.
+        self.picture.setAttribute(Qt.WA_NoMousePropagation, True)
         self.replay_bar = ReplayBar(self)
         self.restore_settings.setParent(self.picture.bottom)
         self.restore_settings.setObjectName("TileCtrl")
