@@ -424,7 +424,7 @@ class SendConsole(SettingsPanel):
         if not hasattr(self, 'body_layout'):
             return
         regular = self.width() >= 520
-        compact = self.width() < 380
+        compact = not regular
         if bool(self.rooms.property('avatarOnly')) != compact:
             self.rooms.setProperty('avatarOnly', compact)
             self.rooms.doItemsLayout()
@@ -433,24 +433,14 @@ class SendConsole(SettingsPanel):
                                         16 if regular else 12, 10 if regular else 8)
         self.layout().setSpacing(10 if regular else 6)
         self.body_layout.setSpacing(12 if regular else 6)
-        self.body_layout.setDirection(QBoxLayout.LeftToRight if regular else QBoxLayout.TopToBottom)
-        row_height = 44 if compact else max(52, self.rooms.fontMetrics().height() * 2 + 12)
-        if regular:
-            self.rooms.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Ignored)
-            self.rooms.setFixedWidth(176)
-            self.rooms.setMinimumHeight(0)
-            self.rooms.setMaximumHeight(16777215)
-            self.rooms.setFlow(QListView.TopToBottom)
-            self.rooms.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            self.rooms.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        else:
-            self.rooms.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-            self.rooms.setMinimumWidth(0)
-            self.rooms.setMaximumWidth(16777215)
-            self.rooms.setFixedHeight(row_height * max(1, self.rooms.count()) + 8)
-            self.rooms.setFlow(QListView.TopToBottom)
-            self.rooms.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            self.rooms.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.body_layout.setDirection(QBoxLayout.LeftToRight)
+        self.rooms.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Ignored)
+        self.rooms.setFixedWidth(176 if regular else 56)
+        self.rooms.setMinimumHeight(0)
+        self.rooms.setMaximumHeight(16777215)
+        self.rooms.setFlow(QListView.TopToBottom)
+        self.rooms.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.rooms.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
     def sync_rooms(self):
         had_rows = bool(self.rows)

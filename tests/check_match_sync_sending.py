@@ -282,7 +282,7 @@ def check(app, host, module, output=None):
             select({'2'})
             console.rooms.setFocus()
             console.rooms.setCurrentRow(0)
-            QTest.keyClick(console.rooms, Qt.Key_Down if console.width() >= 520 else Qt.Key_Right)
+            QTest.keyClick(console.rooms, Qt.Key_Down)
             assert console.checked_rooms() == ['2'] and not sent
             avatar = QPixmap(32, 32)
             avatar.fill(QColor('#728B75'))
@@ -294,7 +294,8 @@ def check(app, host, module, output=None):
             rect = console.rooms.visualItemRect(console.rooms.item(1))
             sample = picture.toImage().pixelColor(round((rect.left() + 10) * picture.devicePixelRatio()),
                                                   round(rect.center().y() * picture.devicePixelRatio()))
-            assert sample != module.theme.qcolor(module.theme.ACCENT), 'Do not outline selected avatars in blue'
+            if not console.rooms.property('avatarOnly'):
+                assert sample != module.theme.qcolor(module.theme.ACCENT), 'Do not outline expanded cards in blue'
             def avatar_x():
                 image = console.rooms.viewport().grab().toImage()
                 ratio = console.rooms.devicePixelRatioF()
@@ -351,8 +352,7 @@ def check(app, host, module, output=None):
                     right = console.mapTo(viewer, QPoint()).y()
                     assert abs(left - right) <= 1, (left, right)
                     regular = console.width() >= 520
-                    assert console.body_layout.direction() == (QBoxLayout.LeftToRight if regular
-                                                              else QBoxLayout.TopToBottom)
+                    assert console.body_layout.direction() == QBoxLayout.LeftToRight
                     assert first.isVisible() == (console.selected_room == '1')
             assert console.findChild(module.QLabel, 'SendContext') is None
             for right_width in (640, 300):
@@ -366,8 +366,9 @@ def check(app, host, module, output=None):
                     first_avatar = console.rooms.visualItemRect(console.rooms.item(0))
                     next_avatar = console.rooms.visualItemRect(console.rooms.item(1))
                     assert next_avatar.top() >= first_avatar.bottom(), 'Keep narrow recipients in a vertical column'
-                    assert console.rooms.height() >= console.rooms.count() * 44
-                    assert console.work.y() >= console.rooms.geometry().bottom() + 1, 'Avatar row must not overlap the composer'
+                    assert console.rooms.width() == 56
+                    assert console.work.x() >= console.rooms.geometry().right() + 1, 'Place the composer to the right of the avatar column'
+                    assert console.work.y() == console.rooms.y(), 'Keep recipients and composer side by side'
                     assert console.save_text.isVisible()
                     primary = next(button for button in second.parentWidget().findChildren(QPushButton)
                                    if button.property('sendPrimary'))
@@ -380,6 +381,8 @@ def check(app, host, module, output=None):
                     assert button.mapTo(console, QPoint(button.width(), 0)).x() <= console.width()
                 if output:
                     viewer.grab().save(str(output.with_name(output.stem + f'-width-{right_width}.png')))
+                    if right_width == 300:
+                        console.grab().save(str(output.with_name(output.stem + '-console-narrow.png')))
             viewer.resize(1320, 880)
             viewer.picture_split.setSizes([700, 620])
             QTest.qWait(40)
