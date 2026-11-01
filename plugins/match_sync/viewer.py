@@ -1106,6 +1106,7 @@ class Viewer(QDialog):
         self.row_preview = []
         self.saved_rooms = {str(item["room_id"]): item for item in context.setting("rooms", [])}
         self.running = False
+        self.status_ui_due = 0.0
         self.replay = ReplayTimeline()
         self._replay_live_anchor = 0.0
         self._replay_live_updated = 0.0
@@ -1968,7 +1969,7 @@ class Viewer(QDialog):
         if getattr(self.picture, "_buffering", False) != bool(active):
             self.picture.set_buffering(bool(active))
 
-    def sync_picture(self, *_args):
+    def sync_picture(self, *_args, refresh_metadata=True):
         row = self.rows.get(self.main.currentData())
         # Poll twice per source frame: Qt paint/chat work can delay a timer by
         # several milliseconds. The audio clock still owns playback speed.
@@ -1985,24 +1986,26 @@ class Viewer(QDialog):
         tile.blockSignals(True)
         try:
             if str(tile.room.get("room_id") or "") != row.room_id:
+                refresh_metadata = True
                 controls_visible = tile._overlay_visible
                 self._stop_recording()
                 self.canvas.set_frame(None)
                 tile.set_room({"room_id": row.room_id, "uname": row.label(), "live": True,
                                "quality": row.quality})
                 tile.set_controls_visible(controls_visible)
-            tile.room["title"] = row.title
-            tile.title_badge.set_text(row.title or row.label(), "")
-            tile.title_badge.setToolTip(row.title or row.label())
-            tile.stream_badge.set_state(True, "")
-            if row.platform is not None:
-                options = row.platform.room_quality_options(row.room_id)
-                if options and tile.quality_options != options:
-                    tile.set_quality_options(options)
-            if tile.quality != row.quality:
-                tile.set_quality(row.quality)
-            if row.platform is not None and tile.actual_quality != row.actual_quality:
-                tile.set_actual_quality(row.actual_quality)
+            if refresh_metadata:
+                tile.room["title"] = row.title
+                tile.title_badge.set_text(row.title or row.label(), "")
+                tile.title_badge.setToolTip(row.title or row.label())
+                tile.stream_badge.set_state(True, "")
+                if row.platform is not None:
+                    options = row.platform.room_quality_options(row.room_id)
+                    if options and tile.quality_options != options:
+                        tile.set_quality_options(options)
+                if tile.quality != row.quality:
+                    tile.set_quality(row.quality)
+                if row.platform is not None and tile.actual_quality != row.actual_quality:
+                    tile.set_actual_quality(row.actual_quality)
             if tile.volume != row.volume.value():
                 tile.set_volume(row.volume.value())
             if tile.audio_channel != row.channel.currentData():
@@ -2860,9 +2863,13 @@ class Viewer(QDialog):
         if not self.embedded:
             self._suppress_host_audio()
         dragging_crop = any(crop.drag is not None for crop in self.floating_crops.values())
+        status_now = time.monotonic()
+        refresh_status_ui = not dragging_crop and status_now >= self.status_ui_due
+        if refresh_status_ui:
+            self.status_ui_due = status_now + .25
         if not dragging_crop:
             self._sync_sidebar_marks()
-        self.sync_picture()
+        self.sync_picture(refresh_metadata=refresh_status_ui)
         clock = self.live_clock()
         wanted = self.target_shifts()
         shifts = self._smooth_shifts(wanted)
@@ -2926,27 +2933,28 @@ class Viewer(QDialog):
         eligible = []
         chat_budget = min(2 if dragging_crop else 80, max(1, 200 // max(1, len(self.rows))))
         for room_id, row in self.rows.items():
-            bounds = row.decoder.history.bounds_at(clock + shifts[room_id]) if row.decoder is not None else None
-            text = ""
-            if bounds:
-                text = f"历史缓存约 {int(bounds[1] - bounds[0])} 秒"
-                position = clock + shifts[room_id]
-                ahead = max(0, bounds[1] - position) if bounds[0] <= position <= bounds[1] else 0
-                text += f"，{'同步目标' if room_id != self.alignment.reference else ''}前方可播放约 {ahead:.1f} 秒"
-                if room_id != self.alignment.reference and self.alignment.automatic and not row.match_confirmed:
-                    text += "（候选偏移，尚未验证）"
-                if position < bounds[0] or position > bounds[1] + 1:
-                    text += "，当前播放偏移超出范围"
-                    text += "（" + cache_gap(row.decoder.history, position) + "）"
-            if row.sync_state != "已同步":
-                text += " · 本路暂时静音"
-            elif self.alignment.automatic and row.correction_remaining > .1001:
-                reference = self.alignment.reference
-                text += (f" · 播放偏移：目标 {wanted[reference] - wanted[room_id]:+.2f} 秒，"
-                         f"当前 {shifts[reference] - shifts[room_id]:+.2f} 秒")
-            if not dragging_crop and row.buffer_text != text:
-                row.buffer_text = text
-                row.refresh_status()
+            if refresh_status_ui:
+                bounds = row.decoder.history.bounds_at(clock + shifts[room_id]) if row.decoder is not None else None
+                text = ""
+                if bounds:
+                    text = f"历史缓存约 {int(bounds[1] - bounds[0])} 秒"
+                    position = clock + shifts[room_id]
+                    ahead = max(0, bounds[1] - position) if bounds[0] <= position <= bounds[1] else 0
+                    text += f"，{'同步目标' if room_id != self.alignment.reference else ''}前方可播放约 {ahead:.1f} 秒"
+                    if room_id != self.alignment.reference and self.alignment.automatic and not row.match_confirmed:
+                        text += "（候选偏移，尚未验证）"
+                    if position < bounds[0] or position > bounds[1] + 1:
+                        text += "，当前播放偏移超出范围"
+                        text += "（" + cache_gap(row.decoder.history, position) + "）"
+                if row.sync_state != "已同步":
+                    text += " · 本路暂时静音"
+                elif self.alignment.automatic and row.correction_remaining > .1001:
+                    reference = self.alignment.reference
+                    text += (f" · 播放偏移：目标 {wanted[reference] - wanted[room_id]:+.2f} 秒，"
+                             f"当前 {shifts[reference] - shifts[room_id]:+.2f} 秒")
+                if row.buffer_text != text:
+                    row.buffer_text = text
+                    row.refresh_status()
             target = clock + shifts[room_id]
             for _ in range(chat_budget):
                 if not row.pending or row.pending[0][0] > target:
