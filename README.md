@@ -5,6 +5,8 @@
 本仓库只包含二路插件本体，不包含其他插件，也没有其他插件的下载入口。
 
 ## 超级大爆💥已对石家庄第一🐷做了特殊适配功能！！！
+<img width="650" height="867" alt="Dyoo2026-11-01_16-28-02" src="https://github.com/user-attachments/assets/129aa1a9-a279-4eac-8266-dc0cc0bf1ad0" />
+
 
 ## 适用范围
 
