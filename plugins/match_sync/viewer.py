@@ -1405,11 +1405,13 @@ class Viewer(QDialog):
         right_pane = QWidget()
         self.chat_pane = right_pane
         self.chat_collapsed = False
-        self.chat_sizes = None
         right_layout = QVBoxLayout(right_pane)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
         right_layout.addWidget(self.panel, 1)
+        self.chat_space = QWidget(right_pane)
+        right_layout.addWidget(self.chat_space, 1)
+        self.chat_space.hide()
         right_layout.addWidget(self.send_console)
         split.addWidget(right_pane)
         self.minimize_chat = ConsoleIconButton('minimize', '最小化弹幕栏', self.panel.header)
@@ -1418,7 +1420,7 @@ class Viewer(QDialog):
         self.restore_chat = QPushButton('展开弹幕', self.picture.bottom)
         self.restore_chat.setObjectName('TileCtrl')
         self.restore_chat.setFixedSize(90, 26)
-        self.restore_chat.setToolTip('恢复右侧弹幕栏与发送控制台')
+        self.restore_chat.setToolTip('恢复弹幕列表')
         self.restore_chat.clicked.connect(lambda: self.set_chat_visible(True))
         self.picture.bottom.layout().insertWidget(
             self.picture.bottom.layout().indexOf(self.picture.danmaku_button), self.restore_chat)
@@ -1919,13 +1921,10 @@ class Viewer(QDialog):
     def set_chat_visible(self, visible):
         if visible == (not self.chat_collapsed):
             return
-        if not visible:
-            self.chat_sizes = self.picture_split.sizes()
         self.chat_collapsed = not visible
-        self.chat_pane.setVisible(visible)
+        self.panel.setVisible(visible)
+        self.chat_space.setVisible(not visible)
         self.restore_chat.setVisible(not visible)
-        if visible and self.chat_sizes is not None:
-            self.picture_split.setSizes(self.chat_sizes)
 
     def _restore_host_widgets(self):
         self.host_audio_timer.stop()
@@ -2038,6 +2037,7 @@ class Viewer(QDialog):
         self.main.setCurrentIndex(max(0, index) if self.rows else -1)
         self.main.blockSignals(False)
         self._main_changed()
+        self._refresh_chat_status()
 
     def _main_changed(self, *_args):
         selected = self.main.currentData() or ""
@@ -2529,7 +2529,7 @@ class Viewer(QDialog):
         self.locked_clock = None
         self.sync_waiting = False
         self.alignment.candidates.clear()
-        self.panel.set_status("多房间弹幕")
+        self._refresh_chat_status()
         for row in self.rows.values():
             row.user_confirmed = False
             self._start_row(row)
@@ -2587,6 +2587,7 @@ class Viewer(QDialog):
         if not row.show_chat.isChecked():
             row.chat_text = "弹幕已关闭"
             row.refresh_status()
+            self._refresh_chat_status()
             return
         row.chat_text = "弹幕连接中…"
         row.refresh_status()
@@ -2595,7 +2596,25 @@ class Viewer(QDialog):
         row.chat = chat
         chat.events.state.connect(lambda text, r=row, c=chat: self._state(r, c, text, True))
         chat.events.message.connect(lambda event, r=row, c=chat: self._message(r, c, event))
+        self._refresh_chat_status()
         chat.start()
+
+    def _refresh_chat_status(self):
+        rows = [row for row in self.rows.values()
+                if self.running and row.chat is not None and row.show_chat.isChecked()]
+        connected = sum(row.chat_text.startswith(('已连接', '弹幕已连接')) for row in rows)
+        if connected:
+            text = f'已连接 · {connected}/{len(rows)}路'
+        elif any(any(word in row.chat_text for word in ('连接中', '重连', '重试')) for row in rows):
+            text = '连接中…'
+        else:
+            text = '连接已断开' if rows else '未接入'
+        if self.panel._status != text:
+            self.panel.set_status(text)
+        self.panel.count.set_connections(connected)
+        detail = '\n'.join(f'{row.label()}：{row.chat_text}' for row in rows)
+        self.panel.count.setToolTip(detail or text)
+        self.panel.count.setAccessibleDescription(detail or text)
 
     def _valid(self, row, worker, chat=False):
         return (self.running and self.rows.get(row.room_id) is row and
@@ -2631,6 +2650,7 @@ class Viewer(QDialog):
         if self._valid(row, worker, chat):
             if chat:
                 row.chat_text = text
+                self._refresh_chat_status()
             else:
                 row.video_text = text
             row.refresh_status()
@@ -3628,6 +3648,7 @@ class Viewer(QDialog):
         if not self.host_audio_timer.isActive():
             self._release_host_audio()
         self.panel.set_status("已停止")
+        self.panel.count.set_connections(0)
         self.overlay_pending.clear()
         self.overlay_last = ""
         if self.video_danmaku is not None:

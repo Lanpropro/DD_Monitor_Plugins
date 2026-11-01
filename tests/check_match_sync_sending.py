@@ -418,15 +418,20 @@ def check(app, host, module, output=None):
                 QTest.qWait(30)
                 sizes = viewer.picture_split.sizes()
                 old_width = viewer.left_pane.width()
+                console_top = console.mapTo(viewer, QPoint()).y()
                 viewer.minimize_chat.click()
                 QTest.qWait(30)
-                assert viewer.chat_pane.isHidden() and viewer.restore_chat.isVisible()
-                assert viewer.left_pane.width() > old_width
+                assert viewer.panel.isHidden() and viewer.restore_chat.isVisible()
+                assert viewer.chat_pane.isVisible()
+                assert viewer.left_pane.width() == old_width
+                assert console.isHidden() == collapsed_console
+                if not collapsed_console:
+                    assert console.mapTo(viewer, QPoint()).y() == console_top
                 assert viewer.rows == rows and second.text() == draft
                 viewer.panel.add_event({'text': 'received while hidden', 'uname': 'fixture'})
                 viewer.restore_chat.click()
                 QTest.qWait(30)
-                assert viewer.chat_pane.isVisible() and viewer.restore_chat.isHidden()
+                assert viewer.panel.isVisible() and viewer.restore_chat.isHidden()
                 assert console.isHidden() == collapsed_console, 'Restore the previous send-console visibility'
                 assert all(abs(a - b) <= 1 for a, b in zip(sizes, viewer.picture_split.sizes()))
                 assert 'received while hidden' in viewer.panel.body.toPlainText()

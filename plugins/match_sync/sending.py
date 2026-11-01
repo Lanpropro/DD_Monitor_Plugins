@@ -7,13 +7,20 @@ from PySide6.QtWidgets import (QApplication, QBoxLayout, QFrame, QHBoxLayout, QL
 from ddm.widgets import DanmakuPanel, Tile
 from ddm.danmaku_actions import CommentToolbar
 from ddm import motion, theme
-from .panels import ConsoleIconButton, SettingsPanel, console_button_style
+from .panels import ChatConnectionIcon, ConsoleIconButton, SettingsPanel, console_button_style
 from .send_design import ACCESSORY_WIDTH, INPUT_HEIGHT, RecipientDelegate, SavedTextDelegate, SavedTextList, align_composer, colors, style_compose, stylesheet
 
 
 class SendingDanmakuPanel(DanmakuPanel):
     def __init__(self, viewer):
         super().__init__(viewer)
+        previous = self.count
+        self.count = ChatConnectionIcon(self.header)
+        self.count.setObjectName('DanmakuCount')
+        self.header.layout().replaceWidget(previous, self.count)
+        previous.hide()
+        previous.deleteLater()
+        self._refresh_count()
         self.viewer = viewer
         self._adding_divider = False
         self._replay_section = False

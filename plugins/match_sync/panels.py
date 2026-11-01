@@ -9,6 +9,32 @@ from PySide6.QtWidgets import QApplication, QDialog, QDialogButtonBox, QFormLayo
 from ddm import theme
 
 
+class ChatConnectionIcon(QLabel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.connections = 0
+        self.setFixedSize(20, 20)
+
+    def set_connections(self, count):
+        if self.connections != count:
+            self.connections = count
+            self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.translate(10, 10)
+        painter.rotate(90)
+        painter.translate(-10, -10)
+        for level, radius in enumerate((5, 9), 1):
+            color = theme.qcolor(theme.PINK if self.connections >= level else theme.TEXT3)
+            painter.setPen(QPen(color, 1.8, Qt.SolidLine, Qt.RoundCap))
+            painter.drawArc(QRectF(10 - radius, 15 - radius, radius * 2, radius * 2), 45 * 16, 90 * 16)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(theme.qcolor(theme.PINK if self.connections else theme.TEXT3))
+        painter.drawEllipse(QPointF(10, 15), 1.4, 1.4)
+
+
 class LinkCursor(QObject):
     def eventFilter(self, widget, event):
         if (event.type() in (QEvent.Enter, QEvent.HoverMove, QEvent.MouseMove)
