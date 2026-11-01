@@ -44,28 +44,15 @@ class ContributionGuideTests(unittest.TestCase):
                     with self.subTest(document=relative, link=link):
                         self.assertTrue((document.parent / link.split('#', 1)[0]).is_file(), link)
 
-    def test_readme_showcases_each_plugin_with_author_credit(self):
+    def test_readme_showcases_only_the_maintained_plugin(self):
         readme = (ROOT / 'README.md').read_text(encoding='utf-8')
-        cards = re.findall(r'<td\b[^>]*>(.*?)</td>', readme, re.DOTALL)
-        manifests = list((ROOT / 'plugins').glob('*/plugin.json'))
-        self.assertEqual(len(cards), len(manifests))
-        platforms = {
-            'domestic_live': {'huya', 'douyu', 'douyin'},
-            'global_live': {'twitch', 'youtube'},
-            'match_sync': {'bilibili', 'huya', 'douyu', 'douyin', 'twitch', 'youtube'},
-            'bili_live': {'bilibili'},
-        }
-        for path in manifests:
-            manifest = json.loads(path.read_text(encoding='utf-8'))
-            with self.subTest(plugin=manifest['id']):
-                matches = [card for card in cards
-                           if f'href="plugins/{manifest["id"]}/README.md"' in card]
-                self.assertEqual(len(matches), 1)
-                author = manifest.get('author', 'Lanpropro')
-                self.assertIn(f'href="https://github.com/{author}"', matches[0])
-                self.assertIn('下载插件', matches[0])
-                icons = re.findall(r'<img src="docs/assets/platforms/([^"/]+)\.png"', matches[0])
-                self.assertEqual(set(icons), platforms[manifest['id']])
+        self.assertIn('# DD监控室CE · 二路插件（分支修改版）', readme)
+        self.assertIn('](plugins/match_sync/README.md)', readme)
+        self.assertIn('](https://github.com/Sarff11)', readme)
+        self.assertIn('match_sync-', readme)
+        for plugin_id in ('domestic_live', 'global_live', 'bili_live'):
+            with self.subTest(plugin=plugin_id):
+                self.assertNotIn(f'plugins/{plugin_id}/README.md', readme)
 
     def test_release_notes_are_indexed_in_one_directory(self):
         self.assertFalse(list(ROOT.glob('RELEASE-*.md')))
