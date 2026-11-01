@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import time
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -43,7 +45,40 @@ def check(app, host, module):
                         resource = panel.body.document().resource(QTextDocument.ImageResource, QUrl(image.name()))
                         assert resource.width() == expected and resource.height() == 80
             assert [entry['source_room'] for entry in panel._blocks] == ['1'] * 100
-            return {'passed': True, 'resize_full_rebuilds': 0, 'messages_preserved': 100}
+            with patch.object(module.Decoder, 'start', lambda _self: None), \
+                    patch.object(module.Chat, 'start', lambda _self: None), \
+                    patch.object(module.AudioPump, 'start', lambda _self: None):
+                viewer.add_room('1')
+                viewer.toggle_running()
+            viewer.render_timer.stop()
+            viewer.match_timer.stop()
+            viewer.audio.timer.stop()
+            row = viewer.rows['1']
+            row.decoder.fps = 60
+            calls = []
+            row.platform = SimpleNamespace(kind='bilibili', room_quality_options=lambda _key: calls.append(_key) or [])
+            viewer.status_ui_due = 0
+            base = time.monotonic()
+            with patch.object(viewer, 'render_floating_crops', wraps=viewer.render_floating_crops) as frames:
+                for index in range(125):
+                    with patch.object(module.time, 'monotonic', return_value=base + index * .008):
+                        viewer.render()
+                assert frames.call_count == 125, 'Do not throttle the playback path'
+            assert len(calls) == 4, len(calls)
+            assert viewer.render_timer.interval() == 8
+            # Explicit source information and room changes bypass periodic UI throttling.
+            row.title = 'new title'
+            viewer.sync_picture()
+            assert viewer.picture.room['title'] == 'new title'
+            assert len(calls) == 5
+            row.volume.setValue(37)
+            row.audible.setChecked(False)
+            before_controls = len(calls)
+            viewer.sync_picture(refresh_metadata=False)
+            assert viewer.picture.volume == 37 and viewer.picture.muted
+            assert len(calls) == before_controls, 'Playback controls must not require a metadata refresh'
+            return {'passed': True, 'resize_full_rebuilds': 0, 'messages_preserved': 100,
+                    'playback_updates': 125, 'metadata_polls': 4, 'immediate_controls': True}
         finally:
             panel.close()
             viewer.close()
