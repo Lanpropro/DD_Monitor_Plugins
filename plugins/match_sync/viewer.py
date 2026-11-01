@@ -90,7 +90,11 @@ class Canvas(QFrame):
         self.selecting = selecting
         self.crop = QRectF(0, 0, 1, 1)
         self.anchor = None
+        self.selection_ready = False
+        self.selection_zoom = 1.
+        self.selection_pan = QPointF()
         self.image_rect = QRectF()
+        self.setMouseTracking(selecting)
         self.setMinimumSize(320, 180)
         self.setAttribute(Qt.WA_OpaquePaintEvent, True)
 
@@ -160,15 +164,69 @@ class Canvas(QFrame):
         self.image_rect = QRectF((self.width() - size.width()) / 2,
                                 (self.height() - size.height()) / 2,
                                 size.width(), size.height())
+        if self.selecting:
+            center = self.image_rect.center()
+            self.image_rect = QRectF(center.x() - size.width() * self.selection_zoom / 2 + self.selection_pan.x(),
+                                     center.y() - size.height() * self.selection_zoom / 2 + self.selection_pan.y(),
+                                     size.width() * self.selection_zoom, size.height() * self.selection_zoom)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
         painter.drawImage(self.image_rect, image, QRectF(source))
         if self.selecting:
             painter.setPen(QPen(QColor("#38bdf8"), 2))
-            rect = self.crop
-            painter.drawRect(QRectF(
-                self.image_rect.x() + rect.x() * self.image_rect.width(),
-                self.image_rect.y() + rect.y() * self.image_rect.height(),
-                rect.width() * self.image_rect.width(), rect.height() * self.image_rect.height()))
+            rect = self.selection_rect()
+            painter.drawRect(rect)
+            if self.selection_ready:
+                painter.setBrush(QColor('#38bdf8'))
+                for point in (rect.topLeft(), rect.topRight(), rect.bottomLeft(), rect.bottomRight(),
+                              QPointF(rect.center().x(), rect.top()), QPointF(rect.center().x(), rect.bottom()),
+                              QPointF(rect.left(), rect.center().y()), QPointF(rect.right(), rect.center().y())):
+                    painter.drawRect(QRectF(point.x() - 3, point.y() - 3, 6, 6))
+
+    def selection_rect(self):
+        rect, image = self.crop, self.image_rect
+        return QRectF(image.x() + rect.x() * image.width(), image.y() + rect.y() * image.height(),
+                      rect.width() * image.width(), rect.height() * image.height())
+
+    def reset_selection(self):
+        self.crop = QRectF(0, 0, 1, 1)
+        self.selection_ready = False
+        self.anchor = None
+        self.selection_zoom = 1.
+        self.selection_pan = QPointF()
+        self.update()
+
+    def wheelEvent(self, event):
+        if not self.selecting or not event.modifiers() & Qt.ControlModifier or self.image_rect.isEmpty():
+            super().wheelEvent(event)
+            return
+        if self.anchor is not None:
+            event.accept()
+            return
+        zoom = max(1., min(12., self.selection_zoom * 1.2 ** (event.angleDelta().y() / 120)))
+        ratio = zoom / self.selection_zoom
+        center = QPointF(self.width() / 2, self.height() / 2)
+        self.selection_pan = event.position() - center - (event.position() - center - self.selection_pan) * ratio
+        self.selection_zoom = zoom
+        if zoom == 1.:
+            self.selection_pan = QPointF()
+        self.update()
+        event.accept()
+
+    def selection_hit(self, point):
+        if not self.selection_ready:
+            return 'new' if self.image_rect.contains(point) else ''
+        rect = self.selection_rect()
+        if not rect.adjusted(-7, -7, 7, 7).contains(point):
+            return ''
+        horizontal = 'l' if abs(point.x() - rect.left()) <= 7 else 'r' if abs(point.x() - rect.right()) <= 7 else ''
+        vertical = 't' if abs(point.y() - rect.top()) <= 7 else 'b' if abs(point.y() - rect.bottom()) <= 7 else ''
+        return horizontal + vertical or 'move'
+
+    @staticmethod
+    def selection_cursor(hit):
+        return {'new': Qt.CrossCursor, 'move': Qt.SizeAllCursor, 'l': Qt.SizeHorCursor, 'r': Qt.SizeHorCursor,
+                't': Qt.SizeVerCursor, 'b': Qt.SizeVerCursor, 'lt': Qt.SizeFDiagCursor, 'rb': Qt.SizeFDiagCursor,
+                'rt': Qt.SizeBDiagCursor, 'lb': Qt.SizeBDiagCursor}.get(hit, Qt.ArrowCursor)
 
     def _point(self, position):
         rect = self.image_rect
@@ -177,15 +235,43 @@ class Canvas(QFrame):
 
     def mousePressEvent(self, event):
         if self.selecting and not self.image_rect.isEmpty() and event.button() == Qt.LeftButton:
-            self.anchor = self._point(event.position())
+            hit = self.selection_hit(event.position())
+            if hit:
+                self.anchor = (hit, self._point(event.position()), QRectF(self.crop))
+                event.accept()
 
     def mouseMoveEvent(self, event):
         if self.anchor is not None:
-            self.crop = QRectF(self.anchor, self._point(event.position())).normalized()
+            hit, start, original = self.anchor
+            point = self._point(event.position())
+            delta = point - start
+            if hit == 'new':
+                self.crop = QRectF(start, point).normalized()
+            elif hit == 'move':
+                self.crop = QRectF(original)
+                self.crop.moveTo(max(0, min(1 - original.width(), original.x() + delta.x())),
+                                 max(0, min(1 - original.height(), original.y() + delta.y())))
+            else:
+                rect = QRectF(original)
+                if 'l' in hit:
+                    rect.setLeft(max(0, min(rect.right() - 1 / self.image.width(), original.left() + delta.x())))
+                if 'r' in hit:
+                    rect.setRight(min(1, max(rect.left() + 1 / self.image.width(), original.right() + delta.x())))
+                if 't' in hit:
+                    rect.setTop(max(0, min(rect.bottom() - 1 / self.image.height(), original.top() + delta.y())))
+                if 'b' in hit:
+                    rect.setBottom(min(1, max(rect.top() + 1 / self.image.height(), original.bottom() + delta.y())))
+                self.crop = rect
             self.update()
+        elif self.selecting:
+            self.setCursor(self.selection_cursor(self.selection_hit(event.position())))
 
     def mouseReleaseEvent(self, event):
+        if self.anchor is not None:
+            self.selection_ready = self.crop.width() > 0 and self.crop.height() > 0
         self.anchor = None
+        if self.selecting:
+            self.update()
 
 
 class AudioFeed(QObject):
@@ -1145,6 +1231,11 @@ class Viewer(QDialog):
         self.prefer_highest = False
         self.embedded = False
         self.floating_crops = {}
+        self.crop_repaint_regions = {}
+        self.crop_repaint_timer = QTimer(self)
+        self.crop_repaint_timer.setSingleShot(True)
+        self.crop_repaint_timer.setInterval(16)
+        self.crop_repaint_timer.timeout.connect(self.flush_crop_background)
         self.hidden_host_widgets = {}
         self.sidebar_style = None
         self.setAcceptDrops(True)
@@ -3320,16 +3411,30 @@ class Viewer(QDialog):
 
     def restore_crop_background(self, floating, exposed):
         parent = floating.parentWidget()
-        # Opaque video/text children can retain their backing-store pixels while
-        # the parent repaints. Repaint the actual exposed surfaces, even if the
-        # stream is stalled and no new video frame is scheduled.
+        # Restore actual video/text surfaces even without a new source frame.
+        # During gestures coalesce mouse bursts before repainting those surfaces.
         surfaces = [self.canvas, self.panel.body.viewport()]
         surfaces.extend(card[2] for card in self.comparison_panel.cards.values())
         for surface in surfaces:
             if surface.isVisible() and surface.window() is parent.window():
                 local = exposed.translated(-surface.mapTo(parent, QPoint())).intersected(surface.rect())
                 if not local.isEmpty():
-                    surface.repaint(local)
+                    if floating.drag is None:
+                        surface.repaint(local)
+                    else:
+                        self.crop_repaint_regions[surface] = self.crop_repaint_regions.get(surface, QRegion()).united(QRegion(local))
+        if self.crop_repaint_regions and not self.crop_repaint_timer.isActive():
+            self.crop_repaint_timer.start()
+
+    def flush_crop_background(self):
+        self.crop_repaint_timer.stop()
+        regions, self.crop_repaint_regions = self.crop_repaint_regions, {}
+        surfaces = [self.canvas, self.panel.body.viewport()]
+        surfaces.extend(card[2] for card in self.comparison_panel.cards.values())
+        for surface in surfaces:
+            region = regions.get(surface)
+            if region is not None and surface.isVisible():
+                surface.repaint(region)
 
     def show_floating_crop(self, row, crop, frame):
         floating = self.floating_crops.get(row.room_id)
@@ -3338,6 +3443,7 @@ class Viewer(QDialog):
             self.floating_crops[row.room_id] = floating
             floating.closed.connect(lambda key=row.room_id: self.floating_crops.pop(key, None))
             floating.background_exposed.connect(lambda rect, item=floating: self.restore_crop_background(item, rect))
+            floating.gesture_finished.connect(self.flush_crop_background)
             floating.recrop.connect(lambda: self.choose_crop(row, floating=True))
             floating.move(40 + len(self.floating_crops) * 24, 40 + len(self.floating_crops) * 24)
         floating.picture_widget = self.picture
@@ -3388,8 +3494,9 @@ class Viewer(QDialog):
         canvas.waiting = frame is None
         canvas.crop = (QRectF(self.floating_crops[row.room_id].crop) if floating and row.room_id in self.floating_crops
                        else QRectF(0, 0, 1, 1) if floating else QRectF(*row.crop))
+        canvas.selection_ready = (floating and row.room_id in self.floating_crops) or canvas.crop != QRectF(0, 0, 1, 1)
         reset = QPushButton("使用整个画面")
-        reset.clicked.connect(lambda: (setattr(canvas, "crop", QRectF(0, 0, 1, 1)), canvas.update()))
+        reset.clicked.connect(canvas.reset_selection)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setObjectName("MatchSyncCropConfirm")
         dialog.setStyleSheet(f"""
@@ -3426,15 +3533,18 @@ class Viewer(QDialog):
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         layout = QVBoxLayout(dialog)
-        hint = QLabel('拖选摄像头等区域；确认后可在软件内拖动、缩放，双击重新框选。使用原分辨率画面，不改变对齐和对照区域。'
+        hint = QLabel('Ctrl＋滚轮以指针为中心缩放画面；拖动边框或四角精调，内部移动选区；使用整个画面重置，确认后可通过微调按钮再次调整。'
                       if floating else "自动匹配始终使用完整画面；框选仅用于放大对照、人工微调偏移。"
                       "两路请选择相同计时器，框选不会改变自动匹配或读取计时器数字。")
         hint.setWordWrap(True)
         layout.addWidget(hint)
         layout.addWidget(canvas, 1)
-        layout.addWidget(reset)
-        layout.addWidget(buttons)
-        if dialog.exec() == QDialog.Accepted and canvas.crop.width() > 0.02 and canvas.crop.height() > 0.02:
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        actions.addWidget(reset)
+        actions.addWidget(buttons)
+        layout.addLayout(actions)
+        if dialog.exec() == QDialog.Accepted and canvas.crop.width() > 0 and canvas.crop.height() > 0:
             rect = canvas.crop
             if floating:
                 self.show_floating_crop(row, (rect.x(), rect.y(), rect.width(), rect.height()), canvas.frame)
