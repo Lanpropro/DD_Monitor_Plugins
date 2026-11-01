@@ -196,10 +196,20 @@ class Canvas(QFrame):
         self.update()
 
     def wheelEvent(self, event):
-        if not self.selecting or not event.modifiers() & Qt.ControlModifier or self.image_rect.isEmpty():
+        if not self.selecting or self.image_rect.isEmpty():
             super().wheelEvent(event)
             return
         if self.anchor is not None:
+            event.accept()
+            return
+        if not event.modifiers() & Qt.ControlModifier:
+            delta = QPointF(event.pixelDelta())
+            if delta.isNull():
+                delta = QPointF(event.angleDelta()) * .5
+            if event.modifiers() & Qt.ShiftModifier:
+                delta = QPointF(delta.x() or delta.y(), 0)
+            self.selection_pan += delta
+            self.update()
             event.accept()
             return
         zoom = max(1., min(12., self.selection_zoom * 1.2 ** (event.angleDelta().y() / 120)))
@@ -1231,6 +1241,14 @@ class Viewer(QDialog):
         self.prefer_highest = False
         self.embedded = False
         self.floating_crops = {}
+        self.crop_quality = QComboBox(self)
+        for label, mode in (('跟随来源', 'source'), ('平台最高画质裁切', 'highest'), ('适中画质＋局部超分（2倍）', 'superres')):
+            self.crop_quality.addItem(label, mode)
+        mode = context.setting('crop_quality', 'source')
+        self.crop_quality.setCurrentIndex(max(0, self.crop_quality.findData(mode)))
+        self.crop_quality.setAccessibleName('画中画画质')
+        self.crop_quality.hide()
+        self.crop_quality.currentIndexChanged.connect(self._crop_quality_changed)
         self.crop_repaint_regions = {}
         self.crop_repaint_timer = QTimer(self)
         self.crop_repaint_timer.setSingleShot(True)
@@ -1975,6 +1993,48 @@ class Viewer(QDialog):
         self.context.set_setting("main_room", self.main.currentData() or "")
         self.context.set_setting("automatic", self.automatic.isChecked())
         self.context.set_setting('buffer_reserve', self.reserve_seconds)
+        self.context.set_setting('crop_quality', self.crop_quality.currentData())
+
+    def _crop_source_policy(self, row):
+        if row.room_id not in self.floating_crops:
+            return 'source'
+        mode = self.crop_quality.currentData()
+        if mode == 'highest':
+            return 'highest'
+        if mode == 'superres' and row.room_id != self.alignment.reference:
+            return 'balanced'
+        return 'source'
+
+    def _crop_quality_changed(self):
+        for floating in self.floating_crops.values():
+            floating.set_quality_mode(self.crop_quality.currentData())
+        self._apply_crop_quality()
+        self.changed()
+
+    def _apply_crop_quality(self):
+        if not self.running:
+            return
+        for key, row in self.rows.items():
+            seed = getattr(row.decoder, 'seed', {})
+            if row.decoder is None or seed.get('crop_quality_policy', 'source') == self._crop_source_policy(row):
+                continue
+            floating = self.floating_crops.get(key)
+            if floating is not None:
+                floating.set_frame(None)
+            if key == self.alignment.reference:
+                self._reload_picture()
+            else:
+                self._stop_row(row)
+                self.sources.pop(key, None)
+                self._start_row(row)
+                if not self.alignment.manual_locked:
+                    self.alignment.lags.pop(key, None)
+                self.alignment.candidates.pop(key, None)
+                self.generation += 1
+
+    def _close_floating_crop(self, key):
+        self.floating_crops.pop(key, None)
+        self._apply_crop_quality()
 
     def _buffer_reserve_changed(self):
         self.reserve_seconds = self.buffer_reserve.currentData()
@@ -2074,6 +2134,7 @@ class Viewer(QDialog):
                     self._reload_picture()
                 elif row.decoder is not None:
                     row.decoder.seed["highest_quality"] = True
+        self._apply_crop_quality()
         self.sync_picture()
         self.changed()
 
@@ -2567,7 +2628,12 @@ class Viewer(QDialog):
         if seed.get("quality", row.quality) != row.quality:
             seed.pop("url", None)
         seed["quality"] = row.quality
-        seed["highest_quality"] = self.prefer_highest and row.room_id == self.alignment.reference
+        policy = self._crop_source_policy(row)
+        seed['crop_quality_policy'] = policy
+        seed['balanced_quality'] = policy == 'balanced'
+        seed["highest_quality"] = policy == 'highest' or (self.prefer_highest and row.room_id == self.alignment.reference)
+        if policy != 'source':
+            seed.pop('url', None)
         row.decoder = Decoder(row.room_id, seed, row.platform)
         row.decoder.set_crop((0, 0, 1, 1))
         decoder = row.decoder
@@ -2623,7 +2689,7 @@ class Viewer(QDialog):
     def _information(self, row, worker, info):
         if not self._valid(row, worker):
             return
-        if info.get("requested_quality"):
+        if info.get("requested_quality") and self._crop_source_policy(row) == 'source':
             row.quality = int(info["requested_quality"])
         if "title" in info:
             row.title = info.get("title") or ""
@@ -2632,7 +2698,7 @@ class Viewer(QDialog):
             self.update_main_choices()
         if info.get("actual_quality"):
             row.actual_quality = int(info["actual_quality"])
-            if (row.platform is not None and row.platform.kind != "douyu"
+            if (self._crop_source_policy(row) == 'source' and row.platform is not None and row.platform.kind != "douyu"
                     and not (self.prefer_highest and row.room_id == self.alignment.reference)):
                 row.quality = row.actual_quality
             if row.room_id == self.main.currentData():
@@ -3456,7 +3522,7 @@ class Viewer(QDialog):
         if floating is None:
             floating = FloatingCrop(self.floating_surface(), row.label(), crop)
             self.floating_crops[row.room_id] = floating
-            floating.closed.connect(lambda key=row.room_id: self.floating_crops.pop(key, None))
+            floating.closed.connect(lambda key=row.room_id: self._close_floating_crop(key))
             floating.background_exposed.connect(lambda rect, item=floating: self.restore_crop_background(item, rect))
             floating.gesture_finished.connect(self.flush_crop_background)
             floating.recrop.connect(lambda: self.choose_crop(row, floating=True))
@@ -3464,6 +3530,8 @@ class Viewer(QDialog):
         floating.picture_widget = self.picture
         self.picture.installEventFilter(floating)
         floating.crop = QRectF(*crop)
+        floating.reset_enhancement()
+        floating.set_quality_mode(self.crop_quality.currentData())
         pixmap = row.avatar.pixmap()
         floating.set_avatar(pixmap if pixmap is not None and not pixmap.isNull() else row.avatar.grab())
         floating.frame_key = None
@@ -3471,6 +3539,7 @@ class Viewer(QDialog):
         floating.fit_geometry(floating.x(), floating.y(), floating.width() if floating.isVisible() else 320)
         floating.show()
         floating.raise_()
+        self._apply_crop_quality()
         return floating
 
     def render_floating_crops(self, clock, shifts):
@@ -3548,7 +3617,7 @@ class Viewer(QDialog):
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         layout = QVBoxLayout(dialog)
-        hint = QLabel('Ctrl＋滚轮以指针为中心缩放画面；拖动边框或四角精调，内部移动选区；使用整个画面重置，确认后可通过微调按钮再次调整。'
+        hint = QLabel('Ctrl＋滚轮：缩放　滚轮：上下平移　Shift＋滚轮：左右平移'
                       if floating else "自动匹配始终使用完整画面；框选仅用于放大对照、人工微调偏移。"
                       "两路请选择相同计时器，框选不会改变自动匹配或读取计时器数字。")
         hint.setWordWrap(True)
@@ -3615,6 +3684,7 @@ class Viewer(QDialog):
         row.refresh_status()
 
     def stop(self):
+        self.running = False
         self.independent_playback.clear()
         for floating in list(self.floating_crops.values()):
             floating.close()
@@ -3625,7 +3695,6 @@ class Viewer(QDialog):
         if self.fullscreen_dialog is not None:
             self.fullscreen_dialog.close()
         self._stop_recording()
-        self.running = False
         self.replay = ReplayTimeline()
         self.replay_bar.refresh(force=True)
         self.sync_waiting = False

@@ -2,7 +2,7 @@
 import math
 import ctypes
 import sys
-from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt
+from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QCursor, QLinearGradient, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QApplication, QDialog, QDialogButtonBox, QFormLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
@@ -150,19 +150,51 @@ class ConsoleIconButton(QPushButton):
 class MatchSettingsDialog(QDialog):
     def __init__(self, viewer):
         super().__init__(viewer)
+        self.viewer = viewer
         self.setAttribute(Qt.WA_DontShowOnScreen, viewer.testAttribute(Qt.WA_DontShowOnScreen))
         self.setWindowTitle('比赛二路设置')
         self.setMinimumWidth(340)
         layout = QVBoxLayout(self)
         form = QFormLayout()
         form.addRow('缓存余量', viewer.buffer_reserve)
+        form.addRow('画中画画质', viewer.crop_quality)
+        viewer.crop_quality.show()
         layout.addLayout(form)
         note = QLabel('自动对齐和对照微调保留在外部控制栏。\n重放最多回看十分钟，实际范围取主画面可用缓存。')
         note.setWordWrap(True)
         layout.addWidget(note)
+        quality_note = QLabel('最高画质与来源共享直播流，切换时可能重新缓冲。\n'
+                              '超分仅增强裁切区域；副路优先720P，否则使用中间档，主画面不降档。\n'
+                              '大选区、超分超时或不可用时使用普通缩放。')
+        quality_note.setWordWrap(True)
+        layout.addWidget(quality_note)
+        self.quality_status = QLabel()
+        layout.addWidget(self.quality_status)
+        self.status_timer = QTimer(self)
+        self.status_timer.setInterval(500)
+        self.status_timer.timeout.connect(self.refresh_quality_status)
         close = QDialogButtonBox(QDialogButtonBox.Close)
         close.rejected.connect(self.close)
         layout.addWidget(close)
+
+    def refresh_quality_status(self):
+        crops = list(self.viewer.floating_crops.values())
+        if self.viewer.crop_quality.currentData() != 'superres':
+            self.quality_status.setText('')
+        elif not crops:
+            self.quality_status.setText('局部超分：等待添加画中画')
+        else:
+            enhanced = sum(not crop.enhanced.isNull() for crop in crops)
+            self.quality_status.setText(f'局部超分：{enhanced} 路增强，{len(crops) - enhanced} 路普通缩放／等待处理')
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.refresh_quality_status()
+        self.status_timer.start()
+
+    def hideEvent(self, event):
+        self.status_timer.stop()
+        super().hideEvent(event)
 
 
 def console_button_style(selector):

@@ -15,3 +15,6 @@
 详细支持范围见各插件 README。
 
 比赛二路同步插件提取自同一软件源码的 1.0 发布基线。图像解码与匹配使用宿主环境的 PyAV（BSD-3-Clause）、NumPy（BSD-3-Clause）及 FFmpeg；安装包不包含这些第三方运行库。
+
+比赛二路局部超分附带 Saafke/FSRCNN_Tensorflow 的 FSRCNN_x2.pb 预训练模型（Apache-2.0）。
+来源版本、文件 SHA256 与完整许可见 `plugins/match_sync/models/`；模型未修改。

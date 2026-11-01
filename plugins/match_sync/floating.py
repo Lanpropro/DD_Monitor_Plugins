@@ -1,9 +1,10 @@
 """In-application crops keep source pixels and are independent of the video tile."""
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen, QTransform
 from PySide6.QtWidgets import QWidget
 
 from ddm import theme
+from .upscale import CropEnhancer
 
 
 class FloatingCrop(QWidget):
@@ -19,6 +20,12 @@ class FloatingCrop(QWidget):
         self.avatar = QImage()
         self.avatar_key = None
         self.frame_key = None
+        self.quality_mode = 'source'
+        self.enhancer = None
+        self.enhanced = QImage()
+        self.enhance_timer = QTimer(self)
+        self.enhance_timer.setInterval(16)
+        self.enhance_timer.timeout.connect(self._refresh_enhancement)
         self.drag = None
         self.lock_mode = 0
         self.picture_widget = None
@@ -43,17 +50,55 @@ class FloatingCrop(QWidget):
 
     def set_frame(self, frame):
         if frame is None:
+            self.reset_enhancement()
             self.frame_key = None
             self.image = QImage()
             self.update()
             return
         if frame[0] == self.frame_key:
             return
+        if self.frame_key is not None and frame[0] < self.frame_key:
+            self.reset_enhancement()
         self.frame_key = frame[0]
         self.image = frame[1] if isinstance(frame[1], QImage) else QImage.fromData(frame[1])
         if not self.image.isNull():
             self.aspect = self.image.width() * self.crop.width() / max(1, self.image.height() * self.crop.height())
+            if self.quality_mode == 'superres':
+                self.enhancer.submit(self.frame_key, self.image, self.crop)
+                self._refresh_enhancement()
         self.update()
+
+    def set_quality_mode(self, mode):
+        if mode == self.quality_mode:
+            return
+        self.quality_mode = mode
+        self.reset_enhancement()
+        if mode == 'superres':
+            if self.enhancer is None:
+                self.enhancer = CropEnhancer()
+            self.enhance_timer.start()
+            if not self.image.isNull():
+                self.enhancer.submit(self.frame_key, self.image, self.crop)
+        else:
+            self.enhance_timer.stop()
+        self.update()
+
+    def reset_enhancement(self):
+        self.enhanced = QImage()
+        if self.enhancer is not None:
+            self.enhancer.reset()
+
+    def diagnostics(self):
+        return dict(mode=self.quality_mode, source_size=(self.image.width(), self.image.height()),
+                    enhanced=not self.enhanced.isNull(),
+                    upscale=self.enhancer.diagnostics() if self.enhancer is not None else {})
+
+    def _refresh_enhancement(self):
+        image = self.enhancer.image_at(self.frame_key) if self.frame_key is not None else None
+        image = image if image is not None else QImage()
+        if image.cacheKey() != self.enhanced.cacheKey():
+            self.enhanced = image
+            self.update()
 
     def fit_geometry(self, x, y, width, remember=True):
         parent = self.parentWidget()
@@ -135,7 +180,11 @@ class FloatingCrop(QWidget):
                             self.crop.width() * self.image.width(), self.crop.height() * self.image.height()).intersected(QRectF(self.image.rect()))
             painter.setRenderHint(QPainter.SmoothPixmapTransform)
             if not source.isEmpty():
-                brush = QBrush(self.image)
+                image = self.image
+                if not self.enhanced.isNull():
+                    image = self.enhanced
+                    source = QRectF(image.rect())
+                brush = QBrush(image)
                 transform = QTransform.fromScale(self.width() / source.width(), self.height() / source.height())
                 transform.translate(-source.x(), -source.y())
                 brush.setTransform(transform)
@@ -275,5 +324,8 @@ class FloatingCrop(QWidget):
         self.background_exposed.emit(self.geometry())
 
     def closeEvent(self, event):
+        self.enhance_timer.stop()
+        if self.enhancer is not None:
+            self.enhancer.stop()
         self.closed.emit()
         super().closeEvent(event)

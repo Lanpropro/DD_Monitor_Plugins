@@ -70,6 +70,16 @@ def check_selection(app, module, source):
         assert canvas.selection_zoom > 1 and canvas.crop == selection
         after = canvas._point(QPointF(point))
         assert abs(before.x() - after.x()) < .0001 and abs(before.y() - after.y()) < .0001, 'Zoom must keep the source pixel under the cursor'
+        original_pan = QPointF(canvas.selection_pan)
+        for modifiers, delta in ((Qt.NoModifier, QPointF(0, 60)), (Qt.ShiftModifier, QPointF(60, 0))):
+            pan = QWheelEvent(QPointF(point), QPointF(canvas.mapToGlobal(point)), QPoint(), QPoint(0, 120),
+                              Qt.NoButton, modifiers, Qt.NoScrollPhase, False)
+            old_pan = QPointF(canvas.selection_pan)
+            app.sendEvent(canvas, pan)
+            canvas.repaint()
+            assert canvas.selection_pan == old_pan + delta, 'Wheel must pan vertically; Shift+wheel horizontally'
+            assert canvas.crop == selection and canvas.selection_zoom > 1, 'Panning only changes the view'
+        assert canvas.selection_pan != original_pan
         right = position(.7, .5)
         drag(right, right + QPoint(12, 0))
         assert abs(canvas.crop.right() - (.7 + 12 / canvas.image_rect.width())) < .003, 'Zoomed edge edits must map back to source coordinates'
