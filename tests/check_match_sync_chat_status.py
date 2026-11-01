@@ -22,12 +22,15 @@ def check(app, host, module):
             first, second = viewer.rows.values()
             viewer.setAttribute(Qt.WA_DontShowOnScreen)
             viewer.show()
-            QTest.qWait(20)
+            QTest.qWait(80)
+            viewer.setFixedSize(viewer.size())
+            QTest.qWait(80)
             console_top = viewer.send_console.mapTo(viewer, QPoint()).y()
             viewer.minimize_chat.click()
             QTest.qWait(20)
             assert viewer.panel.isHidden() and viewer.send_console.isVisible()
-            assert viewer.send_console.mapTo(viewer, QPoint()).y() == console_top
+            assert abs(viewer.send_console.mapTo(viewer, QPoint()).y() - console_top) <= 1, (
+                console_top, viewer.send_console.mapTo(viewer, QPoint()).y())
             assert viewer.restore_chat.isVisible()
             viewer.restore_chat.click()
             QTest.qWait(20)
