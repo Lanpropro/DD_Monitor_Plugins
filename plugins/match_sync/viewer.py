@@ -377,12 +377,12 @@ class AudioPump(QObject):
         for room_id, row in self.viewer.rows.items():
             if (row.decoder is not None and row.audible.isChecked() and not row.paused
                     and room_id in shown_shifts
-                    and (replaying or not self.viewer.sync_waiting and row.sync_state == "已同步")):
+                    and (replaying or room_id in self.viewer.independent_playback or not self.viewer.sync_waiting and row.sync_state == "已同步")):
                 if replaying:
                     change = following.get(room_id, shown_shifts[room_id]) - shown_shifts[room_id]
                     local_rate = 1 + change / .05 if abs(change) < .1 else 1.0
                 else:
-                    local_rate = rate + self.viewer.relative_rates.get(room_id, 1.0) - 1.0
+                    local_rate = 1.0 if room_id in self.viewer.independent_playback else rate + self.viewer.relative_rates.get(room_id, 1.0) - 1.0
                 inputs.append((row.decoder.history, shown_clock + shown_shifts[room_id] - clock,
                                local_rate,
                                row.channel.currentData(), row.volume.value() * (1.0 if replaying else row.mix_gain)))
@@ -809,6 +809,9 @@ class RoomRow(QFrame):
         floating = QPushButton('裁取悬浮画面')
         floating.setToolTip('框选摄像头等区域，在软件内自由移动、缩放；双击悬浮画面可重新框选。')
         floating.clicked.connect(lambda: viewer.choose_crop(self, floating=True))
+        self.independent = ConsoleIconButton('independent', '独立播放：不等待对齐，使用本路缓存进度')
+        self.independent.setCheckable(True)
+        self.independent.clicked.connect(lambda: viewer.toggle_independent(room_id))
         self.realign = QPushButton("重新对齐")
         policy = self.realign.sizePolicy()
         policy.setRetainSizeWhenHidden(True)
@@ -823,7 +826,7 @@ class RoomRow(QFrame):
         self.join.setToolTip("本路内容到达更晚；增加整组观看延迟后加入，原有各路保持相对同步。")
         self.join.clicked.connect(lambda: viewer.confirm_alignment(room_id))
         self.join.hide()
-        self.control_widgets = (self.avatar, self.main_button, floating, self.realign, self.join, self.audible, self.volume,
+        self.control_widgets = (self.avatar, self.main_button, floating, self.independent, self.realign, self.join, self.audible, self.volume,
                                 self.volume_number, self.channel,
                                 self.show_chat, self.color_choice, QLabel("偏移"), self.decrease,
                                 self.delay, self.increase, region, remove)
@@ -999,9 +1002,17 @@ class RoomRow(QFrame):
                 "show_chat": self.show_chat.isChecked(), "crop": list(self.crop)}
 
     def refresh_status(self):
+        independent = self.room_id in self.viewer.independent_playback
+        self.independent.setVisible(self.room_id != self.viewer.alignment.reference)
+        self.independent.setChecked(independent)
+        self.independent.kind = 'resync' if independent else 'independent'
+        self.independent.setToolTip('恢复自动对齐' if independent else '独立播放：不等待对齐，使用本路缓存进度')
+        self.independent.update()
         self.realign.setVisible(self.viewer.alignment.automatic and self.room_id != self.viewer.alignment.reference)
         match_text = self.match_text
-        if not self.viewer.alignment.automatic:
+        if independent:
+            match_text = "独立播放，不参与自动对齐"
+        elif not self.viewer.alignment.automatic:
             match_text = "自动对齐已关闭；手动偏移"
         elif self.room_id == self.viewer.alignment.reference:
             match_text = "主画面基准"
@@ -1023,7 +1034,7 @@ class RoomRow(QFrame):
         elif not self.viewer.alignment.automatic:
             parts.append((QStyle.SP_MediaPlay, '手动偏移' if self.sync_state == '已同步' else '手动偏移 · 等待缓存'))
         elif self.room_id in self.viewer.independent_shifts and self.viewer.alignment.automatic:
-            parts.extend([('search', '搜索中'), (QStyle.SP_MediaPlay, '独立播放')])
+            parts.extend(([(QStyle.SP_MediaPlay, '独立播放')] if independent else [('search', '搜索中'), (QStyle.SP_MediaPlay, '独立播放')]))
         elif self.awaiting_confirmation:
             parts.append((QStyle.SP_MessageBoxInformation, '待确认对齐'))
         elif self.sync_state == '已同步':
@@ -1108,6 +1119,7 @@ class Viewer(QDialog):
         self.stable_reference_shift = None
         self.skin_visible = False
         self.panel_alpha = 1.0
+        self.independent_playback = {}
         self.independent_shifts = {}
         self.rematch_rooms = set()
         self.rematch_admit = set()
@@ -1696,6 +1708,7 @@ class Viewer(QDialog):
         self.rows_layout.activate()
 
     def _queue_rematch(self, row, local=False):
+        self.independent_playback.pop(row.room_id, None)
         row.large_candidate = None
         row.match_confirmed = False
         row.match_failures = 0
@@ -1713,6 +1726,7 @@ class Viewer(QDialog):
         row.refresh_status()
 
     def retry_alignment(self, room_id):
+        self.independent_playback.pop(room_id, None)
         if not self.running or room_id not in self.rows or self.rows[room_id].decoder is None:
             self.notice.setText("请先播放直播间，再重新对齐比赛画面")
             return
@@ -1904,6 +1918,7 @@ class Viewer(QDialog):
 
     def _main_changed(self, *_args):
         selected = self.main.currentData() or ""
+        self.independent_playback.pop(selected, None)
         for room_id, row in self.rows.items():
             row.main_button.setChecked(room_id == selected)
             row.realign.setVisible(self.automatic.isChecked() and room_id != selected)
@@ -2166,6 +2181,7 @@ class Viewer(QDialog):
                                    for key, value in shifts.items()}
             self.stable_reference_shift = origin
         self.alignment.manual_locked = True
+        self.independent_playback.clear()
         self.independent_shifts.clear()
         self.rematch_rooms.clear()
         self.rematch_admit.clear()
@@ -2184,6 +2200,7 @@ class Viewer(QDialog):
             self._save_delay_offsets(self.shifts())
         self.alignment.automatic = self.automatic.isChecked()
         if self.alignment.automatic:
+            self.independent_playback.clear()
             self.independent_shifts.clear()
             self.rematch_rooms = set(self.rows) - {self.alignment.reference}
             self.rematch_admit = set(self.rematch_rooms) if self.running else set()
@@ -2222,6 +2239,7 @@ class Viewer(QDialog):
     def remove_room(self, room_id):
         if room_id in self.floating_crops:
             self.floating_crops[room_id].close()
+        self.independent_playback.pop(room_id, None)
         row = self.rows.pop(room_id)
         self.rematch_rooms.discard(room_id)
         self.rematch_admit.discard(room_id)
@@ -2246,6 +2264,35 @@ class Viewer(QDialog):
             self.notice.setText('')
         self.changed()
 
+    def toggle_independent(self, room_id):
+        row = self.rows[room_id]
+        if room_id == self.alignment.reference:
+            return
+        if room_id in self.independent_playback:
+            self.independent_playback.pop(room_id)
+            self.retry_alignment(room_id)
+            row.refresh_status()
+            return
+        if not self.running or row.decoder is None or row.decoder.history.bounds() is None:
+            row.independent.setChecked(False)
+            self.notice.setText('请先开始播放，收到本路缓存后再独立播放')
+            return
+        before = self.shifts()
+        self.stable_reference_shift = before.get(self.alignment.reference)
+        bounds = row.decoder.history.bounds()
+        position = max(bounds[0], bounds[1] - self.safety_buffer.target)
+        self.independent_playback[room_id] = (time.monotonic(), position)
+        self.independent_shifts[room_id] = position - self.live_clock()
+        self.analysis_serial += 1
+        self.matching = False
+        self.rematch_rooms.discard(room_id)
+        self.rematch_admit.discard(room_id)
+        row.awaiting_confirmation = False
+        row.mix_gain = 1.0
+        row.match_text = '独立播放；点击图标恢复自动对齐'
+        self.rendered_shifts.clear()
+        row.refresh_status()
+
     def target_shifts(self):
         shifts = self.alignment.shifts({key: 0 if self.alignment.automatic else row.delay.value()
                                        for key, row in self.rows.items() if key not in self.independent_shifts})
@@ -2254,6 +2301,8 @@ class Viewer(QDialog):
             delay = 0 if self.alignment.automatic else self.rows[reference].delay.value()
             correction = self.stable_reference_shift - delay - shifts[reference]
             shifts = {key: value + correction for key, value in shifts.items()}
+        for key, (started, position) in self.independent_playback.items():
+            self.independent_shifts[key] = position + time.monotonic() - started - self.live_clock()
         shifts.update(self.independent_shifts)
         return shifts
 
@@ -2283,6 +2332,8 @@ class Viewer(QDialog):
         row.refresh_status()
 
     def shifts(self):
+        if self.independent_playback:
+            return self.target_shifts()
         if (self.alignment.automatic and self.shift_reference == self.alignment.reference
                 and set(self.rendered_shifts) == set(self.rows)):
             return dict(self.rendered_shifts)
@@ -2331,6 +2382,7 @@ class Viewer(QDialog):
             self.notice.setText("请先添加直播间")
             return
         self.running = True
+        self.independent_playback.clear()
         self.independent_shifts.clear()
         self.rematch_rooms = set(self.rows) - {self.alignment.reference} if self.alignment.automatic else set()
         self.rematch_admit.clear()
@@ -2659,6 +2711,8 @@ class Viewer(QDialog):
             known = known and not (key != self.alignment.reference and row.awaiting_confirmation)
             ready = (decoder is not None and not row.paused and available and known
                      and not (self.sync_waiting and key == self.alignment.reference))
+            if key in self.independent_playback:
+                ready = decoder is not None and not row.paused and available
             before = row.sync_state
             if not ready:
                 row.was_isolated |= before == "已同步"
@@ -2950,7 +3004,7 @@ class Viewer(QDialog):
         reference = row.decoder.history.snapshots()
         others = {key: value.decoder.history.snapshots() for key, value in self.rows.items()
                   if key != row.room_id and not value.paused and value.decoder is not None
-                  and not value.reset_pending
+                  and not value.reset_pending and key not in self.independent_playback
                   and time.monotonic() >= value.next_analysis}
         if not others:
             return
@@ -2968,7 +3022,7 @@ class Viewer(QDialog):
                 if hasattr(value.decoder, 'region_frames'):
                     with value.decoder.lock:
                         region_frames[key] = list(value.decoder.region_frames)
-        known = dict(self.alignment.lags)
+        known = {key: lag for key, lag in self.alignment.lags.items() if key not in self.independent_playback}
         for key in self.rematch_rooms:
             if not self.rows[key].rematch_locally:
                 known.pop(key, None)
@@ -3226,6 +3280,8 @@ class Viewer(QDialog):
             floating.closed.connect(lambda key=row.room_id: self.floating_crops.pop(key, None))
             floating.recrop.connect(lambda: self.choose_crop(row, floating=True))
             floating.move(40 + len(self.floating_crops) * 24, 40 + len(self.floating_crops) * 24)
+        floating.picture_widget = self.canvas
+        self.canvas.installEventFilter(floating)
         floating.crop = QRectF(*crop)
         pixmap = row.avatar.pixmap()
         floating.set_avatar(pixmap if pixmap is not None and not pixmap.isNull() else row.avatar.grab())
@@ -3374,6 +3430,7 @@ class Viewer(QDialog):
         row.refresh_status()
 
     def stop(self):
+        self.independent_playback.clear()
         for floating in list(self.floating_crops.values()):
             floating.close()
         self.analysis_serial += 1

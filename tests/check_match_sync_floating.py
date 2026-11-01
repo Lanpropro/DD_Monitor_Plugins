@@ -107,6 +107,22 @@ def check(app, host, module, output=None):
             QTest.mouseMove(host.windowHandle(), anchor + QPoint(108, -60))
             assert abs(floating.width() - before_crossing) <= 3, 'Crossing axis dominance must not jump from shrinking to growing'
             QTest.mouseRelease(host.windowHandle(), Qt.LeftButton, pos=anchor + QPoint(108, -60))
+            QTest.mouseClick(floating, Qt.LeftButton, pos=floating.lock_rect().center())
+            assert floating.lock_mode == 1
+            floating.fit_geometry(-500, -500, 300)
+            assert floating.movement_bounds().contains(floating.geometry()), 'Picture-locked crop stays in the main canvas'
+            QTest.mouseClick(floating, Qt.LeftButton, pos=floating.lock_rect().center())
+            assert floating.lock_mode == 2
+            locked = floating.geometry()
+            QTest.mousePress(floating, Qt.LeftButton, pos=QPoint(40, 40))
+            QTest.mouseMove(floating, QPoint(120, 100))
+            QTest.mouseRelease(floating, Qt.LeftButton, pos=QPoint(120, 100))
+            wheel = QWheelEvent(QPointF(40, 40), QPointF(floating.mapToGlobal(QPoint(40, 40))),
+                                QPoint(), QPoint(0, 120), Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
+            app.sendEvent(floating, wheel)
+            assert floating.geometry() == locked, 'Position lock prevents dragging and wheel resize'
+            QTest.mouseClick(floating, Qt.LeftButton, pos=floating.lock_rect().center())
+            assert floating.lock_mode == 0
             viewer.render_floating_crops(100, {'1': 0, '2': -4})
             assert floating.frame_key == 96, 'Use the displayed source timeline, including replay shifts'
             viewer._configure_picture_budget()

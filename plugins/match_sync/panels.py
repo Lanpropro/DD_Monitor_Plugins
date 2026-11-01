@@ -59,7 +59,7 @@ class ConsoleIconButton(QPushButton):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         hovered = self.isEnabled() and QApplication.widgetAt(QCursor.pos()) is self
-        if hovered:
+        if hovered or self.isChecked():
             painter.setPen(Qt.NoPen)
             painter.setBrush(theme.qcolor(theme.ACCENT_SOFT))
             painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 6, 6)
@@ -79,6 +79,16 @@ class ConsoleIconButton(QPushButton):
             painter.setBrush(Qt.NoBrush)
             painter.drawPath(gear)
             painter.drawEllipse(QRectF(-2, -2, 4, 4))
+        elif self.kind == 'independent':
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(QRectF(-8, -7, 16, 14), 2, 2)
+            painter.drawLine(QPointF(-2, -4), QPointF(4, 0))
+            painter.drawLine(QPointF(4, 0), QPointF(-2, 4))
+            painter.drawLine(QPointF(-2, 4), QPointF(-2, -4))
+        elif self.kind == 'resync':
+            painter.drawArc(QRectF(-7, -7, 14, 14), 35 * 16, 285 * 16)
+            painter.drawLine(QPointF(6, -6), QPointF(7, -1))
+            painter.drawLine(QPointF(7, -1), QPointF(2, -2))
         elif self.kind == 'minimize':
             painter.drawLine(QPointF(-6, 3), QPointF(6, 3))
         elif self.kind == 'emote':
