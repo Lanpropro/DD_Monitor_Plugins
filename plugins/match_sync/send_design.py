@@ -80,6 +80,8 @@ def style_compose(editor, send):
                   if send.property('sendPrimary') else console_button_style('QPushButton'))
     if send.styleSheet() != send_style:
         send.setStyleSheet(send_style)
+    if send.property('sendPrimary'):
+        send.show()
 
 
 def align_composer(widget, console=None):

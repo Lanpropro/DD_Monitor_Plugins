@@ -1349,6 +1349,7 @@ class Viewer(QDialog):
         self.panel.set_max_blocks(int(settings.get("danmaku_max_blocks") or 3000))
         split = QSplitter(Qt.Horizontal)
         split.setOpaqueResize(False)
+        split.setChildrenCollapsible(False)
         split.setHandleWidth(4)
         split.setStyleSheet("QSplitter::handle { background: transparent; } QSplitter::handle:hover { background: palette(mid); }")
         self.picture_split = split
@@ -1402,12 +1403,26 @@ class Viewer(QDialog):
         split.addWidget(self.left_pane)
         self.send_console = SendConsole(self)
         right_pane = QWidget()
+        self.chat_pane = right_pane
+        self.chat_collapsed = False
+        self.chat_sizes = None
         right_layout = QVBoxLayout(right_pane)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
         right_layout.addWidget(self.panel, 1)
         right_layout.addWidget(self.send_console)
         split.addWidget(right_pane)
+        self.minimize_chat = ConsoleIconButton('minimize', '最小化弹幕栏', self.panel.header)
+        self.minimize_chat.clicked.connect(lambda: self.set_chat_visible(False))
+        self.panel.header.layout().addWidget(self.minimize_chat)
+        self.restore_chat = QPushButton('展开弹幕', self.picture.bottom)
+        self.restore_chat.setObjectName('TileCtrl')
+        self.restore_chat.setFixedSize(90, 26)
+        self.restore_chat.setToolTip('恢复右侧弹幕栏与发送控制台')
+        self.restore_chat.clicked.connect(lambda: self.set_chat_visible(True))
+        self.picture.bottom.layout().insertWidget(
+            self.picture.bottom.layout().indexOf(self.picture.danmaku_button), self.restore_chat)
+        self.restore_chat.hide()
         self.settings_panel.installEventFilter(self)
         split.setSizes([930, 330])
         layout = QVBoxLayout(self)
@@ -1900,6 +1915,17 @@ class Viewer(QDialog):
         index = self.comparison_panel.target.findData(room_id)
         if index >= 0:
             self.comparison_panel.target.setCurrentIndex(index)
+
+    def set_chat_visible(self, visible):
+        if visible == (not self.chat_collapsed):
+            return
+        if not visible:
+            self.chat_sizes = self.picture_split.sizes()
+        self.chat_collapsed = not visible
+        self.chat_pane.setVisible(visible)
+        self.restore_chat.setVisible(not visible)
+        if visible and self.chat_sizes is not None:
+            self.picture_split.setSizes(self.chat_sizes)
 
     def _restore_host_widgets(self):
         self.host_audio_timer.stop()

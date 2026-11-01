@@ -411,6 +411,29 @@ def check(app, host, module, output=None):
             viewer.resize(1320, 880)
             viewer.picture_split.setSizes([700, 620])
             QTest.qWait(40)
+            draft = second.text()
+            rows = dict(viewer.rows)
+            for collapsed_console in (False, True):
+                console.set_collapsed(collapsed_console)
+                QTest.qWait(30)
+                sizes = viewer.picture_split.sizes()
+                old_width = viewer.left_pane.width()
+                viewer.minimize_chat.click()
+                QTest.qWait(30)
+                assert viewer.chat_pane.isHidden() and viewer.restore_chat.isVisible()
+                assert viewer.left_pane.width() > old_width
+                assert viewer.rows == rows and second.text() == draft
+                viewer.panel.add_event({'text': 'received while hidden', 'uname': 'fixture'})
+                viewer.restore_chat.click()
+                QTest.qWait(30)
+                assert viewer.chat_pane.isVisible() and viewer.restore_chat.isHidden()
+                assert console.isHidden() == collapsed_console, 'Restore the previous send-console visibility'
+                assert all(abs(a - b) <= 1 for a, b in zip(sizes, viewer.picture_split.sizes()))
+                assert 'received while hidden' in viewer.panel.body.toPlainText()
+                assert second.text() == draft
+            console.set_collapsed(False)
+            viewer.panel.set_placeholder('')
+            QTest.qWait(30)
             feedback_bottom = console.feedback.mapTo(console.body_scroll.viewport(),
                                                       QPoint(0, console.feedback.height())).y()
             assert not console.feedback.isVisible() or feedback_bottom <= console.body_scroll.viewport().height(), (
