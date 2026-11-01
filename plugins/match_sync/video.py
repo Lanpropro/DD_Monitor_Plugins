@@ -37,7 +37,7 @@ _conversion = threading.local()
 
 def reformat_frame(frame, **options):
     # Analysis alternates a few small gray sizes. Reconfiguring one scaler
-    # repeatedly rebuilds swscale's automatic thread pool under the GIL.
+    # repeatedly rebuilds swscale's automatic worker pools.
     if options.get('format') == 'gray':
         options.setdefault('threads', 1)
     if not hasattr(_conversion, 'reformatters'):
