@@ -13,6 +13,8 @@ from unittest.mock import patch
 
 def check_platform_controls(app, host, module, source):
     """Use the maintained domestic composers, with no credentials or requests."""
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QPushButton, QWidget
     from ddm import plugins
     package = types.ModuleType('sending_domestic_fixture')
@@ -73,6 +75,22 @@ def check_platform_controls(app, host, module, source):
                 assert shared is not None and len(shared.findChildren(QPushButton)) == 2
                 assert all(not button.isHidden() for button in shared.findChildren(QPushButton))
             console = viewer.send_console
+            viewer.setAttribute(Qt.WA_DontShowOnScreen, host.testAttribute(Qt.WA_DontShowOnScreen))
+            viewer.show()
+            viewer.resize(1600, 950)
+            viewer.picture_split.setSizes([viewer.width() - 260, 260])
+            QTest.qWait(60)
+            for key in console.rows:
+                console.batch_targets = {key}
+                console._update_selection()
+                QTest.qWait(30)
+                row = console.rows[key]
+                composer = row.tile._plugin_controls.applicable()[0].control.widget
+                send = next(button for button in composer.findChildren(QPushButton) if button.property('sendPrimary'))
+                assert composer.width() < 176, composer.width()
+                assert send.isVisible(), 'Native compact-tile policy must not hide the workspace send action'
+                assert send.mapTo(console, QPoint()).x() >= 0
+                assert send.mapTo(console, QPoint(send.width(), send.height())).x() <= console.width()
             anchor = console.batch_panel.interactions.findChildren(QPushButton)[1]
             native = console.rows['douyu:12345'].tile._plugin_controls.applicable()[0].control.widget
             seen = []
@@ -98,7 +116,7 @@ def check(app, host, module, output=None):
     from PySide6.QtCore import QPoint, Qt, QTimer
     from PySide6.QtTest import QTest
     from PySide6.QtGui import QColor, QPixmap
-    from PySide6.QtWidgets import QBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QWidget
+    from PySide6.QtWidgets import QBoxLayout, QHBoxLayout, QLineEdit, QListView, QPushButton, QWidget
     from ddm import plugins
     from ddm.plugin_controls import TileControl
     sent, active = [], []
@@ -282,7 +300,7 @@ def check(app, host, module, output=None):
             select({'2'})
             console.rooms.setFocus()
             console.rooms.setCurrentRow(0)
-            QTest.keyClick(console.rooms, Qt.Key_Down if console.width() >= 520 else Qt.Key_Right)
+            QTest.keyClick(console.rooms, Qt.Key_Down)
             assert console.checked_rooms() == ['2'] and not sent
             avatar = QPixmap(32, 32)
             avatar.fill(QColor('#728B75'))
@@ -294,7 +312,8 @@ def check(app, host, module, output=None):
             rect = console.rooms.visualItemRect(console.rooms.item(1))
             sample = picture.toImage().pixelColor(round((rect.left() + 10) * picture.devicePixelRatio()),
                                                   round(rect.center().y() * picture.devicePixelRatio()))
-            assert sample != module.theme.qcolor(module.theme.ACCENT), 'Do not outline selected avatars in blue'
+            if not console.rooms.property('avatarOnly'):
+                assert sample != module.theme.qcolor(module.theme.ACCENT), 'Do not outline expanded cards in blue'
             def avatar_x():
                 image = console.rooms.viewport().grab().toImage()
                 ratio = console.rooms.devicePixelRatioF()
@@ -307,7 +326,10 @@ def check(app, host, module, output=None):
             select(set())
             QTest.qWait(200)
             unselected_x = avatar_x()
-            assert 10 <= selected_x - unselected_x <= 14, 'Selected cards insert right; deselected cards retract left'
+            if console.rooms.property('avatarOnly'):
+                assert abs(selected_x - unselected_x) < 1, 'Compact avatars stay centered'
+            else:
+                assert 10 <= selected_x - unselected_x <= 14, 'Selected cards insert right; deselected cards retract left'
             select({'2'})
             QTest.qWait(200)
             assert viewer.panel.property('joined') is True
@@ -348,8 +370,7 @@ def check(app, host, module, output=None):
                     right = console.mapTo(viewer, QPoint()).y()
                     assert abs(left - right) <= 1, (left, right)
                     regular = console.width() >= 520
-                    assert console.body_layout.direction() == (QBoxLayout.LeftToRight if regular
-                                                              else QBoxLayout.TopToBottom)
+                    assert console.body_layout.direction() == QBoxLayout.LeftToRight
                     assert first.isVisible() == (console.selected_room == '1')
             assert console.findChild(module.QLabel, 'SendContext') is None
             for right_width in (640, 300):
@@ -358,14 +379,66 @@ def check(app, host, module, output=None):
                 QTest.qWait(60)
                 assert (console.width() >= 520) == (right_width == 640), console.width()
                 if right_width == 300:
+                    assert console.rooms.property('avatarOnly')
+                    assert console.rooms.flow() == QListView.TopToBottom
+                    first_avatar = console.rooms.visualItemRect(console.rooms.item(0))
+                    next_avatar = console.rooms.visualItemRect(console.rooms.item(1))
+                    assert next_avatar.top() >= first_avatar.bottom(), 'Keep narrow recipients in a vertical column'
+                    assert console.rooms.width() == 56
+                    assert console.work.x() >= console.rooms.geometry().right() + 1, 'Place the composer to the right of the avatar column'
+                    assert console.work.y() == console.rooms.y(), 'Keep recipients and composer side by side'
+                    assert console.save_text.isVisible()
+                    primary = next(button for button in second.parentWidget().findChildren(QPushButton)
+                                   if button.property('sendPrimary'))
+                    bookmark = console.save_text.mapTo(console, QPoint())
+                    send_right = primary.mapTo(console, QPoint(primary.width(), 0))
+                    editor_top = second.mapTo(console, QPoint())
+                    assert send_right.y() >= editor_top.y() + second.height(), 'Put actions below the narrow editor'
+                    assert second.width() >= 150, 'Reserve a usable full row for narrow input'
+                    assert 0 <= bookmark.x() - send_right.x() <= 4, 'Keep all four icons together'
+                    assert bookmark.x() + console.save_text.width() <= console.width()
                     assert console.body_scroll.horizontalScrollBar().maximum() == 0
                     button = second.parentWidget().findChildren(QPushButton)[0]
                     assert button.mapTo(console, QPoint(button.width(), 0)).x() <= console.width()
+                else:
+                    primary = next(button for button in second.parentWidget().findChildren(QPushButton)
+                                   if button.property('sendPrimary'))
+                    assert abs(primary.mapTo(console, QPoint()).y() - second.mapTo(console, QPoint()).y()) <= 1
                 if output:
                     viewer.grab().save(str(output.with_name(output.stem + f'-width-{right_width}.png')))
+                    if right_width == 300:
+                        console.grab().save(str(output.with_name(output.stem + '-console-narrow.png')))
             viewer.resize(1320, 880)
             viewer.picture_split.setSizes([700, 620])
             QTest.qWait(40)
+            draft = second.text()
+            rows = dict(viewer.rows)
+            for collapsed_console in (False, True):
+                console.set_collapsed(collapsed_console)
+                QTest.qWait(30)
+                sizes = viewer.picture_split.sizes()
+                old_width = viewer.left_pane.width()
+                console_top = console.mapTo(viewer, QPoint()).y()
+                viewer.minimize_chat.click()
+                QTest.qWait(30)
+                assert viewer.panel.isHidden() and viewer.restore_chat.isVisible()
+                assert viewer.chat_pane.isVisible()
+                assert viewer.left_pane.width() == old_width
+                assert console.isHidden() == collapsed_console
+                if not collapsed_console:
+                    assert console.mapTo(viewer, QPoint()).y() == console_top
+                assert viewer.rows == rows and second.text() == draft
+                viewer.panel.add_event({'text': 'received while hidden', 'uname': 'fixture'})
+                viewer.restore_chat.click()
+                QTest.qWait(30)
+                assert viewer.panel.isVisible() and viewer.restore_chat.isHidden()
+                assert console.isHidden() == collapsed_console, 'Restore the previous send-console visibility'
+                assert all(abs(a - b) <= 1 for a, b in zip(sizes, viewer.picture_split.sizes()))
+                assert 'received while hidden' in viewer.panel.body.toPlainText()
+                assert second.text() == draft
+            console.set_collapsed(False)
+            viewer.panel.set_placeholder('')
+            QTest.qWait(30)
             feedback_bottom = console.feedback.mapTo(console.body_scroll.viewport(),
                                                       QPoint(0, console.feedback.height())).y()
             assert not console.feedback.isVisible() or feedback_bottom <= console.body_scroll.viewport().height(), (

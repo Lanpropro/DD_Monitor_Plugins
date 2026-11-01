@@ -25,7 +25,17 @@ ACCESSORY_WIDTH = 60
 
 
 class SendIconFace(QObject):
+    def __init__(self, button):
+        super().__init__(button)
+        self.reveal = QTimer(self)
+        self.reveal.setSingleShot(True)
+        self.reveal.timeout.connect(button.show)
+
     def eventFilter(self, button, event):
+        if event.type() == QEvent.Hide and button.isHidden():
+            # Native tile composers hide this below 176px. This workspace has
+            # a separate action row, so retain its explicit send action.
+            self.reveal.start(0)
         if event.type() != QEvent.Paint:
             return False
         painter = QPainter(button)
@@ -54,18 +64,24 @@ def style_compose(editor, send):
     editor.setMinimumWidth(0)
     editor.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     editor.setFixedHeight(INPUT_HEIGHT)
-    editor.setStyleSheet(f'''QLineEdit {{background: {c['input']}; color: {c['text']};
+    editor_style = f'''QLineEdit {{background: {c['input']}; color: {c['text']};
         border: 1px solid transparent; border-radius: 8px; padding: 4px 8px;
         font-size: {theme.FONT_CONTROL}px;}}
-        QLineEdit:focus {{border-color: {c['accent']};}}''')
+        QLineEdit:focus {{border-color: {c['accent']};}}'''
+    if editor.styleSheet() != editor_style:
+        editor.setStyleSheet(editor_style)
     send.setFixedSize(SEND_WIDTH if send.property('sendPrimary') else 60, INPUT_HEIGHT)
     if send.property('sendPrimary') and not hasattr(send, '_match_sync_face'):
         send._match_sync_face = SendIconFace(send)
         send.installEventFilter(send._match_sync_face)
         send.setAccessibleName('发送弹幕')
         send.setToolTip('发送弹幕')
-    send.setStyleSheet('QPushButton {background: transparent; border: none; padding: 0;}'
-                      if send.property('sendPrimary') else console_button_style('QPushButton'))
+    send_style = ('QPushButton {background: transparent; border: none; padding: 0;}'
+                  if send.property('sendPrimary') else console_button_style('QPushButton'))
+    if send.styleSheet() != send_style:
+        send.setStyleSheet(send_style)
+    if send.property('sendPrimary'):
+        send.show()
 
 
 def align_composer(widget, console=None):
@@ -101,8 +117,18 @@ def align_composer(widget, console=None):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
         layout.addWidget(editor, 1)
-        layout.addWidget(accessories)
-        layout.addWidget(send)
+        actions = QWidget(widget)
+        actions.setFixedHeight(INPUT_HEIGHT)
+        action_layout = QHBoxLayout(actions)
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setSpacing(4)
+        action_layout.addWidget(accessories)
+        action_layout.addWidget(send)
+        if console is not None and console.save_text in widgets:
+            action_layout.addWidget(console.save_text)
+            console.save_text.show()
+        widget._match_actions = actions
+        layout.addWidget(actions, 0, Qt.AlignRight)
         widget.setFixedHeight(40)
         widget.setProperty('sendRowAligned', True)
     style_compose(editor, send)
@@ -320,13 +346,16 @@ class RecipientDelegate(QStyledItemDelegate):
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing)
         rect = QRectF(option.rect.adjusted(4, 3, -16, -3))
+        compact = bool(self.parent().property('avatarOnly'))
+        if compact:
+            rect = QRectF(option.rect.adjusted(2, 2, -2, -2))
         checked = index.data(Qt.CheckStateRole)
         selected = (checked == Qt.Checked.value if checked is not None else
                     bool(option.state & QStyle.State_Selected))
         animation = self.animations.get(index.data(Qt.UserRole))
         progress = float(animation.currentValue()) if animation is not None else float(selected)
         painter.setClipRect(option.rect)
-        painter.translate(12 * progress, 0)
+        painter.translate(0 if compact else 12 * progress, 0)
         painter.setPen(Qt.NoPen)
         if progress or option.state & QStyle.State_MouseOver:
             color = QColor(c['raised'])
@@ -334,6 +363,8 @@ class RecipientDelegate(QStyledItemDelegate):
             painter.setBrush(color)
             painter.drawRoundedRect(rect, 6, 6)
         avatar = QRectF(rect.left() + 8, rect.center().y() - 16, 32, 32)
+        if compact:
+            avatar.moveCenter(rect.center())
         pixmap = index.data(Qt.DecorationRole)
         if isinstance(pixmap, QPixmap) and not pixmap.isNull():
             painter.save()
@@ -348,6 +379,13 @@ class RecipientDelegate(QStyledItemDelegate):
             painter.drawEllipse(avatar)
             painter.setPen(QColor(c['text']))
             painter.drawText(avatar, Qt.AlignCenter, str(index.data(Qt.DisplayRole) or '?')[:1])
+        if compact:
+            if selected:
+                painter.setPen(QPen(QColor(c['accent']), 2))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawEllipse(avatar.adjusted(-2, -2, 2, 2))
+            painter.restore()
+            return
         painter.setPen(Qt.NoPen)
         text = str(index.data(Qt.DisplayRole) or '').split('\n', 1)
         font = QFont(option.font)
@@ -377,4 +415,6 @@ class RecipientDelegate(QStyledItemDelegate):
         painter.restore()
 
     def sizeHint(self, option, index):
+        if self.parent().property('avatarOnly'):
+            return QSize(48, 44)
         return QSize(164, max(52, option.fontMetrics.height() * 2 + 12))

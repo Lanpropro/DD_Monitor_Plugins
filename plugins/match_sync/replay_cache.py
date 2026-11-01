@@ -50,8 +50,33 @@ class PacketStore:
 class DiskAudioRing(AudioRing):
     def __init__(self, seconds):
         self.capacity = max(1, int(seconds * RATE))
-        self.file = tempfile.TemporaryFile(prefix='ddm-replay-audio-')
-        self.file.truncate(self.capacity * 4)
-        self.data = mmap.mmap(self.file.fileno(), self.capacity * 4)
+        self.file = self.data = None
         self.end = 0
         self.lock = threading.RLock()
+
+    def _prepare(self):
+        # First PCM arrives on the existing decoder thread, not the GUI drop callback.
+        if self.data is None:
+            file = tempfile.TemporaryFile(prefix='ddm-replay-audio-')
+            try:
+                file.truncate(self.capacity * 4)
+                data = mmap.mmap(file.fileno(), self.capacity * 4)
+            except BaseException:
+                file.close()
+                raise
+            self.file, self.data = file, data
+
+    def append(self, pcm):
+        with self.lock:
+            self._prepare()
+            super().append(pcm)
+
+    def append_at(self, start, pcm):
+        with self.lock:
+            self._prepare()
+            super().append_at(start, pcm)
+
+    def read(self, start, frames):
+        if self.data is None:
+            return bytes(frames * 4)
+        return super().read(start, frames)

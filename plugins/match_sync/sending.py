@@ -1,19 +1,26 @@
 """Independent platform composers below the merged chat, one per live room."""
-from PySide6.QtCore import QPointF, QPropertyAnimation, Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QCursor, QFont, QImage, QPainter, QPalette, QPen
+from PySide6.QtCore import QEvent, QPointF, QPropertyAnimation, Qt, QTimer
+from PySide6.QtGui import QAction, QColor, QCursor, QFont, QImage, QPainter, QPalette, QPen, QTextCursor
 from PySide6.QtWidgets import (QApplication, QBoxLayout, QFrame, QHBoxLayout, QListView, QListWidget,
-    QListWidgetItem, QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
+    QListWidgetItem, QLabel, QLayout, QLineEdit, QMenu, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 
 from ddm.widgets import DanmakuPanel, Tile
 from ddm.danmaku_actions import CommentToolbar
 from ddm import motion, theme
-from .panels import ConsoleIconButton, SettingsPanel, console_button_style
+from .panels import ChatConnectionIcon, ConsoleIconButton, SettingsPanel, console_button_style
 from .send_design import ACCESSORY_WIDTH, INPUT_HEIGHT, RecipientDelegate, SavedTextDelegate, SavedTextList, align_composer, colors, style_compose, stylesheet
 
 
 class SendingDanmakuPanel(DanmakuPanel):
     def __init__(self, viewer):
         super().__init__(viewer)
+        previous = self.count
+        self.count = ChatConnectionIcon(self.header)
+        self.count.setObjectName('DanmakuCount')
+        self.header.layout().replaceWidget(previous, self.count)
+        previous.hide()
+        previous.deleteLater()
+        self._refresh_count()
         self.viewer = viewer
         self._adding_divider = False
         self._replay_section = False
@@ -24,6 +31,10 @@ class SendingDanmakuPanel(DanmakuPanel):
         self.bottom_button.setAutoDefault(False)
         self.bottom_button.setDefault(False)
         self.bottom_button.setFocusPolicy(Qt.NoFocus)
+        self._divider_resize = QTimer(self)
+        self._divider_resize.setSingleShot(True)
+        self._divider_resize.timeout.connect(self._resize_dividers)
+        self.body.viewport().installEventFilter(self)
 
     def begin_replay_section(self):
         self._scroll_animation.stop()
@@ -81,10 +92,28 @@ class SendingDanmakuPanel(DanmakuPanel):
             return f'<p align="center" style="margin:0;"><img src="{key}" width="{width}" height="80"></p>'
         return super()._block_html(entry)
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if any(entry.get('_replay_divider') for entry in getattr(self, '_blocks', ())):
-            self._render_all()
+    def eventFilter(self, watched, event):
+        if watched is self.body.viewport() and event.type() == QEvent.Resize:
+            if event.size().width() != event.oldSize().width():
+                self._divider_resize.start(0)
+        return super().eventFilter(watched, event)
+
+    def _resize_dividers(self):
+        document = self.body.document()
+        width = max(1, self.body.viewport().width() - 24)
+        scroll_state = self._scroll_state()
+        for index, entry in enumerate(self._blocks):
+            if not entry.get('_replay_divider'):
+                continue
+            block = document.findBlockByNumber(index)
+            cursor = QTextCursor(block)
+            cursor.movePosition(QTextCursor.NextCharacter, QTextCursor.KeepAnchor)
+            image = cursor.charFormat().toImageFormat()
+            if image.isValid() and image.width() != width:
+                self._block_html(entry)  # Replace this separator's image resource only.
+                image.setWidth(width)
+                cursor.setCharFormat(image)
+        self._restore_scroll_state(scroll_state)
 
     def _message_clicked(self, index, position):
         if not 0 <= index < len(self._blocks) or self._blocks[index].get('_replay_divider'):
@@ -196,6 +225,7 @@ class SendConsole(SettingsPanel):
         body = QWidget()
         self.body_layout = QBoxLayout(QBoxLayout.LeftToRight, body)
         self.body_layout.setContentsMargins(0, 0, 0, 0)
+        self.body_layout.setSizeConstraint(QLayout.SetMinimumSize)
         self.body_layout.setSpacing(12)
         self.body_layout.addWidget(self.rooms)
         self.work = QWidget()
@@ -328,7 +358,9 @@ class SendConsole(SettingsPanel):
             menu.deleteLater()
 
     def refresh_design(self):
-        self.setStyleSheet(stylesheet())
+        style = stylesheet()
+        if self.styleSheet() != style:
+            self.setStyleSheet(style)
         c = colors()
         for row in self.rows.values():
             for entry in row.tile._plugin_controls.applicable():
@@ -338,9 +370,13 @@ class SendConsole(SettingsPanel):
             palette = editor.palette()
             palette.setColor(QPalette.Text, QColor(c['text']))
             palette.setColor(QPalette.PlaceholderText, QColor(c['secondary']))
-            editor.setPalette(palette)
+            if editor.palette() != palette:
+                editor.setPalette(palette)
         self.rooms.viewport().update()
-        self.restore.setStyleSheet(console_button_style('QPushButton'))
+        restore_style = console_button_style('QPushButton')
+        if self.restore.styleSheet() != restore_style:
+            self.restore.setStyleSheet(restore_style)
+        self._layout_workspace()
         self.update()
 
     def make_interactions(self, parent):
@@ -395,29 +431,43 @@ class SendConsole(SettingsPanel):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._layout_workspace()
+
+    def _layout_workspace(self):
         if not hasattr(self, 'body_layout'):
             return
         regular = self.width() >= 520
+        compact = not regular
+        if bool(self.rooms.property('avatarOnly')) != compact:
+            self.rooms.setProperty('avatarOnly', compact)
+            self.rooms.doItemsLayout()
+            self.rooms.viewport().update()
         self.layout().setContentsMargins(16 if regular else 12, 10 if regular else 8,
                                         16 if regular else 12, 10 if regular else 8)
         self.layout().setSpacing(10 if regular else 6)
         self.body_layout.setSpacing(12 if regular else 6)
-        self.body_layout.setDirection(QBoxLayout.LeftToRight if regular else QBoxLayout.TopToBottom)
-        row_height = max(52, self.rooms.fontMetrics().height() * 2 + 12)
-        if regular:
-            self.rooms.setFixedWidth(176)
-            self.rooms.setMinimumHeight(0)
-            self.rooms.setMaximumHeight(16777215)
-            self.rooms.setFlow(QListView.TopToBottom)
-            self.rooms.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            self.rooms.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        else:
-            self.rooms.setMinimumWidth(0)
-            self.rooms.setMaximumWidth(16777215)
-            self.rooms.setFixedHeight(row_height + 8)
-            self.rooms.setFlow(QListView.LeftToRight)
-            self.rooms.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-            self.rooms.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.body_layout.setDirection(QBoxLayout.LeftToRight)
+        self.rooms.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Ignored)
+        self.rooms.setFixedWidth(176 if regular else 56)
+        self.rooms.setMinimumHeight(0)
+        self.rooms.setMaximumHeight(16777215)
+        self.rooms.setFlow(QListView.TopToBottom)
+        self.rooms.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.rooms.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        stacked = self.width() - (32 if regular else 24) - self.rooms.width() - self.body_layout.spacing() < 280
+        self.pages.setFixedHeight(84 if stacked else 48)
+        composers = [self.batch_panel.compose]
+        self.batch_panel.compose.setFixedHeight(76 if stacked else 40)
+        for row in self.rows.values():
+            row.composer_bar.setFixedHeight(76 if stacked else 40)
+            composers.extend(entry.control.widget for entry in row.tile._plugin_controls.applicable())
+        for composer in composers:
+            actions = getattr(composer, '_match_actions', None)
+            if actions is not None:
+                composer.layout().setDirection(QBoxLayout.TopToBottom if stacked else QBoxLayout.LeftToRight)
+                composer.layout().setStretch(0, 0 if stacked else 1)
+                composer.setFixedHeight(76 if stacked else 40)
+                actions.setFixedWidth(actions.layout().sizeHint().width())
 
     def sync_rooms(self):
         had_rows = bool(self.rows)
@@ -452,18 +502,30 @@ class SendConsole(SettingsPanel):
         if not had_rows and self.rows:
             checked = {next(iter(self.rows))}
         self.batch_targets = checked.intersection(self.rows)
-        self.rooms.blockSignals(True)
-        self.rooms.clear()
-        for key in self.rows:
-            item = QListWidgetItem()
-            item.setData(Qt.UserRole, key)
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Checked if key in self.batch_targets else Qt.Unchecked)
-            self.rooms.addItem(item)
-            self.refresh_room(key)
-        self.rooms.blockSignals(False)
+        blocked = self.rooms.blockSignals(True)
+        try:
+            for index in range(self.rooms.count() - 1, -1, -1):
+                if self.rooms.item(index).data(Qt.UserRole) not in self.rows:
+                    self.rooms.takeItem(index)
+            for index, key in enumerate(self.viewer.rows):
+                current = next((i for i in range(self.rooms.count())
+                                if self.rooms.item(i).data(Qt.UserRole) == key), None)
+                if current is None:
+                    item = QListWidgetItem()
+                    item.setData(Qt.UserRole, key)
+                    item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                    self.rooms.insertItem(index, item)
+                else:
+                    item = self.rooms.item(current)
+                    if current != index:
+                        self.rooms.insertItem(index, self.rooms.takeItem(current))
+                item.setCheckState(Qt.Checked if key in self.batch_targets else Qt.Unchecked)
+                self.refresh_room(key)
+        finally:
+            self.rooms.blockSignals(blocked)
         self.batch_targets.intersection_update(self.rows)
         self._update_selection()
+        self._layout_workspace()
         self.work.setVisible(bool(self.rows))
         self.viewer.replay_bar.refresh(force=True)
         self.refresh_design()
@@ -568,6 +630,17 @@ class SendConsole(SettingsPanel):
         else:
             self.selected_room = None
         self.batch_panel.update_targets()
+        bookmark_layout = self.batch_panel.compose._match_actions.layout()
+        if single:
+            editor = self.rows[keys[0]].tile._plugin_controls._repeat_editor()
+            if isinstance(editor.parentWidget().layout(), QHBoxLayout):
+                composer = editor.parentWidget()
+                bookmark_layout = getattr(composer, '_match_actions', composer).layout()
+        if bookmark_layout.indexOf(self.save_text) < 0:
+            self.save_text.parentWidget().layout().removeWidget(self.save_text)
+            bookmark_layout.addWidget(self.save_text, 0, Qt.AlignVCenter)
+            self.save_text.show()
+        self._layout_workspace()
         self.saved_texts.setEnabled(not self.batch_panel.timer.isActive())
         self.refresh_store_state()
 
@@ -630,8 +703,15 @@ class BatchSend(QWidget):
         self.cancel.hide()
         self.cancel.setFixedHeight(INPUT_HEIGHT)
         extras.addWidget(self.cancel)
-        compose.addWidget(accessories)
-        compose.addWidget(self.send)
+        actions = QWidget(self.compose)
+        actions.setFixedHeight(INPUT_HEIGHT)
+        action_layout = QHBoxLayout(actions)
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setSpacing(4)
+        action_layout.addWidget(accessories)
+        action_layout.addWidget(self.send)
+        self.compose._match_actions = actions
+        compose.addWidget(actions, 0, Qt.AlignRight)
         layout.addWidget(self.compose)
         self.timer = QTimer(self)
         self.timer.setInterval(50)

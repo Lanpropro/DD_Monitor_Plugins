@@ -9,6 +9,32 @@ from PySide6.QtWidgets import QApplication, QDialog, QDialogButtonBox, QFormLayo
 from ddm import theme
 
 
+class ChatConnectionIcon(QLabel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.connections = 0
+        self.setFixedSize(20, 20)
+
+    def set_connections(self, count):
+        if self.connections != count:
+            self.connections = count
+            self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.translate(10, 10)
+        painter.rotate(90)
+        painter.translate(-10, -10)
+        for level, radius in enumerate((5, 9), 1):
+            color = theme.qcolor(theme.PINK if self.connections >= level else theme.TEXT3)
+            painter.setPen(QPen(color, 1.8, Qt.SolidLine, Qt.RoundCap))
+            painter.drawArc(QRectF(10 - radius, 15 - radius, radius * 2, radius * 2), 45 * 16, 90 * 16)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(theme.qcolor(theme.PINK if self.connections else theme.TEXT3))
+        painter.drawEllipse(QPointF(10, 15), 1.4, 1.4)
+
+
 class LinkCursor(QObject):
     def eventFilter(self, widget, event):
         if (event.type() in (QEvent.Enter, QEvent.HoverMove, QEvent.MouseMove)
@@ -59,7 +85,7 @@ class ConsoleIconButton(QPushButton):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         hovered = self.isEnabled() and QApplication.widgetAt(QCursor.pos()) is self
-        if hovered:
+        if hovered or self.isChecked():
             painter.setPen(Qt.NoPen)
             painter.setBrush(theme.qcolor(theme.ACCENT_SOFT))
             painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 6, 6)
@@ -79,6 +105,16 @@ class ConsoleIconButton(QPushButton):
             painter.setBrush(Qt.NoBrush)
             painter.drawPath(gear)
             painter.drawEllipse(QRectF(-2, -2, 4, 4))
+        elif self.kind == 'independent':
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(QRectF(-8, -7, 16, 14), 2, 2)
+            painter.drawLine(QPointF(-2, -4), QPointF(4, 0))
+            painter.drawLine(QPointF(4, 0), QPointF(-2, 4))
+            painter.drawLine(QPointF(-2, 4), QPointF(-2, -4))
+        elif self.kind == 'resync':
+            painter.drawArc(QRectF(-7, -7, 14, 14), 35 * 16, 285 * 16)
+            painter.drawLine(QPointF(6, -6), QPointF(7, -1))
+            painter.drawLine(QPointF(7, -1), QPointF(2, -2))
         elif self.kind == 'minimize':
             painter.drawLine(QPointF(-6, 3), QPointF(6, 3))
         elif self.kind == 'emote':
