@@ -10,6 +10,7 @@ class FloatingCrop(QWidget):
     closed = Signal()
     recrop = Signal()
     background_exposed = Signal(QRect)
+    gesture_finished = Signal()
 
     def __init__(self, parent, label, crop):
         super().__init__(parent)
@@ -24,6 +25,7 @@ class FloatingCrop(QWidget):
         self.tools_visible = False
         self.hover_point = QPoint(-1, -1)
         self.aspect = 16 / 9
+        self.placement = None
         self.setMouseTracking(True)
         # Ordinary child transparency restores the backing store behind moved crops.
         self.setAutoFillBackground(False)
@@ -53,7 +55,7 @@ class FloatingCrop(QWidget):
             self.aspect = self.image.width() * self.crop.width() / max(1, self.image.height() * self.crop.height())
         self.update()
 
-    def fit_geometry(self, x, y, width):
+    def fit_geometry(self, x, y, width, remember=True):
         parent = self.parentWidget()
         previous = self.geometry()
         bounds = self.movement_bounds()
@@ -62,6 +64,9 @@ class FloatingCrop(QWidget):
         height = min(bounds.height(), round(width / self.aspect))
         self.setGeometry(round(max(bounds.x(), min(bounds.right() + 1 - width, x))),
                          round(max(bounds.y(), min(bounds.bottom() + 1 - height, y))), round(width), height)
+        if remember and bounds.width() > 0 and bounds.height() > 0:
+            self.placement = ((self.x() - bounds.x()) / bounds.width(),
+                              (self.y() - bounds.y()) / bounds.height(), self.width() / bounds.width())
         if previous != self.geometry():
             parent.update(previous)
             self.background_exposed.emit(previous)
@@ -90,7 +95,11 @@ class FloatingCrop(QWidget):
 
     def eventFilter(self, watched, event):
         if watched in (self.parentWidget(), self.picture_widget) and event.type() in (QEvent.Resize, QEvent.Move):
-            self.fit_geometry(self.x(), self.y(), self.width())
+            bounds = self.movement_bounds()
+            if self.placement is not None:
+                x, y, width = self.placement
+                self.fit_geometry(bounds.x() + x * bounds.width(), bounds.y() + y * bounds.height(),
+                                  width * bounds.width(), remember=False)
         return False
 
     def close_rect(self):
@@ -242,6 +251,7 @@ class FloatingCrop(QWidget):
 
     def mouseReleaseEvent(self, event):
         self.drag = None
+        self.gesture_finished.emit()
         self.tools_visible = self.underMouse()
         self.setCursor(Qt.ArrowCursor if self.lock_mode == 2 else Qt.OpenHandCursor)
         self.update()

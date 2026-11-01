@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 def check_selection(app, module, source):
     from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt
-    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtGui import QMouseEvent, QWheelEvent
 
     canvas = module.Canvas(selecting=True)
     canvas.setAttribute(Qt.WA_DontShowOnScreen)
@@ -60,6 +60,21 @@ def check_selection(app, module, source):
         assert canvas.crop == QRectF(0, 0, 1, 1)
         drag(position(.7, .7), position(.3, .3))
         assert abs(canvas.crop.x() - .3) < .003 and abs(canvas.crop.width() - .4) < .003, 'Reset allows an explicit new selection'
+        point = position(.4, .4)
+        before = canvas._point(QPointF(point))
+        selection = QRectF(canvas.crop)
+        wheel = QWheelEvent(QPointF(point), QPointF(canvas.mapToGlobal(point)), QPoint(), QPoint(0, 240),
+                            Qt.NoButton, Qt.ControlModifier, Qt.NoScrollPhase, False)
+        app.sendEvent(canvas, wheel)
+        canvas.repaint()
+        assert canvas.selection_zoom > 1 and canvas.crop == selection
+        after = canvas._point(QPointF(point))
+        assert abs(before.x() - after.x()) < .0001 and abs(before.y() - after.y()) < .0001, 'Zoom must keep the source pixel under the cursor'
+        right = position(.7, .5)
+        drag(right, right + QPoint(12, 0))
+        assert abs(canvas.crop.right() - (.7 + 12 / canvas.image_rect.width())) < .003, 'Zoomed edge edits must map back to source coordinates'
+        canvas.reset_selection()
+        assert canvas.selection_zoom == 1 and canvas.selection_pan == QPointF()
     finally:
         canvas.close()
         canvas.deleteLater()
@@ -270,6 +285,14 @@ def check(app, host, module, output=None):
             assert floating.parentWidget() is dialog
             viewer.reparent_floating_crops(host)
             dialog.close()
+            floating.fit_geometry(800, 500, 280)
+            preferred = floating.geometry()
+            host.resize(700, 450)
+            app.processEvents()
+            host.resize(1400, 900)
+            app.processEvents()
+            assert (floating.pos() - preferred.topLeft()).manhattanLength() <= 2
+            assert abs(floating.width() - preferred.width()) <= 1, 'A shrink/grow cycle must restore the placed crop'
             host.resize(450, 300)
             QTest.qWait(20)
             assert host.rect().contains(floating.geometry()), 'Keep the crop accessible after app resizing'
@@ -295,6 +318,22 @@ def check(app, host, module, output=None):
                 for call in repaint.call_args_list:
                     assert viewer.canvas.rect().contains(call.args[0])
                 assert viewer.canvas.frame_key == unchanged
+            with patch.object(viewer.canvas, 'repaint', wraps=viewer.canvas.repaint) as repaint:
+                floating.drag = (QPoint(), floating.geometry(), None)
+                for index in range(100):
+                    floating.fit_geometry(canvas_area.x() + 20 + index, canvas_area.y() + 20, 180)
+                assert repaint.call_count == 0, 'Mouse bursts must not synchronously repaint the video for each event'
+                assert viewer.crop_repaint_timer.isActive()
+                floating.drag = None
+                floating.gesture_finished.emit()
+                assert repaint.call_count == 1, 'Release flushes all exposed areas in one repaint'
+                assert not viewer.crop_repaint_regions and not viewer.crop_repaint_timer.isActive()
+                floating.drag = (QPoint(), floating.geometry(), None)
+                floating.fit_geometry(floating.x() + 10, floating.y(), floating.width())
+                QTest.qWait(35)
+                assert repaint.call_count == 2, 'A stalled background is restored during dragging, not only on release'
+                floating.drag = None
+                floating.gesture_finished.emit()
             with patch.object(viewer.canvas, 'repaint', wraps=viewer.canvas.repaint) as repaint:
                 floating.hide()
                 assert repaint.call_count > 0, 'Hiding/closing must also restore the background'
@@ -325,7 +364,8 @@ def check(app, host, module, output=None):
             assert not viewer.floating_crops
             return {'passed': True, 'source_resolution': '1920x1080', 'app_wide_drag': True,
                     'wheel_corner_resize': True, 'four_corner_resize': True, 'editable_selection': True,
-                    'inline_actions': True, 'fine_tune_button': True, 'replay_source_time': True, 'network_requests': 0}
+                    'inline_actions': True, 'fine_tune_button': True, 'replay_source_time': True,
+                    'resize_placement_restored': True, 'cursor_zoom': True, 'burst_repaints_100_to_1': True, 'network_requests': 0}
         finally:
             row.decoder = None
             viewer.embedded = False
