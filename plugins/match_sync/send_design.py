@@ -54,18 +54,22 @@ def style_compose(editor, send):
     editor.setMinimumWidth(0)
     editor.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     editor.setFixedHeight(INPUT_HEIGHT)
-    editor.setStyleSheet(f'''QLineEdit {{background: {c['input']}; color: {c['text']};
+    editor_style = f'''QLineEdit {{background: {c['input']}; color: {c['text']};
         border: 1px solid transparent; border-radius: 8px; padding: 4px 8px;
         font-size: {theme.FONT_CONTROL}px;}}
-        QLineEdit:focus {{border-color: {c['accent']};}}''')
+        QLineEdit:focus {{border-color: {c['accent']};}}'''
+    if editor.styleSheet() != editor_style:
+        editor.setStyleSheet(editor_style)
     send.setFixedSize(SEND_WIDTH if send.property('sendPrimary') else 60, INPUT_HEIGHT)
     if send.property('sendPrimary') and not hasattr(send, '_match_sync_face'):
         send._match_sync_face = SendIconFace(send)
         send.installEventFilter(send._match_sync_face)
         send.setAccessibleName('发送弹幕')
         send.setToolTip('发送弹幕')
-    send.setStyleSheet('QPushButton {background: transparent; border: none; padding: 0;}'
-                      if send.property('sendPrimary') else console_button_style('QPushButton'))
+    send_style = ('QPushButton {background: transparent; border: none; padding: 0;}'
+                  if send.property('sendPrimary') else console_button_style('QPushButton'))
+    if send.styleSheet() != send_style:
+        send.setStyleSheet(send_style)
 
 
 def align_composer(widget, console=None):

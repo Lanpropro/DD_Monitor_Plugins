@@ -351,7 +351,9 @@ class SendConsole(SettingsPanel):
             menu.deleteLater()
 
     def refresh_design(self):
-        self.setStyleSheet(stylesheet())
+        style = stylesheet()
+        if self.styleSheet() != style:
+            self.setStyleSheet(style)
         c = colors()
         for row in self.rows.values():
             for entry in row.tile._plugin_controls.applicable():
@@ -361,9 +363,12 @@ class SendConsole(SettingsPanel):
             palette = editor.palette()
             palette.setColor(QPalette.Text, QColor(c['text']))
             palette.setColor(QPalette.PlaceholderText, QColor(c['secondary']))
-            editor.setPalette(palette)
+            if editor.palette() != palette:
+                editor.setPalette(palette)
         self.rooms.viewport().update()
-        self.restore.setStyleSheet(console_button_style('QPushButton'))
+        restore_style = console_button_style('QPushButton')
+        if self.restore.styleSheet() != restore_style:
+            self.restore.setStyleSheet(restore_style)
         self.update()
 
     def make_interactions(self, parent):
@@ -485,16 +490,27 @@ class SendConsole(SettingsPanel):
         if not had_rows and self.rows:
             checked = {next(iter(self.rows))}
         self.batch_targets = checked.intersection(self.rows)
-        self.rooms.blockSignals(True)
-        self.rooms.clear()
-        for key in self.rows:
-            item = QListWidgetItem()
-            item.setData(Qt.UserRole, key)
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Checked if key in self.batch_targets else Qt.Unchecked)
-            self.rooms.addItem(item)
-            self.refresh_room(key)
-        self.rooms.blockSignals(False)
+        blocked = self.rooms.blockSignals(True)
+        try:
+            for index in range(self.rooms.count() - 1, -1, -1):
+                if self.rooms.item(index).data(Qt.UserRole) not in self.rows:
+                    self.rooms.takeItem(index)
+            for index, key in enumerate(self.viewer.rows):
+                current = next((i for i in range(self.rooms.count())
+                                if self.rooms.item(i).data(Qt.UserRole) == key), None)
+                if current is None:
+                    item = QListWidgetItem()
+                    item.setData(Qt.UserRole, key)
+                    item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                    self.rooms.insertItem(index, item)
+                else:
+                    item = self.rooms.item(current)
+                    if current != index:
+                        self.rooms.insertItem(index, self.rooms.takeItem(current))
+                item.setCheckState(Qt.Checked if key in self.batch_targets else Qt.Unchecked)
+                self.refresh_room(key)
+        finally:
+            self.rooms.blockSignals(blocked)
         self.batch_targets.intersection_update(self.rows)
         self._update_selection()
         self._layout_workspace()
