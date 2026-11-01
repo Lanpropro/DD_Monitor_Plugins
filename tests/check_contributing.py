@@ -1,5 +1,6 @@
 """Contribution workflow and local documentation links; standard library only."""
 from pathlib import Path
+import json
 import re
 import unittest
 
@@ -29,10 +30,88 @@ class ContributionGuideTests(unittest.TestCase):
     def test_readme_entry_and_local_links(self):
         readme = (ROOT / 'README.md').read_text(encoding='utf-8')
         self.assertIn('(CONTRIBUTING.md)', readme)
-        source = (ROOT / 'CONTRIBUTING.md').read_text(encoding='utf-8')
-        for link in re.findall(r'\]\(([^)]+)\)', source):
-            if '://' not in link and not link.startswith('#'):
-                self.assertTrue((ROOT / link.split('#', 1)[0]).is_file(), link)
+        documents = ['README.md', 'CONTRIBUTING.md', 'docs/repository-layout.md',
+                     'docs/releases/README.md', 'docs/archive/README.md']
+        documents += [str(path.relative_to(ROOT)) for path in (ROOT / 'docs/changes').glob('*.md')]
+        for relative in documents:
+            document = ROOT / relative
+            source = document.read_text(encoding='utf-8')
+            links = re.findall(r'\]\(([^)]+)\)', source)
+            links += re.findall(r'href="([^"]+)"', source)
+            links += re.findall(r'src="([^"]+)"', source)
+            for link in links:
+                if '://' not in link and not link.startswith('#'):
+                    with self.subTest(document=relative, link=link):
+                        self.assertTrue((document.parent / link.split('#', 1)[0]).is_file(), link)
+
+    def test_readme_showcases_each_plugin_with_author_credit(self):
+        readme = (ROOT / 'README.md').read_text(encoding='utf-8')
+        cards = re.findall(r'<td\b[^>]*>(.*?)</td>', readme, re.DOTALL)
+        manifests = list((ROOT / 'plugins').glob('*/plugin.json'))
+        self.assertEqual(len(cards), len(manifests))
+        platforms = {
+            'domestic_live': {'huya', 'douyu', 'douyin'},
+            'global_live': {'twitch', 'youtube'},
+            'match_sync': {'bilibili', 'huya', 'douyu', 'douyin', 'twitch', 'youtube'},
+            'bili_live': {'bilibili'},
+        }
+        for path in manifests:
+            manifest = json.loads(path.read_text(encoding='utf-8'))
+            with self.subTest(plugin=manifest['id']):
+                matches = [card for card in cards
+                           if f'href="plugins/{manifest["id"]}/README.md"' in card]
+                self.assertEqual(len(matches), 1)
+                author = manifest.get('author', 'Lanpropro')
+                self.assertIn(f'href="https://github.com/{author}"', matches[0])
+                self.assertIn('下载插件', matches[0])
+                icons = re.findall(r'<img src="docs/assets/platforms/([^"/]+)\.png"', matches[0])
+                self.assertEqual(set(icons), platforms[manifest['id']])
+
+    def test_release_notes_are_indexed_in_one_directory(self):
+        self.assertFalse(list(ROOT.glob('RELEASE-*.md')))
+        directory = ROOT / 'docs/releases'
+        index = (directory / 'README.md').read_text(encoding='utf-8')
+        notes = list(directory.glob('RELEASE-*.md'))
+        self.assertTrue(notes)
+        for note in notes:
+            with self.subTest(note=note.name):
+                self.assertIn(f']({note.name})', index)
+
+    def test_each_plugin_has_an_incremental_change_log(self):
+        directory = ROOT / 'docs/changes'
+        index = (directory / 'README.md').read_text(encoding='utf-8')
+        for manifest in (ROOT / 'plugins').glob('*/plugin.json'):
+            plugin_id = manifest.parent.name
+            with self.subTest(plugin=plugin_id):
+                note = directory / f'{plugin_id}.md'
+                source = note.read_text(encoding='utf-8')
+                self.assertIn(f']({note.name})', index)
+                self.assertIn(f'`{plugin_id}`', source)
+                self.assertIn('## 待发布', source)
+                self.assertRegex(source, r'https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/')
+        self.assertIn('(docs/changes/README.md)', (ROOT / 'README.md').read_text(encoding='utf-8'))
+        self.assertIn('(docs/changes/README.md)', (ROOT / 'CONTRIBUTING.md').read_text(encoding='utf-8'))
+
+    def test_completed_plan_is_archived(self):
+        relative = 'plans/2026-10-23-bili-live-experience.md'
+        self.assertFalse((ROOT / 'docs/superpowers' / relative).exists())
+        self.assertTrue((ROOT / 'docs/archive' / relative).is_file())
+
+    def test_public_release_sources_have_matching_local_notes(self):
+        directory = ROOT / 'docs/releases'
+        index = (directory / 'README.md').read_text(encoding='utf-8')
+        tags = re.findall(
+            r'https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/([^\s)]+)',
+            index)
+        self.assertTrue(tags)
+        self.assertEqual(len(tags), len(set(tags)))
+        for tag in tags:
+            with self.subTest(tag=tag):
+                note = directory / f'RELEASE-{tag}.md'
+                self.assertIn(f']({note.name})', index)
+                heading = note.read_text(encoding='utf-8').splitlines()[0]
+                self.assertTrue(heading.startswith('# '))
+                self.assertTrue(heading.endswith(' v' + tag.rsplit('-v', 1)[1]))
 
 
 if __name__ == '__main__':
