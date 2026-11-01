@@ -1,6 +1,6 @@
 """Independent platform composers below the merged chat, one per live room."""
-from PySide6.QtCore import QPointF, QPropertyAnimation, Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QCursor, QFont, QImage, QPainter, QPalette, QPen
+from PySide6.QtCore import QEvent, QPointF, QPropertyAnimation, Qt, QTimer
+from PySide6.QtGui import QAction, QColor, QCursor, QFont, QImage, QPainter, QPalette, QPen, QTextCursor
 from PySide6.QtWidgets import (QApplication, QBoxLayout, QFrame, QHBoxLayout, QListView, QListWidget,
     QListWidgetItem, QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 
@@ -24,6 +24,10 @@ class SendingDanmakuPanel(DanmakuPanel):
         self.bottom_button.setAutoDefault(False)
         self.bottom_button.setDefault(False)
         self.bottom_button.setFocusPolicy(Qt.NoFocus)
+        self._divider_resize = QTimer(self)
+        self._divider_resize.setSingleShot(True)
+        self._divider_resize.timeout.connect(self._resize_dividers)
+        self.body.viewport().installEventFilter(self)
 
     def begin_replay_section(self):
         self._scroll_animation.stop()
@@ -81,10 +85,28 @@ class SendingDanmakuPanel(DanmakuPanel):
             return f'<p align="center" style="margin:0;"><img src="{key}" width="{width}" height="80"></p>'
         return super()._block_html(entry)
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if any(entry.get('_replay_divider') for entry in getattr(self, '_blocks', ())):
-            self._render_all()
+    def eventFilter(self, watched, event):
+        if watched is self.body.viewport() and event.type() == QEvent.Resize:
+            if event.size().width() != event.oldSize().width():
+                self._divider_resize.start(0)
+        return super().eventFilter(watched, event)
+
+    def _resize_dividers(self):
+        document = self.body.document()
+        width = max(1, self.body.viewport().width() - 24)
+        scroll_state = self._scroll_state()
+        for index, entry in enumerate(self._blocks):
+            if not entry.get('_replay_divider'):
+                continue
+            block = document.findBlockByNumber(index)
+            cursor = QTextCursor(block)
+            cursor.movePosition(QTextCursor.NextCharacter, QTextCursor.KeepAnchor)
+            image = cursor.charFormat().toImageFormat()
+            if image.isValid() and image.width() != width:
+                self._block_html(entry)  # Replace this separator's image resource only.
+                image.setWidth(width)
+                cursor.setCharFormat(image)
+        self._restore_scroll_state(scroll_state)
 
     def _message_clicked(self, index, position):
         if not 0 <= index < len(self._blocks) or self._blocks[index].get('_replay_divider'):
