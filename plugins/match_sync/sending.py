@@ -369,6 +369,7 @@ class SendConsole(SettingsPanel):
         restore_style = console_button_style('QPushButton')
         if self.restore.styleSheet() != restore_style:
             self.restore.setStyleSheet(restore_style)
+        self._layout_workspace()
         self.update()
 
     def make_interactions(self, parent):
@@ -429,7 +430,7 @@ class SendConsole(SettingsPanel):
         if not hasattr(self, 'body_layout'):
             return
         regular = self.width() >= 520
-        compact = self.width() < 380
+        compact = not regular
         if bool(self.rooms.property('avatarOnly')) != compact:
             self.rooms.setProperty('avatarOnly', compact)
             self.rooms.doItemsLayout()
@@ -438,24 +439,28 @@ class SendConsole(SettingsPanel):
                                         16 if regular else 12, 10 if regular else 8)
         self.layout().setSpacing(10 if regular else 6)
         self.body_layout.setSpacing(12 if regular else 6)
-        self.body_layout.setDirection(QBoxLayout.LeftToRight if regular else QBoxLayout.TopToBottom)
-        row_height = 44 if compact else max(52, self.rooms.fontMetrics().height() * 2 + 12)
-        if regular:
-            self.rooms.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Ignored)
-            self.rooms.setFixedWidth(176)
-            self.rooms.setMinimumHeight(0)
-            self.rooms.setMaximumHeight(16777215)
-            self.rooms.setFlow(QListView.TopToBottom)
-            self.rooms.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            self.rooms.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        else:
-            self.rooms.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-            self.rooms.setMinimumWidth(0)
-            self.rooms.setMaximumWidth(16777215)
-            self.rooms.setFixedHeight(row_height * max(1, self.rooms.count()) + 8)
-            self.rooms.setFlow(QListView.TopToBottom)
-            self.rooms.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            self.rooms.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.body_layout.setDirection(QBoxLayout.LeftToRight)
+        self.rooms.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Ignored)
+        self.rooms.setFixedWidth(176 if regular else 56)
+        self.rooms.setMinimumHeight(0)
+        self.rooms.setMaximumHeight(16777215)
+        self.rooms.setFlow(QListView.TopToBottom)
+        self.rooms.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.rooms.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        stacked = self.width() - (32 if regular else 24) - self.rooms.width() - self.body_layout.spacing() < 280
+        self.pages.setFixedHeight(84 if stacked else 48)
+        composers = [self.batch_panel.compose]
+        self.batch_panel.compose.setFixedHeight(76 if stacked else 40)
+        for row in self.rows.values():
+            row.composer_bar.setFixedHeight(76 if stacked else 40)
+            composers.extend(entry.control.widget for entry in row.tile._plugin_controls.applicable())
+        for composer in composers:
+            actions = getattr(composer, '_match_actions', None)
+            if actions is not None:
+                composer.layout().setDirection(QBoxLayout.TopToBottom if stacked else QBoxLayout.LeftToRight)
+                composer.layout().setStretch(0, 0 if stacked else 1)
+                composer.setFixedHeight(76 if stacked else 40)
+                actions.setFixedWidth(actions.layout().sizeHint().width())
 
     def sync_rooms(self):
         had_rows = bool(self.rows)
@@ -618,15 +623,17 @@ class SendConsole(SettingsPanel):
         else:
             self.selected_room = None
         self.batch_panel.update_targets()
-        bookmark_layout = self.batch_panel.compose.layout()
+        bookmark_layout = self.batch_panel.compose._match_actions.layout()
         if single:
             editor = self.rows[keys[0]].tile._plugin_controls._repeat_editor()
             if isinstance(editor.parentWidget().layout(), QHBoxLayout):
-                bookmark_layout = editor.parentWidget().layout()
+                composer = editor.parentWidget()
+                bookmark_layout = getattr(composer, '_match_actions', composer).layout()
         if bookmark_layout.indexOf(self.save_text) < 0:
             self.save_text.parentWidget().layout().removeWidget(self.save_text)
             bookmark_layout.addWidget(self.save_text, 0, Qt.AlignVCenter)
             self.save_text.show()
+        self._layout_workspace()
         self.saved_texts.setEnabled(not self.batch_panel.timer.isActive())
         self.refresh_store_state()
 
@@ -689,8 +696,15 @@ class BatchSend(QWidget):
         self.cancel.hide()
         self.cancel.setFixedHeight(INPUT_HEIGHT)
         extras.addWidget(self.cancel)
-        compose.addWidget(accessories)
-        compose.addWidget(self.send)
+        actions = QWidget(self.compose)
+        actions.setFixedHeight(INPUT_HEIGHT)
+        action_layout = QHBoxLayout(actions)
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setSpacing(4)
+        action_layout.addWidget(accessories)
+        action_layout.addWidget(self.send)
+        self.compose._match_actions = actions
+        compose.addWidget(actions, 0, Qt.AlignRight)
         layout.addWidget(self.compose)
         self.timer = QTimer(self)
         self.timer.setInterval(50)
