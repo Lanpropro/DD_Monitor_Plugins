@@ -13,6 +13,8 @@ from unittest.mock import patch
 
 def check_platform_controls(app, host, module, source):
     """Use the maintained domestic composers, with no credentials or requests."""
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QPushButton, QWidget
     from ddm import plugins
     package = types.ModuleType('sending_domestic_fixture')
@@ -73,6 +75,22 @@ def check_platform_controls(app, host, module, source):
                 assert shared is not None and len(shared.findChildren(QPushButton)) == 2
                 assert all(not button.isHidden() for button in shared.findChildren(QPushButton))
             console = viewer.send_console
+            viewer.setAttribute(Qt.WA_DontShowOnScreen, host.testAttribute(Qt.WA_DontShowOnScreen))
+            viewer.show()
+            viewer.resize(1600, 950)
+            viewer.picture_split.setSizes([viewer.width() - 260, 260])
+            QTest.qWait(60)
+            for key in console.rows:
+                console.batch_targets = {key}
+                console._update_selection()
+                QTest.qWait(30)
+                row = console.rows[key]
+                composer = row.tile._plugin_controls.applicable()[0].control.widget
+                send = next(button for button in composer.findChildren(QPushButton) if button.property('sendPrimary'))
+                assert composer.width() < 176, composer.width()
+                assert send.isVisible(), 'Native compact-tile policy must not hide the workspace send action'
+                assert send.mapTo(console, QPoint()).x() >= 0
+                assert send.mapTo(console, QPoint(send.width(), send.height())).x() <= console.width()
             anchor = console.batch_panel.interactions.findChildren(QPushButton)[1]
             native = console.rows['douyu:12345'].tile._plugin_controls.applicable()[0].control.widget
             seen = []

@@ -25,7 +25,17 @@ ACCESSORY_WIDTH = 60
 
 
 class SendIconFace(QObject):
+    def __init__(self, button):
+        super().__init__(button)
+        self.reveal = QTimer(self)
+        self.reveal.setSingleShot(True)
+        self.reveal.timeout.connect(button.show)
+
     def eventFilter(self, button, event):
+        if event.type() == QEvent.Hide and button.isHidden():
+            # Native tile composers hide this below 176px. This workspace has
+            # a separate action row, so retain its explicit send action.
+            self.reveal.start(0)
         if event.type() != QEvent.Paint:
             return False
         painter = QPainter(button)
