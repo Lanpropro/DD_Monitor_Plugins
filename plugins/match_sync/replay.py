@@ -47,12 +47,16 @@ class ReplayTimeline:
                 for key, value in shifts.items()}
 
     @staticmethod
-    def valid(stamp, shifts, histories):
+    def valid(stamp, shifts, histories, bounds_cache=None):
         if not histories or any(key not in shifts for key in histories):
             return False
         for key, history in histories.items():
             target = stamp + shifts[key]
-            bounds = history.bounds_at(target)
+            bounds = bounds_cache.get(key) if bounds_cache is not None else None
+            if bounds is None or not bounds[0] <= target <= bounds[1]:
+                bounds = history.bounds_at(target)
+                if bounds_cache is not None:
+                    bounds_cache[key] = bounds
             origin = history.origin
             audio = history.audio
             if (bounds is None or origin is None or not bounds[0] <= target <= bounds[1]
@@ -62,10 +66,13 @@ class ReplayTimeline:
 
     def available(self, now, histories):
         lower = upper = None
+        # Reuse continuous video intervals within this scan only. A new scan
+        # must observe eviction/reconnection; seek still validates independently.
+        bounds_cache = {}
         for stamp, shifts in reversed(self.states):
             if stamp < now - REPLAY_SECONDS:
                 break
-            if not self.valid(stamp, shifts, histories):
+            if not self.valid(stamp, shifts, histories, bounds_cache):
                 if upper is not None:
                     break
                 continue
