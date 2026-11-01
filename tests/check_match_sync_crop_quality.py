@@ -30,10 +30,10 @@ def check_backend(module):
     baseline = np.frombuffer(smooth.constBits(), np.uint8).reshape(120, smooth.bytesPerLine())[:, :606].reshape(120, 202, 3)
     pixels = np.frombuffer(output.constBits(), np.uint8).reshape(120, output.bytesPerLine())[:, :606].reshape(120, 202, 3)
     difference = np.abs(pixels.astype(float) - baseline)
-    assert 0 < difference.mean() and difference.max() <= 4
+    assert difference.mean() > 1 and 4 < difference.max() <= 10
     bounded = backend.upscale(source, QSize(4000, 3000))
     assert bounded.width() <= 202 and bounded.height() <= 120
-    return dict(cpu_only=True, deterministic=True, sharpening_limit=4, padded_rgb=True)
+    return dict(cpu_only=True, deterministic=True, sharpening_limit=10, padded_rgb=True)
 
 
 def check_worker(module):
@@ -125,7 +125,7 @@ def check_timeline(app, module):
             floating.set_frame((100.02, source))
             assert floating.frame_key == 100., 'Do not jump to raw input before the corresponding enhanced frame'
             area = QRectF(.12345 * 256, .13 * 128, .4 * 256, .3 * 128).toAlignedRect()
-            worker.result = (100.02, source, source.copy(area), area, 1.)
+            worker.result = (100.02, source, source.copy(area), area, 1., 1.)
             floating._refresh_enhancement()
             assert floating.frame_key == 100.02 and not floating.enhanced.isNull()
             # The filtered crop and full source must use identical fractional coordinates.
@@ -140,22 +140,46 @@ def check_timeline(app, module):
             painter.end()
             assert filtered.copy(QRect(15, 15, 170, 50)) == plain.copy(QRect(15, 15, 170, 50)), 'Fractional crops must not shift when changing the filter'
             floating.set_frame((100.04, source))
-            worker.result = (100., source, source.copy(area), area, 1.)
+            worker.result = (100., source, source.copy(area), area, 1., 1.)
             floating._refresh_enhancement()
             assert floating.frame_key == 100.02, 'A late result must never move playback backwards'
-            with patch.object(floating_module.time, 'perf_counter', return_value=floating.enhance_progress + .061):
+            # One GUI pause must not disable a cheap filter, even if its wall time is high.
+            resumed = floating.enhance_poll + .150
+            worker.result = (100.04, source, source.copy(area), area, 150., 1.)
+            with patch.object(floating_module.time, 'perf_counter', return_value=resumed):
                 floating._refresh_enhancement()
-            assert floating.enhance_state == 'fallback' and floating.frame_key == 100.04 and worker.closed
+            assert floating.enhance_state == 'active' and floating.frame_key == 100.04
+            floating.set_frame((100.06, source))
+            with patch.object(floating_module.time, 'perf_counter') as clock:
+                for tick in range(1, 28):
+                    clock.return_value = resumed + tick * .020
+                    floating._refresh_enhancement()
+            assert floating.enhance_state == 'fallback' and floating.frame_key == 100.06 and worker.closed
+            assert floating.enhance_reason == 'backend_timeout'
             count = len(worker.requests)
             for index in range(20):
-                worker.result = (100.02, source, source.copy(area), area, 1.)
+                worker.result = (100.02, source, source.copy(area), area, 1., 1.)
                 floating.set_frame((100.06 + index * .02, source))
             assert floating.enhanced.isNull() and len(worker.requests) == count, 'Fallback must remain stable'
             floating.set_quality_mode('source')
             floating.set_quality_mode('light')
             floating.set_frame((10., source))
             assert floating.frame_key == 10. and floating.enhance_state == 'active', 'Explicit seeks start a new timeline'
-            return dict(monotonic=True, stable_fallback=True, exact_crop_geometry=True, seek_reset=True)
+            floating.set_frame((10.12, source))
+            floating.enhancer.result = (10.02, source, source.copy(area), area, 100., 1.)
+            floating._refresh_enhancement()
+            assert floating.enhance_state == 'active' and floating.frame_key == 10., 'An aged result is skipped without disabling the filter'
+            floating.enhancer.result = (10.12, source, source.copy(area), area, 1., 1.)
+            floating._refresh_enhancement()
+            assert floating.frame_key == 10.12
+            # A sustained CPU overrun still falls back; elapsed scheduling time alone does not.
+            for tick in range(1, 9):
+                stamp = 10.12 + tick * .02
+                floating.enhancer.result = (stamp, source, source.copy(area), area, 80., 40.)
+                floating.set_frame((stamp, source))
+            assert floating.enhance_state == 'fallback' and floating.enhance_reason == 'cpu_budget'
+            return dict(monotonic=True, stable_fallback=True, exact_crop_geometry=True, seek_reset=True,
+                        gui_pause_not_filter_overload=True, sustained_cpu_overrun=True)
         finally:
             floating.close()
             host.close()
@@ -197,6 +221,9 @@ def check_routing(app, host, module):
                     assert start.call_count == 0 and row.decoder is decoder, 'Changing the filter must not reconnect'
                 viewer._information(row, decoder, {'requested_quality': 64, 'actual_quality': 64})
                 assert row.quality == preference
+                crop._fallback_enhancement('cpu_budget')
+                viewer.match_settings.refresh_quality_status()
+                assert '持续处理较慢' in viewer.match_settings.quality_status.text()
                 viewer.save()
                 assert context.setting('crop_quality') == 'light'
                 crop.close()

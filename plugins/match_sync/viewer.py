@@ -3211,6 +3211,7 @@ class Viewer(QDialog):
                                      playback_rate=self.playback_rate, replay=self.replay.active,
                                      audio_clock_interpolated=self.audio.clock_observation is not None,
                                      native_clip_retry_blocks=self.native_clip_retry_blocks,
+                                     floating=[crop.diagnostics() for crop in self.floating_crops.values()],
                                      render_interval_ms=self.render_timer.interval())
             target = shown_clock + shown_shifts[row.room_id]
             requested = time.perf_counter()

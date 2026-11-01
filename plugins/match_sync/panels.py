@@ -165,10 +165,11 @@ class MatchSettingsDialog(QDialog):
         layout.addWidget(note)
         quality_note = QLabel('两种模式共用来源，副路优先720P，否则使用中间档；主画面不降档。\n'
                               '轻量增强只处理摄像头选区，切换模式不重连来源。\n'
-                              '处理跟不上时，本次观看保持普通缩放；重新选择增强可重试。')
+                              '持续处理跟不上时保持普通缩放；切换到流畅优先后再选轻量增强可重试。')
         quality_note.setWordWrap(True)
         layout.addWidget(quality_note)
         self.quality_status = QLabel()
+        self.quality_status.setWordWrap(True)
         layout.addWidget(self.quality_status)
         self.status_timer = QTimer(self)
         self.status_timer.setInterval(500)
@@ -186,7 +187,12 @@ class MatchSettingsDialog(QDialog):
         else:
             enhanced = sum(not crop.enhanced.isNull() for crop in crops)
             fallback = sum(crop.enhance_state == 'fallback' for crop in crops)
-            self.quality_status.setText(f'轻量增强：{enhanced} 路增强，{fallback} 路已回退，{len(crops) - enhanced - fallback} 路准备中')
+            reasons = {'cpu_budget': '持续处理较慢', 'backend_timeout': '增强结果持续延迟',
+                       'large_crop': '选区过大', 'unavailable': '增强不可用'}
+            detail = '、'.join(dict.fromkeys(reasons.get(crop.enhance_reason, '处理较慢')
+                              for crop in crops if crop.enhance_state == 'fallback'))
+            suffix = f'（{detail}）' if detail else ''
+            self.quality_status.setText(f'轻量增强：{enhanced} 路增强，{fallback} 路已回退{suffix}，{len(crops) - enhanced - fallback} 路准备中')
 
     def showEvent(self, event):
         super().showEvent(event)

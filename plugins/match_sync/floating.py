@@ -1,5 +1,6 @@
 """In-application crops keep source pixels and are independent of the video tile."""
 import time
+import logging
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen, QTransform
 from PySide6.QtWidgets import QWidget
@@ -30,6 +31,7 @@ class FloatingCrop(QWidget):
         self.enhance_state = 'off'
         self.enhance_reason = ''
         self.enhance_progress = 0.
+        self.enhance_poll = 0.
         self.source_interval = 1 / 30
         self.slow_results = 0
         self.enhance_timer = QTimer(self)
@@ -123,6 +125,7 @@ class FloatingCrop(QWidget):
         self.request_key = None
         self.slow_results = 0
         self.enhance_progress = time.perf_counter()
+        self.enhance_poll = self.enhance_progress
         if self.quality_mode == 'light' and self.enhance_state != 'fallback':
             self.enhance_state = 'warming'
         if self.enhancer is not None:
@@ -137,6 +140,7 @@ class FloatingCrop(QWidget):
 
     def _fallback_enhancement(self, reason):
         self.enhance_state, self.enhance_reason = 'fallback', reason
+        logging.getLogger(__name__).warning('Crop enhancement fallback: %s', self.diagnostics())
         self.enhancer.stop()
         self.enhance_timer.stop()
         if self.input_frame is not None:
@@ -145,27 +149,33 @@ class FloatingCrop(QWidget):
     def _refresh_enhancement(self):
         if self.input_frame is None or self.enhance_state not in ('warming', 'active'):
             return
+        now = time.perf_counter()
+        # Time spent outside the GUI event loop is not evidence of a slow filter.
+        if now - self.enhance_poll > .050:
+            self.enhance_progress = now
+        self.enhance_poll = now
         stats = self.enhancer.diagnostics()
         if stats['error'] or stats['bypassed']:
             self._fallback_enhancement('unavailable' if stats['error'] else 'large_crop')
             return
         if self.enhance_state == 'warming' and stats['ready']:
             self.enhance_state = 'active'
-            self.enhance_progress = time.perf_counter()
+            self.enhance_progress = now
         result = self.enhancer.take_result()
         if result is not None:
-            timestamp, image, enhanced, area, duration = result
+            timestamp, image, enhanced, area, duration, cpu_ms = result
             # Present the source and filtered image atomically; never move backwards.
             if (self.frame_key is None or timestamp >= self.frame_key) and timestamp <= self.input_frame[0]:
-                self.slow_results = self.slow_results + 1 if duration > max(10, self.source_interval * 1250) else 0
-                if self.slow_results >= 3 or self.input_frame[0] - timestamp > .080:
-                    self._fallback_enhancement('slow')
+                self.slow_results = self.slow_results + 1 if cpu_ms > max(10, self.source_interval * 1250) else 0
+                if self.slow_results >= 8:
+                    self._fallback_enhancement('cpu_budget')
                     return
-                self._present(timestamp, image, enhanced, area)
-                self.enhance_progress = time.perf_counter()
+                if self.input_frame[0] - timestamp <= .080:
+                    self._present(timestamp, image, enhanced, area)
+                    self.enhance_progress = now
         if (self.enhance_state == 'active' and self.input_frame[0] != self.frame_key
-                and time.perf_counter() - self.enhance_progress > .060):
-            self._fallback_enhancement('slow')
+                and now - self.enhance_progress > .500):
+            self._fallback_enhancement('backend_timeout')
 
     def fit_geometry(self, x, y, width, remember=True):
         parent = self.parentWidget()

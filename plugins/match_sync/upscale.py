@@ -3,6 +3,7 @@ import logging
 import math
 import threading
 import time
+from collections import deque
 
 from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QImage
@@ -27,7 +28,7 @@ class LightScaler:
         padded = np.pad(pixels.astype(np.int16), ((1, 1), (1, 1), (0, 0)), mode='edge')
         center = padded[1:-1, 1:-1]
         laplacian = 4 * center - padded[:-2, 1:-1] - padded[2:, 1:-1] - padded[1:-1, :-2] - padded[1:-1, 2:]
-        detail = np.clip(np.rint(laplacian.astype(np.float32) / 32), -4, 4)
+        detail = np.clip(np.rint(laplacian.astype(np.float32) / 12), -10, 10)
         output = np.clip(center + detail, 0, 255).astype(np.uint8)
         return QImage(output.data, output.shape[1], output.shape[0], output.strides[0], QImage.Format_RGB888).copy()
 
@@ -43,7 +44,7 @@ class CropEnhancer:
         self.generation = 0
         self.thread = None
         self.stats = dict(ready=False, completed=0, superseded=0, bypassed=0,
-                          inference_ms=0., backend='', error='')
+                          inference_ms=0., cpu_ms=0., cpu_samples=0, backend='', error='')
 
     def reset(self):
         with self.condition:
@@ -79,6 +80,7 @@ class CropEnhancer:
 
     def _run(self):
         backend = None
+        cpu_window = deque(maxlen=32)
         while True:
             with self.condition:
                 self.condition.wait_for(lambda: self.closed or self.pending is not None)
@@ -98,13 +100,19 @@ class CropEnhancer:
                     with self.condition:
                         self.stats.update(ready=True, backend=backend.backend)
                 started = time.perf_counter()
+                cpu_started = time.thread_time()
                 output = backend.upscale(image.copy(area), target)
                 duration = (time.perf_counter() - started) * 1000
+                cpu_window.append(cpu_started)
+                # Windows thread CPU counters are coarse for tiny per-frame jobs.
+                cpu_ms = (time.thread_time() - cpu_window[0]) * 1000 / len(cpu_window)
                 with self.condition:
                     self.stats['inference_ms'] = duration
+                    self.stats['cpu_ms'] = cpu_ms
+                    self.stats['cpu_samples'] = len(cpu_window)
                     self.stats['completed'] += 1
                     if not self.closed and generation == self.generation:
-                        self.result = (timestamp, image, output, area, duration)
+                        self.result = (timestamp, image, output, area, duration, cpu_ms)
             except Exception as error:
                 with self.condition:
                     self.pending = None
