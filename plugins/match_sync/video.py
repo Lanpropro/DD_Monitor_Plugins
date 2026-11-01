@@ -1,7 +1,7 @@
 """Original encoded video history and bounded, asynchronous native pictures."""
 from __future__ import annotations
 
-from collections import deque
+from collections import deque, OrderedDict
 from bisect import bisect_right
 from itertools import islice
 from dataclasses import dataclass, replace
@@ -36,11 +36,21 @@ _conversion = threading.local()
 
 
 def reformat_frame(frame, **options):
-    # VideoFrame.reformat caches on that frame only. Live frames are short-lived;
-    # keep one scaler per worker instead, without sharing mutable state across sources.
-    if not hasattr(_conversion, "reformatter"):
-        _conversion.reformatter = VideoReformatter()
-    return _conversion.reformatter.reformat(frame, **options)
+    # Analysis alternates a few small gray sizes. Reconfiguring one scaler
+    # repeatedly rebuilds swscale's automatic worker pools.
+    if options.get('format') == 'gray':
+        options.setdefault('threads', 1)
+    if not hasattr(_conversion, 'reformatters'):
+        _conversion.reformatters = OrderedDict()
+    cache = _conversion.reformatters
+    key = (frame.width, frame.height, frame.format.name, tuple(sorted(options.items())))
+    converter = cache.pop(key, None)
+    if converter is None:
+        converter = VideoReformatter()
+    cache[key] = converter
+    while len(cache) > 4:
+        cache.popitem(last=False)
+    return converter.reformat(frame, **options)
 
 
 def image_from_frame(frame):
