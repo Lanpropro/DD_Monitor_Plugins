@@ -418,6 +418,9 @@ class SendConsole(SettingsPanel):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._layout_workspace()
+
+    def _layout_workspace(self):
         if not hasattr(self, 'body_layout'):
             return
         regular = self.width() >= 520
@@ -444,10 +447,10 @@ class SendConsole(SettingsPanel):
             self.rooms.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
             self.rooms.setMinimumWidth(0)
             self.rooms.setMaximumWidth(16777215)
-            self.rooms.setFixedHeight(row_height + 8)
-            self.rooms.setFlow(QListView.LeftToRight)
-            self.rooms.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-            self.rooms.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            self.rooms.setFixedHeight(row_height * max(1, self.rooms.count()) + 8)
+            self.rooms.setFlow(QListView.TopToBottom)
+            self.rooms.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            self.rooms.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
     def sync_rooms(self):
         had_rows = bool(self.rows)
@@ -494,6 +497,7 @@ class SendConsole(SettingsPanel):
         self.rooms.blockSignals(False)
         self.batch_targets.intersection_update(self.rows)
         self._update_selection()
+        self._layout_workspace()
         self.work.setVisible(bool(self.rows))
         self.viewer.replay_bar.refresh(force=True)
         self.refresh_design()

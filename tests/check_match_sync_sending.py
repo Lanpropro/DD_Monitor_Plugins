@@ -98,7 +98,7 @@ def check(app, host, module, output=None):
     from PySide6.QtCore import QPoint, Qt, QTimer
     from PySide6.QtTest import QTest
     from PySide6.QtGui import QColor, QPixmap
-    from PySide6.QtWidgets import QBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QWidget
+    from PySide6.QtWidgets import QBoxLayout, QHBoxLayout, QLineEdit, QListView, QPushButton, QWidget
     from ddm import plugins
     from ddm.plugin_controls import TileControl
     sent, active = [], []
@@ -362,6 +362,11 @@ def check(app, host, module, output=None):
                 assert (console.width() >= 520) == (right_width == 640), console.width()
                 if right_width == 300:
                     assert console.rooms.property('avatarOnly')
+                    assert console.rooms.flow() == QListView.TopToBottom
+                    first_avatar = console.rooms.visualItemRect(console.rooms.item(0))
+                    next_avatar = console.rooms.visualItemRect(console.rooms.item(1))
+                    assert next_avatar.top() >= first_avatar.bottom(), 'Keep narrow recipients in a vertical column'
+                    assert console.rooms.height() >= console.rooms.count() * 44
                     assert console.work.y() >= console.rooms.geometry().bottom() + 1, 'Avatar row must not overlap the composer'
                     assert console.save_text.isVisible()
                     primary = next(button for button in second.parentWidget().findChildren(QPushButton)
