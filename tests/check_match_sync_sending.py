@@ -374,11 +374,18 @@ def check(app, host, module, output=None):
                                    if button.property('sendPrimary'))
                     bookmark = console.save_text.mapTo(console, QPoint())
                     send_right = primary.mapTo(console, QPoint(primary.width(), 0))
+                    editor_top = second.mapTo(console, QPoint())
+                    assert send_right.y() >= editor_top.y() + second.height(), 'Put actions below the narrow editor'
+                    assert second.width() >= 150, 'Reserve a usable full row for narrow input'
                     assert 0 <= bookmark.x() - send_right.x() <= 4, 'Keep all four icons together'
                     assert bookmark.x() + console.save_text.width() <= console.width()
                     assert console.body_scroll.horizontalScrollBar().maximum() == 0
                     button = second.parentWidget().findChildren(QPushButton)[0]
                     assert button.mapTo(console, QPoint(button.width(), 0)).x() <= console.width()
+                else:
+                    primary = next(button for button in second.parentWidget().findChildren(QPushButton)
+                                   if button.property('sendPrimary'))
+                    assert abs(primary.mapTo(console, QPoint()).y() - second.mapTo(console, QPoint()).y()) <= 1
                 if output:
                     viewer.grab().save(str(output.with_name(output.stem + f'-width-{right_width}.png')))
                     if right_width == 300:
