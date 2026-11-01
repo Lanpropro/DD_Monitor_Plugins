@@ -110,6 +110,8 @@ class Canvas(QFrame):
             self.presented += 1
         self.frame_key = key
         self.frame = item
+        if self.paint_probe is not None and self.paint_probe.thread is not None and item is not None:
+            self.paint_probe.submitted.record(time.perf_counter(), key)
         self.image = (item[1] if isinstance(item[1], QImage) else QImage.fromData(item[1])) if item is not None else QImage()
         self._sync_opaque_paint()
         self.update()
@@ -164,6 +166,7 @@ class Canvas(QFrame):
             self._paint_frame(event)
         finally:
             probe.paints.append((time.perf_counter(), (time.perf_counter() - started) * 1000))
+            probe.painted.record(time.perf_counter(), self.frame_key)
 
     def _paint_frame(self, event):
         painter = QPainter(self)
@@ -3080,6 +3083,17 @@ class Viewer(QDialog):
             probe.mark('picture')
         row = self.rows.get(self.alignment.reference)
         if row is not None and row.decoder is not None and not row.paused and row.room_id in shown_shifts:
+            if probe is not None and refresh_status_ui:
+                window = self.window()
+                handle = window.windowHandle()
+                screen = window.screen()
+                probe.surface = dict(visible=self.canvas.isVisible(), window_visible=window.isVisible(),
+                                     minimized=window.isMinimized(), exposed=handle.isExposed() if handle else False,
+                                     active=window.isActiveWindow(), canvas_size=(self.canvas.width(), self.canvas.height()),
+                                     source_size=getattr(row.decoder, 'video_size', (0, 0)),
+                                     screen_hz=screen.refreshRate() if screen else 0,
+                                     playback_rate=self.playback_rate, replay=self.replay.active,
+                                     render_interval_ms=self.render_timer.interval())
             frame = self.canvas.show_at(row.decoder, shown_clock + shown_shifts[row.room_id])
             row.actual_position = self.canvas.frame_key
             waiting = self.canvas.playback_waiting(row.decoder, shown_clock + shown_shifts[row.room_id], frame,
