@@ -9,6 +9,8 @@ from types import SimpleNamespace
 
 def check(app, host, module):
     from ddm import plugins
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
     with tempfile.TemporaryDirectory() as directory:
         host.settings, host.rooms = {}, []
         viewer = module.Viewer(plugins.PluginContext(
@@ -18,6 +20,18 @@ def check(app, host, module):
                 viewer.add_room(key, {'alias': 'fixture ' + key})
                 viewer.rows[key].chat = SimpleNamespace(stop=lambda: None)
             first, second = viewer.rows.values()
+            viewer.setAttribute(Qt.WA_DontShowOnScreen)
+            viewer.show()
+            QTest.qWait(20)
+            console_top = viewer.send_console.mapTo(viewer, QPoint()).y()
+            viewer.minimize_chat.click()
+            QTest.qWait(20)
+            assert viewer.panel.isHidden() and viewer.send_console.isVisible()
+            assert viewer.send_console.mapTo(viewer, QPoint()).y() == console_top
+            assert viewer.restore_chat.isVisible()
+            viewer.restore_chat.click()
+            QTest.qWait(20)
+            assert viewer.panel.isVisible() and viewer.send_console.isVisible()
             viewer.running = True
             viewer._state(first, first.chat, '连接中…', True)
             viewer._state(second, second.chat, '连接中…', True)
@@ -51,7 +65,8 @@ def check(app, host, module):
             viewer.stop()
             assert icon.connections == 0
             return {'passed': True, 'levels': [0, 1, 2], 'disconnect_reset': True,
-                    'stale_worker_ignored': True, 'disabled_excluded': True}
+                    'stale_worker_ignored': True, 'disabled_excluded': True,
+                    'console_kept_visible': True}
         finally:
             viewer.close()
             viewer.deleteLater()
