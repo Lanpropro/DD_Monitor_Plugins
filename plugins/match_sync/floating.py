@@ -9,6 +9,7 @@ from ddm import theme
 class FloatingCrop(QWidget):
     closed = Signal()
     recrop = Signal()
+    background_exposed = Signal(QRect)
 
     def __init__(self, parent, label, crop):
         super().__init__(parent)
@@ -63,6 +64,7 @@ class FloatingCrop(QWidget):
                          round(max(bounds.y(), min(bounds.bottom() + 1 - height, y))), round(width), height)
         if previous != self.geometry():
             parent.update(previous)
+            self.background_exposed.emit(previous)
 
     def movement_bounds(self):
         parent = self.parentWidget()
@@ -218,6 +220,10 @@ class FloatingCrop(QWidget):
         if event.button() == Qt.LeftButton:
             self.drag = None
             self.recrop.emit()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self.background_exposed.emit(self.geometry())
 
     def closeEvent(self, event):
         self.closed.emit()

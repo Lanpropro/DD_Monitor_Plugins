@@ -3277,12 +3277,26 @@ class Viewer(QDialog):
             floating.show()
             floating.raise_()
 
+    def restore_crop_background(self, floating, exposed):
+        parent = floating.parentWidget()
+        # Opaque video/text children can retain their backing-store pixels while
+        # the parent repaints. Repaint the actual exposed surfaces, even if the
+        # stream is stalled and no new video frame is scheduled.
+        surfaces = [self.canvas, self.panel.body.viewport()]
+        surfaces.extend(card[2] for card in self.comparison_panel.cards.values())
+        for surface in surfaces:
+            if surface.isVisible() and surface.window() is parent.window():
+                local = exposed.translated(-surface.mapTo(parent, QPoint())).intersected(surface.rect())
+                if not local.isEmpty():
+                    surface.repaint(local)
+
     def show_floating_crop(self, row, crop, frame):
         floating = self.floating_crops.get(row.room_id)
         if floating is None:
             floating = FloatingCrop(self.floating_surface(), row.label(), crop)
             self.floating_crops[row.room_id] = floating
             floating.closed.connect(lambda key=row.room_id: self.floating_crops.pop(key, None))
+            floating.background_exposed.connect(lambda rect, item=floating: self.restore_crop_background(item, rect))
             floating.recrop.connect(lambda: self.choose_crop(row, floating=True))
             floating.move(40 + len(self.floating_crops) * 24, 40 + len(self.floating_crops) * 24)
         floating.picture_widget = self.picture

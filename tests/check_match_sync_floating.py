@@ -166,6 +166,23 @@ def check(app, host, module, output=None):
                 painting.end()
                 floating.set_frame((1000 + index, moving))
                 app.processEvents()
+            # A stalled/paused background has no set_frame call to erase old crops.
+            # Observe direct repaint requests; grab() would force painting and hide the bug.
+            canvas_area = QRect(viewer.canvas.mapTo(host, QPoint()), viewer.canvas.size())
+            floating.fit_geometry(canvas_area.x() + 20, canvas_area.y() + 20, 180)
+            app.processEvents()
+            unchanged = viewer.canvas.frame_key
+            with patch.object(viewer.canvas, 'repaint', wraps=viewer.canvas.repaint) as repaint:
+                old = floating.geometry()
+                floating.fit_geometry(old.x() + 90, old.y() + 30, old.width())
+                assert repaint.call_count > 0, 'Repaint the exposed opaque video surface without a new source frame'
+                for call in repaint.call_args_list:
+                    assert viewer.canvas.rect().contains(call.args[0])
+                assert viewer.canvas.frame_key == unchanged
+            with patch.object(viewer.canvas, 'repaint', wraps=viewer.canvas.repaint) as repaint:
+                floating.hide()
+                assert repaint.call_count > 0, 'Hiding/closing must also restore the background'
+                floating.show()
             before_move = floating.pos()
             position = floating.mapTo(host, QPoint(40, 40))
             assert host.childAt(position) is floating
