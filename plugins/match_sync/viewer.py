@@ -1348,6 +1348,7 @@ class Viewer(QDialog):
                                int(settings.get("danmaku_font_size") or 13))
         self.panel.set_max_blocks(int(settings.get("danmaku_max_blocks") or 3000))
         split = QSplitter(Qt.Horizontal)
+        split.setOpaqueResize(False)
         split.setHandleWidth(4)
         split.setStyleSheet("QSplitter::handle { background: transparent; } QSplitter::handle:hover { background: palette(mid); }")
         self.picture_split = split
@@ -1372,6 +1373,7 @@ class Viewer(QDialog):
         self.controls.viewport().setAcceptDrops(True)
         self.controls.setMinimumHeight(60)
         self.body_split = QSplitter(Qt.Vertical)
+        self.body_split.setOpaqueResize(False)
         self.body_split.setHandleWidth(4)
         self.body_split.setStyleSheet("QSplitter::handle { background: transparent; } QSplitter::handle:hover { background: palette(mid); }")
         self.body_split.addWidget(self.picture)
@@ -1411,16 +1413,6 @@ class Viewer(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(split)
-        self.splitter_damage = QRegion()
-        self.splitter_positions = {}
-        self.splitter_repaint = QTimer(self)
-        self.splitter_repaint.setSingleShot(True)
-        self.splitter_repaint.timeout.connect(self._restore_splitter_background)
-        for splitter in (split, self.body_split):
-            splitter.splitterMoved.connect(
-                lambda position, index, item=splitter: self._queue_splitter_repaint(item, position, index))
-            for index in range(1, splitter.count()):
-                self.splitter_positions[splitter, index] = splitter.handle(index).pos()
         self.audio = AudioPump(self)
         self.audio.status.connect(self.audio_status.setText)
         self.host_audio_timer = QTimer(self)
@@ -3385,29 +3377,6 @@ class Viewer(QDialog):
             floating.fit_geometry(geometry.x(), geometry.y(), geometry.width())
             floating.show()
             floating.raise_()
-
-    def _queue_splitter_repaint(self, splitter, position, index):
-        handle = splitter.handle(index)
-        current = handle.pos()
-        previous = self.splitter_positions.get((splitter, index), current)
-        self.splitter_positions[splitter, index] = current
-        exposed = QRect(previous, handle.size()).united(handle.geometry())
-        self.splitter_damage |= QRegion(exposed.translated(splitter.mapTo(self, QPoint())))
-        # Merge all moves delivered in this event-loop turn, including reversals.
-        if not self.splitter_repaint.isActive():
-            self.splitter_repaint.start(0)
-
-    def _restore_splitter_background(self):
-        damage, self.splitter_damage = self.splitter_damage, QRegion()
-        self.repaint(damage)
-        surfaces = [self.canvas, self.settings_panel, self.send_console,
-                    self.controls.viewport(), self.panel.body.viewport()]
-        surfaces.extend(card[2] for card in self.comparison_panel.cards.values())
-        for surface in surfaces:
-            if surface.isVisible() and surface.window() is self.window():
-                local = damage.translated(-surface.mapTo(self, QPoint())).intersected(QRegion(surface.rect()))
-                if not local.isEmpty():
-                    surface.repaint(local)
 
     def restore_crop_background(self, floating, exposed):
         parent = floating.parentWidget()

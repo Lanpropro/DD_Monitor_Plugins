@@ -1,4 +1,4 @@
-"""Rapid splitter reversals restore exposed surfaces without a new media frame."""
+"""Rubber-band dragging defers media and chat layout until release."""
 import argparse
 import os
 from pathlib import Path
@@ -8,18 +8,10 @@ from unittest.mock import patch
 
 
 def check(app, host, module):
-    from PySide6.QtCore import QEvent, QObject, Qt
-    from PySide6.QtGui import QImage
+    from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+    from PySide6.QtGui import QImage, QMouseEvent
     from PySide6.QtTest import QTest
     from ddm import plugins
-    class Paints(QObject):
-        def __init__(self):
-            super().__init__()
-            self.regions = []
-        def eventFilter(self, watched, event):
-            if event.type() == QEvent.Paint:
-                self.regions.append(event.region())
-            return False
     with tempfile.TemporaryDirectory() as directory:
         host.settings, host.rooms = {}, []
         viewer = module.Viewer(plugins.PluginContext(
@@ -33,35 +25,42 @@ def check(app, host, module):
         image.fill(Qt.red)
         viewer.canvas.set_frame((1, image))
         QTest.qWait(80)
-        paints = Paints()
-        viewer.panel.body.viewport().installEventFilter(paints)
+        viewer.setFixedSize(viewer.size())
+        QTest.qWait(80)
         text = viewer.panel.body.toPlainText()
         split = viewer.picture_split
         low = split.closestLegalPosition(0, 1)
         high = split.closestLegalPosition(split.width(), 1)
         assert high - low > 200, (low, high)
         positions_for = lambda fractions: tuple(round(low + (high - low) * fraction) for fraction in fractions)
+        moves = []
+        split.splitterMoved.connect(lambda position, index: moves.append((position, index)))
+        def mouse(kind, point, button, buttons):
+            app.sendEvent(handle, QMouseEvent(kind, QPointF(point), QPointF(handle.mapToGlobal(point)),
+                                             button, buttons, Qt.NoModifier))
         try:
-            with patch.object(viewer.panel, '_render_all', side_effect=AssertionError('Full chat rebuild')), \
-                    patch.object(viewer.panel.body.viewport(), 'repaint', wraps=viewer.panel.body.viewport().repaint) as restore:
-                for positions in (positions_for((.2, .8, .3, .6)), positions_for((.7, .1, .6, .3))):
-                    paints.regions.clear()
-                    before = restore.call_count
-                    for position in positions:
-                        viewer.picture_split.moveSplitter(position, 1)
-                    assert viewer.splitter_repaint.isActive()
+            assert not split.opaqueResize() and not viewer.body_split.opaqueResize()
+            with patch.object(viewer.panel, '_render_all', side_effect=AssertionError('Full chat rebuild')):
+                for fractions in ((.2, .8, .3, .6), (.7, .1, .6, .3)):
+                    handle = split.handle(1)
+                    start = handle.rect().center()
+                    original = split.sizes()
+                    before = len(moves)
+                    mouse(QEvent.MouseButtonPress, start, Qt.LeftButton, Qt.LeftButton)
+                    for target in positions_for(fractions):
+                        point = start + QPoint(target - handle.x(), 0)
+                        mouse(QEvent.MouseMove, point, Qt.NoButton, Qt.LeftButton)
+                        QTest.qWait(10)
+                        assert split.sizes() == original, (original, split.sizes(), moves, split.opaqueResize())
+                    mouse(QEvent.MouseButtonRelease, point, Qt.LeftButton, Qt.NoButton)
                     QTest.qWait(80)
-                    assert restore.call_count == before + 1, (before, restore.call_count, viewer.picture_split.sizes(), viewer.panel.body.viewport().isVisible(), viewer.panel.body.viewport().size(), viewer.splitter_damage.boundingRect())
-                    assert paints.regions, 'The exposed chat surface must actually paint'
-                    assert viewer.canvas.frame_key == 1, 'Do not rely on a new source frame'
+                    assert split.sizes() != original
+                    assert len(moves) == before + 1, 'Commit one resize per gesture'
+                    assert viewer.canvas.frame_key == 1
                     assert viewer.panel.body.toPlainText() == text
-                    assert viewer.splitter_damage.isEmpty()
-            viewer.hide()
-            for position in (500, 700):
-                viewer.picture_split.moveSplitter(position, 1)
-            QTest.qWait(10)
-            return {'passed': True, 'rapid_moves': 8, 'coalesced_repairs': 2,
-                    'static_frame_preserved': True, 'messages_preserved': 200, 'forced_grabs': 0}
+            return {'passed': True, 'rapid_moves': 8, 'committed_resizes': 2,
+                    'resize_during_drag': 0, 'static_frame_preserved': True,
+                    'messages_preserved': 200, 'forced_grabs': 0}
         finally:
             viewer.close()
             viewer.deleteLater()
