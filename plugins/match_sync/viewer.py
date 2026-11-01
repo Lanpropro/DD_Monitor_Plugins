@@ -1341,6 +1341,13 @@ class Viewer(QDialog):
         # Keep pixel hover inside the tile instead of dispatching it through
         # every surrounding layout and application event filter again.
         self.picture.setAttribute(Qt.WA_NoMousePropagation, True)
+        # The Qt canvas has no libmpv child. Keep mask updates, but stop the
+        # host surface's periodic search for a native playback window.
+        self._native_clip_timer = getattr(self.picture.video, '_clip_timer', None)
+        self.native_clip_retry_blocks = 0
+        if self._native_clip_timer is not None:
+            self._native_clip_timer.stop()
+            self._native_clip_timer.installEventFilter(self)
         self.replay_bar = ReplayBar(self)
         self.restore_settings.setParent(self.picture.bottom)
         self.restore_settings.setObjectName("TileCtrl")
@@ -1615,6 +1622,10 @@ class Viewer(QDialog):
 
     def eventFilter(self, watched, event):
         kind = event.type()
+        if kind == QEvent.Timer and watched is getattr(self, '_native_clip_timer', None):
+            self.native_clip_retry_blocks += 1
+            watched.stop()
+            return True
         if kind in (QEvent.MouseMove, QEvent.HoverMove, QEvent.Enter, QEvent.Leave):
             probe = getattr(self, 'playback_probe', None)
             if probe is not None and probe.thread is not None:
@@ -3157,6 +3168,7 @@ class Viewer(QDialog):
                                      source_size=getattr(row.decoder, 'video_size', (0, 0)),
                                      screen_hz=screen.refreshRate() if screen else 0,
                                      playback_rate=self.playback_rate, replay=self.replay.active,
+                                     native_clip_retry_blocks=self.native_clip_retry_blocks,
                                      render_interval_ms=self.render_timer.interval())
             frame = self.canvas.show_at(row.decoder, shown_clock + shown_shifts[row.room_id])
             row.actual_position = self.canvas.frame_key
