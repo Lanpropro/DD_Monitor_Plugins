@@ -15,6 +15,36 @@ import time
 from PySide6.QtCore import QObject, QTimer, Qt
 
 
+class FrameCadence:
+    """One bounded second of timestamp evidence, without retaining frame images."""
+    def __init__(self):
+        self.samples = deque(maxlen=512)
+        self.enabled = os.environ.get('DDM_MATCH_DIAGNOSTICS', '1') != '0'
+
+    def record(self, wall, media):
+        if self.enabled and media is not None:
+            self.samples.append((wall, media))
+
+    def stats(self, now, fps=0):
+        samples = tuple(self.samples)
+        recent = [item for item in samples if now - 1 <= item[0] <= now]
+        distinct = [item for index, item in enumerate(samples)
+                    if index == 0 or item[1] != samples[index - 1][1]]
+        pairs = [(a, b) for a, b in zip(distinct, distinct[1:]) if now - 1 <= b[0] <= now]
+        gaps = sorted((b[0] - a[0]) * 1000 for a, b in pairs)
+        steps = sorted((b[1] - a[1]) * 1000 for a, b in pairs)
+        def percentile(values, fraction):
+            return round(values[min(len(values) - 1, int((len(values) - 1) * fraction))], 3) if values else None
+        return dict(calls=len(recent), distinct=sum(now - 1 <= item[0] <= now for item in distinct),
+                    gap_p50_ms=percentile(gaps, .5), gap_p95_ms=percentile(gaps, .95),
+                    gap_max_ms=percentile(gaps, 1), media_step_p95_ms=percentile(steps, .95),
+                    gaps_over_25ms=sum(gap > 25 for gap in gaps),
+                    gaps_over_50ms=sum(gap > 50 for gap in gaps),
+                    skipped_frames=sum(max(0, round((b[1] - a[1]) * fps) - 1)
+                                       for a, b in pairs if fps > 0 and b[1] >= a[1]),
+                    backwards=sum(b[1] < a[1] for a, b in pairs))
+
+
 def stack(thread_id):
     result = []
     frame = sys._current_frames().get(thread_id)
@@ -48,6 +78,13 @@ def picture_state(decoder, target, displayed, waiting):
         finally:
             candidate.lock.release()
     reader = decoder.pictures
+    now = time.perf_counter()
+    fps = getattr(decoder, 'fps', 0)
+    result['source_fps'] = fps
+    if hasattr(decoder, 'received_cadence'):
+        result['received_cadence'] = decoder.received_cadence.stats(now, fps)
+    if hasattr(reader, 'decoded_cadence'):
+        result['decoded_cadence'] = reader.decoded_cadence.stats(now, fps)
     if reader.lock.acquire(blocking=False):
         try:
             keys = tuple(reader.images)
@@ -84,6 +121,10 @@ class PlaybackProbe(QObject):
         self.mouse_target = ''
         self.mouse_time = 0.0
         self.audio = None
+        self.submitted = FrameCadence()
+        self.painted = FrameCadence()
+        self.clock_steps = FrameCadence()
+        self.surface = {}
 
     def start(self):
         if not self.enabled or (self.thread is not None and self.thread.is_alive()):
@@ -93,6 +134,10 @@ class PlaybackProbe(QObject):
         self.transitions.clear()
         self.renders.clear()
         self.paints.clear()
+        self.submitted.samples.clear()
+        self.painted.samples.clear()
+        self.clock_steps.samples.clear()
+        self.surface = {}
         self.last_render = self.last_tick = time.perf_counter()
         self.stage = 'idle'
         self.thread = threading.Thread(target=self._run, name='match-sync-diagnostics', daemon=True)
@@ -126,6 +171,7 @@ class PlaybackProbe(QObject):
         if previous is None or previous[0] is not decoder or previous[3] != waiting:
             self.transitions.append((time.time(), frame))
         self.frame = frame
+        self.clock_steps.record(time.perf_counter(), target)
 
     def begin(self):
         now = time.perf_counter()
@@ -159,6 +205,9 @@ class PlaybackProbe(QObject):
                       mouse_age_ms=round((now - self.mouse_time) * 1000, 1) if self.mouse_time else None,
                       audio_gap_ms=round((now - last_fill) * 1000, 1) if last_fill is not None else None)
         frame = self.frame
+        fps = getattr(frame[0], 'fps', 0) if frame is not None else 0
+        result.update(surface=self.surface, submitted_cadence=self.submitted.stats(now, fps),
+                      painted_cadence=self.painted.stats(now, fps), clock_cadence=self.clock_steps.stats(now))
         if frame is not None:
             result['picture'] = picture_state(*frame)
         return result
@@ -173,7 +222,7 @@ class PlaybackProbe(QObject):
                                pid=os.getpid(), event=event, **fields)
                 handler.emit(logging.makeLogRecord(dict(msg=json.dumps(payload, ensure_ascii=False))))
             from .video import PictureReader
-            write('start', schema=1, picture_code=hashlib.sha256(marshal.dumps(PictureReader.get.__code__)).hexdigest())
+            write('start', schema=2, picture_code=hashlib.sha256(marshal.dumps(PictureReader.get.__code__)).hexdigest())
             sampled = 0
             last_stack = last_report = 0.0
             reported_stall = False

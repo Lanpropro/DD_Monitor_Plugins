@@ -19,6 +19,7 @@ except ImportError:
 
 from .engine import History, np
 from .replay_cache import DiskAudioRing, PacketStore
+from .diagnostics import FrameCadence
 
 
 class StreamInput:
@@ -247,6 +248,7 @@ class PictureReader:
         self.requested = 0.0
         self.decode_ms = 0.0
         self.decoded = 0
+        self.decoded_cadence = FrameCadence()
         self.byte_limit = 64 * 1024 * 1024
         self.max_frames = 8
         self.fps = 60.0
@@ -394,6 +396,7 @@ class PictureReader:
                             while len(self.images) > capacity:
                                 self.images.pop(next(iter(self.images)))
                             self.decoded += 1
+                            self.decoded_cadence.record(time.perf_counter(), key)
                         complete = pts >= horizon
                     self.decode_ms = (time.perf_counter() - started) * 1000
                     if complete:
