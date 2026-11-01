@@ -254,6 +254,9 @@ class PictureReader:
         self.active = True
         self.snapshot_until = 0.0
         self.reset_requested = False
+        self.codec_creations = 0
+        self.reset_reason = 'initial'
+        self.decode_phase = 'idle'
 
     def configure(self, byte_limit, fps, lead=.35, active=True):
         with self.lock:
@@ -261,6 +264,8 @@ class PictureReader:
             self.active = active or time.monotonic() < self.snapshot_until
             if not self.active:
                 self.reset_requested |= previous_active
+                if previous_active:
+                    self.reset_reason = 'inactive'
                 self.target = None
                 self.images.clear()
             if (self.byte_limit, self.fps, self.lead, self.max_frames) == (byte_limit, max(1, fps), lead, 24):
@@ -281,6 +286,7 @@ class PictureReader:
             if self.history is not history:
                 self.images.clear()
                 self.history = history
+                self.reset_reason = 'source_changed'
             now = time.monotonic()
             elapsed = max(0, now - self.requested)
             self.requested = now
@@ -290,6 +296,7 @@ class PictureReader:
                 # not a seek and must not restart decoding from a keyframe.
                 if self.target is not None and (frame[1] < self.target[1] - .05 or frame[1] > self.target[1] + elapsed + .5):
                     self.reset_requested = True
+                    self.reset_reason = 'seek_backward' if frame[1] < self.target[1] else 'seek_forward'
                 self.target = frame
                 self.wake.set()
             if self.thread is None and not self.cancelled.is_set():
@@ -311,6 +318,7 @@ class PictureReader:
         capacity = 8
         try:
             while not self.cancelled.is_set():
+                self.decode_phase = 'idle'
                 if not self.wake.wait(1):
                     with self.lock:
                         if self.target is None or not self.active:
@@ -340,8 +348,11 @@ class PictureReader:
                     continue
                 config, packets, reset = result
                 if codec is None or reset:
+                    if codec is not None and reset:
+                        self.reset_reason = 'history_evicted'
                     decoded_until = None
                     codec = av.CodecContext.create(config[0], "r")
+                    self.codec_creations += 1
                     codec.extradata = config[1]
                     # UHD streams often have one slice per frame: SLICE then
                     # serializes decoding even when a thread count is configured.
@@ -358,7 +369,10 @@ class PictureReader:
                                 or self.reset_requested):
                             break
                     started = time.perf_counter()
-                    frames = codec.decode(packet.decode_packet())
+                    self.decode_phase = 'packet_read'
+                    encoded = packet.decode_packet()
+                    self.decode_phase = 'decode'
+                    frames = codec.decode(encoded)
                     sequence = packet.sequence + 1
                     complete = False
                     for frame in frames:
@@ -368,6 +382,7 @@ class PictureReader:
                             requested_target = self.target[1] if self.target is not None else target
                         if pts + .00001 < max(target, requested_target - .05):
                             continue
+                        self.decode_phase = 'convert'
                         image = image_from_frame(frame)
                         key = history.origin + pts
                         with self.lock:
@@ -384,6 +399,7 @@ class PictureReader:
                     if complete:
                         break
         finally:
+            self.decode_phase = 'stopped'
             with self.lock:
                 self.images.clear()
 
