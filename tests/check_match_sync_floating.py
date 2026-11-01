@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 
 def check(app, host, module, output=None):
-    from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt
+    from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt
     from PySide6.QtGui import QColor, QEnterEvent, QImage, QPainter, QPixmap, QWheelEvent
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QDialog, QWidget
@@ -109,6 +109,19 @@ def check(app, host, module, output=None):
             QTest.mouseRelease(host.windowHandle(), Qt.LeftButton, pos=anchor + QPoint(108, -60))
             QTest.mouseClick(floating, Qt.LeftButton, pos=floating.lock_rect().center())
             assert floating.lock_mode == 1
+            assert floating.picture_widget is viewer.picture
+            floating.tools_visible = True
+            icon = floating.grab().toImage()
+            ratio = floating.devicePixelRatioF()
+            area = floating.lock_rect()
+            points = [(x / ratio, y / ratio) for y in range(round(area.top() * ratio), round((area.bottom() + 1) * ratio))
+                      for x in range(round(area.left() * ratio), round((area.right() + 1) * ratio))
+                      if min(icon.pixelColor(x, y).getRgb()[:3]) > 140]
+            assert points
+            assert abs(sum(x for x, _y in points) / len(points) - (area.x() + area.width() / 2)) <= 1
+            assert abs(sum(y for _x, y in points) / len(points) - (area.y() + area.height() / 2)) <= 1
+            expected_bounds = QRect(viewer.picture.mapTo(host, QPoint()), viewer.picture.size()).intersected(host.rect())
+            assert floating.movement_bounds() == expected_bounds, 'Lock to the entire tile, including its controls and letterboxing'
             floating.fit_geometry(-500, -500, 300)
             assert floating.movement_bounds().contains(floating.geometry()), 'Picture-locked crop stays in the main canvas'
             QTest.mouseClick(floating, Qt.LeftButton, pos=floating.lock_rect().center())

@@ -275,6 +275,7 @@ class AudioPump(QObject):
         self.flush_clock = None
         self.replay_offset = None
         self.replay_cursors = {}
+        self.independent_histories = frozenset()
         self.timer = QTimer(self)
         self.timer.setInterval(10)
         self.timer.setTimerType(Qt.PreciseTimer)
@@ -386,6 +387,8 @@ class AudioPump(QObject):
                 inputs.append((row.decoder.history, shown_clock + shown_shifts[room_id] - clock,
                                local_rate,
                                row.channel.currentData(), row.volume.value() * (1.0 if replaying else row.mix_gain)))
+        self.independent_histories = frozenset(row.decoder.history for key, row in self.viewer.rows.items()
+                                               if key in self.viewer.independent_playback and row.decoder is not None)
         self.snapshot = (rate, tuple(inputs))
 
     def fill(self):
@@ -416,7 +419,7 @@ class AudioPump(QObject):
             positions = []
             for history, shift, local_rate, channel, volume in sources:
                 target = clock + shift
-                cursor = self.replay_cursors.get(history) if self.replay_offset is not None else None
+                cursor = self.replay_cursors.get(history) if self.replay_offset is not None or history in self.independent_histories else None
                 if cursor is not None and abs(clock - cursor[0]) < .01 and abs(target - cursor[1]) < .05:
                     target = cursor[1]
                 source_frames = max(1, round(frames * local_rate))
@@ -431,8 +434,8 @@ class AudioPump(QObject):
             actual_rate = media_frames / frames
             self.clock_segments.append((self.written, self.written + written, self.media_written, actual_rate))
             self.media_written += written / RATE * actual_rate
-            if self.replay_offset is not None:
-                for history, target, source_frames in positions:
+            for history, target, source_frames in positions:
+                if self.replay_offset is not None or history in self.independent_histories:
                     self.replay_cursors[history] = (clock + written / RATE * actual_rate,
                         target + source_frames / RATE * written / frames)
             self.written += written
@@ -837,7 +840,7 @@ class RoomRow(QFrame):
         columns = []
         column = 0
         for index, widget in enumerate(self.control_widgets):
-            if index in (5, 9, 11, 15):
+            if index in (6, 10, 12, 16):
                 controls.setColumnStretch(column, 1)
                 column += 1
             columns.append(column)
@@ -852,8 +855,8 @@ class RoomRow(QFrame):
         self.offset_hint.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.offset_hint.setStyleSheet(
             f"QLabel#MatchSyncOffsetHint {{ color: palette(window-text); font-size: {theme.FONT_CAPTION}px; }}")
-        controls.addWidget(self.status, 1, 0, 1, columns[10] - 1)
-        controls.addWidget(self.offset_hint, 1, columns[10], 1, columns[14] - columns[10])
+        controls.addWidget(self.status, 1, 0, 1, columns[11] - 1)
+        controls.addWidget(self.offset_hint, 1, columns[11], 1, columns[15] - columns[11])
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(4)
@@ -3280,8 +3283,8 @@ class Viewer(QDialog):
             floating.closed.connect(lambda key=row.room_id: self.floating_crops.pop(key, None))
             floating.recrop.connect(lambda: self.choose_crop(row, floating=True))
             floating.move(40 + len(self.floating_crops) * 24, 40 + len(self.floating_crops) * 24)
-        floating.picture_widget = self.canvas
-        self.canvas.installEventFilter(floating)
+        floating.picture_widget = self.picture
+        self.picture.installEventFilter(floating)
         floating.crop = QRectF(*crop)
         pixmap = row.avatar.pixmap()
         floating.set_avatar(pixmap if pixmap is not None and not pixmap.isNull() else row.avatar.grab())

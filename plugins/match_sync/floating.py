@@ -1,5 +1,5 @@
 """In-application crops keep source pixels and are independent of the video tile."""
-from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen, QTransform
 from PySide6.QtWidgets import QWidget
 
@@ -27,7 +27,7 @@ class FloatingCrop(QWidget):
         # Ordinary child transparency restores the backing store behind moved crops.
         self.setAutoFillBackground(False)
         self.setAttribute(Qt.WA_DeleteOnClose)
-        self.setToolTip(label + '\n随意移动；定位图标切换画面内／固定位置；滚轮或右下角缩放；双击重选；右上角关闭。')
+        self.setToolTip(label + '\n随意移动；定位图标切换格子内／固定位置；滚轮或右下角缩放；双击重选；右上角关闭。')
         self.setAccessibleName(label + '：悬浮画面')
         parent.installEventFilter(self)
 
@@ -69,10 +69,6 @@ class FloatingCrop(QWidget):
         if self.lock_mode == 1 and self.picture_widget is not None:
             picture = self.picture_widget
             area = QRect(picture.mapTo(parent, QPoint()), picture.size())
-            if not picture.image.isNull():
-                size = picture._source_rect().size().scaled(picture.size(), Qt.KeepAspectRatio)
-                area = QRect(picture.mapTo(parent, QPoint((picture.width() - size.width()) // 2,
-                                                         (picture.height() - size.height()) // 2)), size)
             return area.intersected(parent.rect())
         return parent.rect()
 
@@ -83,7 +79,7 @@ class FloatingCrop(QWidget):
         self.lock_mode = (self.lock_mode + 1) % 3
         self.drag = None
         self.fit_geometry(self.x(), self.y(), self.width())
-        self.setToolTip(self.label + '\n' + ('随意移动', '锁定在画面内', '锁定在当前位置')[self.lock_mode]
+        self.setToolTip(self.label + '\n' + ('随意移动', '锁定在格子内', '锁定在当前位置')[self.lock_mode]
                         + '；点击定位图标切换；右上角关闭。')
         self.update()
 
@@ -143,7 +139,7 @@ class FloatingCrop(QWidget):
         painter.setBrush(theme.qcolor(theme.ACCENT) if self.lock_rect().contains(self.hover_point) else QColor(0, 0, 0, 170))
         painter.drawRoundedRect(QRectF(self.lock_rect()), 12, 12)
         painter.save()
-        painter.translate(self.lock_rect().center())
+        painter.translate(QRectF(self.lock_rect()).center())
         painter.setPen(QPen(QColor('#e7ebf0'), 1.5))
         painter.setBrush(Qt.NoBrush)
         if self.lock_mode == 2:
@@ -162,9 +158,9 @@ class FloatingCrop(QWidget):
         painter.setBrush(theme.qcolor(theme.ACCENT) if self.close_rect().contains(self.hover_point) else QColor(0, 0, 0, 170))
         painter.drawRoundedRect(QRectF(self.close_rect()), 12, 12)
         painter.setPen(QColor('#e7ebf0'))
-        close = self.close_rect().center()
-        painter.drawLine(close + QPoint(-4, -4), close + QPoint(4, 4))
-        painter.drawLine(close + QPoint(-4, 4), close + QPoint(4, -4))
+        close = QRectF(self.close_rect()).center()
+        painter.drawLine(close + QPointF(-4, -4), close + QPointF(4, 4))
+        painter.drawLine(close + QPointF(-4, 4), close + QPointF(4, -4))
         painter.setPen(QPen(QColor('#e7ebf0'), 1.5))
         for offset in (() if self.lock_mode == 2 else (5, 10)):
             painter.drawLine(self.width() - offset, self.height() - 3,

@@ -10,19 +10,37 @@ from unittest.mock import patch
 
 
 def check(app, host, module):
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import QPoint, Qt
     from PySide6.QtTest import QTest
     from ddm import plugins
     with tempfile.TemporaryDirectory() as directory:
         host.settings, host.rooms = {}, []
         viewer = module.Viewer(plugins.PluginContext(plugins.PluginManager(window=host, plugins_dir=directory), 'independent_check'), {})
+        class History(SimpleNamespace):
+            __hash__ = object.__hash__
+        viewer.setAttribute(Qt.WA_DontShowOnScreen)
         histories = []
         try:
             for key in ('1', '2', '3'):
                 viewer.add_room(key)
-                history = SimpleNamespace(bounds=lambda: (100., 130.), bounds_at=lambda _stamp: (100., 130.), snapshots=lambda: [])
+                history = History(bounds=lambda: (100., 130.), bounds_at=lambda _stamp: (100., 130.), snapshots=lambda: [])
                 viewer.rows[key].decoder = SimpleNamespace(history=history, stop=lambda: None)
                 histories.append(history)
+            viewer.resize(2200, 800)
+            viewer.show()
+            app.processEvents()
+            viewer.align_room_controls()
+            app.processEvents()
+            for current in viewer.rows.values():
+                left = current.decrease.geometry()
+                value = current.delay.geometry()
+                right = current.increase.geometry()
+                assert 0 <= value.left() - left.right() <= 12
+                assert 0 <= right.left() - value.right() <= 12, 'Keep offset minus/value/plus together'
+            main = viewer.rows['1']
+            for attribute in ('audible', 'volume', 'channel', 'delay', 'increase'):
+                first, second = getattr(main, attribute), getattr(viewer.rows['2'], attribute)
+                assert first.mapTo(main, QPoint()).x() == second.mapTo(viewer.rows['2'], QPoint()).x(), attribute
             viewer.running = True
             viewer.render_timer.stop()
             viewer.match_timer.stop()
@@ -62,7 +80,40 @@ def check(app, host, module):
                     viewer.sync_waiting = False
                 viewer.toggle_independent('1')
                 assert '1' not in viewer.independent_playback
-            return {'passed': True, 'no_zero_nonzero_offset': True, 'main_progress_preserved': True,
+            import numpy as np
+            class WaveHistory:
+                def __init__(self):
+                    self.reads = []
+                def pcm_at(self, stamp, frames):
+                    start = round(stamp * module.RATE)
+                    self.reads.append((start, frames))
+                    wave = (np.sin(np.arange(start, start + frames) * (2 * np.pi * 880 / module.RATE)) * 9000).astype('<i2')
+                    return np.column_stack((wave, wave)).tobytes()
+            class Sink:
+                def processedUSecs(self):
+                    return 0
+                def bytesFree(self):
+                    return 2048 * 4
+            class Device:
+                def write(self, data):
+                    return len(data)
+            wave = WaveHistory()
+            pump = module.AudioPump(viewer)
+            pump.sink, pump.device = Sink(), Device()
+            pump.anchor = 100.
+            pump.independent_histories = frozenset((wave,))
+            try:
+                for index in range(30):
+                    jitter = (0, .004, -.003, .001)[index % 4]
+                    shift = -pump.anchor + pump.written / module.RATE - pump.media_written + jitter
+                    pump.snapshot = (.98, ((wave, shift, 1., 0, 100),))
+                    pump._fill()
+                for previous, current in zip(wave.reads, wave.reads[1:]):
+                    assert current[0] == previous[0] + previous[1], 'Independent PCM must stay sample-contiguous during main slowdown and GUI jitter'
+            finally:
+                pump.sink = pump.device = None
+                pump.deleteLater()
+            return {'passed': True, 'continuous_pcm': True, 'no_zero_nonzero_offset': True, 'main_progress_preserved': True,
                     'audio_snapshot': True, 'mute_volume': True, 'resume_alignment': True}
         finally:
             for row in viewer.rows.values():
