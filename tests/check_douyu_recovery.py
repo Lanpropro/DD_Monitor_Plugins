@@ -56,6 +56,18 @@ def main():
             clock[0] += 61
             platform._streams(session, 'douyu:123', 10000)
             assert calls[-1] == ('123', 'hw-h5', 0), 'Failure expires after 60 seconds'
+            # Real 18:49:57 response: requested Hefei, returned Beijing. Avoid both
+            # the failed request route and the CDN that actually served the stream.
+            source['cdnsWithName'] = [{'cdn': 'scdncmccanhhf'}, {'cdn': 'scdncttbej'}, {'cdn': 'hw-h5'}]
+            source['rtmp_cdn'] = 'scdncttbej'
+            source['multirates'].append({'rate': 15, 'bit': 15000, 'name': '2K'})
+            platform._failed_cdns['douyu:789'] = {'hw-h5': clock[0]}
+            stream = platform._streams(session, 'douyu:789', 2000015)['source']
+            assert calls[-1] == ('789', 'scdncmccanhhf', 15) and stream.ddm_quality == 2000015
+            platform.report_playback_failure('douyu:789', stream.to_url(), 'LIVE_EOF')
+            failed = platform._failed_cdns['douyu:789']
+            assert 'scdncttbej' in failed, 'Actual returned CDN must be rejected even when it differs from the request'
+            assert 'scdncmccanhhf' in failed, 'The request route that led to the failed stream must also be avoided'
         plugin = module.LivePlatformsPlugin()
         plugin.context = plugins.PluginContext(manager, 'domestic_live')
         plugin._diagnostic_enabled = False

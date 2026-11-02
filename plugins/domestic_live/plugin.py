@@ -777,10 +777,10 @@ class DouyuPlatform(NumericLivePlatform):
         if not re.fullmatch(r"[A-Za-z0-9.-]{1,253}", host):
             return
         with self._cdn_lock:
-            cdn = self._source_cdns.get(room, {}).get(host, "")
+            cdns = self._source_cdns.get(room, {}).get(host, ())
             failed = self._failed_cdns.setdefault(room, {})
             failed[host] = time.monotonic()
-            if cdn:
+            for cdn in cdns:
                 failed[cdn] = failed[host]
         logger = getattr(self, "_diagnostic_log", None)
         if logger is not None:
@@ -993,8 +993,10 @@ class DouyuPlatform(NumericLivePlatform):
             raise RuntimeError("斗鱼未返回所选画质，请重试或选择其他线路/画质")
         host = urlsplit(data['rtmp_url']).hostname or ""
         with self._cdn_lock:
-            # Keep only unsigned host/CDN metadata for the current room's recovery.
-            self._source_cdns.setdefault(canonical, {})[host] = cdn or data.get("rtmp_cdn", "")
+            # The API can return another CDN. Keep both the actual CDN and request
+            # route so neither bypasses failure avoidance through a new hostname.
+            self._source_cdns.setdefault(canonical, {})[host] = tuple(dict.fromkeys(
+                name for name in (data.get("rtmp_cdn"), cdn) if name))
         stream = HTTPStream(session, f"{data['rtmp_url']}/{data['rtmp_live']}")
         stream.ddm_quality = 10000 if actual_rate == 0 else 2000000 + actual_rate
         return {"source": stream}
