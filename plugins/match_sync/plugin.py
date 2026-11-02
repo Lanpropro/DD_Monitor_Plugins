@@ -203,10 +203,12 @@ class EntryButton(QToolButton):
             self.setToolButtonStyle(Qt.ToolButtonIconOnly if top else Qt.ToolButtonTextOnly)
             self.setMinimumSize(QSize(30, 30) if top else QSize(0, 0))
             self.setMaximumSize(QSize(30, 30) if top else QSize(16777215, 16777215))
-            self.setSizePolicy(QSizePolicy.Fixed if top else QSizePolicy.Preferred,
-                               QSizePolicy.Fixed)
             self.style().unpolish(self)
             self.style().polish(self)
+        # Inactive entries must not inherit a stretched width while the host
+        # temporarily hides or restores neighboring controls during a collapse.
+        self.setSizePolicy(QSizePolicy.Preferred if occupied else QSizePolicy.Fixed,
+                           QSizePolicy.Fixed)
         index = box.indexOf(anchor) if top else 0
         if self.parentWidget() is not parent or box.indexOf(self) != index - (1 if top else 0):
             old = self.parentWidget().layout()
@@ -217,6 +219,7 @@ class EntryButton(QToolButton):
         self.setVisible(top or not getattr(sidebar, "collapsed", False))
         if not top:
             box.setStretch(box.indexOf(self), int(occupied))
+        box.activate()
 
     def detach(self):
         if self._set_side_original is not None and self.sidebar.set_side == self._set_side:

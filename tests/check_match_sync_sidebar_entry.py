@@ -12,7 +12,7 @@ def main():
     sys.path[:0] = [str(args.host.resolve()), str(Path(__file__).resolve().parents[1])]
     os.environ['DDM_NO_SAVE'] = '1'
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-    from PySide6.QtCore import QEvent, QObject, Qt
+    from PySide6.QtCore import QEvent, QObject, QRect, Qt
     from PySide6.QtGui import QAction
     from PySide6.QtWidgets import QApplication, QHBoxLayout, QWidget
     from ddm import theme
@@ -34,7 +34,7 @@ def main():
         def eventFilter(self, watched, event):
             if event.type() == QEvent.Paint and not sidebar.collapsed:
                 frames.append((entry.isVisible(), sidebar.layout_button.isVisible(),
-                               entry.geometry().getRect()))
+                               entry.geometry().getRect(), sidebar.layout_button.geometry().getRect()))
             return False
 
     recorder = PaintRecorder(sidebar)
@@ -46,6 +46,16 @@ def main():
     host.show()
     settle()
     try:
+        # While other tool buttons are temporarily hidden by a layout change,
+        # an inactive entry must retain its normal width instead of filling the row.
+        normal_width = entry.sizeHint().width()
+        sidebar.layout_button.hide()
+        sidebar.settings_button.hide()
+        sidebar.tool_row.layout().activate()
+        assert entry.width() <= normal_width, ('Inactive entry stretched', entry.width(), normal_width)
+        sidebar.layout_button.show()
+        sidebar.settings_button.show()
+        settle()
         for active in (False, True, False):
             entry.set_mode(active)
             entry._stretch_finished()
@@ -59,6 +69,8 @@ def main():
                 assert frames, 'The host must still paint the sidebar synchronously'
                 first = frames[0]
                 assert first[:2] == (True, not active), ('Incomplete first frame', active, first)
+                if not active:
+                    assert not QRect(*first[2]).intersects(QRect(*first[3])), ('Overlapping first frame', first)
                 settle()
                 assert entry.geometry().getRect() == first[2], 'Entry geometry changed after first paint'
         sidebar.set_side('top')
