@@ -6,6 +6,7 @@ import sys
 import threading
 import time
 from collections import deque
+from contextlib import nullcontext
 from dataclasses import replace
 from math import ceil
 from pathlib import Path
@@ -1678,12 +1679,17 @@ class Viewer(QDialog):
                     break
         return super().eventFilter(watched, event)
 
+    def _switch_stage(self, stage):
+        probe = getattr(self, 'switch_probe', None)
+        return probe.span(stage) if probe is not None else nullcontext()
+
     def showEvent(self, event):
         QApplication.instance().installEventFilter(self)
         if self.embedded:
             suspend = getattr(self.context.window, "set_match_sync_playback", None)
             if callable(suspend):
-                suspend(True)
+                with self._switch_stage('suspend_host_playback'):
+                    suspend(True)
             self.host_audio_timer.start()
             self._suppress_host_audio()
         if self.embedded and not self.hidden_host_widgets:
@@ -1693,8 +1699,9 @@ class Viewer(QDialog):
                     self.hidden_host_widgets[widget] = not widget.isHidden()
                     widget.installEventFilter(self)
                     widget.hide()
-        self._sync_sidebar_marks()
-        self.send_console.sync_height()
+        with self._switch_stage('show_controls'):
+            self._sync_sidebar_marks()
+            self.send_console.sync_height()
         super().showEvent(event)
 
     def hideEvent(self, event):
@@ -2013,7 +2020,8 @@ class Viewer(QDialog):
             widget.setVisible(visible)
         resume = getattr(self.context.window, "set_match_sync_playback", None)
         if self.embedded and callable(resume):
-            resume(False)
+            with self._switch_stage('resume_host_playback'):
+                resume(False)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasFormat(ROOM_MIME):
@@ -3736,7 +3744,8 @@ class Viewer(QDialog):
         row.refresh_status()
 
     def stop(self):
-        self.playback_probe.stop()
+        with self._switch_stage('stop_playback_probe'):
+            self.playback_probe.stop()
         self.independent_playback.clear()
         for floating in list(self.floating_crops.values()):
             floating.close()
@@ -3757,16 +3766,18 @@ class Viewer(QDialog):
         self.render_timer.stop()
         self.match_timer.stop()
         self.compare.setChecked(False)
-        self.audio.stop()
+        with self._switch_stage('stop_audio'):
+            self.audio.stop()
         for _card, _name, canvas, state in self.comparison_panel.cards.values():
             canvas.set_frame(None)
             canvas.waiting = True
             state.setText("已停止")
-        for row in self.rows.values():
-            self._stop_row(row)
-            seed = self.sources.get(row.room_id) or {}
-            if str(seed.get("url") or "").startswith(("http://", "https://")):
-                self.sources.pop(row.room_id, None)
+        with self._switch_stage('stop_sources'):
+            for row in self.rows.values():
+                self._stop_row(row)
+                seed = self.sources.get(row.room_id) or {}
+                if str(seed.get("url") or "").startswith(("http://", "https://")):
+                    self.sources.pop(row.room_id, None)
         if not self.host_audio_timer.isActive():
             self._release_host_audio()
         self.panel.set_status("已停止")
@@ -3785,7 +3796,8 @@ class Viewer(QDialog):
             self.save_timer.stop()
             self.save()
         super().closeEvent(event)
-        self._restore_host_widgets()
+        with self._switch_stage('restore_host_widgets'):
+            self._restore_host_widgets()
 
     def reject(self):
         if self.embedded:

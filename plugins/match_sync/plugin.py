@@ -1,22 +1,27 @@
 """Package entry point loaded by DD Monitor CE's single-file plugin loader."""
 import os
+from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QEvent, QSize, Qt, QTimer, QVariantAnimation
+from PySide6.QtCore import QEasingCurve, QEvent, QSize, Qt, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QSizePolicy, QStyle, QStyleOptionToolButton, QStylePainter, QToolButton
 
 from ddm import plugins as api
 from ddm import motion
+from ddm import config as config_module
 
 # Keep sibling imports local to this plugin, including in the frozen EXE.
 __path__ = [os.path.dirname(__file__)]
 __package__ = __name__
 
 from .viewer import Viewer
+from .diagnostics import SwitchProbe
 
 
 class EntryButton(QToolButton):
     """Use the original horizontal entry and a separate portrait icon."""
+    feedback_painted = Signal()
+
     def __init__(self, sidebar, action):
         super().__init__(sidebar)
         self.sidebar = sidebar
@@ -25,6 +30,7 @@ class EntryButton(QToolButton):
         self._closing = False
         self._compact_width = 0
         self._paint_width = None
+        self._feedback_pending = False
         self._stretch = QVariantAnimation(self)
         self._stretch.setDuration(160)
         self._stretch.setEasingCurve(getattr(motion, 'THEME_WAVE_EASING', QEasingCurve.OutCubic))
@@ -88,13 +94,18 @@ class EntryButton(QToolButton):
 
     def paintEvent(self, event):
         if self._paint_width is None:
-            return super().paintEvent(event)
-        painter = QStylePainter(self)
-        option = QStyleOptionToolButton()
-        self.initStyleOption(option)
-        option.rect.setWidth(self._paint_width)
-        painter.setClipRect(option.rect)
-        painter.drawComplexControl(QStyle.CC_ToolButton, option)
+            super().paintEvent(event)
+        else:
+            painter = QStylePainter(self)
+            option = QStyleOptionToolButton()
+            self.initStyleOption(option)
+            option.rect.setWidth(self._paint_width)
+            painter.setClipRect(option.rect)
+            painter.drawComplexControl(QStyle.CC_ToolButton, option)
+            painter.end()
+        if self._feedback_pending:
+            self._feedback_pending = False
+            self.feedback_painted.emit()
 
     def _set_side(self, side):
         self._stretch.stop()
@@ -173,16 +184,27 @@ class MatchSyncPlugin(api.Plugin):
         self.viewer = None
         self.entry = None
         self.button = None
+        self._pending_enabled = None
+        self._applying = False
+        self.switch_probe = None
+        self._switch_timer = None
 
     def on_load(self, context):
         self.context = context
         host = context.window
+        self.switch_probe = SwitchProbe(host, Path(config_module.REPO) / 'logs' / 'match-switch.jsonl')
+        self._switch_timer = QTimer(host)
+        self._switch_timer.setSingleShot(True)
+        self._switch_timer.timeout.connect(self._apply_enabled)
         sidebar = getattr(host, "sidebar", None)
         if hasattr(host, "_content") and hasattr(sidebar, "tool_row"):
             self.button = QAction("比赛二路", host)
             self.button.setCheckable(True)
             self.button.toggled.connect(self.set_enabled)
             self.entry = EntryButton(sidebar, self.button)
+            self.entry.feedback_painted.connect(self._entry_painted)
+            self.entry._stretch.valueChanged.connect(self.switch_probe.animation_tick)
+            self.entry._stretch.finished.connect(self.switch_probe.animation_finished)
         context.log("比赛二路同步已就绪；点击关注栏「比赛二路」入口开启")
 
     def on_event(self, event, payload):
@@ -207,10 +229,44 @@ class MatchSyncPlugin(api.Plugin):
         return []
 
     def set_enabled(self, enabled):
+        if self._pending_enabled is not None:
+            self.switch_probe.record('superseded')
+        self._pending_enabled = bool(enabled)
+        self.switch_probe.begin(enabled)
+        if self.entry is not None:
+            self.entry._feedback_pending = True
+            self.entry.set_mode(enabled)
+            self.entry.update()
+        # Usually the first button paint releases this at 0ms. Hidden entries
+        # still switch after one frame; never wait for the entire animation.
+        self._switch_timer.start(16)
+
+    def _entry_painted(self):
+        self.switch_probe.button_paint()
+        if self._pending_enabled is not None:
+            self._switch_timer.start(0)
+
+    def _apply_enabled(self):
+        if self._applying or self._pending_enabled is None:
+            return
+        enabled, self._pending_enabled = self._pending_enabled, None
+        self._applying = True
+        try:
+            with self.switch_probe.span('apply_mode'):
+                self._change_mode(enabled)
+            self.switch_probe.finish(enabled)
+        finally:
+            self._applying = False
+            if self._pending_enabled is not None:
+                self._switch_timer.start(0)
+
+    def _change_mode(self, enabled):
         if enabled:
             self.open_viewer({})
         elif self.viewer is not None:
-            self.viewer.close()
+            self.switch_probe.watch_target(getattr(self.context.window, 'wall', None))
+            with self.switch_probe.span('close_viewer'):
+                self.viewer.close()
 
     def _closed(self):
         if self.entry is not None:
@@ -222,22 +278,31 @@ class MatchSyncPlugin(api.Plugin):
 
     def open_viewer(self, room):
         if self.viewer is None:
-            self.viewer = Viewer(self.context, self.sources, room)
+            with self.switch_probe.span('construct_viewer'):
+                self.viewer = Viewer(self.context, self.sources, room)
+            self.viewer.switch_probe = self.switch_probe
             if self.button is not None:
-                self.viewer.embed(self.context.window._content)
+                with self.switch_probe.span('embed_viewer'):
+                    self.viewer.embed(self.context.window._content)
                 self.viewer.finished.connect(lambda _result: self._closed())
         elif room.get("room_id") and str(room["room_id"]) not in self.viewer.rows:
             self.viewer.add_room(str(room["room_id"]), {"alias": room.get("uname") or ""})
-        self.viewer.show()
-        self.viewer.raise_()
+        self.switch_probe.watch_target(self.viewer)
+        with self.switch_probe.span('show_viewer'):
+            self.viewer.show()
+            self.viewer.raise_()
         if self.entry is not None:
             self.entry.set_mode(True)
         if self.button is not None and self.viewer.rows and not self.viewer.running:
-            self.viewer.toggle_running()
+            with self.switch_probe.span('start_sources'):
+                self.viewer.toggle_running()
         if self.button is None:
             self.viewer.activateWindow()
 
     def on_unload(self):
+        self._pending_enabled = None
+        if self._switch_timer is not None:
+            self._switch_timer.stop()
         if self.viewer is not None:
             self.viewer.close()
         if self.entry is not None:
@@ -245,6 +310,13 @@ class MatchSyncPlugin(api.Plugin):
             self.entry = None
             self.button.deleteLater()
             self.button = None
+        if self.switch_probe is not None:
+            self.switch_probe.close()
+            self.switch_probe.deleteLater()
+            self.switch_probe = None
+        if self._switch_timer is not None:
+            self._switch_timer.deleteLater()
+            self._switch_timer = None
 
 
 plugin = MatchSyncPlugin()
