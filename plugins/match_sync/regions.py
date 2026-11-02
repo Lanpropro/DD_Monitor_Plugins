@@ -84,7 +84,7 @@ def region_samples(frames, crop):
             for stamp, image, _large in frames]
 
 
-def match_regions(reference, other, regions=(), expected=None):
+def match_regions(reference, other, regions=(), expected=None, *, hint=None):
     missing = Match(None, 0, '未找到可靠的共同游戏区域；不同视角需有共同动态内容')
     if len(reference) < 40 or len(other) < 40:
         return missing
@@ -100,8 +100,8 @@ def match_regions(reference, other, regions=(), expected=None):
         candidate = (refine_match(Match(expected, .9, '复核共同区域'), a, b, focused=True)
                      if expected is not None else missing)
         if candidate.lag is None:
-            candidate = match_scenes(a[::5], b[::5], focused=True)
-            candidate = refine_match(candidate, a, b, focused=True)
+            candidate = match_scenes(a[::5], b[::5], focused=True, hint=hint)
+            candidate = refine_match(candidate, a, b, focused=True, hint=hint)
         if candidate.lag is not None and candidate.confidence >= .65:
             return replace(candidate, reason='已自动识别共同游戏区域并验证连续画面', regions=crops)
     return missing

@@ -55,7 +55,15 @@ def feature_distances(a, b):
     return distances
 
 
-def match_scenes(reference: list[Sample], other: list[Sample], *, focused=False) -> Match:
+def hint_penalty(lag, hint):
+    """Rank plausible offsets using judgement without changing visual confidence."""
+    if hint is None:
+        return 0.
+    baseline, direction, weight = hint
+    return .03 * weight if direction * (lag - baseline) <= .05 else 0.
+
+
+def match_scenes(reference: list[Sample], other: list[Sample], *, focused=False, hint=None) -> Match:
     """Positive lag means the other feed receives the same scene later."""
     if len(reference) < 8 or len(other) < 8:
         return Match(None, 0, "正在收集比赛画面")
@@ -146,7 +154,10 @@ def match_scenes(reference: list[Sample], other: list[Sample], *, focused=False)
         distance = sum(p[2] for p in pairs) / len(pairs)
         # Reward precise matches much more than a large number of vaguely
         # similar scoreboards; static graphics otherwise dominate the vote.
-        ranked.append((support * math.exp(-24 * distance), key, support, distance, pairs))
+        score = support * math.exp(-24 * distance)
+        if hint is not None:
+            score *= math.exp(-24 * hint_penalty(median(p[3] for p in pairs), hint))
+        ranked.append((score, key, support, distance, pairs))
     if not ranked:
         if focused:
             return Match(None, 0, "正在收集框选区域的连续变化；两路请只框选相同计时数字并保留少量背景")
@@ -175,19 +186,20 @@ def assisted_match(lag: float, reference: list[Sample], other: list[Sample], *, 
                         reference, other, focused=focused)
 
 
-def refine_match(match: Match, reference: list[Sample], other: list[Sample], *, focused=False) -> Match:
+def refine_match(match: Match, reference: list[Sample], other: list[Sample], *, focused=False, hint=None) -> Match:
     """Refine a coarse candidate using recent ordered, normalized grayscale scenes."""
     if np is None:
         return Match(None, 0, "缺少精校正组件 NumPy，请更新 requirements.txt 中的依赖")
     if match.candidates:
-        results = [refine_match(Match(candidate, .9, "粗匹配候选"), reference, other, focused=focused)
+        results = [refine_match(Match(candidate, .9, "粗匹配候选"), reference, other, focused=focused, hint=hint)
                    for candidate in match.candidates]
         results = sorted((result for result in results if result.lag is not None),
-                         key=lambda result: result.confidence, reverse=True)
+                         key=lambda result: result.confidence - hint_penalty(result.lag, hint), reverse=True)
         if not results:
             return Match(None, 0, "粗匹配候选未通过精校正，保持已确认偏移")
         rival = next((result for result in results[1:] if abs(result.lag - results[0].lag) >= .15), None)
-        if rival and rival.confidence >= results[0].confidence - .025:
+        if rival and (rival.confidence - hint_penalty(rival.lag, hint)
+                      >= results[0].confidence - hint_penalty(results[0].lag, hint) - .025):
             return Match(None, 0, "连续画面存在多个相近时间差，保持已确认偏移")
         return results[0]
     if match.lag is None:
@@ -244,12 +256,13 @@ def refine_match(match: Match, reference: list[Sample], other: list[Sample], *, 
                         (errors * second).sum(axis=1) / np.maximum(1, second.sum(axis=1)))
     admitted = (counts >= max(12 if focused else 30, len(a) * .8)) & (halves <= .20)
     scores = np.where(admitted, scores, np.inf)
-    best = int(np.argmin(scores))
+    ranked_scores = scores + np.array([hint_penalty(value, hint) for value in candidates]) if hint else scores
+    best = int(np.argmin(ranked_scores))
     score = float(scores[best])
     if not np.isfinite(score):
         return Match(None, 0, "精校正尚未确认，保持已确认偏移")
-    rivals = scores[np.abs(candidates - candidates[best]) >= .2]
-    if score > .15 or (len(rivals) and float(rivals.min()) <= score + .025):
+    rivals = ranked_scores[np.abs(candidates - candidates[best]) >= .2]
+    if score > .15 or (len(rivals) and float(rivals.min()) <= ranked_scores[best] + .025):
         return Match(None, 0, "精校正时间差不明确，保持已确认偏移")
     # The sample timestamps refine the grid centre without inventing sub-frame time.
     good = valid[best] & (errors[best] <= .20)

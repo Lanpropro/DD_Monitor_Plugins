@@ -187,6 +187,8 @@ class Decoder:
             gaps = sorted((b - a for a, b in zip(stamps, stamps[1:])), reverse=True)
             recent = [stamp for stamp in stamps if stamps and stamp >= stamps[-1] - 3]
             return {"size": self.video_size, "fps": self.fps,
+                    "crop_quality_policy": self.seed.get('crop_quality_policy', 'source'),
+                    "requested_quality": self.seed.get('quality'),
                     "codec": self.history.codec[0] if self.history.codec else "",
                     "received_packets": self.history.sequence,
                     "received_frames": self.history.received_frames,
@@ -200,13 +202,18 @@ class Decoder:
     def _resolve(self, attempt: int) -> tuple[str, dict]:
         if self.cancelled.is_set():
             raise bili.Cancelled()
-        if self.seed.get("highest_quality"):
+        if self.seed.get("highest_quality") or self.seed.get("balanced_quality"):
             # The host lists tiers from highest to lowest; IDs are platform-specific.
             options = (self.platform.room_quality_options(self.room_id) if self.platform is not None
                        else bili.room_quality_options(self.room_id))
             if self.cancelled.is_set():
                 raise bili.Cancelled()
-            self.seed["quality"] = next((int(item["qn"]) for item in options if int(item["qn"]) != AUTO_QUALITY), 10000)
+            tiers = [item for item in options if int(item['qn']) != AUTO_QUALITY]
+            selected = tiers[0] if tiers else {'qn': self.seed.get('quality', 10000)}
+            if tiers and self.seed.get('balanced_quality'):
+                # Prefer 720p; tier IDs are not comparable across platforms.
+                selected = next((item for item in tiers if '720' in str(item.get('desc', ''))), tiers[len(tiers) // 2])
+            self.seed["quality"] = int(selected['qn'])
             self.seed.pop("url", None)
             self.events.information.emit({"requested_quality": self.seed["quality"], "quality_options": options})
         # Douyu signed addresses may allow only one consumer; do not reuse the wall's URL.

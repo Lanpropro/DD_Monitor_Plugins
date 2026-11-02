@@ -4,6 +4,7 @@ from importlib import import_module
 import os
 from pathlib import Path
 import socket
+import subprocess
 import sys
 import tempfile
 import time
@@ -69,7 +70,7 @@ def check_platform_controls(app, host, module, source):
                 assert send.width() == 32 and hasattr(send, '_match_sync_face'), kind
                 gift = controls.applicable()[0].control.widget.gifts
                 assert 'QPushButton#TileCtrl:hover' in gift.styleSheet(), kind
-                assert 'border-radius: 12px' in gift.styleSheet(), kind
+                assert 'border-radius: 6px' in gift.styleSheet(), kind
                 assert 'background: transparent' in send.styleSheet(), kind
                 shared = controls.applicable()[0].control.widget.findChild(QWidget, 'SendInteractions')
                 assert shared is not None and len(shared.findChildren(QPushButton)) == 2
@@ -94,16 +95,20 @@ def check_platform_controls(app, host, module, source):
             anchor = console.batch_panel.interactions.findChildren(QPushButton)[1]
             native = console.rows['douyu:12345'].tile._plugin_controls.applicable()[0].control.widget
             seen = []
+            console.batch_targets = {'douyu:12345'}
+            console._update_selection()
             with patch.object(native, 'open_gifts', side_effect=lambda: seen.append(native.gifts is anchor)):
-                menu = console.interaction_menu('gift', anchor)
-                assert [action.text() for action in menu.actions()] == ['斗鱼', '虎牙', '抖音']
-                menu.actions()[0].menu().actions()[0].trigger()
+                assert anchor.isEnabled()
+                anchor.click()
                 assert seen == [True] and native.gifts is not anchor
-                assert not menu.actions()[1].menu().actions()[0].isEnabled()
-                menu.deleteLater()
-            menu = console.interaction_menu('emote', anchor)
-            assert all(not action.menu().actions()[0].isEnabled() for action in menu.actions())
-            menu.deleteLater()
+            for key in ('huya:12345', 'douyin:12345'):
+                console.batch_targets = {key}
+                console._update_selection()
+                assert not anchor.isEnabled() and '暂不支持' in anchor.toolTip()
+            assert console.interaction_target('emote')[0] is None
+            console.batch_targets = set(console.rows)
+            console._update_selection()
+            assert not anchor.isEnabled() and '请选择一位主播' in anchor.toolTip()
             return {'domestic_controls': ['douyu', 'huya', 'douyin'], 'credentials_read': False}
         finally:
             manager.unload()
@@ -219,8 +224,9 @@ def check(app, host, module, output=None):
             QTest.mouseClick(viewer.match_settings_button, Qt.LeftButton)
             assert viewer.match_settings is not None and viewer.match_settings.isVisible()
             assert viewer.buffer_reserve.parentWidget() is viewer.match_settings
-            assert viewer.automatic.parentWidget() is viewer.settings_panel
-            assert viewer.compare.parentWidget() is viewer.settings_panel
+            assert viewer.automatic.parentWidget() is viewer.console_toolbar
+            assert viewer.compare.parentWidget() is viewer.console_toolbar
+            assert viewer.settings_panel.isAncestorOf(viewer.console_toolbar)
             old_reserve = viewer.buffer_reserve.currentIndex()
             viewer.buffer_reserve.setCurrentIndex(viewer.buffer_reserve.findData(8))
             assert viewer.reserve_seconds == 8
@@ -368,7 +374,10 @@ def check(app, host, module, output=None):
                     QTest.qWait(40)
                     left = viewer.settings_panel.mapTo(viewer, QPoint()).y()
                     right = console.mapTo(viewer, QPoint()).y()
-                    assert abs(left - right) <= 1, (left, right)
+                    assert abs(left - right) <= 1, (
+                        width, height, sizes, left, right, viewer.settings_panel.height(), console.height(),
+                        viewer.chat_pane.height(), viewer.panel.minimumHeight(),
+                        viewer.panel.minimumSizeHint().height())
                     regular = console.width() >= 520
                     assert console.body_layout.direction() == QBoxLayout.LeftToRight
                     assert first.isVisible() == (console.selected_room == '1')
@@ -378,6 +387,9 @@ def check(app, host, module, output=None):
                 viewer.picture_split.setSizes([1500 - right_width, right_width])
                 QTest.qWait(60)
                 assert (console.width() >= 520) == (right_width == 640), console.width()
+                assert console.divider.isVisible() and console.divider.width() == 1
+                assert console.rooms.geometry().right() < console.divider.x() < console.work.x()
+                assert console.divider.height() >= console.rooms.height() - 1
                 if right_width == 300:
                     assert console.rooms.property('avatarOnly')
                     assert console.rooms.flow() == QListView.TopToBottom
@@ -693,7 +705,16 @@ def main():
     parser.add_argument('--host', type=Path, required=True)
     parser.add_argument('--output', type=Path)
     parser.add_argument('--platform-source', type=Path)
+    parser.add_argument('--platform-only', action='store_true')
     args = parser.parse_args()
+    if args.platform_only and not args.platform_source:
+        parser.error('--platform-only requires --platform-source')
+    if args.platform_source and not args.platform_only:
+        # Separate QApplication lifetimes: native composer cleanup must not leak between checks.
+        command = [sys.executable, str(Path(__file__).resolve()), '--host', str(args.host)]
+        subprocess.run(command + (['--output', str(args.output)] if args.output else []), check=True)
+        subprocess.run(command + ['--platform-source', str(args.platform_source), '--platform-only'], check=True)
+        return
     root = Path(__file__).resolve().parents[1]
     sys.path[:0] = [str(args.host.resolve()), str(root)]
     os.environ['DDM_NO_SAVE'] = '1'
@@ -704,9 +725,12 @@ def main():
     app = QApplication([])
     module.theme.apply('dark')
     with patch.object(socket.socket, 'connect', side_effect=AssertionError('Network forbidden')):
-        print(check(app, QWidget(), module, args.output))
-        if args.platform_source:
+        if args.platform_only:
             print(check_platform_controls(app, QWidget(), module, args.platform_source))
+        else:
+            print(check(app, QWidget(), module, args.output))
+    app.sendPostedEvents(None, 52)
+    app.shutdown()
     if dll:
         dll.close()
 
