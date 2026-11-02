@@ -1,7 +1,7 @@
 """Original encoded video history and bounded, asynchronous native pictures."""
 from __future__ import annotations
 
-from collections import deque
+from collections import deque, OrderedDict
 from bisect import bisect_right
 from itertools import islice
 from dataclasses import dataclass, replace
@@ -19,6 +19,7 @@ except ImportError:
 
 from .engine import History, np
 from .replay_cache import DiskAudioRing, PacketStore
+from .diagnostics import FrameCadence
 
 
 class StreamInput:
@@ -35,11 +36,21 @@ _conversion = threading.local()
 
 
 def reformat_frame(frame, **options):
-    # VideoFrame.reformat caches on that frame only. Live frames are short-lived;
-    # keep one scaler per worker instead, without sharing mutable state across sources.
-    if not hasattr(_conversion, "reformatter"):
-        _conversion.reformatter = VideoReformatter()
-    return _conversion.reformatter.reformat(frame, **options)
+    # Analysis alternates a few small gray sizes. Reconfiguring one scaler
+    # repeatedly rebuilds swscale's automatic worker pools.
+    if options.get('format') == 'gray':
+        options.setdefault('threads', 1)
+    if not hasattr(_conversion, 'reformatters'):
+        _conversion.reformatters = OrderedDict()
+    cache = _conversion.reformatters
+    key = (frame.width, frame.height, frame.format.name, tuple(sorted(options.items())))
+    converter = cache.pop(key, None)
+    if converter is None:
+        converter = VideoReformatter()
+    cache[key] = converter
+    while len(cache) > 4:
+        cache.popitem(last=False)
+    return converter.reformat(frame, **options)
 
 
 def image_from_frame(frame):
@@ -247,6 +258,7 @@ class PictureReader:
         self.requested = 0.0
         self.decode_ms = 0.0
         self.decoded = 0
+        self.decoded_cadence = FrameCadence()
         self.byte_limit = 64 * 1024 * 1024
         self.max_frames = 8
         self.fps = 60.0
@@ -254,6 +266,9 @@ class PictureReader:
         self.active = True
         self.snapshot_until = 0.0
         self.reset_requested = False
+        self.codec_creations = 0
+        self.reset_reason = 'initial'
+        self.decode_phase = 'idle'
 
     def configure(self, byte_limit, fps, lead=.35, active=True):
         with self.lock:
@@ -261,6 +276,8 @@ class PictureReader:
             self.active = active or time.monotonic() < self.snapshot_until
             if not self.active:
                 self.reset_requested |= previous_active
+                if previous_active:
+                    self.reset_reason = 'inactive'
                 self.target = None
                 self.images.clear()
             if (self.byte_limit, self.fps, self.lead, self.max_frames) == (byte_limit, max(1, fps), lead, 24):
@@ -281,11 +298,17 @@ class PictureReader:
             if self.history is not history:
                 self.images.clear()
                 self.history = history
-            self.requested = time.monotonic()
+                self.reset_reason = 'source_changed'
+            now = time.monotonic()
+            elapsed = max(0, now - self.requested)
+            self.requested = now
             cached_backward = frame[0] in self.images and self.target is not None and frame[0] < self.target[0]
             if not cached_backward and (frame != self.target or frame[0] not in self.images):
-                if self.target is not None and (frame[1] < self.target[1] - .05 or frame[1] > self.target[1] + .5):
+                # A delayed GUI poll advances with elapsed playback time; it is
+                # not a seek and must not restart decoding from a keyframe.
+                if self.target is not None and (frame[1] < self.target[1] - .05 or frame[1] > self.target[1] + elapsed + .5):
                     self.reset_requested = True
+                    self.reset_reason = 'seek_backward' if frame[1] < self.target[1] else 'seek_forward'
                 self.target = frame
                 self.wake.set()
             if self.thread is None and not self.cancelled.is_set():
@@ -307,9 +330,10 @@ class PictureReader:
         capacity = 8
         try:
             while not self.cancelled.is_set():
+                self.decode_phase = 'idle'
                 if not self.wake.wait(1):
                     with self.lock:
-                        if time.monotonic() - self.requested >= 1:
+                        if self.target is None or not self.active:
                             self.images.clear()
                             codec = owner = sequence = decoded_until = None
                     continue
@@ -336,8 +360,11 @@ class PictureReader:
                     continue
                 config, packets, reset = result
                 if codec is None or reset:
+                    if codec is not None and reset:
+                        self.reset_reason = 'history_evicted'
                     decoded_until = None
                     codec = av.CodecContext.create(config[0], "r")
+                    self.codec_creations += 1
                     codec.extradata = config[1]
                     # UHD streams often have one slice per frame: SLICE then
                     # serializes decoding even when a thread count is configured.
@@ -354,7 +381,10 @@ class PictureReader:
                                 or self.reset_requested):
                             break
                     started = time.perf_counter()
-                    frames = codec.decode(packet.decode_packet())
+                    self.decode_phase = 'packet_read'
+                    encoded = packet.decode_packet()
+                    self.decode_phase = 'decode'
+                    frames = codec.decode(encoded)
                     sequence = packet.sequence + 1
                     complete = False
                     for frame in frames:
@@ -364,6 +394,7 @@ class PictureReader:
                             requested_target = self.target[1] if self.target is not None else target
                         if pts + .00001 < max(target, requested_target - .05):
                             continue
+                        self.decode_phase = 'convert'
                         image = image_from_frame(frame)
                         key = history.origin + pts
                         with self.lock:
@@ -375,11 +406,13 @@ class PictureReader:
                             while len(self.images) > capacity:
                                 self.images.pop(next(iter(self.images)))
                             self.decoded += 1
+                            self.decoded_cadence.record(time.perf_counter(), key)
                         complete = pts >= horizon
                     self.decode_ms = (time.perf_counter() - started) * 1000
                     if complete:
                         break
         finally:
+            self.decode_phase = 'stopped'
             with self.lock:
                 self.images.clear()
 

@@ -7,6 +7,8 @@ import threading
 import time
 from collections import deque
 from dataclasses import replace
+from math import ceil
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from PySide6.QtCore import QEasingCurve, QEvent, QMetaObject, QMimeData, QObject, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, Qt, QThread, QTimer, Signal, Slot
@@ -29,9 +31,19 @@ from .panels import ConsoleIconButton, MatchSettingsDialog, SettingsPanel, style
 from .replay import ReplayBar, ReplayTimeline
 from .floating import FloatingCrop
 from .regions import match_regions
+from .diagnostics import PlaybackProbe
 
 COLORS = ("#38bdf8", "#fb7185", "#a78bfa", "#4ade80", "#fbbf24", "#fb923c")
 ROW_MIME = "application/x-ddm-match-sync-row"
+
+
+def picture_poll_interval(target, frame_stamp, fps, rate=1., elapsed=0.):
+    fps = max(1., fps)
+    normal = max(4, int(500 / fps))
+    if frame_stamp is None:
+        return normal
+    remaining = (frame_stamp + 1 / fps - target) / rate - elapsed
+    return max(1, min(normal, ceil(remaining * 1000)))
 
 
 def cache_gap(history, target):
@@ -80,6 +92,7 @@ class Canvas(QFrame):
         self.waiting = False
         self.zoom_crop = False
         self.frame_key = None
+        self.requested_frame_key = None
         self.frame = None
         self.missing_since = None
         self.preview_only = False
@@ -87,6 +100,7 @@ class Canvas(QFrame):
         self.transparent_background = False
         self.presented = 0
         self.repeated = 0
+        self.paint_probe = None
         self.selecting = selecting
         self.crop = QRectF(0, 0, 1, 1)
         self.anchor = None
@@ -107,12 +121,15 @@ class Canvas(QFrame):
             self.presented += 1
         self.frame_key = key
         self.frame = item
+        if self.paint_probe is not None and self.paint_probe.thread is not None and item is not None:
+            self.paint_probe.submitted.record(time.perf_counter(), key)
         self.image = (item[1] if isinstance(item[1], QImage) else QImage.fromData(item[1])) if item is not None else QImage()
         self._sync_opaque_paint()
         self.update()
 
     def show_at(self, decoder, timestamp):
         frame = decoder.history.frame_at(timestamp)
+        self.requested_frame_key = frame[0] if frame is not None else None
         if frame is not None:
             ready = decoder.picture_at(timestamp) if hasattr(decoder, "picture_at") else frame
             if ready is not None:
@@ -153,6 +170,17 @@ class Canvas(QFrame):
         super().resizeEvent(event)
 
     def paintEvent(self, event):
+        probe = self.paint_probe
+        if probe is None or probe.thread is None:
+            return self._paint_frame(event)
+        started = time.perf_counter()
+        try:
+            self._paint_frame(event)
+        finally:
+            probe.paints.append((time.perf_counter(), (time.perf_counter() - started) * 1000))
+            probe.painted.record(time.perf_counter(), self.frame_key)
+
+    def _paint_frame(self, event):
         painter = QPainter(self)
         if not self.transparent_background:
             painter.fillRect(self.rect(), theme.qcolor(theme.CONTENT) if theme.is_light() else QColor("#101216"))
@@ -318,6 +346,7 @@ class AudioFeed(QObject):
             pump.media_written = 0.0
             pump.clock_segments.clear()
             pump.clock_snapshot = clock
+            pump.clock_observation = pump.clock_floor = None
             pump.replay_cursors.clear()
 
     @Slot()
@@ -333,6 +362,7 @@ class AudioFeed(QObject):
         with self.pump.lock:
             sink, self.pump.sink = self.pump.sink, None
             self.pump.device = None
+            self.pump.clock_observation = self.pump.clock_floor = None
         if sink is not None:
             sink.stop()
             sink.deleteLater()
@@ -358,6 +388,7 @@ class AudioPump(QObject):
         self.snapshot = (1.0, ())
         self.played = 0
         self.clock_snapshot = None
+        self.clock_observation = self.clock_floor = None
         self.flush_clock = None
         self.replay_offset = None
         self.replay_cursors = {}
@@ -412,6 +443,7 @@ class AudioPump(QObject):
             sink.deleteLater()
         self.device = None
         self.clock_snapshot = None
+        self.clock_observation = self.clock_floor = None
         self.snapshot = (1.0, ())
 
     def flush(self, target_clock=None):
@@ -422,6 +454,20 @@ class AudioPump(QObject):
             QMetaObject.invokeMethod(self.feed, 'flush', Qt.BlockingQueuedConnection)
 
     def clock(self):
+        observation = self.clock_observation
+        if observation is not None:
+            observed, played, queued, anchor, segments = observation
+            played = min(queued, played + max(0, time.perf_counter() - observed) * RATE)
+            value = anchor + played / RATE
+            for first, end, media, rate in segments:
+                value = anchor + media + min(max(0, played - first), end - first) / RATE * rate
+                if played <= end:
+                    break
+            # Device observations arrive in blocks; a late report must not
+            # briefly move the picture backwards. Flush/start reset this floor.
+            floor = self.clock_floor
+            self.clock_floor = value if floor is None else max(floor, value)
+            return self.clock_floor + self.correction
         # Audio mixing/device I/O can outlast a GUI frame. Reuse the last
         # observed device position rather than queue the GUI behind that work.
         if self.lock.acquire(blocking=False):
@@ -526,6 +572,7 @@ class AudioPump(QObject):
                         target + source_frames / RATE * written / frames)
             self.written += written
         self.clock_snapshot = self._clock()
+        self.clock_observation = (now, self.played, self.written, self.anchor, tuple(self.clock_segments))
 
     def _device_changed(self):
         current = bytes(QMediaDevices.defaultAudioOutput().id())
@@ -1303,6 +1350,16 @@ class Viewer(QDialog):
         heading.addWidget(self.match_settings_button)
         heading.addWidget(self.minimize_settings)
         self.picture = Tile({})
+        # Keep pixel hover inside the tile instead of dispatching it through
+        # every surrounding layout and application event filter again.
+        self.picture.setAttribute(Qt.WA_NoMousePropagation, True)
+        # The Qt canvas has no libmpv child. Keep mask updates, but stop the
+        # host surface's periodic search for a native playback window.
+        self._native_clip_timer = getattr(self.picture.video, '_clip_timer', None)
+        self.native_clip_retry_blocks = 0
+        if self._native_clip_timer is not None:
+            self._native_clip_timer.stop()
+            self._native_clip_timer.installEventFilter(self)
         self.replay_bar = ReplayBar(self)
         self.restore_settings.setParent(self.picture.bottom)
         self.restore_settings.setObjectName("TileCtrl")
@@ -1439,6 +1496,9 @@ class Viewer(QDialog):
         self.render_timer.setTimerType(Qt.PreciseTimer)
         self.render_timer.setInterval(33)
         self.render_timer.timeout.connect(self.render)
+        self.playback_probe = PlaybackProbe(self, Path(config_module.REPO) / 'logs' / 'match-playback.jsonl')
+        self.playback_probe.audio = self.audio
+        self.canvas.paint_probe = self.playback_probe
         self.match_timer = QTimer(self)
         self.match_timer.setInterval(500)
         self.match_timer.timeout.connect(self.analyse)
@@ -1574,6 +1634,14 @@ class Viewer(QDialog):
 
     def eventFilter(self, watched, event):
         kind = event.type()
+        if kind == QEvent.Timer and watched is getattr(self, '_native_clip_timer', None):
+            self.native_clip_retry_blocks += 1
+            watched.stop()
+            return True
+        if kind in (QEvent.MouseMove, QEvent.HoverMove, QEvent.Enter, QEvent.Leave):
+            probe = getattr(self, 'playback_probe', None)
+            if probe is not None and probe.thread is not None:
+                probe.mouse(watched)
         if kind in (QEvent.ShortcutOverride, QEvent.KeyPress):
             action = self._shortcut_action(watched, event)
             if action is not None:
@@ -2093,7 +2161,10 @@ class Viewer(QDialog):
         # Poll twice per source frame: Qt paint/chat work can delay a timer by
         # several milliseconds. The audio clock still owns playback speed.
         interval = max(4, int(500 / getattr(row.decoder, "fps", 30))) if row is not None else 33
-        if self.render_timer.interval() != interval:
+        self._picture_poll_base = interval
+        state = (row.room_id, id(row.decoder), getattr(row.decoder, 'fps', 30)) if row is not None else None
+        if state != getattr(self, '_picture_poll_source', None):
+            self._picture_poll_source = state
             self.render_timer.setInterval(interval)
         tile = self.picture
         if row is None:
@@ -2536,6 +2607,7 @@ class Viewer(QDialog):
         self.sync_picture()
         self._sync_sidebar_marks()
         self.audio.start()
+        self.playback_probe.start()
         self.render_timer.start()
         self.match_timer.start()
 
@@ -2999,6 +3071,23 @@ class Viewer(QDialog):
     def render(self):
         if not self.running:
             return
+        self._picture_poll = None
+        probe = self.playback_probe if self.playback_probe.thread is not None else None
+        if probe is not None:
+            probe.begin()
+        try:
+            self._render(probe)
+        finally:
+            if probe is not None:
+                probe.end()
+            interval = getattr(self, '_picture_poll_base', 33)
+            if self._picture_poll is not None:
+                target, frame_stamp, fps, rate, requested = self._picture_poll
+                interval = picture_poll_interval(target, frame_stamp, fps, rate, time.perf_counter() - requested)
+            if self.running and self.render_timer.interval() != interval:
+                self.render_timer.setInterval(interval)
+
+    def _render(self, probe):
         if not self.embedded:
             self._suppress_host_audio()
         dragging_crop = any(crop.drag is not None for crop in self.floating_crops.values())
@@ -3009,6 +3098,8 @@ class Viewer(QDialog):
         if not dragging_crop:
             self._sync_sidebar_marks()
         self.sync_picture(refresh_metadata=refresh_status_ui)
+        if probe is not None:
+            probe.mark('clock')
         clock = self.live_clock()
         wanted = self.target_shifts()
         shifts = self._smooth_shifts(wanted)
@@ -3037,13 +3128,37 @@ class Viewer(QDialog):
             self.return_live()
             shown_clock, shown_shifts = clock, shifts
         self.replay_bar.refresh()
+        if probe is not None:
+            probe.mark('floating')
         self.render_floating_crops(shown_clock, shown_shifts)
+        if probe is not None:
+            probe.mark('picture')
         row = self.rows.get(self.alignment.reference)
         if row is not None and row.decoder is not None and not row.paused and row.room_id in shown_shifts:
-            frame = self.canvas.show_at(row.decoder, shown_clock + shown_shifts[row.room_id])
+            if probe is not None and refresh_status_ui:
+                window = self.window()
+                handle = window.windowHandle()
+                screen = window.screen()
+                probe.surface = dict(visible=self.canvas.isVisible(), window_visible=window.isVisible(),
+                                     minimized=window.isMinimized(), exposed=handle.isExposed() if handle else False,
+                                     active=window.isActiveWindow(), canvas_size=(self.canvas.width(), self.canvas.height()),
+                                     source_size=getattr(row.decoder, 'video_size', (0, 0)),
+                                     screen_hz=screen.refreshRate() if screen else 0,
+                                     playback_rate=self.playback_rate, replay=self.replay.active,
+                                     audio_clock_interpolated=self.audio.clock_observation is not None,
+                                     native_clip_retry_blocks=self.native_clip_retry_blocks,
+                                     render_interval_ms=self.render_timer.interval())
+            target = shown_clock + shown_shifts[row.room_id]
+            requested = time.perf_counter()
+            frame = self.canvas.show_at(row.decoder, target)
+            self._picture_poll = (target, self.canvas.requested_frame_key if frame is not None else None,
+                                  getattr(row.decoder, 'fps', 30),
+                                  1. if self.replay.active else self.playback_rate, requested)
             row.actual_position = self.canvas.frame_key
             waiting = self.canvas.playback_waiting(row.decoder, shown_clock + shown_shifts[row.room_id], frame,
                                                    self.sync_waiting and not self.replay.active)
+            if probe is not None:
+                probe.observe(row.decoder, shown_clock + shown_shifts[row.room_id], self.canvas.frame_key, waiting)
             self._show_buffering(waiting)
             if self.sync_waiting:
                 self.notice.setText("主画面等待缓存恢复；异常二路已静音，已确认偏移保持不变")
@@ -3064,11 +3179,17 @@ class Viewer(QDialog):
                 mode = ("自动对齐已开启" if self.alignment.automatic else
                         "自动对齐已关闭；手动偏移")
                 self.notice.setText(f"主画面：{row.label()} · 本地播放延后约 {delay:.1f} 秒 · {mode}")
+        elif probe is not None:
+            probe.frame = None
+        if probe is not None:
+            probe.mark('comparison')
         if self.compare.isChecked():
             self.comparison_panel.render(shown_clock, shown_shifts)
         if self.replay.active:
             self.notice.setText('整组回看中；后台继续接收直播并自动对齐')
         self._update_sync_health(clock, shifts)
+        if probe is not None:
+            probe.mark('chat')
         eligible = []
         chat_budget = min(2 if dragging_crop else 80, max(1, 200 // max(1, len(self.rows))))
         for room_id, row in self.rows.items():
@@ -3615,6 +3736,7 @@ class Viewer(QDialog):
         row.refresh_status()
 
     def stop(self):
+        self.playback_probe.stop()
         self.independent_playback.clear()
         for floating in list(self.floating_crops.values()):
             floating.close()

@@ -16,6 +16,7 @@ from ddm.auto_quality import AUTO_QUALITY
 from .engine import FPS, Sample, SIGNATURE_BITS, np
 from .video import av, VideoHistory, PictureReader, StreamInput, reformat_frame
 from .replay_cache import CACHE_BYTES, CACHE_SECONDS
+from .diagnostics import FrameCadence
 
 FRAME_TIMEOUT = 8.0
 
@@ -115,6 +116,7 @@ class Decoder:
         self.pictures = PictureReader()
         self.video_size = (0, 0)
         self.last_frame_received = 0.0
+        self.received_cadence = FrameCadence()
         self.crop = (0.0, 0.0, 1.0, 1.0)
         self.crop_generation = 0
         self.analysis_size = (640, 360)
@@ -346,6 +348,7 @@ class Decoder:
                         if abs(pts) > 1e9:
                             continue  # An invalid/missing source timestamp cannot establish time.
                         timestamp = (self.history.origin or 0) + pts
+                        self.received_cadence.record(time.perf_counter(), timestamp)
                         self.video_size = (frame.width, frame.height)
                         self.history.video_size = self.video_size
                         if pts + .0001 >= next_region:
