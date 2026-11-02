@@ -180,11 +180,6 @@ class ConsoleIconButton(QPushButton):
                 painter.drawLine(x * 8, y * 3, x * 8, y * 8)
                 painter.drawLine(x * 3, y * 8, x * 8, y * 8)
             painter.drawRect(QRectF(-3, -3, 6, 6))
-        elif self.kind == 'assist':
-            for x, direction in ((-4, -1), (4, 1)):
-                painter.drawLine(x, -6, x, 6)
-                painter.drawLine(x, direction * 6, x - 3, direction * 3)
-                painter.drawLine(x, direction * 6, x + 3, direction * 3)
         elif self.kind == 'independent':
             painter.setBrush(Qt.NoBrush)
             painter.drawRoundedRect(QRectF(-8, -7, 16, 14), 2, 2)
@@ -283,9 +278,8 @@ class ConsoleChoice(QComboBox):
     def showPopup(self):
         if self.kind == 'color':
             self.view().setFixedSize(self.count() * 32 + 8, 36)
-        super().showPopup()
-        if self.kind == 'color':
             self.view().window().setFixedSize(self.count() * 32 + 12, 40)
+        super().showPopup()
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -300,11 +294,17 @@ class ConsoleChoice(QComboBox):
         painter.setFont(font)
         painter.setPen(QPen(theme.qcolor(theme.TEXT1), 1.5, Qt.SolidLine, Qt.RoundCap))
         if self.kind == 'channel':
-            painter.drawArc(QRectF(7, 7, 14, 14), 0, 180 * 16)
-            painter.drawRoundedRect(QRectF(6, 14, 4, 7), 1, 1)
-            painter.drawRoundedRect(QRectF(18, 14, 4, 7), 1, 1)
-            painter.drawText(QRectF(26, 0, 18, 28), Qt.AlignCenter,
-                             {0: '原', 3: 'L', 4: 'R'}.get(self.currentData(), '原'))
+            font.setBold(True)
+            painter.setFont(font)
+            for label, x, channel in (('L', 4, 3), ('R', 24, 4)):
+                selected = self.currentData() in (0, channel)
+                if selected:
+                    painter.setPen(Qt.NoPen)
+                    painter.setBrush(theme.qcolor(theme.ACCENT_SOFT))
+                    painter.drawRoundedRect(QRectF(x, 3, 18, 22), 4, 4)
+                painter.setPen(theme.qcolor(theme.ACCENT if selected else theme.TEXT3))
+                painter.drawText(QRectF(x, 3, 18, 22), Qt.AlignCenter, label)
+            painter.setPen(QPen(theme.qcolor(theme.TEXT1), 1.5, Qt.SolidLine, Qt.RoundCap))
         else:
             painter.setBrush(QColor(self.currentData() or theme.ACCENT))
             painter.drawRoundedRect(QRectF(8, 8, 12, 12), 2, 2)

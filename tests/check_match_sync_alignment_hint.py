@@ -31,7 +31,7 @@ def check_ranking(engine):
 
 
 def check(app, host, module, output=None):
-    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtCore import QEvent, QObject, QPoint, Qt
     from PySide6.QtTest import QTest
     from ddm import plugins
     engine = import_module(module.__package__ + '.engine')
@@ -70,15 +70,37 @@ def check(app, host, module, output=None):
             QTest.qWait(20)
             assert viewer.settings_panel.height() == manual_height, 'Keep explicit splitter adjustments too'
             row = viewer.rows['2']
-            assert row.assist.x() > row.offset_box.geometry().right()
+            assert row.hint_fast.x() > row.offset_box.geometry().right()
+            assert row.hint_slow.x() > row.hint_fast.geometry().right()
+            assert row.independent.parentWidget() is row.audible.parentWidget()
+            assert row.independent.parentWidget() is not row.floating_button.parentWidget()
             assert isinstance(row.audible, module.VolumeButton)
             assert isinstance(row.realign, module.RefreshButton)
             assert isinstance(row.show_chat, module.DanmakuToggleButton)
+            channel_faces = []
+            for value in (3, 4, 0):
+                row.channel.setCurrentIndex(row.channel.findData(value))
+                channel_faces.append(row.channel.grab().toImage())
+                assert row.audible.audio_channel == value
+            assert all(a != b for i, a in enumerate(channel_faces) for b in channel_faces[i + 1:])
+            assert '点击' in row.channel.toolTip()
             assert not hasattr(row, 'rename') and not hasattr(row, 'more_menu')
             color = row.color_choice
-            color.view().window().setAttribute(Qt.WA_DontShowOnScreen)
-            color.showPopup()
+            popup = color.view().window()
+            popup.setAttribute(Qt.WA_DontShowOnScreen)
+            popup_events = []
+            class PopupProbe(QObject):
+                def eventFilter(self, widget, event):
+                    if event.type() in (QEvent.Show, QEvent.Paint, QEvent.Resize) and widget.isVisible():
+                        popup_events.append((event.type().name, widget.width(), widget.height()))
+                    return False
+            popup_probe = PopupProbe(popup)
+            popup.installEventFilter(popup_probe)
+            QTest.mouseClick(color, Qt.LeftButton)
             QTest.qWait(25)
+            assert popup.isVisible(), 'The first click must leave the palette open'
+            assert popup_events and all(height <= 40 for _, _, height in popup_events), popup_events
+            QTest.qWait(app.doubleClickInterval())  # Respect the native combo's opening-release guard.
             rects = [color.view().visualRect(color.model().index(i, 0)) for i in range(color.count())]
             assert len({rect.y() for rect in rects}) == 1, rects
             assert all(a.right() < b.left() for a, b in zip(rects, rects[1:])), rects
@@ -90,14 +112,13 @@ def check(app, host, module, output=None):
             QTest.mouseClick(color.view().viewport(), Qt.LeftButton, pos=rects[-1].center())
             assert row.preferences()['color'] == module.COLORS[-1]
             color.hidePopup()
-            for button in (viewer.automatic, viewer.compare, row.assist):
+            for button in (viewer.automatic, viewer.compare, row.hint_fast, row.hint_slow):
                 with patch.object(button, 'hasFocus', return_value=True):
                     focused = button.grab().toImage()
                     accent = module.theme.qcolor(module.theme.ACCENT)
                     assert all(focused.pixelColor(x, 1) != accent for x in range(focused.width()))
-            menu = viewer.alignment_hint_menu('2')
-            assert [action.text() for action in menu.actions()] == ['本路比主画面偏快', '本路比主画面偏慢']
-            menu.deleteLater()
+            assert not hasattr(viewer, 'alignment_hint_menu')
+            assert row.hint_fast.text() == '偏快' and row.hint_slow.text() == '偏慢'
             # Numeric history descriptors exercise the real job dispatch, without decoding.
             for current in viewer.rows.values():
                 current.decoder = SimpleNamespace(
@@ -122,10 +143,11 @@ def check(app, host, module, output=None):
             before = dict(viewer.alignment.lags)
             with patch.object(viewer, 'live_clock', return_value=103.), \
                     patch.object(viewer, 'shifts', return_value=positions), patch.object(viewer, 'analyse'):
-                viewer.submit_alignment_hint('2', -1)
+                row.refresh_status()
+                row.hint_fast.click()
                 assert row.alignment_hint == (0., -1, 1) and row.hint_pending
-                assert not row.assist.isEnabled()
-                viewer.submit_alignment_hint('2', -1)
+                assert not row.hint_fast.isEnabled() and not row.hint_slow.isEnabled()
+                row.hint_slow.click()
                 assert row.alignment_hint[2] == 1, 'Do not count clicks during a pending scan'
                 viewer._analysis_finished(viewer.analysis_serial - 1, viewer.generation, {'2': engine.Match(-4, 1, 'stale')})
                 assert row.hint_pending, 'An older job cannot unlock the button'
@@ -147,14 +169,14 @@ def check(app, host, module, output=None):
                     patch.object(viewer, 'shifts', return_value=positions):
                 viewer.analyse()
                 assert received and coarse.call_args.kwargs['hint'] == (0., -1, 1)
-                assert not row.hint_pending and row.assist.isEnabled()
+                assert not row.hint_pending and row.hint_fast.isEnabled() and row.hint_slow.isEnabled()
                 with patch.object(viewer, 'analyse'):
-                    viewer.submit_alignment_hint('2', -1)
+                    row.hint_fast.click()
                 assert row.alignment_hint[2] == 2
                 viewer.analyse()
                 assert coarse.call_args.kwargs['hint'][2] == 2
                 with patch.object(viewer, 'analyse'):
-                    viewer.submit_alignment_hint('2', 1)
+                    row.hint_slow.click()
                 assert row.alignment_hint[1:] == (1, 1), 'Changed direction starts new evidence'
                 viewer.analyse()
             assert viewer.alignment.lags == before, 'Judgement alone never moves playback'
@@ -163,11 +185,13 @@ def check(app, host, module, output=None):
             with patch.object(viewer, '_reload_picture'):
                 viewer.main.setCurrentIndex(viewer.main.findData('2'))
             assert all(current.alignment_hint is None and not current.hint_pending for current in viewer.rows.values())
-            assert not row.assist.isEnabled()
+            assert not row.hint_fast.isEnabled() and not row.hint_slow.isEnabled()
             return dict(passed=True, directional_ranking=True, no_evidence_no_alignment=True,
                         completed_job_gate=True, repeated_weight=True, stale_job_rejected=True,
                         fixed_height_five_sources=True, horizontal_palette=True,
-                        native_host_icons=True, no_focus_border=True, media_playback=False)
+                        native_host_icons=True, no_focus_border=True, first_popup_sized=True,
+                        inline_hint_buttons=True, independent_sound_group=True, channel_faces=True,
+                        media_playback=False)
         finally:
             viewer.close()
             viewer.deleteLater()

@@ -232,6 +232,11 @@ class SendConsole(SettingsPanel):
         self.body_layout.setSizeConstraint(QLayout.SetMinimumSize)
         self.body_layout.setSpacing(12)
         self.body_layout.addWidget(self.rooms)
+        self.divider = QFrame()
+        self.divider.setObjectName('SendDivider')
+        self.divider.setFixedWidth(1)
+        self.divider.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self.body_layout.addWidget(self.divider)
         self.work = QWidget()
         self.work.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         work_layout = QVBoxLayout(self.work)
@@ -366,6 +371,7 @@ class SendConsole(SettingsPanel):
         if self.styleSheet() != style:
             self.setStyleSheet(style)
         c = colors()
+        self.divider.setStyleSheet(f'QFrame#SendDivider {{background: {theme.BORDER_STRONG}; border: none;}}')
         self.toolbar.setFixedHeight(self.viewer.console_toolbar.sizeHint().height())
         for row in self.rows.values():
             for entry in row.tile._plugin_controls.applicable():
@@ -458,7 +464,7 @@ class SendConsole(SettingsPanel):
         self.rooms.setFlow(QListView.TopToBottom)
         self.rooms.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.rooms.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        stacked = self.width() - (32 if regular else 24) - self.rooms.width() - self.body_layout.spacing() < 280
+        stacked = self.width() - (32 if regular else 24) - self.rooms.width() - 2 * self.body_layout.spacing() - self.divider.width() < 280
         self.pages.setFixedHeight(84 if stacked else 48)
         composers = [self.batch_panel.compose]
         self.batch_panel.compose.setFixedHeight(76 if stacked else 40)

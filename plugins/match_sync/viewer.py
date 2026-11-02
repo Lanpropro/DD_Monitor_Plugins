@@ -943,7 +943,7 @@ class RoomRow(QFrame):
         for label, value in (("原始声道", 0), ("仅左输出", 3), ("仅右输出", 4)):
             self.channel.addItem(label, value)
         self.channel.setCurrentIndex(max(0, self.channel.findData(preferences.get("audio_channel", 0))))
-        self.channel.setToolTip("仅左/仅右：将完整声音混为单声道，送到指定耳机一侧。")
+        self.channel.setToolTip("点击选择原始 / 仅左 / 仅右声道；仅左、仅右会将完整声音混为单声道，送到指定一侧。")
         self.channel.currentIndexChanged.connect(viewer.changed)
         for signal in (self.channel.currentIndexChanged, self.volume.valueChanged, self.audible.toggled):
             signal.connect(self.refresh_audio_icon)
@@ -995,8 +995,11 @@ class RoomRow(QFrame):
         self.independent.setSizePolicy(policy)
         self.remove_button = native_console_button(TileButton('×'), '移除此路')
         self.remove_button.clicked.connect(lambda: viewer.remove_room_with_undo(room_id))
-        self.assist = ConsoleIconButton('assist', '辅助自动对齐', size=32)
-        self.assist.clicked.connect(lambda: viewer.open_alignment_hint(room_id))
+        self.hint_fast = native_console_button(QPushButton('偏快'), '本路比主画面偏快')
+        self.hint_slow = native_console_button(QPushButton('偏慢'), '本路比主画面偏慢')
+        for button, direction in ((self.hint_fast, -1), (self.hint_slow, 1)):
+            button.setFixedSize(44, 28)
+            button.clicked.connect(lambda _checked=False, d=direction: viewer.submit_alignment_hint(room_id, d))
         self.join = QPushButton("确认对齐并加入")
         self.join.setAutoDefault(False)
         self.join.setFixedHeight(28)
@@ -1047,10 +1050,10 @@ class RoomRow(QFrame):
             offset_layout.addWidget(widget)
         groups = [identity]
         self.group_separators = []
-        for index, widgets in enumerate(((floating, self.independent, self.realign),
-                        (self.audible, self.volume, self.volume_number, self.channel),
+        for index, widgets in enumerate(((floating, self.realign),
+                        (self.independent, self.audible, self.volume, self.volume_number, self.channel),
                         (self.show_chat, self.color_choice),
-                        (self.offset_box, self.assist), (region, self.remove_button)), 1):
+                        (self.offset_box, self.hint_fast, self.hint_slow), (region, self.remove_button)), 1):
             group = QWidget()
             line = QHBoxLayout(group)
             line.setContentsMargins(0, 0, 0, 0)
@@ -1112,13 +1115,14 @@ class RoomRow(QFrame):
         for column in range(6):
             grid.setColumnMinimumWidth(column, 0)
             grid.setColumnStretch(column, 0)
-        positions = ((1, 0), (1, 1), (3, 0), (3, 1), (3, 2), (1, 2)) if compact else tuple((1, i) for i in range(6))
-        for widget, label, (line, column) in zip(self.control_widgets, self.group_labels, positions):
-            grid.addWidget(label, line - 1, column)
-            grid.addWidget(widget, line, column)
-        for column in range(3 if compact else 6):
+        positions = (((1, 0, 2), (3, 0, 1), (5, 0, 1), (5, 1, 1), (7, 0, 2), (3, 1, 1))
+                     if compact else tuple((1, i, 1) for i in range(6)))
+        for widget, label, (line, column, span) in zip(self.control_widgets, self.group_labels, positions):
+            grid.addWidget(label, line - 1, column, 1, span)
+            grid.addWidget(widget, line, column, 1, span)
+        for column in range(2 if compact else 6):
             grid.setColumnStretch(column, 1 if compact or column in (0, 4) else 0)
-        self.control_columns = tuple(column for _, column in positions)
+        self.control_columns = tuple(column for _, column, _ in positions)
 
     def event(self, event):
         result = super().event(event)
@@ -1258,17 +1262,18 @@ class RoomRow(QFrame):
         self.independent.setAccessibleName(self.independent.toolTip())
         self.independent.update()
         self.realign.setEnabled(self.viewer.alignment.automatic and self.room_id != self.viewer.alignment.reference)
-        self.assist.setEnabled(self.viewer.running and self.viewer.alignment.automatic
-                               and self.room_id != self.viewer.alignment.reference and not self.hint_pending
-                               and not self.viewer.replay.active and not self.paused and not independent)
+        can_submit_hint = (self.viewer.running and self.viewer.alignment.automatic
+                           and self.room_id != self.viewer.alignment.reference and not self.hint_pending
+                           and not self.viewer.replay.active and not self.paused and not independent)
         hint = '辅助自动对齐：本路偏快 / 本路偏慢'
         if self.hint_pending:
             hint = '正在按你的判断完整重新搜索，完成后可再次提交'
         elif self.alignment_hint is not None:
             _, direction, weight = self.alignment_hint
             hint += f"（{'偏快' if direction < 0 else '偏慢'}，判断权重 {weight}）"
-        self.assist.setToolTip(hint)
-        self.assist.setAccessibleName(hint)
+        for button in (self.hint_fast, self.hint_slow):
+            button.setEnabled(can_submit_hint)
+            button.setToolTip(button.text() + '：' + hint)
         match_text = self.match_text
         if independent:
             match_text = "独立播放，不参与自动对齐"
@@ -2161,20 +2166,6 @@ class Viewer(QDialog):
         self.changed()
         self.render()
         self.analyse()
-
-    def alignment_hint_menu(self, room_id):
-        menu = motion.AnimatedMenu(self.rows[room_id].assist)
-        for label, direction in (('本路比主画面偏快', -1), ('本路比主画面偏慢', 1)):
-            menu.addAction(label, lambda _checked=False, d=direction: self.submit_alignment_hint(room_id, d))
-        return menu
-
-    def open_alignment_hint(self, room_id):
-        row = self.rows[room_id]
-        menu = self.alignment_hint_menu(room_id)
-        try:
-            menu.exec(row.assist.mapToGlobal(row.assist.rect().bottomLeft()))
-        finally:
-            menu.deleteLater()
 
     def submit_alignment_hint(self, room_id, direction):
         row = self.rows.get(room_id)

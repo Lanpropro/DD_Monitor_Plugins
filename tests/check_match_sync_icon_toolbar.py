@@ -86,13 +86,13 @@ def check(app, host, module, output=None):
                 surface.deleteLater()
             assert all(not label.isHidden() for label in first.group_labels)
             assert all(label.isHidden() for label in second.group_labels)
-            for name in ('audible', 'channel', 'show_chat', 'color_choice', 'delay', 'remove_button', 'assist'):
+            for name in ('audible', 'channel', 'show_chat', 'color_choice', 'delay', 'remove_button', 'hint_fast', 'hint_slow'):
                 a, b = getattr(first, name), getattr(second, name)
                 assert a.mapTo(first, QPoint()).x() == b.mapTo(second, QPoint()).x(), name
             assert isinstance(first.audible, module.VolumeButton)
             assert isinstance(first.show_chat, module.DanmakuToggleButton)
             assert isinstance(first.realign, module.RefreshButton)
-            for button in (first.floating_button, first.audible, first.show_chat, first.remove_button, first.realign, first.assist):
+            for button in (first.floating_button, first.audible, first.show_chat, first.remove_button, first.realign, first.hint_fast, first.hint_slow):
                 assert button.toolTip() and button.accessibleName()
                 assert button.focusPolicy() == Qt.StrongFocus
             before = first.audible.isChecked()

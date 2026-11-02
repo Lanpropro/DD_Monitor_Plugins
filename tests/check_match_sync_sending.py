@@ -382,6 +382,9 @@ def check(app, host, module, output=None):
                 viewer.picture_split.setSizes([1500 - right_width, right_width])
                 QTest.qWait(60)
                 assert (console.width() >= 520) == (right_width == 640), console.width()
+                assert console.divider.isVisible() and console.divider.width() == 1
+                assert console.rooms.geometry().right() < console.divider.x() < console.work.x()
+                assert console.divider.height() >= console.rooms.height() - 1
                 if right_width == 300:
                     assert console.rooms.property('avatarOnly')
                     assert console.rooms.flow() == QListView.TopToBottom
