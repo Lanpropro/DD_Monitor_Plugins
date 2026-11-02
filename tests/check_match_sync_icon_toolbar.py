@@ -97,6 +97,12 @@ def check(app, host, module, output=None):
                 for _ in range(30):
                     viewer.sync_picture(refresh_metadata=False)
                 assert align.call_count == 0, 'Playback updates must not relayout controls'
+            with patch.object(viewer.body_split, 'setSizes', wraps=viewer.body_split.setSizes) as sizes:
+                viewer.console_content_height = -1
+                viewer.align_room_controls()
+                assert sizes.call_count == 0, 'Do not resize the splitter inside a layout callback'
+                app.processEvents()
+                assert sizes.call_count >= 1, 'Apply the requested content height on the next event turn'
             if output:
                 output = Path(output)
                 output.parent.mkdir(parents=True, exist_ok=True)

@@ -1439,6 +1439,9 @@ class Viewer(QDialog):
         self.settings_panel = SettingsPanel(self)
         self.match_settings = None
         self.settings_height = 280
+        self.console_size_timer = QTimer(self)
+        self.console_size_timer.setSingleShot(True)
+        self.console_size_timer.timeout.connect(self.fit_console_height)
         self.minimize_settings = ConsoleIconButton('minimize', '最小化播放控制台')
         self.minimize_settings.setToolTip("收起设置栏，保留画面、声音和弹幕播放。")
         self.minimize_settings.clicked.connect(lambda: self.set_settings_visible(False))
@@ -1995,8 +1998,14 @@ class Viewer(QDialog):
         if height != getattr(self, 'console_content_height', None):
             self.console_content_height = height
             self.settings_height = height
-            sizes = self.body_split.sizes()
-            self.body_split.setSizes([max(1, sizes[0] + sizes[2] - height), sizes[1], height])
+            self.console_size_timer.start(0)
+
+    def fit_console_height(self):
+        if self.settings_panel.isHidden():
+            return
+        sizes = self.body_split.sizes()
+        height = self.console_content_height
+        self.body_split.setSizes([max(1, sizes[0] + sizes[2] - height), sizes[1], height])
 
     def begin_row_drag(self, room_id):
         self.dragged_row = room_id
