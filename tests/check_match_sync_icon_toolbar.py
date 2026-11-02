@@ -51,9 +51,9 @@ def check(app, host, module, output=None):
                 assert button.cursor().shape() == Qt.PointingHandCursor
                 assert button.testAttribute(Qt.WA_Hover)
             assert first.delay.lineEdit().cursor().shape() == Qt.IBeamCursor
-            with patch.object(panels.QApplication, 'widgetAt', return_value=None):
+            with patch.object(first.audible, 'underMouse', return_value=False):
                 normal = first.audible.grab().toImage()
-            with patch.object(panels.QApplication, 'widgetAt', return_value=first.audible):
+            with patch.object(first.audible, 'underMouse', return_value=True):
                 assert first.audible.grab().toImage() != normal, 'Checked icons must still give hover feedback'
             with patch.object(viewer.automatic, 'underMouse', return_value=False):
                 normal = viewer.automatic.grab().toImage()
@@ -86,12 +86,14 @@ def check(app, host, module, output=None):
                 surface.deleteLater()
             assert all(not label.isHidden() for label in first.group_labels)
             assert all(label.isHidden() for label in second.group_labels)
-            for name in ('audible', 'channel', 'show_chat', 'color_choice', 'delay', 'more'):
+            for name in ('audible', 'channel', 'show_chat', 'color_choice', 'delay', 'remove_button', 'assist'):
                 a, b = getattr(first, name), getattr(second, name)
                 assert a.mapTo(first, QPoint()).x() == b.mapTo(second, QPoint()).x(), name
-            for button in (first.floating_button, first.audible, first.show_chat, first.more, first.realign):
-                assert isinstance(button, panels.ConsoleIconButton)
-                assert not button.text() and button.toolTip() and button.accessibleName()
+            assert isinstance(first.audible, module.VolumeButton)
+            assert isinstance(first.show_chat, module.DanmakuToggleButton)
+            assert isinstance(first.realign, module.RefreshButton)
+            for button in (first.floating_button, first.audible, first.show_chat, first.remove_button, first.realign, first.assist):
+                assert button.toolTip() and button.accessibleName()
                 assert button.focusPolicy() == Qt.StrongFocus
             before = first.audible.isChecked()
             QTest.mouseClick(first.audible, Qt.LeftButton)
@@ -174,10 +176,8 @@ def check(app, host, module, output=None):
                 second.join.show()
                 QTest.qWait(30)
                 viewer.settings_panel.grab().save(str(output))
-            menu = second.more_menu()
-            assert [action.text() for action in menu.actions() if not action.isSeparator()] == ['修改主播名称…', '移除此路']
-            next(action for action in menu.actions() if action.text() == '移除此路').trigger()
-            assert '202' in viewer.rows, 'Removal must wait until the menu callback returns'
+            assert not hasattr(second, 'more_menu') and not hasattr(second, 'rename')
+            second.remove_button.click()
             app.processEvents()
             assert list(viewer.rows) == ['101']
             assert not viewer.removal_notice.isHidden()
@@ -212,7 +212,7 @@ def check(app, host, module, output=None):
                 viewer.settings_panel.grab().save(str(output.with_name('single-wide.png')))
             return dict(passed=True, native_controls=True, column_alignment=True,
                         responsive=True, toggles=True, persisted_values=True,
-                        crop_action=True, deferred_remove=True, undo_remove=True,
+                        crop_action=True, direct_remove=True, undo_remove=True,
                         compact_identity=True, shared_offset=True, prototype_modes=True,
                         inline_confirmation=True, role_alignment=True, drag_height_fixed=True,
                         adjacent_console_edge=True, interactive_cursors=True,

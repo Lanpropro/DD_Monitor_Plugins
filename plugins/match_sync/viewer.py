@@ -1,6 +1,7 @@
 """One selectable match picture, independently mixed audio, and labelled chat."""
 from __future__ import annotations
 
+import logging
 import re
 import sys
 import threading
@@ -14,14 +15,14 @@ from urllib.parse import urlsplit
 from shiboken6 import isValid
 
 from PySide6.QtCore import QEasingCurve, QEvent, QMetaObject, QMimeData, QObject, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, Qt, QThread, QTimer, Signal, Slot
-from PySide6.QtGui import QColor, QCursor, QDrag, QFont, QFontMetrics, QIcon, QImage, QKeySequence, QPainter, QPen, QPixmap, QRegion
+from PySide6.QtGui import QColor, QCursor, QDrag, QIcon, QImage, QKeySequence, QPainter, QPen, QPixmap, QRegion
 from PySide6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices
 from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QCheckBox, QComboBox, QDialog,
     QDialogButtonBox, QDoubleSpinBox, QFrame,
-    QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLayout, QLineEdit,
+    QGridLayout, QHBoxLayout, QLabel, QLayout, QLineEdit,
     QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QSlider, QSplitter, QStyle, QTextEdit, QToolTip, QVBoxLayout, QWidget)
 
-from ddm.widgets import AUTO_QUALITY, Avatar, ROOM_MIME, Tile
+from ddm.widgets import AUTO_QUALITY, Avatar, DanmakuToggleButton, RefreshButton, ROOM_MIME, Tile, TileButton, VolumeButton
 from ddm.fullscreen_cursor import FullscreenCursor
 from ddm.dialogs import SHORTCUT_ACTIONS
 from ddm import config as config_module, motion, theme
@@ -29,7 +30,7 @@ from .engine import route_pcm_s16_stereo, Alignment, Match, RATE, SafetyBuffer, 
 from .media import Chat, Decoder, PlatformChat
 from .fullscreen import mark_fullscreen
 from .sending import SendConsole, SendingDanmakuPanel
-from .panels import ConsoleChoice, ConsoleIconButton, ConsoleModeToggle, MatchSettingsDialog, SettingsPanel, console_hover_color, console_role_icon, style_checkbox, use_link_cursor
+from .panels import ConsoleChoice, ConsoleIconButton, ConsoleModeToggle, MatchSettingsDialog, SettingsPanel, console_hover_color, console_role_icon, native_console_button, style_checkbox, use_link_cursor
 from .replay import ReplayBar, ReplayTimeline
 from .floating import FloatingCrop
 from .regions import match_regions
@@ -883,6 +884,10 @@ class RoomRow(QFrame):
         self.correction_remaining = 0.0
         self.reset_pending = False
         self.needs_epoch_samples = False
+        self.alignment_hint = None
+        self.hint_pending = False
+        self.hint_serial = None
+        self.hint_searching = False
         room = next((item for item in getattr(viewer.context.window, "rooms", [])
                      if str(item.get("room_id") or "") == room_id), {})
         self.title = room.get("title") or (viewer.sources.get(room_id) or {}).get("title") or ""
@@ -914,12 +919,12 @@ class RoomRow(QFrame):
         use_link_cursor(self.main_button)
         self.main_button.setIcon(console_role_icon())
         self.main_button.setStyleSheet(f'''QPushButton {{background: transparent; border: 1px solid {theme.BORDER_STRONG};
-            border-radius: 5px; padding: 3px 6px; font-size: 12px;}}
-            QPushButton:checked {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT}; border-color: {theme.ACCENT};}}
-            QPushButton:hover, QPushButton:checked:hover {{background: {console_hover_color()}; color: {theme.ACCENT}; border-color: {theme.ACCENT};}}''')
+            border-radius: 5px; outline: none; padding: 3px 6px; font-size: 12px;}}
+            QPushButton:checked {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}
+            QPushButton:hover, QPushButton:focus, QPushButton:checked:hover {{background: {console_hover_color()}; color: {theme.ACCENT};}}''')
         self.main_button.setToolTip("选择这位主播作为主画面，其他路声音与弹幕继续播放。")
         self.main_button.clicked.connect(lambda: viewer.select_main(room_id))
-        self.audible = ConsoleIconButton('sound', '声音开关', size=32)
+        self.audible = native_console_button(VolumeButton(), '声音开关')
         self.audible.setCheckable(True)
         self.audible.setChecked(preferences.get("audible", True))
         self.volume = QSlider(Qt.Horizontal)
@@ -941,12 +946,15 @@ class RoomRow(QFrame):
         self.channel.setToolTip("仅左/仅右：将完整声音混为单声道，送到指定耳机一侧。")
         self.channel.currentIndexChanged.connect(viewer.changed)
         for signal in (self.channel.currentIndexChanged, self.volume.valueChanged, self.audible.toggled):
+            signal.connect(self.refresh_audio_icon)
             signal.connect(viewer.sync_picture)
+        self.audible.volumeChanged.connect(self.volume.setValue)
+        self.refresh_audio_icon()
         self.delay = self._offset(0 if viewer.automatic.isChecked() else preferences.get("delay", 0))
         self.previous_delay = self.delay.value()
         self.delay.setFixedWidth(74)
         self.delay.installEventFilter(viewer)
-        self.show_chat = ConsoleIconButton('chat', '弹幕开关', size=32)
+        self.show_chat = native_console_button(DanmakuToggleButton('弹'), '弹幕开关')
         self.show_chat.setCheckable(True)
         self.show_chat.setChecked(preferences.get("show_chat", True))
         self.color_choice = ConsoleChoice('color')
@@ -978,15 +986,17 @@ class RoomRow(QFrame):
         self.independent = ConsoleIconButton('independent', '独立播放：不等待对齐，使用本路缓存进度', size=32)
         self.independent.setCheckable(True)
         self.independent.clicked.connect(lambda: viewer.toggle_independent(room_id))
-        self.realign = ConsoleIconButton('resync', '重新对齐', size=32)
+        self.realign = native_console_button(RefreshButton(), '重新对齐')
         policy = self.realign.sizePolicy()
         policy.setRetainSizeWhenHidden(True)
         self.realign.setSizePolicy(policy)
         self.realign.setToolTip("重新匹配本路比赛画面，不重启直播流，不改变其他路已确认偏移。")
         self.realign.clicked.connect(lambda: viewer.retry_alignment(room_id))
         self.independent.setSizePolicy(policy)
-        self.more = ConsoleIconButton('more', '更多操作', size=32)
-        self.more.clicked.connect(self.open_more)
+        self.remove_button = native_console_button(TileButton('×'), '移除此路')
+        self.remove_button.clicked.connect(lambda: viewer.remove_room_with_undo(room_id))
+        self.assist = ConsoleIconButton('assist', '辅助自动对齐', size=32)
+        self.assist.clicked.connect(lambda: viewer.open_alignment_hint(room_id))
         self.join = QPushButton("确认对齐并加入")
         self.join.setAutoDefault(False)
         self.join.setFixedHeight(28)
@@ -1040,7 +1050,7 @@ class RoomRow(QFrame):
         for index, widgets in enumerate(((floating, self.independent, self.realign),
                         (self.audible, self.volume, self.volume_number, self.channel),
                         (self.show_chat, self.color_choice),
-                        (self.offset_box,), (region, self.more)), 1):
+                        (self.offset_box, self.assist), (region, self.remove_button)), 1):
             group = QWidget()
             line = QHBoxLayout(group)
             line.setContentsMargins(0, 0, 0, 0)
@@ -1055,7 +1065,7 @@ class RoomRow(QFrame):
                 self.group_separators.append(separator)
             for widget in widgets:
                 line.addWidget(widget)
-                if isinstance(widget, ConsoleIconButton):
+                if isinstance(widget, QPushButton):
                     widget.setFocusPolicy(Qt.StrongFocus)
             groups.append(group)
         self.control_widgets = tuple(groups)
@@ -1131,7 +1141,7 @@ class RoomRow(QFrame):
         if hasattr(self, 'name_label'):
             self.name_label.setText(self.name_label.fontMetrics().elidedText(self.label(), Qt.ElideRight, 140))
             self.name_label.setToolTip(self.label())
-        self.avatar.setToolTip(f"{self.label()} · 拖动整张卡片调整顺序，右键修改名称")
+        self.avatar.setToolTip(f"{self.label()} · 拖动整张卡片调整顺序")
         self.setToolTip(self.avatar.toolTip())
         sidebar = getattr(self.viewer.context.window, "sidebar", None)
         item = next((item for item in getattr(sidebar, "_items", [])
@@ -1143,28 +1153,6 @@ class RoomRow(QFrame):
                 self.avatar.set_pixmap_image(pixmap)
         elif self.avatar_key is None:
             self.avatar.setText(self.label()[0])
-
-    def contextMenuEvent(self, event):
-        menu = motion.AnimatedMenu(self)
-        menu.addAction("修改主播名称", self.rename)
-        menu.exec_context(event)
-
-    def rename(self):
-        value, accepted = QInputDialog.getText(self, "修改主播名称", "主播名称", text=self.alias.text())
-        if accepted and value.strip():
-            self.alias.setText(value.strip())
-            self.viewer.update_main_choices()
-
-    def more_menu(self):
-        menu = motion.AnimatedMenu(self)
-        menu.addAction("修改主播名称…", self.rename)
-        menu.addSeparator()
-        menu.addAction("移除此路", lambda: QTimer.singleShot(0, self,
-            lambda: self.viewer.remove_room_with_undo(self.room_id)))
-        return menu
-
-    def open_more(self):
-        self.more_menu().exec(self.more.mapToGlobal(self.more.rect().bottomLeft()))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -1245,6 +1233,9 @@ class RoomRow(QFrame):
             self.viewer._start_chat(self)
         self.viewer.changed()
 
+    def refresh_audio_icon(self, *_args):
+        self.audible.set_state(not self.audible.isChecked(), self.volume.value(), self.channel.currentData())
+
     def preferences(self):
         return {"room_id": self.room_id, "alias": self.alias.text(), "color": self.color,
                 "audible": self.audible.isChecked(), "volume": self.volume.value(),
@@ -1267,6 +1258,17 @@ class RoomRow(QFrame):
         self.independent.setAccessibleName(self.independent.toolTip())
         self.independent.update()
         self.realign.setEnabled(self.viewer.alignment.automatic and self.room_id != self.viewer.alignment.reference)
+        self.assist.setEnabled(self.viewer.running and self.viewer.alignment.automatic
+                               and self.room_id != self.viewer.alignment.reference and not self.hint_pending
+                               and not self.viewer.replay.active and not self.paused and not independent)
+        hint = '辅助自动对齐：本路偏快 / 本路偏慢'
+        if self.hint_pending:
+            hint = '正在按你的判断完整重新搜索，完成后可再次提交'
+        elif self.alignment_hint is not None:
+            _, direction, weight = self.alignment_hint
+            hint += f"（{'偏快' if direction < 0 else '偏慢'}，判断权重 {weight}）"
+        self.assist.setToolTip(hint)
+        self.assist.setAccessibleName(hint)
         match_text = self.match_text
         if independent:
             match_text = "独立播放，不参与自动对齐"
@@ -1484,7 +1486,7 @@ class Viewer(QDialog):
         for widget in self.add_controls:
             heading.addWidget(widget)
         heading.addStretch(0)
-        self.match_settings_button = ConsoleIconButton('settings', '比赛二路设置', size=32)
+        self.match_settings_button = native_console_button(TileButton('⚙'), '比赛二路设置')
         self.match_settings_button.clicked.connect(self.open_match_settings)
         heading.addWidget(self.match_settings_button)
         heading.addWidget(self.minimize_settings)
@@ -1579,6 +1581,7 @@ class Viewer(QDialog):
         self.body_split.addWidget(self.comparison_panel)
         self.body_split.addWidget(self.settings_panel)
         self.body_split.setSizes([660, 0, 280])
+        self.body_split.splitterMoved.connect(self.remember_console_height)
         self.audio_status = QLabel()
         settings_layout = QVBoxLayout(self.settings_panel)
         settings_layout.setContentsMargins(1, 1, 1, 1)
@@ -1836,6 +1839,7 @@ class Viewer(QDialog):
             if watched is self.settings_panel and hasattr(self, 'send_console'):
                 self.send_console.sync_height()
                 self.position_removal_notice()
+                self.queue_console_height()
             if watched is self.picture.bottom:
                 QTimer.singleShot(0, self._layout_restore_control)
             if self.embedded and watched is self.parentWidget():
@@ -2006,7 +2010,7 @@ class Viewer(QDialog):
         if self.dragged_row is not None:
             return
         if not rows:
-            self.queue_console_height(self.empty_console_rows_height())
+            self.queue_console_height()
             return
         name_width = min(140, max(row.name_label.fontMetrics().horizontalAdvance(row.name_label.text()) for row in rows))
         for row in rows:
@@ -2021,26 +2025,18 @@ class Viewer(QDialog):
                 needed = max(w for c, w in zip(row.control_columns, widths) if c == column)
                 if row.controls_grid.columnMinimumWidth(column) != needed:
                     row.controls_grid.setColumnMinimumWidth(column, needed)
-        heading = max(label.sizeHint().height() for label in rows[0].group_labels) + rows[0].controls_grid.verticalSpacing()
-        bands = 2 if compact else 1
-        first_height = rows[0].sizeHint().height()
-        self.console_reserved_rows_height = 2 * first_height - bands * heading + self.rows_layout.spacing()
-        self.queue_console_height(max(self.rows_layout.sizeHint().height(), self.console_reserved_rows_height))
+        self.queue_console_height()
 
-    def empty_console_rows_height(self):
-        if hasattr(self, 'console_reserved_rows_height'):
-            return self.console_reserved_rows_height
-        font = QFont(self.font())
-        font.setPixelSize(theme.FONT_CAPTION)
-        return 2 * (24 + 28 + 22 + 2) + QFontMetrics(font).height() + 5 + self.rows_layout.spacing()
-
-    def queue_console_height(self, rows_height):
-        height = (self.console_toolbar.sizeHint().height() + rows_height
-                  + self.console_footer.sizeHint().height() + 2)
+    def queue_console_height(self):
+        height = self.settings_height
         if height != getattr(self, 'console_content_height', None) or self.settings_panel.height() != height:
             self.console_content_height = height
             self.settings_height = height
             self.console_size_timer.start(0)
+
+    def remember_console_height(self, _position, _index):
+        if not self.settings_panel.isHidden() and self.dragged_row is None:
+            self.settings_height = self.console_content_height = self.settings_panel.height()
 
     def fit_console_height(self):
         if self.settings_panel.isHidden() or self.dragged_row is not None:
@@ -2158,11 +2154,59 @@ class Viewer(QDialog):
         for key in targets:
             self.alignment.lags[key] = before[key] - before[reference]
             row = self.rows[key]
+            row.alignment_hint, row.hint_pending, row.hint_searching = None, False, False
             self._queue_rematch(row, local=row.user_confirmed and not row.needs_epoch_samples)
             self.rematch_admit.add(key)
         self.generation += 1
         self.changed()
         self.render()
+        self.analyse()
+
+    def alignment_hint_menu(self, room_id):
+        menu = motion.AnimatedMenu(self.rows[room_id].assist)
+        for label, direction in (('本路比主画面偏快', -1), ('本路比主画面偏慢', 1)):
+            menu.addAction(label, lambda _checked=False, d=direction: self.submit_alignment_hint(room_id, d))
+        return menu
+
+    def open_alignment_hint(self, room_id):
+        row = self.rows[room_id]
+        menu = self.alignment_hint_menu(room_id)
+        try:
+            menu.exec(row.assist.mapToGlobal(row.assist.rect().bottomLeft()))
+        finally:
+            menu.deleteLater()
+
+    def submit_alignment_hint(self, room_id, direction):
+        row = self.rows.get(room_id)
+        if (row is None or direction not in (-1, 1) or not self.running or not self.alignment.automatic
+                or room_id == self.alignment.reference or row.hint_pending or row.paused
+                or self.replay.active or room_id in self.independent_playback):
+            return
+        clock, shifts = self.live_clock(), self.shifts()
+        main_position = self.canvas.frame_key
+        if main_position is None:
+            main_position = clock + shifts[self.alignment.reference]
+        position = clock + shifts[room_id]
+        floating = self.floating_crops.get(room_id)
+        card = self.comparison_panel.cards.get(room_id)
+        if self.compare.isChecked() and card is not None and card[2].isVisible() and card[2].frame_key is not None:
+            position = card[2].frame_key
+        elif floating is not None and floating.isVisible() and floating.frame_key is not None:
+            position = floating.frame_key
+        previous = row.alignment_hint
+        weight = min(4, previous[2] + 1) if previous is not None and previous[1] == direction else 1
+        # An ahead picture needs a smaller same-scene arrival lag than the displayed difference.
+        row.alignment_hint = (position - main_position, direction, weight)
+        row.hint_pending, row.hint_serial = True, None
+        row.hint_searching = True
+        row.match_text = f"已提交{'偏快' if direction < 0 else '偏慢'}判断（权重 {weight}），正在完整重新搜索"
+        row.next_analysis = 0.
+        self.alignment.candidates.pop(room_id, None)
+        self.analysis_serial += 1
+        self.matching = False
+        row.refresh_status()
+        logging.getLogger(__name__).info('Alignment hint submitted: slot=%s baseline=%.3f direction=%s weight=%s',
+            tuple(self.rows).index(room_id), row.alignment_hint[0], direction, weight)
         self.analyse()
 
     def _delay_changed(self, *_args):
@@ -2429,6 +2473,7 @@ class Viewer(QDialog):
             self.late_notice.hide()
             for current in self.rows.values():
                 current.large_candidate = None
+                current.alignment_hint, current.hint_pending, current.hint_searching = None, False, False
             saved = self.shifts() if self.alignment.manual_locked else None
             self.stable_reference_shift = self.independent_shifts.pop(selected, None)
             self.prefer_highest = True
@@ -2742,6 +2787,8 @@ class Viewer(QDialog):
         self.rematch_admit.clear()
 
     def _automatic_changed(self, *_args):
+        for current in self.rows.values():
+            current.alignment_hint, current.hint_pending, current.hint_searching = None, False, False
         self.analysis_serial += 1
         self.matching = False
         preserved_main = (self.shifts().get(self.alignment.reference)
@@ -2971,6 +3018,7 @@ class Viewer(QDialog):
         self.match_timer.start()
 
     def _start_row(self, row):
+        row.alignment_hint, row.hint_pending, row.hint_searching = None, False, False
         row.large_candidate = None
         row.paused = False
         row.sync_state = "准备缓存"
@@ -3671,7 +3719,7 @@ class Viewer(QDialog):
                   and time.monotonic() >= value.next_analysis}
         if not others:
             return
-        keys = list(others)
+        keys = [key for key in others if self.rows[key].hint_pending] or list(others)
         key = keys[self.analysis_cursor % len(keys)]
         self.analysis_cursor += 1
         others = {key: others[key]}
@@ -3686,6 +3734,9 @@ class Viewer(QDialog):
                     with value.decoder.lock:
                         region_frames[key] = list(value.decoder.region_frames)
         known = {key: lag for key, lag in self.alignment.lags.items() if key not in self.independent_playback}
+        hints = {key: self.rows[key].alignment_hint for key in others if self.rows[key].hint_searching}
+        for key in hints:
+            known.pop(key, None)
         for key in self.rematch_rooms:
             if not self.rows[key].rematch_locally:
                 known.pop(key, None)
@@ -3712,11 +3763,17 @@ class Viewer(QDialog):
         epoch, bridge = self.generation, self.results
         self.analysis_serial += 1
         serial = self.analysis_serial
+        for key in hints:
+            a, b = details.get(reference_id, []), details.get(key, [])
+            ready = min(len(a), len(b)) >= 40 if a and b else min(len(reference), len(others[key])) >= 8
+            if self.rows[key].hint_pending:
+                self.rows[key].hint_serial = serial if ready else None
         self.matching = True
 
         def calculate():
             results = {}
             for key, samples in others.items():
+                hint_options = {'hint': hints[key]} if key in hints else {}
                 reference_details = details.get(reference_id, [])
                 other_details = details.get(key, [])
                 if key in tracking_rooms and has_picture:
@@ -3725,14 +3782,14 @@ class Viewer(QDialog):
                     candidate = (refine_match(Match(known[key], .9, "跟踪已确认偏移"), reference_details, other_details)
                                  if key in known else Match(None, 0, "首次匹配"))
                     if candidate.lag is None:
-                        candidate = match_scenes(reference_details[::4], other_details[::4])
+                        candidate = match_scenes(reference_details[::4], other_details[::4], **hint_options)
                 else:
-                    candidate = match_scenes(reference, samples)
+                    candidate = match_scenes(reference, samples, **hint_options)
                 if reference_details and other_details:
                     if candidate.lag is None and not candidate.candidates and key in known:
                         candidate = Match(known[key], .9, "复核已确认偏移")
                     if not candidate.refined:
-                        candidate = refine_match(candidate, reference_details, other_details)
+                        candidate = refine_match(candidate, reference_details, other_details, **hint_options)
                     if candidate.lag is not None and key in known and has_picture and key not in preview_rooms:
                         shown_reference = [s for s in details[reference_id] if s.time <= positions[reference_id]]
                         shown_other = [s for s in details[key] if s.time <= positions[key]]
@@ -3757,7 +3814,7 @@ class Viewer(QDialog):
                     candidate = Match(None, 0, "恢复精校正需要连续至少 4 秒比赛画面，继续收集")
                 if candidate.lag is None and region_frames.get(reference_id) and region_frames.get(key):
                     regional = match_regions(region_frames[reference_id], region_frames[key],
-                                             cached_regions.get(key, ()), known.get(key))
+                                             cached_regions.get(key, ()), known.get(key), **hint_options)
                     if regional.lag is not None:
                         peers = [peer for peer in known if peer not in (key, reference_id)
                                  and peer in confirmed_peers and region_frames.get(peer)]
@@ -3781,6 +3838,14 @@ class Viewer(QDialog):
 
     def _analysis_finished(self, serial, epoch, results):
         if serial == self.analysis_serial:
+            if self.running and epoch == self.generation and self.alignment.automatic:
+                for key, match in results.items():
+                    row = self.rows.get(key)
+                    if row is not None and row.hint_pending and row.hint_serial == serial:
+                        if not match.reason.startswith('匹配异常：'):
+                            row.hint_pending = False
+                        logging.getLogger(__name__).info('Alignment hint search: slot=%s lag=%s confidence=%.3f refined=%s reason=%s',
+                            tuple(self.rows).index(key), match.lag, match.confidence, match.refined, match.reason)
             self.results.matched.emit(epoch, results)
 
     def _matched(self, epoch, results):
@@ -3860,6 +3925,8 @@ class Viewer(QDialog):
                 row.refresh_status()
                 continue
             applied = self.alignment.accept(room_id, match)
+            if applied and match.refined:
+                row.hint_searching = False
             if match.lag is None:
                 row.large_candidate = None
                 insufficient = any(reason in match.reason for reason in (
@@ -4110,6 +4177,7 @@ class Viewer(QDialog):
 
     @staticmethod
     def _stop_row(row):
+        row.alignment_hint, row.hint_pending, row.hint_searching = None, False, False
         if row.decoder is not None:
             row.decoder.stop()
         if row.chat is not None:

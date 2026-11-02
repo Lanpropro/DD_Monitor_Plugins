@@ -67,7 +67,7 @@ def style_compose(editor, send):
     editor_style = f'''QLineEdit {{background: {c['input']}; color: {c['text']};
         border: 1px solid {theme.BORDER_STRONG}; border-radius: {theme.RADIUS_MD}px; padding: 4px 8px;
         font-size: {theme.FONT_CONTROL}px;}}
-        QLineEdit:focus {{border-color: {c['accent']};}}'''
+        QLineEdit:focus {{background: {c['raised']};}}'''
     if editor.styleSheet() != editor_style:
         editor.setStyleSheet(editor_style)
     send.setFixedSize(SEND_WIDTH if send.property('sendPrimary') else 60, INPUT_HEIGHT)
@@ -161,12 +161,12 @@ def stylesheet():
         #MatchSyncSendConsole #SavedTextList {{background: transparent;}}
         #MatchSyncSendConsole QLineEdit {{background: {c['input']}; color: {c['text']};
             border: 1px solid {theme.BORDER_STRONG}; border-radius: {theme.RADIUS_MD}px; padding: 6px 8px;}}
-        #MatchSyncSendConsole QLineEdit:focus {{border-color: {c['accent']};}}
+        #MatchSyncSendConsole QLineEdit:focus {{background: {c['raised']};}}
         #MatchSyncSendConsole QPushButton {{background: {c['raised']}; color: {c['text']};
             border: 1px solid {theme.BORDER_STRONG}; border-radius: {theme.RADIUS_MD}px; padding: 5px 10px; min-height: 18px;}}
         #MatchSyncSendConsole QPushButton:hover {{background: {console_hover_color()}; border-color: {c['accent']};}}
         #MatchSyncSendConsole QPushButton:pressed {{background: {c['inset']};}}
-        #MatchSyncSendConsole QPushButton:focus {{border: 1px solid {c['accent']};}}
+        #MatchSyncSendConsole QPushButton:focus {{background: {console_hover_color()}; outline: none;}}
         #MatchSyncSendConsole QPushButton[sendPrimary="true"],
         #MatchSyncSendConsole QPushButton[sendPrimary="true"]:disabled {{background: transparent; border: none;}}
         #MatchSyncSendConsole QPushButton:disabled {{background: {c['raised']}; color: {c['secondary']};}}
@@ -363,10 +363,6 @@ class RecipientDelegate(QStyledItemDelegate):
             color.setAlphaF(color.alphaF() * max(progress, .5 if option.state & QStyle.State_MouseOver else 0))
             painter.setBrush(color)
             painter.drawRoundedRect(rect, 6, 6)
-            if selected:
-                painter.setPen(QPen(QColor(c['accent']), 1))
-                painter.setBrush(Qt.NoBrush)
-                painter.drawRoundedRect(rect.adjusted(.5, .5, -.5, -.5), 6, 6)
         avatar = QRectF(rect.left() + 8, rect.center().y() - 16, 32, 32)
         if compact:
             avatar.moveCenter(rect.center())
@@ -385,10 +381,6 @@ class RecipientDelegate(QStyledItemDelegate):
             painter.setPen(QColor(c['text']))
             painter.drawText(avatar, Qt.AlignCenter, str(index.data(Qt.DisplayRole) or '?')[:1])
         if compact:
-            if selected:
-                painter.setPen(QPen(QColor(c['accent']), 2))
-                painter.setBrush(Qt.NoBrush)
-                painter.drawEllipse(avatar.adjusted(-2, -2, 2, 2))
             painter.restore()
             return
         painter.setPen(Qt.NoPen)
