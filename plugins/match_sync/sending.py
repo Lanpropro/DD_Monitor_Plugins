@@ -2,7 +2,7 @@
 from PySide6.QtCore import QEvent, QPointF, QPropertyAnimation, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QCursor, QFont, QImage, QPainter, QPalette, QPen, QTextCursor
 from PySide6.QtWidgets import (QApplication, QBoxLayout, QFrame, QHBoxLayout, QListView, QListWidget,
-    QListWidgetItem, QLabel, QLayout, QLineEdit, QMenu, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
+    QListWidgetItem, QLabel, QLayout, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 
 from ddm.widgets import DanmakuPanel, Tile
 from ddm.danmaku_actions import CommentToolbar
@@ -387,6 +387,7 @@ class SendConsole(SettingsPanel):
         restore_style = console_button_style('QPushButton')
         if self.restore.styleSheet() != restore_style:
             self.restore.setStyleSheet(restore_style)
+        self.refresh_interactions()
         self._layout_workspace()
         self.update()
 
@@ -398,30 +399,41 @@ class SendConsole(SettingsPanel):
         layout.setSpacing(4)
         for kind, label in (('emote', '选择平台表情'), ('gift', '选择平台礼物')):
             button = ConsoleIconButton(kind, label, bar)
+            button.setProperty('interactionKind', kind)
             button.clicked.connect(lambda _checked=False, b=button, k=kind: self.show_interactions(k, b))
             layout.addWidget(button)
+        self.refresh_interactions()
         return bar
 
-    def interaction_menu(self, kind, anchor):
-        menu = QMenu(anchor)
-        platforms = {}
-        for key, row in self.rows.items():
-            platform = row.tile.room.get('platform', 'bilibili')
-            label = {'bilibili': '哔哩哔哩', 'douyu': '斗鱼', 'huya': '虎牙', 'douyin': '抖音'}.get(platform, platform)
-            if platform not in platforms:
-                platforms[platform] = menu.addMenu(label)
-            action = platforms[platform].addAction(self.viewer.rows[key].label())
-            composer = next((entry.control.widget for entry in row.tile._plugin_controls.applicable()
-                             if callable(getattr(entry.control.widget, 'open_emoticons' if kind == 'emote' else 'open_gifts', None))), None)
-            supported = composer is not None and (kind != 'gift' or platform not in ('huya', 'douyin'))
-            action.setEnabled(supported)
-            if supported:
-                action.triggered.connect(lambda _checked=False, w=composer, k=kind: self.open_interaction(w, k, anchor))
-            else:
-                action.setText(action.text() + '（平台暂不支持）')
-        if not platforms:
-            menu.addAction('暂无直播间').setEnabled(False)
-        return menu
+    def interaction_target(self, kind):
+        keys = self.checked_rooms()
+        label = '表情' if kind == 'emote' else '礼物'
+        if not keys:
+            return None, f'请先选择主播，再使用{label}'
+        if len(keys) != 1:
+            return None, f'请选择一位主播使用{label}；文字弹幕仍可多选发送'
+        key = keys[0]
+        row = self.rows[key]
+        entries = row.tile._plugin_controls.applicable()
+        if not entries:
+            return None, '发送控件不可用，请检查平台插件是否已启用'
+        platform = row.tile.room.get('platform', 'bilibili')
+        platform_name = {'bilibili': '哔哩哔哩', 'douyu': '斗鱼', 'huya': '虎牙', 'douyin': '抖音'}.get(platform, platform)
+        composer = next((entry.control.widget for entry in entries
+                         if callable(getattr(entry.control.widget, 'open_emoticons' if kind == 'emote' else 'open_gifts', None))), None)
+        if composer is None or kind == 'gift' and platform in ('huya', 'douyin'):
+            return None, f'{platform_name}暂不支持{label}'
+        return composer, f'给 {self.viewer.rows[key].label()} 选择{label}（{platform_name}）'
+
+    def refresh_interactions(self):
+        states = {kind: self.interaction_target(kind) for kind in ('emote', 'gift')}
+        for button in self.findChildren(ConsoleIconButton):
+            kind = button.property('interactionKind')
+            if kind in states:
+                composer, tooltip = states[kind]
+                button.setEnabled(composer is not None)
+                button.setToolTip(tooltip)
+                button.setAccessibleName(tooltip)
 
     @staticmethod
     def open_interaction(composer, kind, anchor):
@@ -434,11 +446,10 @@ class SendConsole(SettingsPanel):
             setattr(composer, attribute, original)
 
     def show_interactions(self, kind, anchor):
-        menu = self.interaction_menu(kind, anchor)
-        try:
-            menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
-        finally:
-            menu.deleteLater()
+        composer, _tooltip = self.interaction_target(kind)
+        self.refresh_interactions()
+        if composer is not None:
+            self.open_interaction(composer, kind, anchor)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -653,6 +664,7 @@ class SendConsole(SettingsPanel):
         self._layout_workspace()
         self.saved_texts.setEnabled(not self.batch_panel.timer.isActive())
         self.refresh_store_state()
+        self.refresh_interactions()
 
     def sync_height(self):
         settings = self.viewer.settings_panel

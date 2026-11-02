@@ -4,6 +4,7 @@ from importlib import import_module
 import os
 from pathlib import Path
 import socket
+import subprocess
 import sys
 import tempfile
 import time
@@ -94,16 +95,20 @@ def check_platform_controls(app, host, module, source):
             anchor = console.batch_panel.interactions.findChildren(QPushButton)[1]
             native = console.rows['douyu:12345'].tile._plugin_controls.applicable()[0].control.widget
             seen = []
+            console.batch_targets = {'douyu:12345'}
+            console._update_selection()
             with patch.object(native, 'open_gifts', side_effect=lambda: seen.append(native.gifts is anchor)):
-                menu = console.interaction_menu('gift', anchor)
-                assert [action.text() for action in menu.actions()] == ['斗鱼', '虎牙', '抖音']
-                menu.actions()[0].menu().actions()[0].trigger()
+                assert anchor.isEnabled()
+                anchor.click()
                 assert seen == [True] and native.gifts is not anchor
-                assert not menu.actions()[1].menu().actions()[0].isEnabled()
-                menu.deleteLater()
-            menu = console.interaction_menu('emote', anchor)
-            assert all(not action.menu().actions()[0].isEnabled() for action in menu.actions())
-            menu.deleteLater()
+            for key in ('huya:12345', 'douyin:12345'):
+                console.batch_targets = {key}
+                console._update_selection()
+                assert not anchor.isEnabled() and '暂不支持' in anchor.toolTip()
+            assert console.interaction_target('emote')[0] is None
+            console.batch_targets = set(console.rows)
+            console._update_selection()
+            assert not anchor.isEnabled() and '请选择一位主播' in anchor.toolTip()
             return {'domestic_controls': ['douyu', 'huya', 'douyin'], 'credentials_read': False}
         finally:
             manager.unload()
@@ -700,7 +705,16 @@ def main():
     parser.add_argument('--host', type=Path, required=True)
     parser.add_argument('--output', type=Path)
     parser.add_argument('--platform-source', type=Path)
+    parser.add_argument('--platform-only', action='store_true')
     args = parser.parse_args()
+    if args.platform_only and not args.platform_source:
+        parser.error('--platform-only requires --platform-source')
+    if args.platform_source and not args.platform_only:
+        # Separate QApplication lifetimes: native composer cleanup must not leak between checks.
+        command = [sys.executable, str(Path(__file__).resolve()), '--host', str(args.host)]
+        subprocess.run(command + (['--output', str(args.output)] if args.output else []), check=True)
+        subprocess.run(command + ['--platform-source', str(args.platform_source), '--platform-only'], check=True)
+        return
     root = Path(__file__).resolve().parents[1]
     sys.path[:0] = [str(args.host.resolve()), str(root)]
     os.environ['DDM_NO_SAVE'] = '1'
@@ -711,9 +725,12 @@ def main():
     app = QApplication([])
     module.theme.apply('dark')
     with patch.object(socket.socket, 'connect', side_effect=AssertionError('Network forbidden')):
-        print(check(app, QWidget(), module, args.output))
-        if args.platform_source:
+        if args.platform_only:
             print(check_platform_controls(app, QWidget(), module, args.platform_source))
+        else:
+            print(check(app, QWidget(), module, args.output))
+    app.sendPostedEvents(None, 52)
+    app.shutdown()
     if dll:
         dll.close()
 
