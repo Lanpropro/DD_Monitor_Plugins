@@ -51,6 +51,8 @@ class LinkCursor(QObject):
 
 def use_link_cursor(widget):
     widget.setCursor(Qt.PointingHandCursor)
+    widget.setAttribute(Qt.WA_Hover)
+    widget.setMouseTracking(True)
     if not hasattr(widget, '_match_link_cursor'):
         widget._match_link_cursor = LinkCursor(widget)
         widget.installEventFilter(widget._match_link_cursor)
@@ -62,6 +64,10 @@ def style_checkbox(checkbox):
     checkbox.setMouseTracking(True)
     checkbox.setStyleSheet(f'''QCheckBox {{color: {theme.TEXT1}; border: none; border-radius: 5px; padding: 3px;}}
         QCheckBox:hover {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}''')
+
+
+def console_hover_color():
+    return theme.mix(theme.CONTENT, theme.ACCENT, .25)
 
 
 class ConsoleModeToggle(QCheckBox):
@@ -84,6 +90,11 @@ class ConsoleModeToggle(QCheckBox):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        hovered = self.isEnabled() and self.underMouse()
+        if hovered:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(theme.qcolor(console_hover_color()))
+            painter.drawRoundedRect(QRectF(self.rect()), 5, 5)
         y = self.height() / 2
         font = painter.font()
         font.setPixelSize(13)
@@ -99,7 +110,7 @@ class ConsoleModeToggle(QCheckBox):
             painter.setBrush(Qt.NoBrush)
             for x in (3, 17):
                 painter.drawRoundedRect(QRectF(x, y - 8, 8, 16), 1, 1)
-        painter.setPen(theme.qcolor(theme.TEXT1 if self.isChecked() else theme.TEXT2))
+        painter.setPen(theme.qcolor(theme.ACCENT if hovered else theme.TEXT1 if self.isChecked() else theme.TEXT2))
         painter.drawText(QRect(38, 0, self.width() - 38, self.height()), Qt.AlignVCenter, self.text())
         if self.hasFocus():
             painter.setPen(QPen(theme.qcolor(theme.ACCENT), 1, Qt.DashLine))
@@ -145,6 +156,11 @@ class ConsoleIconButton(QPushButton):
             QToolTip.showText(self.mapToGlobal(self.rect().bottomLeft()), self.toolTip(), self)
         return super().event(event)
 
+    def changeEvent(self, event):
+        if event.type() == QEvent.EnabledChange:
+            self.setCursor(Qt.PointingHandCursor if self.isEnabled() else Qt.ArrowCursor)
+        super().changeEvent(event)
+
     def paintEvent(self, event):
         super().paintEvent(event)
         painter = QPainter(self)
@@ -152,7 +168,7 @@ class ConsoleIconButton(QPushButton):
         hovered = self.isEnabled() and QApplication.widgetAt(QCursor.pos()) is self
         if hovered or self.isChecked() or self.hasFocus():
             painter.setPen(Qt.NoPen)
-            painter.setBrush(theme.qcolor(theme.ACCENT_SOFT))
+            painter.setBrush(theme.qcolor(console_hover_color() if hovered else theme.ACCENT_SOFT))
             painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 6, 6)
         if self.hasFocus():
             painter.setBrush(Qt.NoBrush)
@@ -163,10 +179,7 @@ class ConsoleIconButton(QPushButton):
         pen = QPen(theme.qcolor(color), 1.6)
         pen.setCapStyle(Qt.RoundCap)
         painter.setPen(pen)
-        if self.kind == 'add':
-            painter.drawLine(-6, 0, 6, 0)
-            painter.drawLine(0, -6, 0, 6)
-        elif self.kind == 'floating':
+        if self.kind == 'floating':
             painter.drawRoundedRect(QRectF(-8, -6, 16, 12), 2, 2)
             painter.drawRect(QRectF(1, 0, 5, 4))
         elif self.kind in ('sound', 'chat'):
@@ -263,7 +276,7 @@ class ConsoleChoice(QComboBox):
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(Qt.NoPen)
         if self.underMouse() or self.hasFocus():
-            painter.setBrush(theme.qcolor(theme.ACCENT_SOFT))
+            painter.setBrush(theme.qcolor(console_hover_color()))
             painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 5, 5)
         painter.translate(0, 2)
         font = painter.font()
@@ -385,14 +398,6 @@ class SettingsPanel(QWidget):
         path = QPainterPath()
         # Match the host's Tile and DanmakuPanel outer corners.
         path.addRoundedRect(QRectF(self.rect()), 10, 10)
-        if self.objectName() == 'MatchSyncSettings':
-            color = theme.qcolor(theme.CONTENT)
-            color.setAlpha(round(255 * self.viewer.panel_alpha) if self.viewer.skin_visible else 255)
-            painter.fillPath(path, color)
-            painter.setPen(QPen(theme.qcolor(theme.BORDER_STRONG), 1))
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRoundedRect(QRectF(self.rect()).adjusted(.5, .5, -.5, -.5), 10, 10)
-            return
         if self.objectName() == 'MatchSyncSendConsole':
             path.setFillRule(Qt.WindingFill)
             path.addRect(QRectF(0, 0, self.width(), 10))

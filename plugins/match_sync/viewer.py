@@ -29,7 +29,7 @@ from .engine import route_pcm_s16_stereo, Alignment, Match, RATE, SafetyBuffer, 
 from .media import Chat, Decoder, PlatformChat
 from .fullscreen import mark_fullscreen
 from .sending import SendConsole, SendingDanmakuPanel
-from .panels import ConsoleChoice, ConsoleIconButton, ConsoleModeToggle, MatchSettingsDialog, SettingsPanel, console_role_icon, style_checkbox
+from .panels import ConsoleChoice, ConsoleIconButton, ConsoleModeToggle, MatchSettingsDialog, SettingsPanel, console_hover_color, console_role_icon, style_checkbox, use_link_cursor
 from .replay import ReplayBar, ReplayTimeline
 from .floating import FloatingCrop
 from .regions import match_regions
@@ -901,10 +901,14 @@ class RoomRow(QFrame):
         self.main_button = QPushButton("主画面")
         self.main_button.setCheckable(True)
         self.main_button.setFixedWidth(96)
+        self.main_button.setFixedHeight(28)
+        self.main_button.setAutoDefault(False)
+        use_link_cursor(self.main_button)
         self.main_button.setIcon(console_role_icon())
         self.main_button.setStyleSheet(f'''QPushButton {{background: transparent; border: 1px solid {theme.BORDER_STRONG};
             border-radius: 5px; padding: 3px 6px; font-size: 12px;}}
-            QPushButton:checked {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT}; border-color: {theme.ACCENT};}}''')
+            QPushButton:checked {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT}; border-color: {theme.ACCENT};}}
+            QPushButton:hover, QPushButton:checked:hover {{background: {console_hover_color()}; color: {theme.ACCENT}; border-color: {theme.ACCENT};}}''')
         self.main_button.setToolTip("选择这位主播作为主画面，其他路声音与弹幕继续播放。")
         self.main_button.clicked.connect(lambda: viewer.select_main(room_id))
         self.audible = ConsoleIconButton('sound', '声音开关', size=32)
@@ -915,6 +919,7 @@ class RoomRow(QFrame):
         self.volume.setValue(int(preferences.get("volume", getattr(
             viewer.context.window, "settings", {}).get("default_volume", config_module.DEFAULT_VOLUME))))
         self.volume.setFixedWidth(72)
+        use_link_cursor(self.volume)
         self.volume_number = QLabel(str(self.volume.value()))
         self.volume_number.setFixedWidth(26)
         self.volume_number.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -951,6 +956,7 @@ class RoomRow(QFrame):
         self.increase.setToolTip("+ 正数：延后本路画面、声音和弹幕。单位秒，例如 +3 表示延后 3 秒。")
         for button in (self.decrease, self.increase):
             button.setFixedWidth(24)
+            use_link_cursor(button)
         self.decrease.clicked.connect(lambda: viewer.show_comparison(self.room_id))
         self.increase.clicked.connect(lambda: viewer.show_comparison(self.room_id))
         self.decrease.clicked.connect(self.delay.stepDown)
@@ -974,6 +980,10 @@ class RoomRow(QFrame):
         self.more = ConsoleIconButton('more', '更多操作', size=32)
         self.more.clicked.connect(self.open_more)
         self.join = QPushButton("确认对齐并加入")
+        self.join.setAutoDefault(False)
+        self.join.setFixedHeight(28)
+        self.join.setStyleSheet(self.main_button.styleSheet())
+        use_link_cursor(self.join)
         self.join.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.join.setToolTip("本路内容到达更晚；增加整组观看延迟后加入，原有各路保持相对同步。")
         self.join.clicked.connect(lambda: viewer.confirm_alignment(room_id))
@@ -994,6 +1004,7 @@ class RoomRow(QFrame):
         identity_heading.setSpacing(8)
         identity_heading.addWidget(self.name_label)
         identity_heading.addWidget(self.main_button)
+        identity_heading.addWidget(self.join)
         identity_heading.addStretch()
         identity_text.addLayout(identity_heading)
         identity_text.addWidget(self.status)
@@ -1012,7 +1023,8 @@ class RoomRow(QFrame):
         self.delay.setStyleSheet('QDoubleSpinBox {background: transparent; border: none; padding: 0; font-size: 12px;}')
         for step in (self.decrease, self.increase):
             step.setFixedHeight(30)
-            step.setStyleSheet('QPushButton {background: transparent; border: none; padding: 0; border-radius: 0;}')
+            step.setStyleSheet(f'''QPushButton {{background: transparent; border: none; padding: 0; border-radius: 0;}}
+                QPushButton:hover {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}''')
         for widget in (self.decrease, self.delay, self.increase):
             offset_layout.addWidget(widget)
         groups = [identity]
@@ -1077,7 +1089,7 @@ class RoomRow(QFrame):
             return
         self._compact_controls = compact
         grid = self.controls_grid
-        for widget in (*self.control_widgets, *self.group_labels, self.join):
+        for widget in (*self.control_widgets, *self.group_labels):
             grid.removeWidget(widget)
         for column in range(6):
             grid.setColumnMinimumWidth(column, 0)
@@ -1088,7 +1100,6 @@ class RoomRow(QFrame):
             grid.addWidget(widget, line, column)
         for column in range(3 if compact else 6):
             grid.setColumnStretch(column, 1 if compact or column in (0, 4) else 0)
-        grid.addWidget(self.join, 4 if compact else 2, 0, 1, 3 if compact else 6, Qt.AlignRight)
         self.control_columns = tuple(column for _, column in positions)
 
     def event(self, event):
@@ -1150,6 +1161,7 @@ class RoomRow(QFrame):
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.anchor = event.position().toPoint()
+            self.setCursor(Qt.ClosedHandCursor)
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
@@ -1177,10 +1189,12 @@ class RoomRow(QFrame):
                 drag.exec(Qt.MoveAction)
             finally:
                 self.viewer.end_row_drag()
+                self.setCursor(Qt.OpenHandCursor)
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
         self.anchor = None
+        self.setCursor(Qt.OpenHandCursor)
         super().mouseReleaseEvent(event)
 
     def dragEnterEvent(self, event):
@@ -1462,9 +1476,6 @@ class Viewer(QDialog):
         for widget in self.add_controls:
             heading.addWidget(widget)
         heading.addStretch(0)
-        self.add_room_button = ConsoleIconButton('add', '添加直播间', size=32)
-        self.add_room_button.clicked.connect(self.add_room_dialog)
-        heading.addWidget(self.add_room_button)
         self.match_settings_button = ConsoleIconButton('settings', '比赛二路设置', size=32)
         self.match_settings_button.clicked.connect(self.open_match_settings)
         heading.addWidget(self.match_settings_button)
@@ -1982,8 +1993,12 @@ class Viewer(QDialog):
 
     def align_room_controls(self):
         rows = list(self.rows.values())
-        if not rows:
+        if not rows or self.dragged_row is not None:
             return
+        name_width = min(140, max(row.name_label.fontMetrics().horizontalAdvance(row.name_label.text()) for row in rows))
+        for row in rows:
+            if row.name_label.width() != name_width or row.name_label.minimumWidth() != name_width:
+                row.name_label.setFixedWidth(name_width)
         widths = [max(min(widget.maximumWidth(), max(widget.minimumWidth(), widget.sizeHint().width()))
                       for widget in widgets) for widgets in zip(*(row.control_widgets for row in rows))]
         compact = self.controls.viewport().width() < sum(widths) + 12 * 5 + 16
@@ -2001,13 +2016,14 @@ class Viewer(QDialog):
             self.console_size_timer.start(0)
 
     def fit_console_height(self):
-        if self.settings_panel.isHidden():
+        if self.settings_panel.isHidden() or self.dragged_row is not None:
             return
         sizes = self.body_split.sizes()
         height = self.console_content_height
         self.body_split.setSizes([max(1, sizes[0] + sizes[2] - height), sizes[1], height])
 
     def begin_row_drag(self, room_id):
+        self.console_size_timer.stop()
         self.dragged_row = room_id
         self.row_preview = list(self.rows)
         self.row_slots = {key: row.geometry() for key, row in self.rows.items()}
@@ -2281,12 +2297,6 @@ class Viewer(QDialog):
             self.panel.apply_style(settings.get('danmaku_font', ''),
                                    int(settings.get('danmaku_font_size') or 13))
             self.panel.set_max_blocks(int(settings.get('danmaku_max_blocks') or 3000))
-
-    def add_room_dialog(self):
-        value, accepted = QInputDialog.getText(self, '添加直播间', '房间号、平台前缀或官方直播链接')
-        if accepted and value.strip():
-            self.input.setText(value.strip())
-            self._add_input()
 
     def position_removal_notice(self):
         self.removal_notice.move(max(0, (self.settings_panel.width() - self.removal_notice.width()) // 2),

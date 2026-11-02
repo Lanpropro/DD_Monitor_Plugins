@@ -9,7 +9,8 @@ from unittest.mock import patch
 
 
 def check(app, host, module, output=None):
-    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+    from PySide6.QtGui import QEnterEvent, QMouseEvent
     from PySide6.QtTest import QTest
     from ddm import plugins
     panels = import_module(module.__package__ + '.panels')
@@ -33,16 +34,56 @@ def check(app, host, module, output=None):
             assert isinstance(viewer.automatic, panels.ConsoleModeToggle)
             assert isinstance(viewer.compare, panels.ConsoleModeToggle)
             assert len(first.group_separators) == 3
+            assert not hasattr(viewer, 'add_room_button')
+            assert first.main_button.styleSheet() == second.main_button.styleSheet()
+            assert first.main_button.size() == second.main_button.size()
+            assert first.main_button.mapTo(first, QPoint()).x() == second.main_button.mapTo(second, QPoint()).x()
+            second.join.show()
+            app.processEvents()
+            assert second.join.parentWidget() is second.main_button.parentWidget()
+            assert second.join.y() == second.main_button.y()
+            assert 0 <= second.join.x() - second.main_button.geometry().right() <= 12
+            with patch.object(viewer, 'confirm_alignment') as confirm:
+                second.join.click()
+                confirm.assert_called_once_with('202')
+            for button in (first.main_button, second.join, first.decrease, first.increase,
+                           first.volume, first.channel, first.color_choice):
+                assert button.cursor().shape() == Qt.PointingHandCursor
+                assert button.testAttribute(Qt.WA_Hover)
+            assert first.delay.lineEdit().cursor().shape() == Qt.IBeamCursor
+            with patch.object(panels.QApplication, 'widgetAt', return_value=None):
+                normal = first.audible.grab().toImage()
+            with patch.object(panels.QApplication, 'widgetAt', return_value=first.audible):
+                assert first.audible.grab().toImage() != normal, 'Checked icons must still give hover feedback'
+            with patch.object(viewer.automatic, 'underMouse', return_value=False):
+                normal = viewer.automatic.grab().toImage()
+            with patch.object(viewer.automatic, 'underMouse', return_value=True):
+                assert viewer.automatic.grab().toImage() != normal
+            first.main_button.setAttribute(Qt.WA_UnderMouse, False)
+            normal = first.main_button.grab().toImage()
+            first.main_button.setAttribute(Qt.WA_UnderMouse, True)
+            app.sendEvent(first.main_button, QEnterEvent(QPointF(5, 5), QPointF(5, 5), QPointF(5, 5)))
+            app.sendEvent(first.main_button, QMouseEvent(QEvent.MouseMove, QPointF(5, 5), QPointF(5, 5),
+                                                       Qt.NoButton, Qt.NoButton, Qt.NoModifier))
+            QTest.qWait(40)
+            assert first.main_button.grab().toImage() != normal
+            first.main_button.setAttribute(Qt.WA_UnderMouse, False)
+            app.sendEvent(first.main_button, QEvent(QEvent.Leave))
             assert first.decrease.parentWidget() is first.offset_box
             assert first.delay.parentWidget() is first.offset_box
             assert first.increase.parentWidget() is first.offset_box
             assert not first.main_button.icon().isNull()
             assert not first.independent.isHidden() and not first.independent.isEnabled()
             assert not first.realign.isHidden() and not first.realign.isEnabled()
-            with patch.object(module.QInputDialog, 'getText', return_value=('303', True)):
-                viewer.add_room_button.click()
-            assert '303' in viewer.rows
-            viewer.remove_room('303')
+            assert first.independent.cursor().shape() == Qt.ArrowCursor
+            surfaces = [panels.SettingsPanel(viewer, name) for name in ('MatchSyncSettings', 'MatchSyncSendConsole')]
+            for surface in surfaces:
+                surface.resize(120, 140)
+            images = [surface.grab().toImage() for surface in surfaces]
+            assert images[0].pixelColor(0, 70) == images[1].pixelColor(0, 70), 'Use the adjacent console edge treatment'
+            for surface in surfaces:
+                surface.close()
+                surface.deleteLater()
             assert all(not label.isHidden() for label in first.group_labels)
             assert all(label.isHidden() for label in second.group_labels)
             for name in ('audible', 'channel', 'show_chat', 'color_choice', 'delay', 'more'):
@@ -103,6 +144,19 @@ def check(app, host, module, output=None):
                 assert sizes.call_count == 0, 'Do not resize the splitter inside a layout callback'
                 app.processEvents()
                 assert sizes.call_count >= 1, 'Apply the requested content height on the next event turn'
+            app.processEvents()
+            height = viewer.settings_panel.height()
+            splitter = viewer.body_split.sizes()
+            viewer.begin_row_drag('202')
+            viewer.align_room_controls()
+            viewer.fit_console_height()
+            QTest.qWait(30)
+            assert viewer.settings_panel.height() == height
+            assert viewer.body_split.sizes() == splitter
+            assert not viewer.console_size_timer.isActive()
+            viewer.end_row_drag()
+            QTest.qWait(30)
+            assert viewer.settings_panel.height() == height
             if output:
                 output = Path(output)
                 output.parent.mkdir(parents=True, exist_ok=True)
@@ -117,6 +171,7 @@ def check(app, host, module, output=None):
                 viewer.align_room_controls()
                 viewer.notice.setText('主画面：Machine · 自动对齐已开启')
                 viewer.audio_status.setText('声音已接管')
+                second.join.show()
                 QTest.qWait(30)
                 viewer.settings_panel.grab().save(str(output))
             menu = second.more_menu()
@@ -154,6 +209,8 @@ def check(app, host, module, output=None):
                         responsive=True, toggles=True, persisted_values=True,
                         crop_action=True, deferred_remove=True, undo_remove=True,
                         compact_identity=True, shared_offset=True, prototype_modes=True,
+                        inline_confirmation=True, role_alignment=True, drag_height_fixed=True,
+                        adjacent_console_edge=True, interactive_cursors=True,
                         no_playback_relayout=True,
                         media_playback=False)
         finally:
