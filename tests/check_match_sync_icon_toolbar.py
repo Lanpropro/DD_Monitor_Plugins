@@ -24,7 +24,7 @@ def check(app, host, module, output=None):
         try:
             viewer.add_room('101', {'alias': 'Machine'})
             viewer.add_room('202', {'alias': '大东彦', 'audible': False})
-            viewer.resize(1600, 900)
+            viewer.resize(2000, 900)
             viewer.show()
             QTest.qWait(50)
             viewer.align_room_controls()
@@ -128,7 +128,7 @@ def check(app, host, module, output=None):
             first.channel.hidePopup()
             QTest.keyClick(first.channel, Qt.Key_Down)
             assert first.channel.currentData() == 4
-            for width in (1100, 900, 1600):
+            for width in (1100, 900, 2000):
                 viewer.resize(width, 900)
                 QTest.qWait(35)
                 viewer.align_room_controls()
