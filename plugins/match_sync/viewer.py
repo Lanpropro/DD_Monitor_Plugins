@@ -2843,6 +2843,22 @@ class Viewer(QDialog):
             return recovered
         arrival = getattr(main.decoder, "last_frame_received", 0)
         fresh = not arrival or now - arrival <= 3
+        position = clock + shifts[main.room_id]
+        if (self.sync_waiting and not self.offset_repositioning
+                and bounds[0] <= position <= bounds[1] + .05
+                and position >= bounds[1] - .3):
+            # bounds_at keeps separate PTS intervals. Once a later interval is
+            # buffered, waiting for the old interval to grow can never finish.
+            following = main.decoder.history.bounds_at(bounds[1] + .1)
+            if (following is not None and following[0] > bounds[1] + .05
+                    and following[1] - following[0] >= .3):
+                self.sync_waiting = False
+                if position >= bounds[1] - .05 - 1e-6:
+                    recovered = following[0] - shifts[main.room_id]
+                    self.playback_probe.clock_gaps.append((time.perf_counter(), position, following[0]))
+                    self.audio.correction += recovered - clock
+                    clock, bounds = recovered, following
+                # Otherwise play the retained tail before crossing the gap.
         if clock + shifts[main.room_id] < bounds[0]:
             starting = self.alignment.automatic and self.stable_reference_shift is None
             if (main.was_isolated or starting) and fresh and bounds[1] - bounds[0] >= reserve:
