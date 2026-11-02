@@ -128,13 +128,15 @@ def check_mux(output):
     return dict(passed=True, files=results, real_network_requests=0)
 
 
-def check_pipeline(app, host, output):
+def check_pipeline(app, host, output, module=None):
+    from importlib import import_module
     import av
     import numpy as np
     from PySide6.QtTest import QTest
     from ddm.recording import ffmpeg_path
-    from plugins.match_sync.media import Decoder
-    from plugins.match_sync.recording import MultiTrackRecorder
+    package = module.__package__ if module is not None else 'plugins.match_sync'
+    Decoder = import_module(package + '.media').Decoder
+    MultiTrackRecorder = import_module(package + '.recording').MultiTrackRecorder
     decoders = []
     states = []
     try:
