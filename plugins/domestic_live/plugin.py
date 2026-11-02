@@ -762,6 +762,30 @@ class DouyuPlatform(NumericLivePlatform):
     follow_cookie_domain = "douyu.com"
     account_login_url = "https://passport.douyu.com/index/login?client_id=1"
 
+    def __init__(self):
+        super().__init__()
+        self._failed_cdns = {}
+        self._source_cdns = {}
+        self._cdn_lock = threading.Lock()
+
+    def report_playback_failure(self, room_id, url, reason):
+        if reason not in ("STALL", "LIVE_EOF", "HTTP_401", "HTTP_403", "HTTP_404", "HTTP_410",
+                          "HTTP_502", "HTTP_503", "HTTP_504"):
+            return
+        room = self.normalize(room_id)
+        host = urlsplit(url).hostname or ""
+        if not re.fullmatch(r"[A-Za-z0-9.-]{1,253}", host):
+            return
+        with self._cdn_lock:
+            cdn = self._source_cdns.get(room, {}).get(host, "")
+            failed = self._failed_cdns.setdefault(room, {})
+            failed[host] = time.monotonic()
+            if cdn:
+                failed[cdn] = failed[host]
+        logger = getattr(self, "_diagnostic_log", None)
+        if logger is not None:
+            logger(f"[平台诊断] 阶段=source_rejected 房间={room} CDN={host} 原因={reason} 避让秒数=60")
+
     def room_quality_options(self, room_id: str) -> list[dict]:
         options = super().room_quality_options(room_id)
         # rate=0 的“原画”不一定是最高分辨率；仅调整菜单，不改变取流档位映射。
@@ -930,6 +954,17 @@ class DouyuPlatform(NumericLivePlatform):
         cdn = ""
         if (urlsplit(data.get("rtmp_url", "")).hostname or "").endswith(".edgesrv.com"):
             cdn = next((name for name in ("hw-h5", "tct-h5", "ali-h5") if name in cdns), "")
+        canonical = self.normalize(room_id)
+        with self._cdn_lock:
+            failures = {key: stamp for key, stamp in self._failed_cdns.get(canonical, {}).items()
+                        if time.monotonic() - stamp < 60}
+            self._failed_cdns[canonical] = failures
+        host = urlsplit(data.get("rtmp_url", "")).hostname or ""
+        if cdn in failures or (not cdn and host in failures):
+            candidates = [item.get("cdn") for item in data.get("cdnsWithName", []) if item.get("cdn")]
+            if candidates:
+                # Use only the current API list; a failed CDN's next hostname is still avoided.
+                cdn = min(candidates, key=lambda name: (name in failures, failures.get(name, 0)))
         options = [{"qn": 10000 if item["rate"] == 0 else 2000000 + item["rate"],
                     "desc": item.get("name") or (
                         "原画" if item["rate"] == 0 else f"{item.get('bit', 0)} kbps"),
@@ -956,6 +991,10 @@ class DouyuPlatform(NumericLivePlatform):
                 raise getattr(api, "LoginRequiredError", RuntimeError)(
                     "斗鱼登录已失效或未登录，请重新登录后获取所选画质") from error
             raise RuntimeError("斗鱼未返回所选画质，请重试或选择其他线路/画质")
+        host = urlsplit(data['rtmp_url']).hostname or ""
+        with self._cdn_lock:
+            # Keep only unsigned host/CDN metadata for the current room's recovery.
+            self._source_cdns.setdefault(canonical, {})[host] = cdn or data.get("rtmp_cdn", "")
         stream = HTTPStream(session, f"{data['rtmp_url']}/{data['rtmp_live']}")
         stream.ddm_quality = 10000 if actual_rate == 0 else 2000000 + actual_rate
         return {"source": stream}
@@ -1863,11 +1902,10 @@ class LivePlatformsPlugin(api.Plugin):
             self._huya_interaction.shutdown()
         if event == api.EVENT_CLOSING and getattr(self, "_douyu_interaction", None) is not None:
             self._douyu_interaction.shutdown()
-        if (event == api.EVENT_STREAM_FAILED and self.context is not None and payload.get("source_url")
-                and getattr(self, "_diagnostic_enabled", False)):
+        if event == api.EVENT_STREAM_FAILED and self.context is not None and payload.get("source_url"):
             room = str((payload.get("room") or {}).get("room_id") or "")
-            if room.startswith("huya:"):
-                self.context.platform("huya").report_playback_failure(
+            if room.startswith(("huya:", "douyu:")):
+                self.context.platform(room.split(":", 1)[0]).report_playback_failure(
                     room, payload["source_url"], payload.get("reason"))
         if event == api.EVENT_CLOSING and self.context is not None:
             platform = self.context.platform("douyin")
