@@ -3939,10 +3939,15 @@ class Viewer(QDialog):
                    else row.decoder.history.frame_at(timestamp))
         if isinstance(picture, (tuple, list)) and len(picture) > 1:
             picture = picture[1]
-        return picture
+        return picture if isinstance(picture, QImage) else None
 
     def _pip_frames(self, row):
-        """A few recent grayscale frames of ``row``, oldest first."""
+        """A few recent grayscale frames of ``row``, oldest first.
+
+        The picture reader decodes on a worker thread, so past frames are often
+        not ready yet. The frame already drawn in the inset is the reliable
+        fallback: it is exactly what the user sees, and it is always there.
+        """
         frames = []
         seen = set()
         for back in (0.75, 0.5, 0.25, 0.0):
@@ -3953,6 +3958,12 @@ class Viewer(QDialog):
             thumb = self._pip_thumb(picture)
             if thumb is not None:
                 frames.append(thumb)
+        if not frames:
+            shown = getattr(self.canvas, "pip_image", None)
+            if shown is not None and not shown.isNull():
+                thumb = self._pip_thumb(shown)
+                if thumb is not None:
+                    frames.append(thumb)
         return frames
 
     def _auto_pip_crop_clicked(self):
@@ -3960,19 +3971,28 @@ class Viewer(QDialog):
         if row is None:
             self.say("请先把要放进画中画的那一路加入比赛二路，再自动框选", hold=6.0)
             return
-        self._auto_pip_crop_for(row)
+        self._auto_pip_crop_for(row, retries=2)
 
-    def _auto_pip_crop_for(self, row):
+    def _auto_pip_crop_for(self, row, retries=0):
         """Find the talker camera window in ``row`` and use it as the crop."""
-        frames = self._pip_frames(row)
+        try:
+            frames = self._pip_frames(row)
+        except Exception as error:  # a detector hiccup must never break playback
+            self.say(f"自动框选取画面失败：{error}", hold=8.0)
+            return False
         if not frames:
+            if retries > 0:
+                self.say("正在取这一路的画面…", hold=3.0)
+                QTimer.singleShot(250, lambda: self._auto_pip_crop_for(row, retries - 1))
+                return False
             self.say("这一路还没有画面：等播放稳定后再点「自动框选」，或用「框选画面」手动框", hold=6.0)
             return False
         rect = None
         try:
             rect, _score = detect_auto_crop(frames, faces=True)
-        except Exception:  # a detector hiccup must never break playback
-            rect = None
+        except Exception as error:
+            self.say(f"自动框选识别出错：{error}", hold=8.0)
+            return False
         if rect is None:
             self.say("没认出摄像头小窗：等画面稳定后再点一次，或用「框选画面」手动框", hold=6.0)
             return False

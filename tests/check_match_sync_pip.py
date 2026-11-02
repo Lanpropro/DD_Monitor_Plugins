@@ -1,6 +1,7 @@
 """Picture-in-picture geometry for the match sync plugin; standard library only."""
 from pathlib import Path
 import sys
+import types
 import unittest
 
 
@@ -274,6 +275,96 @@ class ViewerWiringTests(unittest.TestCase):
                      'timestamp = shown - back'):
             with self.subTest(text=text):
                 self.assertIn(text, self.source)
+
+
+class AutoCropPathTests(unittest.TestCase):
+    """Runs the real Viewer wiring on a bare instance, with Qt offscreen."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import match_sync.viewer as module
+        except Exception as error:  # the host or Qt is not installed here
+            raise unittest.SkipTest(f"viewer unavailable: {error}")
+        cls.module = module
+
+    def _viewer(self, grab):
+        module = self.module
+        viewer = module.Viewer.__new__(module.Viewer)
+        image = module.QImage(320, 180, module.QImage.Format_RGB32)
+        image.fill(0x204060)
+        viewer.canvas = types.SimpleNamespace(pip_image=image, image_rect=module.QRect(0, 0, 1600, 900))
+        viewer.pip_rect = (0.10, 0.10, 0.30, 0.30)
+        viewer.pip_stamp = ('', 0.0)
+        viewer.pip_active_room = lambda: ''
+        viewer.live_clock = lambda: 0.0
+        viewer.shifts = lambda: {}
+        viewer._grab_picture = grab
+        viewer.pip_enabled = True
+        viewer.messages = []
+        viewer.say = lambda text, hold=0.0: viewer.messages.append(text)
+        viewer._sync_pip_geometry = lambda: None
+        viewer.render = lambda: None
+        viewer.changed = lambda: None
+        return viewer
+
+    def test_the_inset_frame_is_the_fallback_when_past_frames_are_not_ready(self):
+        viewer = self._viewer(lambda row, back=0.0: None)
+        frames = self.module.Viewer._pip_frames(viewer, object())
+        self.assertEqual(len(frames), 1)
+        self.assertEqual(frames[0].shape, (540, 960))
+        self.assertEqual(frames[0].dtype.name, 'uint8')
+
+    def test_the_auto_crop_uses_the_detected_box_and_says_so(self):
+        viewer = self._viewer(lambda row, back=0.0: None)
+        row = types.SimpleNamespace(pip_crop=(0.0, 0.0, 1.0, 1.0))
+        original = self.module.detect_auto_crop
+        self.module.detect_auto_crop = lambda frames, faces=True: ((0.60, 0.04, 0.30, 0.30), 1.0)
+        try:
+            result = self.module.Viewer._auto_pip_crop_for(viewer, row)
+        finally:
+            self.module.detect_auto_crop = original
+        self.assertTrue(result)
+        self.assertLess(row.pip_crop[2], 1.0)
+        self.assertGreater(row.pip_crop[0], 0.5)
+        self.assertIn('已自动框选摄像头小窗', viewer.messages[-1])
+
+    def test_a_failed_detection_says_why_and_keeps_the_crop(self):
+        viewer = self._viewer(lambda row, back=0.0: None)
+        row = types.SimpleNamespace(pip_crop=(0.0, 0.0, 1.0, 1.0))
+        original = self.module.detect_auto_crop
+        self.module.detect_auto_crop = lambda frames, faces=True: (None, 0.0)
+        try:
+            result = self.module.Viewer._auto_pip_crop_for(viewer, row)
+        finally:
+            self.module.detect_auto_crop = original
+        self.assertFalse(result)
+        self.assertEqual(row.pip_crop, (0.0, 0.0, 1.0, 1.0))
+        self.assertIn('没认出摄像头小窗', viewer.messages[-1])
+
+    def test_a_detector_crash_is_reported_instead_of_vanishing(self):
+        viewer = self._viewer(lambda row, back=0.0: None)
+        row = types.SimpleNamespace(pip_crop=(0.0, 0.0, 1.0, 1.0))
+        original = self.module.detect_auto_crop
+
+        def boom(frames, faces=True):
+            raise RuntimeError('cascade exploded')
+
+        self.module.detect_auto_crop = boom
+        try:
+            result = self.module.Viewer._auto_pip_crop_for(viewer, row)
+        finally:
+            self.module.detect_auto_crop = original
+        self.assertFalse(result)
+        self.assertIn('cascade exploded', viewer.messages[-1])
+
+    def test_an_empty_crop_source_retries_before_giving_up(self):
+        viewer = self._viewer(lambda row, back=0.0: None)
+        viewer.canvas.pip_image = self.module.QImage()
+        row = types.SimpleNamespace(pip_crop=(0.0, 0.0, 1.0, 1.0))
+        result = self.module.Viewer._auto_pip_crop_for(viewer, row, retries=1)
+        self.assertFalse(result)
+        self.assertIn('正在取这一路的画面', viewer.messages[-1])
 
 
 class ConsoleQualityTests(unittest.TestCase):
