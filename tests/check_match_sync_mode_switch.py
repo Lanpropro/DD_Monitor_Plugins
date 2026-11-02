@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 
 def check(app, _host, module):
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import QAbstractAnimation, Qt
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QDialog, QFrame, QHBoxLayout, QToolButton, QVBoxLayout, QWidget
     from ddm import plugins
@@ -80,12 +80,15 @@ def check(app, _host, module):
                     QTest.qWait(70)
                     assert calls == ['construct', 'show'], calls
                     plugin.button.setChecked(False)
+                    assert not sidebar.layout_button.isHidden(), 'Layout entry waited for animation completion'
+                    assert plugin.entry._paint_width is None and plugin.entry._stretch.state() == QAbstractAnimation.Stopped
                     assert 'close' not in calls
                     QTest.qWait(70)
                     assert calls[-1] == 'close'
                     before = len(calls)
                     for active in (True, False, True):
                         plugin.button.setChecked(active)
+                        assert sidebar.layout_button.isHidden() == active
                     QTest.qWait(70)
                     assert calls[before:] == ['show'], calls
                     assert plugin.button.isChecked() and plugin.entry._mode
@@ -198,7 +201,7 @@ def check(app, _host, module):
                     assert disabled.thread is None and not disabled.path.exists()
                 return dict(passed=True, media_playback=False, feedback_before_construction=True,
                             latest_request_only=True, portrait_and_animation_off=True,
-                            hidden_entry_fallback=True, unload_cancels_pending=True,
+                            hidden_entry_fallback=True, unload_cancels_pending=True, immediate_layout_restore=True,
                             real_viewer_hooks=True, local_sidebar_styles=True, single_close_cleanup=True,
                             background_writer=True, bounded_sampling=True)
             finally:
