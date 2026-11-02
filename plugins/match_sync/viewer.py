@@ -6,10 +6,12 @@ import sys
 import threading
 import time
 from collections import deque
+from contextlib import nullcontext
 from dataclasses import replace
 from math import ceil
 from pathlib import Path
 from urllib.parse import urlsplit
+from shiboken6 import isValid
 
 from PySide6.QtCore import QEasingCurve, QEvent, QMetaObject, QMimeData, QObject, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QColor, QCursor, QDrag, QIcon, QImage, QKeySequence, QPainter, QPen, QPixmap, QRegion
@@ -1284,7 +1286,7 @@ class Viewer(QDialog):
         self.crop_repaint_timer.setInterval(16)
         self.crop_repaint_timer.timeout.connect(self.flush_crop_background)
         self.hidden_host_widgets = {}
-        self.sidebar_style = None
+        self.sidebar_item_styles = {}
         self.setAcceptDrops(True)
         self.setWindowTitle("比赛二路同步")
         self.setObjectName("MatchSync")
@@ -1678,12 +1680,17 @@ class Viewer(QDialog):
                     break
         return super().eventFilter(watched, event)
 
+    def _switch_stage(self, stage):
+        probe = getattr(self, 'switch_probe', None)
+        return probe.span(stage) if probe is not None else nullcontext()
+
     def showEvent(self, event):
         QApplication.instance().installEventFilter(self)
         if self.embedded:
             suspend = getattr(self.context.window, "set_match_sync_playback", None)
             if callable(suspend):
-                suspend(True)
+                with self._switch_stage('suspend_host_playback'):
+                    suspend(True)
             self.host_audio_timer.start()
             self._suppress_host_audio()
         if self.embedded and not self.hidden_host_widgets:
@@ -1693,8 +1700,9 @@ class Viewer(QDialog):
                     self.hidden_host_widgets[widget] = not widget.isHidden()
                     widget.installEventFilter(self)
                     widget.hide()
-        self._sync_sidebar_marks()
-        self.send_console.sync_height()
+        with self._switch_stage('show_controls'):
+            self._sync_sidebar_marks()
+            self.send_console.sync_height()
         super().showEvent(event)
 
     def hideEvent(self, event):
@@ -1715,23 +1723,34 @@ class Viewer(QDialog):
         for row in self.rows.values():
             row.refresh_avatar()
             self.send_console.refresh_avatar(row.room_id)
-        if self.sidebar_style is None:
-            self.sidebar_style = sidebar.styleSheet()
-            sidebar.setStyleSheet(self.sidebar_style + """
+        for item in getattr(sidebar, "_items", []):
+            row = self.rows.get(str(item.room.get("room_id") or ""))
+            active = self.running and row is not None and row.decoder is not None
+            self._style_sidebar_item(item, active, bool(item.property('onWall')))
+        self._sync_strip_marks(sidebar, True)
+
+    def _style_sidebar_item(self, item, active, hold):
+        changed = bool(item.property('matchSync')) != active
+        if changed:
+            item.setProperty('matchSync', active)
+        if active or hold:
+            original = self.sidebar_item_styles.setdefault(item, item.styleSheet())
+            style = original + """
                 #NavItem[onWall="true"] { border: none; }
                 #NavItem[matchSync="true"], #NavItem[matchSync="true"][onWall="true"] {
                     border: 1px solid #fb7299;
                 }
-            """)
-        for item in getattr(sidebar, "_items", []):
-            row = self.rows.get(str(item.room.get("room_id") or ""))
-            active = self.running and row is not None and row.decoder is not None
-            if item.property("matchSync") != active:
-                item.setProperty("matchSync", active)
-                item.style().unpolish(item)
-                item.style().polish(item)
-                item.update()
-        self._sync_strip_marks(sidebar, True)
+            """
+        elif item in self.sidebar_item_styles:
+            style = self.sidebar_item_styles.pop(item)
+        else:
+            return
+        if item.styleSheet() != style:
+            item.setStyleSheet(style)
+        elif changed:
+            item.style().unpolish(item)
+            item.style().polish(item)
+            item.update()
 
     def _sync_strip_marks(self, sidebar, enabled):
         strip = getattr(sidebar, "_head_strip", None)
@@ -1998,14 +2017,12 @@ class Viewer(QDialog):
         self.host_audio_timer.stop()
         self._release_host_audio()
         sidebar = getattr(self.context.window, "sidebar", None)
-        if sidebar is not None and self.sidebar_style is not None:
-            sidebar.setStyleSheet(self.sidebar_style)
-            self.sidebar_style = None
-            for item in getattr(sidebar, "_items", []):
-                item.setProperty("matchSync", False)
-                item.style().unpolish(item)
-                item.style().polish(item)
-                item.update()
+        if sidebar is not None:
+            for item in tuple(self.sidebar_item_styles):
+                if isValid(item):
+                    self._style_sidebar_item(item, False, False)
+                else:
+                    self.sidebar_item_styles.pop(item)
             self._sync_strip_marks(sidebar, False)
         previous, self.hidden_host_widgets = self.hidden_host_widgets, {}
         for widget, visible in previous.items():
@@ -2013,7 +2030,8 @@ class Viewer(QDialog):
             widget.setVisible(visible)
         resume = getattr(self.context.window, "set_match_sync_playback", None)
         if self.embedded and callable(resume):
-            resume(False)
+            with self._switch_stage('resume_host_playback'):
+                resume(False)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasFormat(ROOM_MIME):
@@ -3736,7 +3754,8 @@ class Viewer(QDialog):
         row.refresh_status()
 
     def stop(self):
-        self.playback_probe.stop()
+        with self._switch_stage('stop_playback_probe'):
+            self.playback_probe.stop()
         self.independent_playback.clear()
         for floating in list(self.floating_crops.values()):
             floating.close()
@@ -3757,16 +3776,18 @@ class Viewer(QDialog):
         self.render_timer.stop()
         self.match_timer.stop()
         self.compare.setChecked(False)
-        self.audio.stop()
+        with self._switch_stage('stop_audio'):
+            self.audio.stop()
         for _card, _name, canvas, state in self.comparison_panel.cards.values():
             canvas.set_frame(None)
             canvas.waiting = True
             state.setText("已停止")
-        for row in self.rows.values():
-            self._stop_row(row)
-            seed = self.sources.get(row.room_id) or {}
-            if str(seed.get("url") or "").startswith(("http://", "https://")):
-                self.sources.pop(row.room_id, None)
+        with self._switch_stage('stop_sources'):
+            for row in self.rows.values():
+                self._stop_row(row)
+                seed = self.sources.get(row.room_id) or {}
+                if str(seed.get("url") or "").startswith(("http://", "https://")):
+                    self.sources.pop(row.room_id, None)
         if not self.host_audio_timer.isActive():
             self._release_host_audio()
         self.panel.set_status("已停止")
@@ -3780,18 +3801,27 @@ class Viewer(QDialog):
         self._sync_sidebar_marks()
 
     def closeEvent(self, event):
+        if self.embedded:
+            self.reject()
+            event.accept()
+            return
         self.stop()
         if self.save_timer.isActive():
             self.save_timer.stop()
             self.save()
         super().closeEvent(event)
-        self._restore_host_widgets()
+        with self._switch_stage('restore_host_widgets'):
+            self._restore_host_widgets()
 
     def reject(self):
         if self.embedded:
             self.stop()
+            if self.save_timer.isActive():
+                self.save_timer.stop()
+                self.save()
             self.hide()
-            self._restore_host_widgets()
+            with self._switch_stage('restore_host_widgets'):
+                self._restore_host_widgets()
             self.finished.emit(0)
         else:
             super().reject()

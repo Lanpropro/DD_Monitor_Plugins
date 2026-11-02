@@ -1,5 +1,6 @@
 """Bounded playback evidence; the writer/sampler never calls Qt or waits on media locks."""
 from collections import deque
+from contextlib import contextmanager
 from datetime import datetime
 import hashlib
 import json
@@ -12,7 +13,7 @@ import sys
 import threading
 import time
 
-from PySide6.QtCore import QObject, QTimer, Qt
+from PySide6.QtCore import QEvent, QObject, QTimer, Qt
 
 
 class FrameCadence:
@@ -56,6 +57,147 @@ def stack(thread_id):
     finally:
         del frame
     return result
+
+
+class SwitchProbe(QObject):
+    """Sparse mode-switch evidence; file IO and bounded stall sampling stay off GUI."""
+    def __init__(self, parent, path):
+        super().__init__(parent)
+        self.path = Path(path)
+        self.enabled = os.environ.get('DDM_MATCH_DIAGNOSTICS', '1') != '0'
+        self.events = deque(maxlen=256)
+        self.wake = threading.Event()
+        self.stopped = threading.Event()
+        self.thread = None
+        self.gui_thread = threading.get_ident()
+        self.serial = 0
+        self.session = str(time.time_ns())
+        self.started = 0.
+        self.active = None
+        self.switching = False
+        self.target = None
+        self.button_painted = False
+        self.animation_ticks = deque(maxlen=64)
+        self.target_timeout = QTimer(self)
+        self.target_timeout.setSingleShot(True)
+        self.target_timeout.setInterval(5000)
+        self.target_timeout.timeout.connect(self._target_timeout)
+
+    def record(self, phase, **fields):
+        if self.enabled and self.serial and not self.stopped.is_set():
+            self.events.append(dict(time=time.time(), pid=os.getpid(), schema=1,
+                                    session=self.session, switch=self.serial, phase=phase,
+                                    elapsed_ms=round((time.perf_counter() - self.started) * 1000, 3), **fields))
+            self.wake.set()
+
+    def begin(self, enabled):
+        self._clear_target()
+        self.serial += 1
+        self.started = time.perf_counter()
+        self.button_painted = False
+        self.animation_ticks.clear()
+        self.switching = True
+        self.record('request', enabled=bool(enabled))
+        if self.enabled and not self.stopped.is_set() and self.thread is None:
+            self.thread = threading.Thread(target=self._run, name='match-switch-diagnostics', daemon=True)
+            self.thread.start()
+
+    @contextmanager
+    def span(self, stage):
+        if not self.enabled or not self.switching:
+            yield
+            return
+        previous = self.active
+        started = time.perf_counter()
+        self.active = (self.serial, stage, started)
+        self.record('stage_begin', stage=stage)
+        try:
+            yield
+        finally:
+            self.record('stage_end', stage=stage, duration_ms=round((time.perf_counter() - started) * 1000, 3))
+            self.active = previous
+
+    def button_paint(self):
+        if not self.button_painted:
+            self.button_painted = True
+            self.record('button_paint_completed')
+
+    def animation_tick(self, _value):
+        if self.enabled:
+            self.animation_ticks.append(time.perf_counter())
+
+    def animation_finished(self):
+        ticks = tuple(self.animation_ticks)
+        self.record('button_animation_finished', ticks=len(ticks),
+                    tick_gap_max_ms=round(max((b - a for a, b in zip(ticks, ticks[1:])), default=0) * 1000, 3))
+
+    def finish(self, enabled):
+        self.record('applied', enabled=enabled)
+        self.switching = False
+
+    def watch_target(self, widget):
+        self._clear_target()
+        if self.enabled and widget is not None:
+            self.target = widget
+            widget.installEventFilter(self)
+            self.target_timeout.start()
+
+    def _clear_target(self):
+        self.target_timeout.stop()
+        if self.target is not None:
+            self.target.removeEventFilter(self)
+            self.target = None
+
+    def _target_timeout(self):
+        self.record('target_paint_timeout')
+        self._clear_target()
+
+    def eventFilter(self, watched, event):
+        if watched is self.target and event.type() == QEvent.Paint:
+            # Dispatch time, not completion of child paints or physical presentation.
+            self.record('target_paint_event')
+            self._clear_target()
+        return False
+
+    def close(self):
+        self._clear_target()
+        self.active = None
+        self.stopped.set()
+        self.wake.set()
+
+    def _run(self):
+        handler = None
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            handler = RotatingFileHandler(self.path, maxBytes=2 * 1024 ** 2, backupCount=2, encoding='utf-8')
+            last_sample = 0.
+            sampled_serial, samples = 0, 0
+            while True:
+                self.wake.wait(.05 if self.active else 1.)
+                self.wake.clear()
+                active = self.active
+                now = time.perf_counter()
+                if active is not None:
+                    serial, stage, started = active
+                    if serial != sampled_serial:
+                        sampled_serial, samples = serial, 0
+                    if now - started >= .15 and now - last_sample >= .25 and samples < 16:
+                        self.events.append(dict(time=time.time(), pid=os.getpid(), schema=1,
+                                                session=self.session, switch=serial, phase='slow_stage', stage=stage,
+                                                duration_ms=round((now - started) * 1000, 3),
+                                                stack=stack(self.gui_thread)))
+                        samples += 1
+                        last_sample = now
+                while self.events:
+                    payload = self.events.popleft()
+                    handler.emit(logging.makeLogRecord(dict(msg=json.dumps(payload, ensure_ascii=False))))
+                if self.stopped.is_set():
+                    break
+        except OSError as error:
+            print(f'[二路切换诊断] {type(error).__name__}', file=sys.stderr)
+        finally:
+            if handler is not None:
+                handler.close()
 
 
 def picture_state(decoder, target, displayed, waiting):
