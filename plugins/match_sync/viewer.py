@@ -33,7 +33,7 @@ from .panels import ConsoleChoice, ConsoleIconButton, ConsoleModeToggle, MatchSe
 from .replay import ReplayBar, ReplayTimeline
 from .floating import FloatingCrop
 from .regions import match_regions
-from .diagnostics import PlaybackProbe
+from .diagnostics import AudioReadMetrics, PlaybackProbe
 
 COLORS = ("#38bdf8", "#fb7185", "#a78bfa", "#4ade80", "#fbbf24", "#fb923c")
 ROW_MIME = "application/x-ddm-match-sync-row"
@@ -363,6 +363,7 @@ class AudioFeed(QObject):
             pump.clock_snapshot = clock
             pump.clock_observation = pump.clock_floor = None
             pump.replay_cursors.clear()
+            pump.read_metrics.reset()
 
     @Slot()
     def state_changed(self):
@@ -407,6 +408,7 @@ class AudioPump(QObject):
         self.flush_clock = None
         self.replay_offset = None
         self.replay_cursors = {}
+        self.read_metrics = AudioReadMetrics()
         self.independent_histories = frozenset()
         self.timer = QTimer(self)
         self.timer.setInterval(10)
@@ -460,6 +462,7 @@ class AudioPump(QObject):
         self.clock_snapshot = None
         self.clock_observation = self.clock_floor = None
         self.snapshot = (1.0, ())
+        self.read_metrics.reset()
 
     def flush(self, target_clock=None):
         self.replay_offset = None
@@ -581,7 +584,9 @@ class AudioPump(QObject):
             actual_rate = media_frames / frames
             self.clock_segments.append((self.written, self.written + written, self.media_written, actual_rate))
             self.media_written += written / RATE * actual_rate
-            for history, target, source_frames in positions:
+            for (history, target, source_frames), source in zip(positions, sources):
+                self.read_metrics.record(id(history), target,
+                    source_frames / RATE * written / frames, source[2], source[3], source[4])
                 if self.replay_offset is not None or history in self.independent_histories:
                     self.replay_cursors[history] = (clock + written / RATE * actual_rate,
                         target + source_frames / RATE * written / frames)
@@ -2651,6 +2656,10 @@ class Viewer(QDialog):
         self._start_row(row)
         if not self.alignment.manual_locked:
             self.alignment.lags = {self.alignment.reference: 0}
+            if self.alignment.automatic:
+                self.stable_reference_shift = None
+                self.locked_clock = None
+                self.sync_waiting = False
         self.alignment.candidates.clear()
         self.generation += 1
         self.canvas.set_frame(None)
@@ -3172,8 +3181,27 @@ class Viewer(QDialog):
             return recovered
         arrival = getattr(main.decoder, "last_frame_received", 0)
         fresh = not arrival or now - arrival <= 3
+        position = clock + shifts[main.room_id]
+        if (self.sync_waiting and not self.offset_repositioning
+                and bounds[0] <= position <= bounds[1] + .05
+                and position >= bounds[1] - .3):
+            # bounds_at keeps separate PTS intervals. Once a later interval is
+            # buffered, waiting for the old interval to grow can never finish.
+            following = main.decoder.history.bounds_at(bounds[1] + .1, minimum_duration=.3)
+            if following is not None and following[0] > bounds[1] + .05:
+                self.sync_waiting = False
+                if position >= bounds[1] - .05 - 1e-6:
+                    recovered = following[0] - shifts[main.room_id]
+                    self.playback_probe.clock_gaps.append((time.perf_counter(), position, following[0]))
+                    self.audio.correction += recovered - clock
+                    clock, bounds = recovered, following
+                # Otherwise play the retained tail before crossing the gap.
         if clock + shifts[main.room_id] < bounds[0]:
             starting = self.alignment.automatic and self.stable_reference_shift is None
+            if (main.was_isolated or starting) and fresh and bounds[1] - bounds[0] < reserve:
+                ready = main.decoder.history.bounds_at(clock + shifts[main.room_id], minimum_duration=reserve)
+                if ready is not None:
+                    bounds = ready
             if (main.was_isolated or starting) and fresh and bounds[1] - bounds[0] >= reserve:
                 recovered = bounds[1] - shifts[main.room_id] - reserve
                 self.audio.correction += recovered - clock
@@ -3501,6 +3529,9 @@ class Viewer(QDialog):
                                      minimized=window.isMinimized(), exposed=handle.isExposed() if handle else False,
                                      active=window.isActiveWindow(), canvas_size=(self.canvas.width(), self.canvas.height()),
                                      source_size=getattr(row.decoder, 'video_size', (0, 0)),
+                                     main_slot=tuple(self.rows).index(row.room_id),
+                                     sync_waiting=self.sync_waiting,
+                                     main_started=self.stable_reference_shift is not None,
                                      screen_hz=screen.refreshRate() if screen else 0,
                                      playback_rate=self.playback_rate, replay=self.replay.active,
                                      audio_clock_interpolated=self.audio.clock_observation is not None,

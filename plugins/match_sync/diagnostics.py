@@ -77,6 +77,58 @@ class StageTimings:
                     and samples[0][0] >= now - 1), stages=result)
 
 
+class AudioReadMetrics:
+    """Numeric PCM read continuity; no audio content or sound-quality score."""
+    def __init__(self):
+        self.enabled = os.environ.get('DDM_MATCH_DIAGNOSTICS', '1') != '0'
+        self.samples = deque(maxlen=1024)
+        self.previous = {}
+        self.serial = 0
+
+    def reset(self):
+        self.previous.clear()
+        self.samples.clear()
+
+    def record(self, key, start, duration, rate, channel, gain, at=None):
+        if not self.enabled:
+            return
+        now = time.perf_counter() if at is None else at
+        previous = self.previous.get(key)
+        if previous is None:
+            self.serial += 1
+            slot = self.serial
+        else:
+            slot = previous[0]
+        # Returning after isolation is a new baseline, not a block discontinuity.
+        gap = (start - previous[2]) * 1000 if previous is not None and now - previous[1] < .2 else None
+        self.previous[key] = (slot, now, start + duration)
+        if len(self.previous) > 32:
+            self.previous.pop(next(iter(self.previous)))
+        self.samples.append((now, slot, gap, rate, channel, gain))
+
+    def stats(self, now=None):
+        now = time.perf_counter() if now is None else now
+        samples = tuple(self.samples)
+        groups = {}
+        for sample in samples:
+            if now - 1 <= sample[0] <= now:
+                groups.setdefault(sample[1], []).append(sample)
+        sources = []
+        for slot, values in sorted(groups.items()):
+            gaps = [item[2] for item in values if item[2] is not None]
+            sources.append(dict(audio_slot=slot, blocks=len(values),
+                gap_max_ms=round(max([0., *gaps]), 4),
+                overlap_max_ms=round(-min([0., *gaps]), 4),
+                discontinuities_over_1ms=sum(abs(gap) > 1 for gap in gaps),
+                rate_min=round(min(item[3] for item in values), 6),
+                rate_max=round(max(item[3] for item in values), 6),
+                channels=sorted({item[4] for item in values}),
+                gain_min=round(min(item[5] for item in values), 3),
+                gain_max=round(max(item[5] for item in values), 3)))
+        return dict(window_s=1, capacity_limited=bool(len(samples) == self.samples.maxlen
+                    and samples[0][0] >= now - 1), sources=sources)
+
+
 def stack(thread_id):
     result = []
     frame = sys._current_frames().get(thread_id)
@@ -246,6 +298,16 @@ def picture_state(decoder, target, displayed, waiting):
             if bounds and bounds[0] <= target <= bounds[1]:
                 result.update(encoded_bounds=bounds, encoded_ahead_s=round(bounds[1] - target, 3),
                               received_frames=candidate.received_frames)
+                intervals = tuple(getattr(candidate, 'intervals', ()))
+                for index, (start, end) in enumerate(intervals):
+                    if target <= end + .05:
+                        continuous = (max(start, bounds[0]), min(end, bounds[1]))
+                        result.update(contiguous_bounds=continuous,
+                            contiguous_ahead_s=round(max(0, continuous[1] - target), 3)
+                            if continuous[0] <= target <= continuous[1] else 0.)
+                        if index + 1 < len(intervals):
+                            result['following_bounds'] = intervals[index + 1]
+                        break
                 break
             result['encoded_bounds'] = bounds
         finally:
@@ -299,6 +361,7 @@ class PlaybackProbe(QObject):
         self.clock_steps = FrameCadence()
         self.surface = {}
         self.pipeline_sources = ()
+        self.clock_gaps = deque(maxlen=32)
         self.timings = StageTimings()
         self.cpu_observation = (time.perf_counter(), time.process_time())
 
@@ -313,6 +376,7 @@ class PlaybackProbe(QObject):
         self.submitted.samples.clear()
         self.painted.samples.clear()
         self.clock_steps.samples.clear()
+        self.clock_gaps.clear()
         self.surface = {}
         self.pipeline_sources = ()
         self.timings.samples.clear()
@@ -393,6 +457,10 @@ class PlaybackProbe(QObject):
                       painted_cadence=self.painted.stats(now, fps), clock_cadence=self.clock_steps.stats(now))
         result['process_cpu_cores'] = round((cpu - previous_cpu) / max(.001, now - previous_wall), 3)
         result['gui_pipeline'] = self.timings.stats(now)
+        result['clock_gap_recoveries'] = [dict(at=at, before=before, after=after)
+            for at, before, after in tuple(self.clock_gaps) if now - 1 <= at <= now]
+        if self.audio is not None:
+            result['audio_reads'] = self.audio.read_metrics.stats(now)
         result['source_pipelines'] = [dict(slot=slot, source_fps=decoder.fps,
             analysis_size=decoder.analysis_size, capture=decoder.timings.stats(now),
             display=decoder.pictures.timings.stats(now)) for slot, decoder in self.pipeline_sources]
@@ -413,7 +481,8 @@ class PlaybackProbe(QObject):
             from .media import Decoder, analysis_gray
             write('start', schema=3, picture_code=hashlib.sha256(marshal.dumps(PictureReader.get.__code__)).hexdigest(),
                   capture_code=hashlib.sha256(marshal.dumps(Decoder._capture.__code__)).hexdigest(),
-                  analysis_gray_code=hashlib.sha256(marshal.dumps(analysis_gray.__code__)).hexdigest())
+                  analysis_gray_code=hashlib.sha256(marshal.dumps(analysis_gray.__code__)).hexdigest(),
+                  audio_read_metrics=1, pts_gap_recovery=2)
             sampled = 0
             last_stack = last_report = 0.0
             reported_stall = False
