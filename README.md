@@ -4,6 +4,10 @@
 
 本仓库只包含二路插件本体，不包含其他插件，也没有其他插件的下载入口。
 
+## 超级大爆💥已对石家庄第一🐷做了特殊适配功能！！！
+<img width="344" height="270" alt="df1df0eef5499f33d4fc20086da0ab2c" src="https://github.com/user-attachments/assets/a14d0774-712c-42a6-9167-75d9c463b3e8" />
+
+
 ## 适用范围
 
 - 本体：DD 监控室 CE `0.6` 及以上，Windows 10/11
