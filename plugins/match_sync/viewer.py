@@ -30,9 +30,7 @@ from .sending import SendConsole, SendingDanmakuPanel
 from .panels import ConsoleIconButton, MatchSettingsDialog, SettingsPanel, style_checkbox
 from .replay import ReplayBar, ReplayTimeline
 from .regions import match_regions
-import numpy as np
 
-from .autocrop import clamp as clamp_auto_crop, detect_best, snap as snap_auto_crop
 from .pip import (CORNERS as PIP_CORNERS, DEFAULT_WIDTH, HANDLE, MAX_WIDTH, MIN_BOX, MIN_WIDTH,
                 clamp_box, clamp_crop, crop_pixels, fit, from_normalized, inset as pip_inset,
                 resize_keeping_aspect, to_normalized)
@@ -109,7 +107,6 @@ class Canvas(QFrame):
         self.presented = 0
         self.repeated = 0
         self.selecting = selecting
-        self.snap_gray = None
         self.crop = QRectF(0, 0, 1, 1)
         self.anchor = None
         self.image_rect = QRectF()
@@ -369,8 +366,6 @@ class Canvas(QFrame):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if self.selecting and self.snap_gray is not None and event.button() == Qt.LeftButton:
-            self._snap_selection()
         if self.pip_drag is not None:
             self.pip_drag = None
             if self.pip_rect is not None:
@@ -380,16 +375,6 @@ class Canvas(QFrame):
             return
         self.anchor = None
         super().mouseReleaseEvent(event)
-
-    def _snap_selection(self):
-        """Pull the drawn edges onto the nearest strong content step."""
-        if self.crop.width() <= 0.02 or self.crop.height() <= 0.02:
-            return
-        rect = snap_auto_crop(self.snap_gray, tuple(self.crop.getRect()))
-        if rect is None:
-            return
-        self.crop = QRectF(*rect)
-        self.update()
 
     def leaveEvent(self, event):
         if self.pip_hover:
@@ -1491,11 +1476,6 @@ class Viewer(QDialog):
         self.pip_source = QComboBox()
         self.pip_source.setMinimumWidth(150)
         self.pip_source.setToolTip("画中画取自哪一路：通常是画质较糊、但想看到人脸的那一路。")
-        self.pip_auto_button = QPushButton("自动框选")
-        self.pip_auto_button.setToolTip(
-            "自动识别这一路画面里的摄像头小窗并框出来；点一次即可，"
-            "框得不准时再用「框选画面」手动微调。")
-        self.auto_pip_done = False
         self.pip_crop_button = QPushButton("框选画面")
         self.pip_crop_button.setToolTip("拖选画中画要显示的部分，例如二路解说的人脸。")
         self.pip_hint = QLabel("小窗可拖动，拖右下角缩放")
@@ -1504,12 +1484,10 @@ class Viewer(QDialog):
         self.pip_check.toggled.connect(self._pip_changed)
         self.pip_source.currentIndexChanged.connect(self._pip_changed)
         self.pip_crop_button.clicked.connect(self._pip_crop_clicked)
-        self.pip_auto_button.clicked.connect(self._auto_pip_crop_clicked)
         self.pip_row = QHBoxLayout()
         self.pip_row.setSpacing(6)
         self.pip_row.addWidget(self.pip_check)
         self.pip_row.addWidget(self.pip_source, 1)
-        self.pip_row.addWidget(self.pip_auto_button)
         self.pip_row.addWidget(self.pip_crop_button)
         self.pip_row.addWidget(self.pip_hint)
         self.hidden_host_widgets = {}
@@ -3754,8 +3732,6 @@ class Viewer(QDialog):
         canvas = Canvas(selecting=True)
         canvas.set_frame(frame)
         canvas.waiting = frame is None
-        if frame is not None:
-            canvas.snap_gray = self._pip_thumb(frame[1] if isinstance(frame, (tuple, list)) else frame, 640, 360)
         canvas.crop = QRectF(*initial)
         reset = QPushButton("使用整个画面")
         reset.clicked.connect(lambda: (setattr(canvas, "crop", QRectF(0, 0, 1, 1)), canvas.update()))
@@ -3836,6 +3812,49 @@ class Viewer(QDialog):
         self.pip_rect = self.canvas.pip_rect
         self.changed()
 
+    def _keep_pip_centre(self, previous, current):
+        """Keep the inset's centre when the crop's aspect ratio changes.
+
+        The inset's height follows the crop. Re-hanging the box from its
+        top-left corner made it grow downwards and then get pushed back inside
+        the picture, which read as the crop "jumping" right after a manual
+        selection. Keep the centre instead: the box only gets taller or
+        shorter around the same point, and moves only when it would leave the
+        picture.
+        """
+        rect = self.pip_rect
+        area = self.canvas.image_rect
+        if rect is None or area is None or area.isEmpty():
+            return
+        ratio = area.width() / max(1.0, area.height())
+        try:
+            # Aspect of the crop as drawn: the normalized crop scaled by the
+            # picture's own aspect ratio.
+            old_aspect = float(previous[2]) / float(previous[3]) * ratio
+            new_aspect = float(current[2]) / float(current[3]) * ratio
+        except (TypeError, ValueError, IndexError, ZeroDivisionError):
+            return
+        if old_aspect <= 0.0 or new_aspect <= 0.0:
+            return
+        x, y, width = float(rect[0]), float(rect[1]), float(rect[2])
+        shown = width * ratio / old_aspect
+        wanted = width * ratio / new_aspect
+        if abs(wanted - shown) < 0.002:
+            return
+        centre_x = x + width / 2.0
+        centre_y = y + shown / 2.0
+        # The taller box must still fit around the centre; if it cannot, give up
+        # width for height instead of moving the inset.
+        room = 2.0 * min(centre_y, 1.0 - centre_y)
+        if wanted > room or wanted > 1.0:
+            limit = min(room, 1.0)
+            width = max(0.10, limit * new_aspect / ratio)
+            wanted = width * ratio / new_aspect
+        width = max(0.06, min(0.95, width))
+        centre_x = min(max(centre_x, width / 2.0), 1.0 - width / 2.0)
+        top = min(max(0.0, centre_y - wanted / 2.0), max(0.0, 1.0 - wanted))
+        self.pip_rect = (centre_x - width / 2.0, top, width, wanted)
+
     def _read_pip(self):
         self.pip_enabled = self.pip_check.isChecked()
         data = self.pip_source.currentData()
@@ -3843,7 +3862,6 @@ class Viewer(QDialog):
             self.pip_room = str(data)
         self.pip_source.setEnabled(self.pip_enabled)
         self.pip_crop_button.setEnabled(self.pip_enabled and bool(self.pip_room))
-        self.pip_auto_button.setEnabled(self.pip_enabled and bool(self.pip_room))
         self.pip_hint.setEnabled(self.pip_enabled)
         if self.pip_enabled and not self.pip_room:
             self.notice.setText("画中画没有可选来源：请再拖入至少一位主播，或先取消勾选")
@@ -3853,9 +3871,6 @@ class Viewer(QDialog):
         self._read_pip()
         self.render()
         self.changed()
-        if self.pip_enabled and not self.auto_pip_done:
-            self.auto_pip_done = True
-            QTimer.singleShot(1200, self._auto_pip_first)
 
     def _update_pip_choices(self):
         reference = self.alignment.reference
@@ -3875,86 +3890,6 @@ class Viewer(QDialog):
         self.pip_crop_button.setEnabled(self.pip_enabled and bool(self.pip_room))
         self._sync_pip_geometry()
 
-    @staticmethod
-    def _pip_thumb(image, width=320, height=180):
-        """A small grayscale copy of ``image`` for the auto crop detector."""
-        if image is None or image.isNull():
-            return None
-        small = image.scaled(width, height, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
-        if small.isNull():
-            return None
-        small = small.convertToFormat(QImage.Format_Grayscale8)
-        stride = small.bytesPerLine()
-        data = np.frombuffer(small.constBits(), dtype=np.uint8, count=stride * small.height())
-        return data.reshape(small.height(), stride)[:, :small.width()].copy()
-
-    def _grab_picture(self, row):
-        """Current decoded picture of one room, or None."""
-        if row is None or row.decoder is None:
-            return None
-        timestamp = self.live_clock() + self.shifts().get(row.room_id, 0)
-        picture = (row.decoder.picture_at(timestamp) if hasattr(row.decoder, "picture_at")
-                   else row.decoder.history.frame_at(timestamp))
-        if isinstance(picture, (tuple, list)) and len(picture) > 1:
-            picture = picture[1]
-        return picture
-
-    def _auto_pip_crop_clicked(self):
-        row = self.rows.get(self.pip_source.currentData() or self.pip_room)
-        if row is None:
-            self.notice.setText("请先把要放进画中画的那一路加入比赛二路，再自动框选")
-            return
-        found = self._auto_pip_crop_for(row)
-        if not found:
-            self.notice.setText("没认出摄像头小窗：等画面稳定后再点一次，或用「框选画面」手动框")
-
-    def _auto_pip_first(self):
-        if not self.pip_enabled:
-            return
-        row = self.rows.get(self.pip_room)
-        if row is None:
-            return
-        if tuple(row.pip_crop) != (0.0, 0.0, 1.0, 1.0):
-            return
-        self._auto_pip_crop_for(row, quiet=True)
-
-    def _auto_pip_crop_for(self, row, quiet=False):
-        """Detect the talker camera window in ``row`` once and store it as the crop."""
-        picture = self._grab_picture(row)
-        if picture is None:
-            if not quiet:
-                self.notice.setText("这一路还没有画面：等播放稳定后再点「自动框选」")
-            return False
-        frames = []
-        for size in ((640, 360), (480, 270), (320, 180)):
-            thumb = self._pip_thumb(picture, *size)
-            if thumb is not None:
-                frames.append(thumb)
-        if not frames:
-            return False
-        if not quiet:
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-            QApplication.processEvents()
-        try:
-            rect, score = detect_best(frames, faces=True)
-        finally:
-            if not quiet:
-                QApplication.restoreOverrideCursor()
-        if rect is None:
-            if not quiet:
-                self.notice.setText("没认出摄像头小窗：等画面稳定后再点一次，或用「框选画面」手动框")
-            return False
-        snapped = snap_auto_crop(frames[0], rect)
-        row.pip_crop = clamp_auto_crop(snapped if snapped is not None else rect)
-        if not self.pip_enabled:
-            self.pip_check.setChecked(True)
-        self._sync_pip_geometry()
-        self.render()
-        self.changed()
-        if not quiet:
-            self.notice.setText(f"已自动框选摄像头区域（置信度 {score:.0f}），可再用「框选画面」微调")
-        return True
-
     def _pip_crop_clicked(self):
         row = self.rows.get(self.pip_source.currentData() or self.pip_room)
         if row is None:
@@ -3966,7 +3901,9 @@ class Viewer(QDialog):
             "自动匹配与时间对齐仍使用完整画面，不受影响；画质取决于那一路本身，本插件只做裁剪放大。")
         if rect is None:
             return
+        previous = tuple(row.pip_crop)
         row.pip_crop = rect
+        self._keep_pip_centre(previous, rect)
         self._sync_pip_geometry()
         self.render()
         self.changed()
@@ -4037,7 +3974,6 @@ class Viewer(QDialog):
 
     def stop(self):
         self.analysis_serial += 1
-        self.auto_pip_done = False
         self.late_buffer = LateBuffer(self.reserve_seconds)
         self.late_notice.hide()
         self.matching = False

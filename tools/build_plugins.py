@@ -18,7 +18,8 @@ def build():
         assert re.fullmatch(r"[a-z][a-z0-9_]*", plugin_id)
         assert manifest["id"] == plugin_id
         version = manifest["version"]
-        assert re.fullmatch(r"[0-9]+(?:\.[0-9]+)*", version)
+        # Plain dotted numbers, plus the maintainer's "2.0r1" revision suffix.
+        assert re.fullmatch(r"[0-9]+(?:\.[0-9]+)*(?:r[0-9]+)?", version)
         tracked = subprocess.check_output(
             ["git", "ls-files", "-z", "--", f"plugins/{plugin_id}/"], cwd=ROOT
         ).decode("utf-8").split("\0")

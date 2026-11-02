@@ -181,15 +181,29 @@ class ViewerWiringTests(unittest.TestCase):
         self.assertIn('tuple(row.pip_crop) if row is not None else (0.0, 0.0, 1.0, 1.0)', self.source)
         self.assertNotIn('self.canvas.pip_crop = QRectF(', self.source)
 
-    def test_the_auto_crop_button_writes_the_detected_box(self):
-        for text in ('QPushButton("自动框选")', 'self.pip_auto_button.clicked.connect(self._auto_pip_crop_clicked)',
-                     'row.pip_crop = clamp_auto_crop(snapped if snapped is not None else rect)',
-                     'detect_best(frames, faces=True)', 'snap_auto_crop(frames[0], rect)'):
+    def test_the_manual_crop_is_the_only_way_to_set_the_box(self):
+        for text in ('self.pip_crop_button.clicked.connect(self._pip_crop_clicked)',
+                     'row.pip_crop = rect', 'self._keep_pip_centre(previous, rect)'):
             with self.subTest(text=text):
                 self.assertIn(text, self.source)
-        for stale in ('自动跟随摄像头', 'pip_follow', 'pip_follower'):
+        for stale in ('自动框选', 'pip_auto_button', 'auto_pip', 'detect_best', 'snap_auto_crop',
+                      'snap_gray', '_snap_selection', 'autocrop', 'pip_follow', 'pip_follower'):
             with self.subTest(stale=stale):
                 self.assertNotIn(stale, self.source)
+
+    def test_the_crop_change_keeps_the_inset_centre(self):
+        start = self.source.index('def _keep_pip_centre')
+        end = self.source.index('def _read_pip', start)
+        body = self.source[start:end]
+        for text in ('old_aspect = float(previous[2]) / float(previous[3]) * ratio',
+                     'new_aspect = float(current[2]) / float(current[3]) * ratio',
+                     'shown = width * ratio / old_aspect',
+                     'wanted = width * ratio / new_aspect',
+                     'centre_x = x + width / 2.0',
+                     'centre_y = y + shown / 2.0',
+                     'self.pip_rect = (centre_x - width / 2.0, top, width, wanted)'):
+            with self.subTest(text=text):
+                self.assertIn(text, body)
 
     def test_the_inset_has_no_accent_border(self):
         start = self.source.index('def _paint_pip')

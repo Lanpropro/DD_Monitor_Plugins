@@ -2,11 +2,23 @@
 
 插件 ID：`match_sync`。
 
-上次公开发布基线：[match-sync-v1.4](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.4)。
+上次公开发布基线：上游 [match-sync-v1.4](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.4)；本 Fork 基线 [match-sync-v2.0.0](https://github.com/Sarff11/DD_Monitor_Plugins/releases/tag/match-sync-v2.0.0)。
 
 记录规则与条目模板见[增量记录入口](README.md)。
 
 ## 待发布
+
+### 2026-11-02｜修复：手动框选后小窗跳位，移除自动框选
+
+- 更新内容：画中画不再自动识别摄像头区域，「自动框选」按钮、开启画中画后的自动识别与手动框选松手后的四边贴合一起移除，裁剪只由手动框选决定（`viewer.py` 去掉 `autocrop` 全部接线，`autocrop.py` 与 `tests/check_match_sync_autocrop.py` 删除）。手动框选后裁剪比例变化时，小窗改为以中心为锚重算高度，高度放不下时先让出宽度，不再从左上角重新悬挂并被画面边界顶回去（新增 `_keep_pip_centre`）；只有调整后仍越界时才平移。版本号 `2.0r1`。
+- 验收：2026-11-02，`tests/check_match_sync_pip.py` 44 例通过（含「手动框选是唯一入口」「换裁剪后小窗中心不动」两条断言），`tests/check_match_sync_console.py` 3 例、`tests/check_contributing.py` 8 例、`tests/check_packages.py`、`compileall` 通过；实机验收待维护者确认。
+- 追踪：本次提交。
+- 集成状态：尚未合入默认分支。
+- 发布注意：相对 `2.0.0` 功能只减不增，配置无需迁移；按维护者规则本版先归档、不创建 Tag 与 Release。
+
+## 已发布 v2.0.0（2026-11-01）
+
+Release 链接：<https://github.com/Sarff11/DD_Monitor_Plugins/releases/tag/match-sync-v2.0.0>。
 
 ### 2026-11-01｜修复：弹幕控制台窄宽度下房间列压住输入框
 
@@ -15,6 +27,10 @@
 - 追踪：本次提交。
 - 集成状态：尚未合入默认分支。
 - 发布注意：只改界面布局，无配置迁移；2.0.0 待维护者实测确认后再发布。
+
+## 已发布 v1.11.0（2026-11-01）
+
+Release 链接：<https://github.com/Sarff11/DD_Monitor_Plugins/releases/tag/match-sync-v1.11.0>。该功能已在 `2.0r1` 移除。
 
 ### 2026-11-01｜新增：画中画自动框选摄像头区域
 
