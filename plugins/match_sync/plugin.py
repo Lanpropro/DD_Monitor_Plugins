@@ -1,10 +1,11 @@
 """Package entry point loaded by DD Monitor CE's single-file plugin loader."""
 import os
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QEasingCurve, QEvent, QSize, Qt, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QSizePolicy, QStyle, QStyleOptionToolButton, QStylePainter, QToolButton
+from PySide6.QtWidgets import QSizePolicy, QStyle, QStyleOptionToolButton, QToolButton, QWidget
 
 from ddm import plugins as api
 from ddm import motion
@@ -18,9 +19,27 @@ from .viewer import Viewer
 from .diagnostics import SwitchProbe
 
 
+class EntryStretch(QWidget):
+    """Paint the button's transition without retaining its old layout space."""
+    def __init__(self, entry, width):
+        super().__init__(entry.parentWidget())
+        self.entry = entry
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setGeometry(entry.x(), entry.y(), max(entry.width(), round(width)), entry.height())
+
+    def paintEvent(self, event):
+        self.entry.sync_transition()
+        if self.entry._paint_width is not None:
+            painter = QPainter(self)
+            self.entry._paint_button(painter, self.entry._paint_width)
+            painter.end()
+            self.entry._feedback_painted()
+
+
 class EntryButton(QToolButton):
     """Use the original horizontal entry and a separate portrait icon."""
     feedback_painted = Signal()
+    transition_finished = Signal()
 
     def __init__(self, sidebar, action):
         super().__init__(sidebar)
@@ -28,6 +47,8 @@ class EntryButton(QToolButton):
         self._top = None
         self._mode = False
         self._paint_width = None
+        self._transition = None
+        self._overlay = None
         self._feedback_pending = False
         self._stretch = QVariantAnimation(self)
         self._stretch.setDuration(160)
@@ -61,38 +82,73 @@ class EntryButton(QToolButton):
     def set_mode(self, active):
         if self._mode == bool(active):
             return
+        self.sync_transition()
         old_width = self._paint_width if self._paint_width is not None else self.width()
+        old_parent = self.parentWidget()
+        self._clear_transition()
         self._mode = bool(active)
-        self._stretch.stop()
-        self._paint_width = None
         self._place()
         self.parentWidget().layout().activate()
         target = self.width()
-        if active and self.isVisible() and motion.enabled() and target != old_width:
-            self._stretch.setStartValue(float(old_width))
-            self._stretch.setEndValue(float(target))
+        if (self.isVisible() and motion.enabled() and target != old_width
+                and self.parentWidget() is old_parent):
+            self._transition = (old_width, target, time.perf_counter())
+            self._paint_width = round(old_width)
+            self._overlay = EntryStretch(self, max(old_width, target))
+            self._overlay.show()
+            self._overlay.raise_()
+            self._stretch.setStartValue(0.)
+            self._stretch.setEndValue(1.)
             self._stretch.start()
         self.update()
 
-    def _stretch_frame(self, width):
-        self._paint_width = round(width)
+    def sync_transition(self):
+        if self._transition is None:
+            return
+        start, target, started = self._transition
+        progress = min(1., max(0., (time.perf_counter() - started) * 1000 / self._stretch.duration()))
+        if progress >= 1.:
+            self._stretch_finished()
+        else:
+            eased = self._stretch.easingCurve().valueForProgress(progress)
+            self._paint_width = round(start + (target - start) * eased)
+
+    def _stretch_frame(self, _value):
+        self.sync_transition()
+        if self._overlay is not None:
+            self._overlay.update()
         self.update()
+
+    def _clear_transition(self):
+        self._stretch.stop()
+        self._transition = None
+        self._paint_width = None
+        if self._overlay is not None:
+            self._overlay.hide()
+            self._overlay.deleteLater()
+            self._overlay = None
 
     def _stretch_finished(self):
-        self._paint_width = None
+        active = self._transition is not None
+        self._clear_transition()
         self.update()
+        if active:
+            self.transition_finished.emit()
+
+    def _paint_button(self, painter, width):
+        option = QStyleOptionToolButton()
+        self.initStyleOption(option)
+        option.rect.setWidth(width)
+        painter.setClipRect(option.rect)
+        self.style().drawComplexControl(QStyle.CC_ToolButton, option, painter, self)
 
     def paintEvent(self, event):
-        if self._paint_width is None:
+        self.sync_transition()
+        if self._overlay is None:
             super().paintEvent(event)
-        else:
-            painter = QStylePainter(self)
-            option = QStyleOptionToolButton()
-            self.initStyleOption(option)
-            option.rect.setWidth(self._paint_width)
-            painter.setClipRect(option.rect)
-            painter.drawComplexControl(QStyle.CC_ToolButton, option)
-            painter.end()
+            self._feedback_painted()
+
+    def _feedback_painted(self):
         if self._feedback_pending:
             self._feedback_pending = False
             self.feedback_painted.emit()
@@ -113,8 +169,14 @@ class EntryButton(QToolButton):
             watched.hide()
         if watched is self.sidebar and event.type() in (
                 QEvent.LayoutRequest, QEvent.Resize, QEvent.Show):
+            if event.type() == QEvent.Resize:
+                self._stretch_finished()
             self._placement.start(0)
         return super().eventFilter(watched, event)
+
+    def hideEvent(self, event):
+        self._stretch_finished()
+        super().hideEvent(event)
 
     def _place(self):
         sidebar = self.sidebar
@@ -156,7 +218,7 @@ class EntryButton(QToolButton):
         self.sidebar.removeEventFilter(self)
         self.sidebar.layout_button.removeEventFilter(self)
         self.sidebar.layout_button.show()
-        self._stretch.stop()
+        self._clear_transition()
         self._placement.stop()
         if self.parentWidget().layout() is not None:
             self.parentWidget().layout().removeWidget(self)
@@ -191,7 +253,7 @@ class MatchSyncPlugin(api.Plugin):
             self.entry = EntryButton(sidebar, self.button)
             self.entry.feedback_painted.connect(self._entry_painted)
             self.entry._stretch.valueChanged.connect(self.switch_probe.animation_tick)
-            self.entry._stretch.finished.connect(self.switch_probe.animation_finished)
+            self.entry.transition_finished.connect(self.switch_probe.animation_finished)
         context.log("比赛二路同步已就绪；点击关注栏「比赛二路」入口开启")
 
     def on_event(self, event, payload):
@@ -241,6 +303,8 @@ class MatchSyncPlugin(api.Plugin):
         try:
             with self.switch_probe.span('apply_mode'):
                 self._change_mode(enabled)
+                if self.entry is not None:
+                    self.entry.sync_transition()
             self.switch_probe.finish(enabled)
         finally:
             self._applying = False

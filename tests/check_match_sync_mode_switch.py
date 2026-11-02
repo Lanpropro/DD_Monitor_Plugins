@@ -28,6 +28,7 @@ def check(app, _host, module):
             switches.append(active)
     host.set_match_sync_playback = set_playback
     host.sidebar = sidebar = QWidget(host)
+    sidebar.setFixedWidth(260)
     sidebar.side, sidebar.collapsed = 'left', False
     sidebar.tool_row = QWidget(sidebar)
     row = QHBoxLayout(sidebar.tool_row)
@@ -81,7 +82,6 @@ def check(app, _host, module):
                     assert calls == ['construct', 'show'], calls
                     plugin.button.setChecked(False)
                     assert not sidebar.layout_button.isHidden(), 'Layout entry waited for animation completion'
-                    assert plugin.entry._paint_width is None and plugin.entry._stretch.state() == QAbstractAnimation.Stopped
                     assert 'close' not in calls
                     QTest.qWait(70)
                     assert calls[-1] == 'close'
@@ -94,6 +94,33 @@ def check(app, _host, module):
                     assert plugin.button.isChecked() and plugin.entry._mode
                     plugin.button.setChecked(False)
                     QTest.qWait(200)
+                    # Advance only the monotonic clock: no animation ticks, media or performance claim.
+                    entry = plugin.entry
+                    now = time.perf_counter()
+                    probe.enabled = False
+                    with patch.object(module.motion, 'enabled', return_value=True), \
+                            patch.object(module.time, 'perf_counter', side_effect=lambda: now):
+                        entry.set_mode(True)
+                        assert entry._transition is not None and entry._overlay is not None
+                        start, target, _stamp = entry._transition
+                        now += .04
+                        entry.sync_transition()
+                        halfway = entry._paint_width
+                        assert start < halfway < target
+                        entry.set_mode(False)
+                        assert entry._transition[0] == halfway, 'Reversal jumped instead of continuing from visible width'
+                        assert not sidebar.layout_button.isHidden()
+                        assert entry._overlay.testAttribute(Qt.WA_TransparentForMouseEvents)
+                        settled_geometry = entry.geometry()
+                        now += .04
+                        entry.sync_transition()
+                        assert entry._transition[1] < entry._paint_width < halfway
+                        assert entry.geometry() == settled_geometry, 'Animation changed live layout geometry'
+                        now += .2
+                        entry.sync_transition()
+                        assert entry._overlay is None and entry._paint_width is None
+                        assert entry._stretch.state() == QAbstractAnimation.Stopped
+                    probe.enabled = True
                     # Portrait reparenting and the system animation-off path.
                     sidebar.side = 'top'
                     with patch.object(module.motion, 'enabled', return_value=False):
@@ -141,11 +168,16 @@ def check(app, _host, module):
                 original_styles = [card.styleSheet() for card in cards]
                 with patch.object(sidebar, 'setStyleSheet', side_effect=AssertionError('Repolished the whole sidebar')):
                     plugin.button.setChecked(True)
-                    QTest.qWait(100)
+                    deadline = time.monotonic() + 2
+                    while (plugin._pending_enabled is not None or plugin._applying) and time.monotonic() < deadline:
+                        QTest.qWait(10)
+                    assert plugin._pending_enabled is None and not plugin._applying
                     viewer = plugin.viewer
                     assert viewer is not None and not viewer.running
                     assert cards[0].styleSheet() == original_styles[0]
-                    assert 'border: none' in cards[1].styleSheet() and cards[1].property('onWall')
+                    assert 'border: none' in cards[1].styleSheet() and cards[1].property('onWall'), (
+                        cards[1].styleSheet(), cards[1].property('onWall'), viewer.isHidden(), viewer.embedded,
+                        len(viewer.sidebar_item_styles), getattr(viewer, 'sidebar_marks_state', None))
                     viewer.add_room('1')
                     viewer.rows['1'].decoder = SimpleNamespace(
                         history=import_module(module.__package__ + '.video').VideoHistory(), stop=lambda: None)
@@ -202,6 +234,7 @@ def check(app, _host, module):
                 return dict(passed=True, media_playback=False, feedback_before_construction=True,
                             latest_request_only=True, portrait_and_animation_off=True,
                             hidden_entry_fallback=True, unload_cancels_pending=True, immediate_layout_restore=True,
+                            entry_exit_motion=True, wall_clock_catchup=True, reversible_paint_only=True,
                             real_viewer_hooks=True, local_sidebar_styles=True, single_close_cleanup=True,
                             background_writer=True, bounded_sampling=True)
             finally:
