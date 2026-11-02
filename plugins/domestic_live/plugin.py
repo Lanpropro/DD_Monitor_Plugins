@@ -762,6 +762,11 @@ class DouyuPlatform(NumericLivePlatform):
     follow_cookie_domain = "douyu.com"
     account_login_url = "https://passport.douyu.com/index/login?client_id=1"
 
+    def room_quality_options(self, room_id: str) -> list[dict]:
+        options = super().room_quality_options(room_id)
+        # rate=0 的“原画”不一定是最高分辨率；仅调整菜单，不改变取流档位映射。
+        return sorted(options, key=lambda item: "2K" in item["desc"].upper(), reverse=True)
+
     def danmaku_client(self, room_id: str, parent=None):
         from .douyu_danmaku import DouyuDanmakuClient
         return DouyuDanmakuClient(room_id, self, parent)
