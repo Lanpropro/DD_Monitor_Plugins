@@ -46,6 +46,37 @@ class FrameCadence:
                     backwards=sum(b[1] < a[1] for a, b in pairs))
 
 
+class StageTimings:
+    """Bounded one-second wall-time samples; retain numbers, never media objects."""
+    def __init__(self):
+        self.enabled = os.environ.get('DDM_MATCH_DIAGNOSTICS', '1') != '0'
+        self.samples = deque(maxlen=2048)
+
+    def record(self, stage, elapsed, items=1, payload_bytes=0, at=None):
+        if self.enabled:
+            self.samples.append((time.perf_counter() if at is None else at, stage,
+                                 elapsed * 1000, items, payload_bytes))
+
+    def stats(self, now=None):
+        now = time.perf_counter() if now is None else now
+        samples = tuple(self.samples)
+        groups = {}
+        for at, stage, elapsed, items, size in samples:
+            if now - 1 <= at <= now:
+                groups.setdefault(stage, []).append((elapsed, items, size))
+        result = {}
+        for stage, values in groups.items():
+            durations = sorted(item[0] for item in values)
+            result[stage] = dict(calls=len(values), items=sum(item[1] for item in values),
+                                 payload_bytes=sum(item[2] for item in values),
+                                 total_ms=round(sum(durations), 3),
+                                 p50_ms=round(durations[(len(durations) - 1) // 2], 3),
+                                 p95_ms=round(durations[int((len(durations) - 1) * .95)], 3),
+                                 max_ms=round(durations[-1], 3))
+        return dict(window_s=1, capacity_limited=bool(len(samples) == self.samples.maxlen
+                    and samples[0][0] >= now - 1), stages=result)
+
+
 def stack(thread_id):
     result = []
     frame = sys._current_frames().get(thread_id)
@@ -267,6 +298,9 @@ class PlaybackProbe(QObject):
         self.painted = FrameCadence()
         self.clock_steps = FrameCadence()
         self.surface = {}
+        self.pipeline_sources = ()
+        self.timings = StageTimings()
+        self.cpu_observation = (time.perf_counter(), time.process_time())
 
     def start(self):
         if not self.enabled or (self.thread is not None and self.thread.is_alive()):
@@ -280,6 +314,9 @@ class PlaybackProbe(QObject):
         self.painted.samples.clear()
         self.clock_steps.samples.clear()
         self.surface = {}
+        self.pipeline_sources = ()
+        self.timings.samples.clear()
+        self.cpu_observation = (time.perf_counter(), time.process_time())
         self.last_render = self.last_tick = time.perf_counter()
         self.stage = 'idle'
         self.thread = threading.Thread(target=self._run, name='match-sync-diagnostics', daemon=True)
@@ -295,6 +332,7 @@ class PlaybackProbe(QObject):
                 self.thread = None
         self.frame = None
         self.transitions.clear()
+        self.pipeline_sources = ()
 
     def pulse(self):
         self.last_tick = time.perf_counter()
@@ -334,6 +372,9 @@ class PlaybackProbe(QObject):
 
     def snapshot(self):
         now = time.perf_counter()
+        cpu = time.process_time()
+        previous_wall, previous_cpu = self.cpu_observation
+        self.cpu_observation = (now, cpu)
         renders = [item for item in tuple(self.renders) if now - item[0] < 1]
         paints = [item for item in tuple(self.paints) if now - item[0] < 1]
         slowest = max(renders, key=lambda item: item[2], default=None)
@@ -350,6 +391,11 @@ class PlaybackProbe(QObject):
         fps = getattr(frame[0], 'fps', 0) if frame is not None else 0
         result.update(surface=self.surface, submitted_cadence=self.submitted.stats(now, fps),
                       painted_cadence=self.painted.stats(now, fps), clock_cadence=self.clock_steps.stats(now))
+        result['process_cpu_cores'] = round((cpu - previous_cpu) / max(.001, now - previous_wall), 3)
+        result['gui_pipeline'] = self.timings.stats(now)
+        result['source_pipelines'] = [dict(slot=slot, source_fps=decoder.fps,
+            analysis_size=decoder.analysis_size, capture=decoder.timings.stats(now),
+            display=decoder.pictures.timings.stats(now)) for slot, decoder in self.pipeline_sources]
         if frame is not None:
             result['picture'] = picture_state(*frame)
         return result
@@ -364,7 +410,10 @@ class PlaybackProbe(QObject):
                                pid=os.getpid(), event=event, **fields)
                 handler.emit(logging.makeLogRecord(dict(msg=json.dumps(payload, ensure_ascii=False))))
             from .video import PictureReader
-            write('start', schema=2, picture_code=hashlib.sha256(marshal.dumps(PictureReader.get.__code__)).hexdigest())
+            from .media import Decoder, analysis_gray
+            write('start', schema=3, picture_code=hashlib.sha256(marshal.dumps(PictureReader.get.__code__)).hexdigest(),
+                  capture_code=hashlib.sha256(marshal.dumps(Decoder._capture.__code__)).hexdigest(),
+                  analysis_gray_code=hashlib.sha256(marshal.dumps(analysis_gray.__code__)).hexdigest())
             sampled = 0
             last_stack = last_report = 0.0
             reported_stall = False

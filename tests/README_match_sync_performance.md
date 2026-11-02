@@ -1,5 +1,17 @@
 # 二路插件响应性回归
 
+`check_match_sync_pipeline_metrics.py --host <宿主目录>` 只用数值、转换器描述符和空QObject
+验证schema=3管线计时：统计窗口/分位数/容量提示、同帧同参数重复请求计数、后台导出与隐私。
+基线版仍执行每次转换，未改变分析频率、尺寸或图像结果；不生成/播放媒体。
+真实直播日志沿用`logs/match-playback.jsonl`，每秒导出各路capture/display及主画面gui_pipeline：
+接收等待、音视频解码/缓存写入、灰度转换/区域图像/特征计算、历史包读取/显示解码、
+BGRA转换、QImage分配/像素拷贝、drawImage。
+`total_ms`及分位数是阶段的墙钟耗时（包含调度等待），不是CPU占比；input_wait包含等流。
+`payload_bytes`是图像有效像素的数据量，不是实际内存总线带宽；drawImage不是屏幕物理呈现。
+`process_cpu_cores`是整个进程的CPU时间/实际时间，也包含宿主和其他插件，不归因到单个二路阶段。
+各路仅以slot序号标识，不写入房间号/媒体地址/账号。每个采样器最多2048条数字记录，
+`capacity_limited`为真时不能把该秒调用数视为完整计数；沿用诊断关闭与日志轮转边界。
+
 `check_match_sync_mode_switch.py --host <宿主目录>` 仅用空控件验证按钮先完成一次绘制、
 再处理模式切换，连续请求只执行最后状态，保留竖向侧栏换父级、系统关闭动画、
 隐藏按钮的兜底及卸载取消待执行请求；空二路界面覆盖真实启停阶段接线。
