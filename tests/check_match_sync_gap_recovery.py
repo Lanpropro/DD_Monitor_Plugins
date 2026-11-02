@@ -78,10 +78,57 @@ def check(app, host, module):
             state = diagnostic.picture_state(decoder, 8696.044, 8696.044, True)
             assert state['encoded_ahead_s'] == 11.667 and state['contiguous_ahead_s'] == .05
             assert state['following_bounds'] == (8700.261, 8707.711)
+            # Real follow-up evidence: the immediately following interval is
+            # a singleton, followed by a normal continuous interval.
+            fragmented = video.VideoHistory(audio_factory=lambda seconds: SimpleNamespace(end=0, capacity=48000))
+            fragmented.origin = 10200.
+            intervals = ((10249.937, 10251.137), (10254.104, 10254.104), (10261.537, 10281.437))
+            fragmented.intervals.extend(intervals)
+            fragmented.frames.extend((stamp, stamp - fragmented.origin) for bounds in intervals for stamp in bounds)
+            assert fragmented.bounds_at(10251.237) == intervals[1]
+            assert fragmented.bounds_at(10251.237, minimum_duration=.3) == intervals[2]
+            assert fragmented.bounds_at(10251.237, minimum_duration=30.) is None
+            fragmented.previous = history
+            assert fragmented.bounds_at(8696.044, minimum_duration=.3) == (8646.094, 8696.094)
+            fragmented.previous = None
+            main.paused = False
+            main.decoder.history = fragmented
+            main.was_isolated = True
+            viewer.sync_waiting = True
+            viewer.audio.correction = 0.
+            clock = 10251.087 - shifts['1']
+            viewer.locked_clock = clock
+            with patch.object(module.time, 'monotonic', return_value=100.):
+                recovered = viewer._recover_clock(clock, shifts)
+            assert abs(recovered + shifts['1'] - intervals[2][0]) < 1e-8, 'A singleton must not block a later ready interval'
+            # Startup cannot wait forever for the first short fragment to grow.
+            main.was_isolated = False
+            viewer.stable_reference_shift = None
+            viewer.sync_waiting = False
+            viewer.audio.correction = 0.
+            clock = 10244.463 - shifts['1']
+            with patch.object(module.time, 'monotonic', return_value=100.):
+                recovered = viewer._recover_clock(clock, shifts)
+            assert intervals[2][0] <= recovered + shifts['1'] <= intervals[2][1] - viewer.safety_buffer.target
+            # Rebuilding the main source must re-establish automatic startup,
+            # while a manually locked timeline retains its chosen offsets.
+            viewer.running = True
+            viewer.stable_reference_shift, viewer.locked_clock, viewer.sync_waiting = -56., clock, True
+            with patch.object(viewer, '_stop_row'), patch.object(viewer, '_start_row'):
+                viewer._reload_picture()
+            assert viewer.stable_reference_shift is None and viewer.locked_clock is None and not viewer.sync_waiting
+            viewer.alignment.manual_locked = True
+            viewer.alignment.lags = {'1': 0., '2': -2.}
+            viewer.stable_reference_shift = -56.
+            with patch.object(viewer, '_stop_row'), patch.object(viewer, '_start_row'):
+                viewer._reload_picture()
+            assert viewer.stable_reference_shift == -56. and viewer.alignment.lags == {'1': 0., '2': -2.}
             return dict(passed=True, media_playback=False, pts_gap_resumes=True,
                         retained_tail_played=True, starvation_still_waits=True,
                         insufficient_next_reserve_waits=True, offsets_preserved=True,
-                        pause_preserved=True, contiguous_reserve_reported=True)
+                        pause_preserved=True, contiguous_reserve_reported=True,
+                        singleton_does_not_block=True, fragmented_startup=True,
+                        main_reload_reanchors=True, manual_lock_preserved=True)
         finally:
             main.decoder = None
             viewer.close()

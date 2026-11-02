@@ -129,10 +129,10 @@ class VideoHistory(History):
             return self
         return None
 
-    def bounds_at(self, timestamp):
+    def bounds_at(self, timestamp, minimum_duration=0.):
         segment = self.segment_at(timestamp)
         if segment is not None and segment is not self:
-            return segment.bounds_at(timestamp)
+            return segment.bounds_at(timestamp, minimum_duration)
         with self.lock:
             bounds = super().bounds()
             if bounds is None:
@@ -140,9 +140,10 @@ class VideoHistory(History):
             while self.intervals and self.intervals[0][1] < bounds[0]:
                 self.intervals.popleft()
             for start, end in self.intervals:
-                if timestamp <= end + .05:
+                if (timestamp <= end + .05
+                        and min(end, bounds[1]) - max(start, bounds[0]) >= minimum_duration):
                     return max(start, bounds[0]), min(end, bounds[1])
-            return bounds
+            return None if minimum_duration else bounds
 
     def frame_at(self, timestamp):
         segment = self.segment_at(timestamp)

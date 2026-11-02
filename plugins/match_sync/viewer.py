@@ -2327,6 +2327,10 @@ class Viewer(QDialog):
         self._start_row(row)
         if not self.alignment.manual_locked:
             self.alignment.lags = {self.alignment.reference: 0}
+            if self.alignment.automatic:
+                self.stable_reference_shift = None
+                self.locked_clock = None
+                self.sync_waiting = False
         self.alignment.candidates.clear()
         self.generation += 1
         self.canvas.set_frame(None)
@@ -2849,9 +2853,8 @@ class Viewer(QDialog):
                 and position >= bounds[1] - .3):
             # bounds_at keeps separate PTS intervals. Once a later interval is
             # buffered, waiting for the old interval to grow can never finish.
-            following = main.decoder.history.bounds_at(bounds[1] + .1)
-            if (following is not None and following[0] > bounds[1] + .05
-                    and following[1] - following[0] >= .3):
+            following = main.decoder.history.bounds_at(bounds[1] + .1, minimum_duration=.3)
+            if following is not None and following[0] > bounds[1] + .05:
                 self.sync_waiting = False
                 if position >= bounds[1] - .05 - 1e-6:
                     recovered = following[0] - shifts[main.room_id]
@@ -2861,6 +2864,10 @@ class Viewer(QDialog):
                 # Otherwise play the retained tail before crossing the gap.
         if clock + shifts[main.room_id] < bounds[0]:
             starting = self.alignment.automatic and self.stable_reference_shift is None
+            if (main.was_isolated or starting) and fresh and bounds[1] - bounds[0] < reserve:
+                ready = main.decoder.history.bounds_at(clock + shifts[main.room_id], minimum_duration=reserve)
+                if ready is not None:
+                    bounds = ready
             if (main.was_isolated or starting) and fresh and bounds[1] - bounds[0] >= reserve:
                 recovered = bounds[1] - shifts[main.room_id] - reserve
                 self.audio.correction += recovered - clock
@@ -3188,6 +3195,9 @@ class Viewer(QDialog):
                                      minimized=window.isMinimized(), exposed=handle.isExposed() if handle else False,
                                      active=window.isActiveWindow(), canvas_size=(self.canvas.width(), self.canvas.height()),
                                      source_size=getattr(row.decoder, 'video_size', (0, 0)),
+                                     main_slot=tuple(self.rows).index(row.room_id),
+                                     sync_waiting=self.sync_waiting,
+                                     main_started=self.stable_reference_shift is not None,
                                      screen_hz=screen.refreshRate() if screen else 0,
                                      playback_rate=self.playback_rate, replay=self.replay.active,
                                      audio_clock_interpolated=self.audio.clock_observation is not None,

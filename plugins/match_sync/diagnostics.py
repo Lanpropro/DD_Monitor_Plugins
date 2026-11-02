@@ -482,7 +482,7 @@ class PlaybackProbe(QObject):
             write('start', schema=3, picture_code=hashlib.sha256(marshal.dumps(PictureReader.get.__code__)).hexdigest(),
                   capture_code=hashlib.sha256(marshal.dumps(Decoder._capture.__code__)).hexdigest(),
                   analysis_gray_code=hashlib.sha256(marshal.dumps(analysis_gray.__code__)).hexdigest(),
-                  audio_read_metrics=1, pts_gap_recovery=1)
+                  audio_read_metrics=1, pts_gap_recovery=2)
             sampled = 0
             last_stack = last_report = 0.0
             reported_stall = False
