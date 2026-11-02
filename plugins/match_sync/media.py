@@ -16,7 +16,7 @@ from ddm.auto_quality import AUTO_QUALITY
 from .engine import FPS, Sample, SIGNATURE_BITS, np
 from .video import av, VideoHistory, PictureReader, StreamInput, reformat_frame
 from .replay_cache import CACHE_BYTES, CACHE_SECONDS
-from .diagnostics import FrameCadence
+from .diagnostics import FrameCadence, StageTimings
 
 FRAME_TIMEOUT = 8.0
 
@@ -63,11 +63,26 @@ def scene_feature(image, crop, size=(16, 16)):
     return np.clip(np.rint(128 + (pixels.astype(np.float32) - centre) * 48 / scale), 0, 255).astype(np.uint8).tobytes()
 
 
-def frame_sample(frame, timestamp, crop, size):
+def analysis_gray(frame, timings, conversions, **options):
+    key = tuple(sorted(options.items()))
+    repeated = conversions is not None and key in conversions
+    started = time.perf_counter()
+    gray = reformat_frame(frame, **options)
+    if timings is not None:
+        timings.record('analysis_gray_convert', time.perf_counter() - started)
+        timings.record('analysis_gray_repeat' if repeated else 'analysis_gray_unique', 0.)
+    if conversions is not None:
+        conversions[key] = gray
+    return gray
+
+
+def frame_sample(frame, timestamp, crop, size, timings=None, conversions=None):
     width, height = size
     selected = crop != (0, 0, 1, 1)
-    gray = (reformat_frame(frame, format="gray") if selected else
-            reformat_frame(frame, width=min(width, frame.width), height=min(height, frame.height), format="gray"))
+    gray = (analysis_gray(frame, timings, conversions, format="gray") if selected else
+            analysis_gray(frame, timings, conversions, width=min(width, frame.width),
+                          height=min(height, frame.height), format="gray"))
+    started = time.perf_counter()
     plane = gray.planes[0]
     image = QImage(memoryview(plane), gray.width, gray.height, plane.line_size, QImage.Format_Grayscale8)
     if selected:
@@ -78,7 +93,10 @@ def frame_sample(frame, timestamp, crop, size):
             image = image.scaled(width, height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         crop = (0, 0, 1, 1)
     signature, texture = fingerprint(image, crop)
-    return Sample(timestamp, signature, texture, scene_feature(image, crop, (128, 48) if selected else (16, 16)))
+    sample = Sample(timestamp, signature, texture, scene_feature(image, crop, (128, 48) if selected else (16, 16)))
+    if timings is not None:
+        timings.record('analysis_features', time.perf_counter() - started)
+    return sample
 
 
 def decode_command(executable: str, url: str, headers: dict, port: int, quality: int = 250,
@@ -117,6 +135,7 @@ class Decoder:
         self.video_size = (0, 0)
         self.last_frame_received = 0.0
         self.received_cadence = FrameCadence()
+        self.timings = StageTimings()
         self.crop = (0.0, 0.0, 1.0, 1.0)
         self.crop_generation = 0
         self.analysis_size = (640, 360)
@@ -331,11 +350,16 @@ class Decoder:
                 rate = stream.average_rate or stream.base_rate or stream.codec_context.framerate
                 if rate:
                     self.fps = float(rate)
+                reading = time.perf_counter()
                 for packet in container.demux():
+                    self.timings.record('input_wait', time.perf_counter() - reading)
                     if self.cancelled.is_set():
                         break
                     if packet.stream.type == "audio":
-                        for frame in packet.decode():
+                        started = time.perf_counter()
+                        frames = packet.decode()
+                        self.timings.record('capture_audio_decode', time.perf_counter() - started, items=len(frames))
+                        for frame in frames:
                             if frame.pts is None:
                                 continue
                             pts = float(frame.pts * frame.time_base)
@@ -343,12 +367,20 @@ class Decoder:
                                 # Ignore an old cached video keyframe when anchoring live time.
                                 self.history.set_origin(time.monotonic() - pts)
                                 self.events.state.emit("取流已连接")
+                            started = time.perf_counter()
                             pcm = bytes(frame.planes[0])[:frame.samples * 4]
                             self.history.audio.append_at(round(pts * 48000), pcm)
+                            self.timings.record('capture_audio_cache', time.perf_counter() - started, payload_bytes=len(pcm))
+                        reading = time.perf_counter()
                         continue
                     if packet.size:
+                        started = time.perf_counter()
                         self.history.append_packet(packet)
-                    for frame in packet.decode():
+                        self.timings.record('capture_packet_cache', time.perf_counter() - started, payload_bytes=packet.size)
+                    started = time.perf_counter()
+                    frames = packet.decode()
+                    self.timings.record('capture_video_decode', time.perf_counter() - started, items=len(frames))
+                    for frame in frames:
                         if frame.pts is None:
                             continue
                         pts = float(frame.pts * frame.time_base)
@@ -358,17 +390,20 @@ class Decoder:
                         self.received_cadence.record(time.perf_counter(), timestamp)
                         self.video_size = (frame.width, frame.height)
                         self.history.video_size = self.video_size
+                        conversions = {}
                         if pts + .0001 >= next_region:
                             next_region = pts + .1
                             large = pts + .0001 >= next_region_large
                             if large:
                                 next_region_large = pts + 1
-                            gray = reformat_frame(frame, width=320 if large else 160,
-                                                  height=180 if large else 90, format='gray')
+                            gray = analysis_gray(frame, self.timings, conversions, width=320 if large else 160,
+                                                 height=180 if large else 90, format='gray')
+                            started = time.perf_counter()
                             image = QImage(memoryview(gray.planes[0]), gray.width, gray.height,
                                            gray.planes[0].line_size, QImage.Format_Grayscale8)
                             full = image.copy() if large else None
                             small = image.scaled(160, 90, Qt.IgnoreAspectRatio, Qt.SmoothTransformation) if large else image.copy()
+                            self.timings.record('analysis_region_images', time.perf_counter() - started)
                             with self.lock:
                                 self.region_frames.append((timestamp, small, full))
                                 while self.region_frames and timestamp - self.region_frames[0][0] > 60:
@@ -383,7 +418,7 @@ class Decoder:
                                 width, height = self.analysis_size
                             if crop != (0, 0, 1, 1):
                                 width, height = 640, 360
-                            detail = frame_sample(frame, timestamp, crop, (width, height))
+                            detail = frame_sample(frame, timestamp, crop, (width, height), self.timings, conversions)
                             with self.lock:
                                 if crop_generation == self.crop_generation:
                                     with self.history.lock:
@@ -398,6 +433,7 @@ class Decoder:
                             self.history.append(timestamp, pts, sample)
                         last_frame[0] = time.monotonic()
                         self.last_frame_received = last_frame[0]
+                    reading = time.perf_counter()
             if not self.cancelled.is_set():
                 refresh = getattr(hls_proxy, "refresh_required", None)
                 self.events.state.emit("播放地址已失效，正在重新取流" if refresh is not None and refresh.is_set()

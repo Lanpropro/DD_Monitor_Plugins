@@ -200,7 +200,10 @@ class Canvas(QFrame):
                                      center.y() - size.height() * self.selection_zoom / 2 + self.selection_pan.y(),
                                      size.width() * self.selection_zoom, size.height() * self.selection_zoom)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        started = time.perf_counter()
         painter.drawImage(self.image_rect, image, QRectF(source))
+        if self.paint_probe is not None and self.paint_probe.thread is not None:
+            self.paint_probe.timings.record('main_draw_image', time.perf_counter() - started)
         if self.selecting:
             painter.setPen(QPen(QColor("#38bdf8"), 2))
             rect = self.selection_rect()
@@ -3424,6 +3427,9 @@ class Viewer(QDialog):
         refresh_status_ui = not dragging_crop and status_now >= self.status_ui_due
         if refresh_status_ui:
             self.status_ui_due = status_now + .25
+            if probe is not None:
+                probe.pipeline_sources = tuple((index, row.decoder) for index, row in enumerate(self.rows.values())
+                                               if row.decoder is not None and hasattr(row.decoder, 'timings'))
         if not dragging_crop:
             self._sync_sidebar_marks()
         self.sync_picture(refresh_metadata=refresh_status_ui)
