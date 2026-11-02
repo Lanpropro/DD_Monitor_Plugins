@@ -3500,9 +3500,13 @@ class Viewer(QDialog):
             received, event = pending
             if key not in shifts or not self.rows[key].show_chat.isChecked() or clock + shifts[key] - received > 5:
                 self.overlay_pending.pop(key, None)
-            elif self.video_danmaku.add_event(event):
-                self.overlay_pending.pop(key, None)
-                self.overlay_last = key
+            else:
+                overlay_event = dict(event)
+                if not event.get('color'):
+                    overlay_event['text'] = f"【{event['source_label']}】 {event.get('text') or ''}"
+                if self.video_danmaku.add_event(overlay_event):
+                    self.overlay_pending.pop(key, None)
+                    self.overlay_last = key
 
     def render(self):
         if not self.running:
@@ -3677,15 +3681,13 @@ class Viewer(QDialog):
                 self.panel.add_event(event)
             received = _due + shifts[event["source_room"]]
             if not self.replay.active:
-                self.overlay_pending[event["source_room"]] = (received, {**event,
-                    "text": f"【{event['source_label']}】 {event.get('text') or ''}"})
+                self.overlay_pending[event["source_room"]] = (received, event)
         if self.replay.active:
             for event in self.replay.messages_between(self.replay.cursor, shown_clock):
                 key = event['source_room']
                 if key in shown_shifts:
                     self.panel.add_event(event)
-                    self.overlay_pending[key] = (shown_clock + shown_shifts[key], {**event,
-                        'text': f"【{event['source_label']}】 {event.get('text') or ''}"})
+                    self.overlay_pending[key] = (shown_clock + shown_shifts[key], event)
             self.replay.cursor = shown_clock
         self._render_overlay(shown_clock, shown_shifts)
 
