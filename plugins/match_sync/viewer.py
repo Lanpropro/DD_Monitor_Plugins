@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
+import shutil
 import sys
 import threading
 import time
@@ -29,6 +30,7 @@ from ddm import config as config_module, motion, theme
 from .engine import route_pcm_s16_stereo, Alignment, Match, RATE, SafetyBuffer, LateBuffer, match_scenes, refine_match, mix_pcm, resample_pcm
 from .media import Chat, Decoder, PlatformChat
 from .fullscreen import mark_fullscreen
+from .recording import MultiTrackRecorder
 from .sending import SendConsole, SendingDanmakuPanel
 from .panels import ConsoleChannels, ConsoleChoice, ConsoleIconButton, ConsoleModeToggle, MatchSettingsDialog, SettingsPanel, console_hover_color, console_role_icon, native_console_button, style_checkbox, use_link_cursor
 from .replay import ReplayBar, ReplayTimeline
@@ -893,6 +895,7 @@ class RoomRow(QFrame):
         self.title = room.get("title") or (viewer.sources.get(room_id) or {}).get("title") or ""
         self.quality = int(preferences.get("quality", 10000 if self.platform is not None else 250))
         self.actual_quality = 0
+        self.record_tracks = tuple(number for number in range(1, 7) if number in preferences.get('record_tracks', []))
         self.pending = deque(maxlen=2000)
         self.color = preferences.get("color", color)
         if self.color not in COLORS:
@@ -1253,6 +1256,7 @@ class RoomRow(QFrame):
         return {"room_id": self.room_id, "alias": self.alias.text(), "color": self.color,
                 "audible": self.audible.isChecked(), "volume": self.volume.value(),
                 "audio_channel": self.channel.currentData(),
+                "record_tracks": list(self.record_tracks),
                 "quality": self.quality,
                 "delay": self.delay.value(),
                 "show_chat": self.show_chat.isChecked(), "crop": list(self.crop)}
@@ -1400,6 +1404,9 @@ class Viewer(QDialog):
         self.skin_visible = False
         self.panel_alpha = 1.0
         self.independent_playback = {}
+        self.multi_recorder = None
+        self.record_started = None
+        self.record_elapsed = ''
         self.independent_shifts = {}
         self.rematch_rooms = set()
         self.rematch_admit = set()
@@ -2433,8 +2440,11 @@ class Viewer(QDialog):
         if room_id in self.rows:
             self.notice.setText("这位主播已经加入")
             return False
+        self._stop_recording()
         options = dict(self.saved_rooms.get(room_id, {}))
         options.update(preferences or {})
+        used = {number for row in self.rows.values() for number in row.record_tracks}
+        options.setdefault('record_tracks', next(([number] for number in range(1, 7) if number not in used), []))
         row = RoomRow(self, room_id, options, COLORS[len(self.rows) % len(COLORS)])
         self.rows[room_id] = row
         self.rows_layout.addWidget(row)
@@ -2657,6 +2667,7 @@ class Viewer(QDialog):
         live_clock = self.live_clock()
         was_replaying = self.replay.active
         if self.replay.seek(stamp, now, self.replay_histories()):
+            self._stop_recording()
             if not was_replaying:
                 self._replay_live_anchor = live_clock - self.audio.correction
                 self._replay_live_updated = now
@@ -2668,6 +2679,8 @@ class Viewer(QDialog):
             self.replay_bar.refresh(force=True)
 
     def return_live(self):
+        if self.replay.active:
+            self._stop_recording()
         clock = self.live_clock()
         self.replay.live()
         self.canvas.set_frame(None)
@@ -2759,18 +2772,82 @@ class Viewer(QDialog):
         dialog._fullscreen_cursor.start()
 
     def _stop_recording(self):
+        if self.multi_recorder is not None:
+            self.multi_recorder.stop()
+            self.picture.recording_button.setEnabled(False)
         recorder = getattr(self.context.window, "recorder", None)
         if recorder is not None and self.picture in recorder.sessions:
             recorder.stop(self.picture)
 
     def _record_picture(self):
-        recorder = getattr(self.context.window, "recorder", None)
-        if recorder is not None:
-            session = recorder.sessions.get(self.picture)
-            if session and session.recording:
-                recorder.stop(self.picture)
-            else:
-                recorder.start(self.picture, recording=True)
+        if self.multi_recorder is not None:
+            self._stop_recording()
+            return
+        settings = getattr(self.context.window, 'settings', {})
+        if not settings.get('recording_enabled', True):
+            self.notice.setText('录制功能已在「设置 → 录制」关闭')
+            return
+        row = self.rows.get(self.alignment.reference)
+        history = row.decoder.history if row is not None and row.decoder is not None else None
+        if not self.running or history is None or not getattr(history, 'codec', None) or history.origin is None:
+            self.notice.setText('请等待主画面缓存就绪后再录制')
+            return
+        tracks = tuple((number, '、'.join(current.label() for current in self.rows.values() if number in current.record_tracks),
+                        tuple(key for key, current in self.rows.items() if number in current.record_tracks))
+                       for number in range(1, 7) if any(number in current.record_tracks for current in self.rows.values()))
+        if not tracks:
+            self.notice.setText('请先在二路控制台设置中选择至少一条录制音轨')
+            return
+        directory = str(settings.get('recording_dir') or '').strip()
+        if not directory:
+            self.notice.setText('请先在「设置 → 录制」选择保存目录')
+            return
+        try:
+            folder = Path(directory).expanduser().resolve()
+            folder.mkdir(parents=True, exist_ok=True)
+            minimum = max(256, int(settings.get('recording_min_free_mb', 2048))) * 1024 * 1024
+            if shutil.disk_usage(folder).free < minimum:
+                self.notice.setText('录制未开始：保存目录所在磁盘剩余空间不足')
+                return
+            path = folder / f'match_sync_{time.strftime("%Y%m%d_%H%M%S")}_{time.time_ns() % 1000000000:09d}.mkv'
+            worker = MultiTrackRecorder(path, history, tracks, self._recording_snapshot(), minimum_free=minimum)
+        except (OSError, ValueError) as error:
+            self.notice.setText(f'无法开始分音轨录制：{error}')
+            return
+        self.multi_recorder = worker
+        self.record_started = time.monotonic()
+        worker.completed.connect(self._recording_finished, Qt.QueuedConnection)
+        self.picture.set_recording_state('record')
+        self.picture.recording_button.setToolTip('停止录制主画面与所选音轨')
+        if self.match_settings is not None:
+            self.match_settings.refresh_recording_routes()
+        self.notice.setText(f'开始分音轨录制：{path}')
+        worker.start()
+
+    def _recording_snapshot(self):
+        clock, shifts = self.replay.presentation(self.live_clock(), self.shifts())
+        main = shifts.get(self.alignment.reference, 0)
+        sources = {key: (row.decoder.history if row.decoder is not None and
+                        (key == self.alignment.reference or row.sync_state == '已同步' or key in self.independent_playback)
+                        else None, shift - main)
+                   for key, shift in shifts.items() if (row := self.rows.get(key)) is not None}
+        return clock + main, sources
+
+    @Slot(str, str)
+    def _recording_finished(self, path, error):
+        worker = self.sender()
+        if self.multi_recorder is worker:
+            self.multi_recorder = None
+            self.record_started = None
+            self.record_elapsed = ''
+            self.picture.set_recording_state('')
+            self.picture.set_recording_elapsed('')
+            self.picture.recording_button.setEnabled(True)
+            self.picture.recording_button.setToolTip('录制主画面与所选音轨；在二路控制台设置中分配音轨')
+            self.notice.setText(f'分音轨录制停止：{error} · 文件：{path}' if error else f'分音轨录制已保存：{path}')
+            if self.match_settings is not None:
+                self.match_settings.refresh_recording_routes()
+        worker.deleteLater()
 
     def _save_delay_offsets(self, shifts):
         reference = self.alignment.reference
@@ -2844,6 +2921,7 @@ class Viewer(QDialog):
         self.changed()
 
     def remove_room(self, room_id):
+        self._stop_recording()
         if room_id in self.floating_crops:
             self.floating_crops[room_id].close()
         self.independent_playback.pop(room_id, None)
@@ -3690,6 +3768,17 @@ class Viewer(QDialog):
                     self.overlay_pending[key] = (shown_clock + shown_shifts[key], event)
             self.replay.cursor = shown_clock
         self._render_overlay(shown_clock, shown_shifts)
+        if self.multi_recorder is not None and not self.multi_recorder.cancelled.is_set():
+            main = self.rows.get(self.alignment.reference)
+            if main is None or main.decoder is None or main.decoder.history is not self.multi_recorder.history:
+                self._stop_recording()
+            else:
+                self.multi_recorder.snapshot = self._recording_snapshot()
+                elapsed = max(0, int(time.monotonic() - self.record_started))
+                text = f'{elapsed // 3600:02d}:{elapsed // 60 % 60:02d}:{elapsed % 60:02d}'
+                if text != self.record_elapsed:
+                    self.record_elapsed = text
+                    self.picture.set_recording_elapsed(text)
 
     def _configure_picture_budget(self):
         reference = self.alignment.reference
@@ -4220,6 +4309,8 @@ class Viewer(QDialog):
             self.fullscreen_dialog.close()
         self._stop_recording()
         self.replay = ReplayTimeline()
+        if self.multi_recorder is not None:
+            self.multi_recorder.stop(wait=True)
         self.replay_bar.refresh(force=True)
         self.sync_waiting = False
         self.locked_clock = None

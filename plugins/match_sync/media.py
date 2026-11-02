@@ -14,7 +14,7 @@ from PySide6.QtGui import QImage
 from ddm import bili, danmaku, recording
 from ddm.auto_quality import AUTO_QUALITY
 from .engine import FPS, Sample, SIGNATURE_BITS, np
-from .video import av, VideoHistory, PictureReader, StreamInput, reformat_frame
+from .video import av, VideoHistory, PictureReader, StreamInput, reformat_frame, recording_template
 from .replay_cache import CACHE_BYTES, CACHE_SECONDS
 from .diagnostics import FrameCadence, StageTimings
 
@@ -342,7 +342,7 @@ class Decoder:
             with self.lock:
                 self.region_frames.clear()
             with av.open(StreamInput(process.stdout), "r", format="nut",
-                         options={"probesize": "65536", "analyzeduration": "100000"}) as container:
+                         options={"probesize": "65536", "analyzeduration": "100000"}) as container, recording_template(self.history, container):
                 stream = container.streams.video[0]
                 stream.codec_context.thread_count = (4 if stream.width * stream.height >= 3840 * 2160 else 2)
                 stream.codec_context.thread_type = "AUTO"

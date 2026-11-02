@@ -3,7 +3,7 @@ import ctypes
 import sys
 from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QCursor, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel, QListView, QPushButton, QStyledItemDelegate, QStyle, QToolTip, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGridLayout, QHBoxLayout, QLabel, QListView, QPushButton, QScrollArea, QStyledItemDelegate, QStyle, QToolTip, QVBoxLayout, QWidget
 
 from ddm import theme
 
@@ -374,9 +374,24 @@ class MatchSettingsDialog(QDialog):
         self.quality_status = QLabel()
         self.quality_status.setWordWrap(True)
         layout.addWidget(self.quality_status)
+        layout.addWidget(QLabel('录制音轨'))
+        routing_note = QLabel('每路可选 1～6 中的一条或多条；同一音轨混合所选来源。\n'
+                              '不勾选则不录该路声音。收听音量、静音和 L/R 不影响录制。\n'
+                              '录制期间音轨固定；添加、移除或切换主画面、跳转回看会结束当前文件。')
+        routing_note.setWordWrap(True)
+        layout.addWidget(routing_note)
+        self.recording_routes = QScrollArea()
+        self.recording_routes.setWidgetResizable(True)
+        self.recording_routes.setMaximumHeight(240)
+        self.recording_routes.setMinimumHeight(80)
+        layout.addWidget(self.recording_routes)
+        self.track_checks = {}
+        self._recording_rooms = None
+        self.refresh_recording_routes()
         self.status_timer = QTimer(self)
         self.status_timer.setInterval(500)
         self.status_timer.timeout.connect(self.refresh_quality_status)
+        self.status_timer.timeout.connect(self.refresh_recording_routes)
         close = QDialogButtonBox(QDialogButtonBox.Close)
         close.rejected.connect(self.close)
         layout.addWidget(close)
@@ -397,9 +412,46 @@ class MatchSettingsDialog(QDialog):
             suffix = f'（{detail}）' if detail else ''
             self.quality_status.setText(f'轻量增强：{enhanced} 路增强，{fallback} 路已回退{suffix}，{len(crops) - enhanced - fallback} 路准备中')
 
+    def refresh_recording_routes(self):
+        rooms = tuple((key, row.label()) for key, row in self.viewer.rows.items())
+        if rooms != self._recording_rooms:
+            self._recording_rooms = rooms
+            old = self.recording_routes.takeWidget()
+            if old is not None:
+                old.deleteLater()
+            body = QWidget()
+            grid = QGridLayout(body)
+            self.track_checks = {}
+            if not rooms:
+                grid.addWidget(QLabel('添加直播间后可为各路分配音轨'), 0, 0)
+            for index, (key, label) in enumerate(rooms):
+                name = QLabel(label)
+                name.setMaximumWidth(200)
+                name.setWordWrap(True)
+                grid.addWidget(name, index, 0)
+                checks = []
+                for number in range(1, 7):
+                    check = QCheckBox(str(number))
+                    check.setAccessibleName(f'{label}录制音轨{number}')
+                    check.setChecked(number in self.viewer.rows[key].record_tracks)
+                    check.setCursor(Qt.PointingHandCursor)
+                    check.toggled.connect(lambda _checked, k=key: self._record_tracks_changed(k))
+                    grid.addWidget(check, index, number)
+                    checks.append(check)
+                self.track_checks[key] = checks
+            grid.setRowStretch(len(rooms), 1)
+            self.recording_routes.setWidget(body)
+        self.recording_routes.setEnabled(self.viewer.multi_recorder is None)
+
+    def _record_tracks_changed(self, key):
+        if key in self.viewer.rows and self.viewer.multi_recorder is None:
+            self.viewer.rows[key].record_tracks = tuple(number for number, check in enumerate(self.track_checks[key], 1) if check.isChecked())
+            self.viewer.changed()
+
     def showEvent(self, event):
         super().showEvent(event)
         self.refresh_quality_status()
+        self.refresh_recording_routes()
         self.status_timer.start()
 
     def hideEvent(self, event):
