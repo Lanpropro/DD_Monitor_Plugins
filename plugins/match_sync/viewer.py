@@ -1289,6 +1289,7 @@ class Viewer(QDialog):
         self.prefer_highest = False
         self.embedded = False
         self.floating_crops = {}
+        self.stream_info_dialog = None
         self.crop_quality = QComboBox(self)
         for label, mode in (('流畅优先：直接裁切', 'source'), ('轻量增强：放大与轻锐化', 'light')):
             self.crop_quality.addItem(label, mode)
@@ -1397,6 +1398,7 @@ class Viewer(QDialog):
         video_layout.addWidget(self.canvas)
         self.picture.roomDropped.connect(self._add_dragged)
         self.picture.qualityChanged.connect(self._quality_changed)
+        self.picture.streamInfoRequested.connect(self._open_stream_info)
         self.picture.volumeChanged.connect(lambda _room, value: self._picture_setting("volume", value))
         self.picture.muteToggled.connect(lambda _room, muted: self._picture_setting("audible", not muted))
         self.picture.audioChannelChanged.connect(lambda _room, value: self._picture_setting("channel", value))
@@ -2222,6 +2224,49 @@ class Viewer(QDialog):
             self.canvas.update()
         if getattr(self.picture, "_buffering", False) != bool(active):
             self.picture.set_buffering(bool(active))
+
+    def _stream_info_snapshot(self):
+        row = self.rows.get(self.main.currentData())
+        if row is None:
+            return None
+        info = {'room': f'{row.label()} · {row.room_id}', 'state': 'idle',
+                'core': 'FFmpeg / PyAV（比赛二路）'}
+        decoder = row.decoder
+        if not self.running or decoder is None:
+            return info
+        width, height = decoder.video_size
+        info.update(state=('paused' if row.paused else 'connecting' if not width else
+                           'buffering' if self.canvas.waiting else 'playing'),
+                    host=urlsplit(decoder.source_url).hostname or '',
+                    video={'w': width, 'h': height}, fps=decoder.fps, decoder='no')
+        history = decoder.history
+        # Read retained-cache metadata only; never wait for decoding or inspect
+        # the FFmpeg pipe on the GUI thread. Unknown source properties stay unknown.
+        if history.lock.acquire(blocking=False):
+            try:
+                info['video_codec'] = history.codec[0] if history.codec else None
+                bounds = history.bounds()
+                info['buffer_seconds'] = bounds[1] - bounds[0] if bounds else None
+                info['buffer_bytes'] = history.byte_size
+            finally:
+                history.lock.release()
+        return info
+
+    def _open_stream_info(self):
+        if self._stream_info_snapshot() is None:
+            return
+        if self.stream_info_dialog is None:
+            from ddm.stream_info import StreamInfoDialog
+            dialog = StreamInfoDialog(self._stream_info_snapshot, self)
+            dialog.finished.connect(self._stream_info_closed)
+            self.stream_info_dialog = dialog
+        self.stream_info_dialog.refresh()
+        self.stream_info_dialog.show()
+        self.stream_info_dialog.raise_()
+        self.stream_info_dialog.activateWindow()
+
+    def _stream_info_closed(self, _result):
+        self.stream_info_dialog = None
 
     def sync_picture(self, *_args, refresh_metadata=True):
         row = self.rows.get(self.main.currentData())
@@ -3813,6 +3858,8 @@ class Viewer(QDialog):
 
     def stop(self):
         self.running = False
+        if self.stream_info_dialog is not None:
+            self.stream_info_dialog.close()
         with self._switch_stage('stop_playback_probe'):
             self.playback_probe.stop()
         self.independent_playback.clear()
