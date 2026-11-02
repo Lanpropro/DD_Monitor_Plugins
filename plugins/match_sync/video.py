@@ -19,7 +19,7 @@ except ImportError:
 
 from .engine import History, np
 from .replay_cache import DiskAudioRing, PacketStore
-from .diagnostics import FrameCadence
+from .diagnostics import FrameCadence, StageTimings
 
 
 class StreamInput:
@@ -53,15 +53,22 @@ def reformat_frame(frame, **options):
     return converter.reformat(frame, **options)
 
 
-def image_from_frame(frame):
+def image_from_frame(frame, timings=None):
+    started = time.perf_counter()
     rgb = reformat_frame(frame, format="bgra")
+    if timings is not None:
+        timings.record('display_bgra_convert', time.perf_counter() - started)
+    started = time.perf_counter()
     plane = rgb.planes[0]
     if np is None:
-        return QImage(bytes(plane), rgb.width, rgb.height, plane.line_size, QImage.Format_ARGB32).copy()
-    image = QImage(rgb.width, rgb.height, QImage.Format_ARGB32)
-    source = np.frombuffer(plane, dtype=np.uint8).reshape(rgb.height, plane.line_size)
-    target = np.frombuffer(image.bits(), dtype=np.uint8).reshape(rgb.height, image.bytesPerLine())
-    target[:, :rgb.width * 4] = source[:, :rgb.width * 4]
+        image = QImage(bytes(plane), rgb.width, rgb.height, plane.line_size, QImage.Format_ARGB32).copy()
+    else:
+        image = QImage(rgb.width, rgb.height, QImage.Format_ARGB32)
+        source = np.frombuffer(plane, dtype=np.uint8).reshape(rgb.height, plane.line_size)
+        target = np.frombuffer(image.bits(), dtype=np.uint8).reshape(rgb.height, image.bytesPerLine())
+        target[:, :rgb.width * 4] = source[:, :rgb.width * 4]
+    if timings is not None:
+        timings.record('display_image_copy', time.perf_counter() - started, payload_bytes=rgb.width * rgb.height * 4)
     return image
 
 
@@ -122,10 +129,10 @@ class VideoHistory(History):
             return self
         return None
 
-    def bounds_at(self, timestamp):
+    def bounds_at(self, timestamp, minimum_duration=0.):
         segment = self.segment_at(timestamp)
         if segment is not None and segment is not self:
-            return segment.bounds_at(timestamp)
+            return segment.bounds_at(timestamp, minimum_duration)
         with self.lock:
             bounds = super().bounds()
             if bounds is None:
@@ -133,9 +140,10 @@ class VideoHistory(History):
             while self.intervals and self.intervals[0][1] < bounds[0]:
                 self.intervals.popleft()
             for start, end in self.intervals:
-                if timestamp <= end + .05:
+                if (timestamp <= end + .05
+                        and min(end, bounds[1]) - max(start, bounds[0]) >= minimum_duration):
                     return max(start, bounds[0]), min(end, bounds[1])
-            return bounds
+            return None if minimum_duration else bounds
 
     def frame_at(self, timestamp):
         segment = self.segment_at(timestamp)
@@ -259,6 +267,7 @@ class PictureReader:
         self.decode_ms = 0.0
         self.decoded = 0
         self.decoded_cadence = FrameCadence()
+        self.timings = StageTimings()
         self.byte_limit = 64 * 1024 * 1024
         self.max_frames = 8
         self.fps = 60.0
@@ -355,7 +364,9 @@ class PictureReader:
                 horizon = target + min(self.lead, max(1, capacity * 3 // 4) / self.fps)
                 if decoded_until is not None and decoded_until >= horizon:
                     continue
+                range_started = time.perf_counter()
                 result = history.packet_range(sequence, target)
+                self.timings.record('display_packet_range', time.perf_counter() - range_started)
                 if result is None:
                     continue
                 config, packets, reset = result
@@ -383,8 +394,11 @@ class PictureReader:
                     started = time.perf_counter()
                     self.decode_phase = 'packet_read'
                     encoded = packet.decode_packet()
+                    self.timings.record('display_packet_unpack', time.perf_counter() - started)
                     self.decode_phase = 'decode'
+                    decode_started = time.perf_counter()
                     frames = codec.decode(encoded)
+                    self.timings.record('display_video_decode', time.perf_counter() - decode_started, items=len(frames))
                     sequence = packet.sequence + 1
                     complete = False
                     for frame in frames:
@@ -395,7 +409,7 @@ class PictureReader:
                         if pts + .00001 < max(target, requested_target - .05):
                             continue
                         self.decode_phase = 'convert'
-                        image = image_from_frame(frame)
+                        image = image_from_frame(frame, self.timings)
                         key = history.origin + pts
                         with self.lock:
                             if not self.active or self.history is not history or self.cancelled.is_set():
