@@ -13,7 +13,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(app, host, output, sources, module=None):
+def run(app, host, output, sources, module=None, crop_mode=None):
     from PySide6.QtCore import QEventLoop, QPoint, QTimer, Qt
     from PySide6.QtGui import QImage, QRegion
     from PySide6.QtWidgets import QWidget
@@ -48,6 +48,10 @@ def run(app, host, output, sources, module=None):
         last = [time.perf_counter()]
         previous_frame = [None]
         previous_stamp = [None]
+        floating = None
+        crop_stamps, crop_gaps = [], []
+        source_stamps = []
+        crop_previous, crop_painted_at = [None], [None]
         comment_x = {}
         scroll_moved = [False]
         loop = QEventLoop()
@@ -66,6 +70,13 @@ def run(app, host, output, sources, module=None):
                     if previous_stamp[0] is not None:
                         gaps.append((now - previous_stamp[0]) * 1000)
                     previous_stamp[0] = now
+                if floating is not None and floating.frame_key != crop_previous[0] and floating.frame_key is not None:
+                    crop_stamps.append(floating.frame_key)
+                    if crop_painted_at[0] is not None:
+                        crop_gaps.append((now - crop_painted_at[0]) * 1000)
+                    crop_previous[0], crop_painted_at[0] = floating.frame_key, now
+                if floating is not None and floating.input_frame is not None:
+                    source_stamps.append(floating.input_frame[0])
             previous_frame[0] = viewer.canvas.frame_key
             last[0] = now
             for comment in viewer.video_danmaku.comments:
@@ -93,6 +104,17 @@ def run(app, host, output, sources, module=None):
                 row.match_confirmed = row.user_confirmed = True
                 row.user_confirmed_lag = viewer.alignment.lags[key]
                 row.awaiting_confirmation = False
+            if crop_mode is not None:
+                # Fix fixture alignment so genuine timeline corrections are not counted as filter jitter.
+                viewer.automatic.setChecked(False)
+                viewer.match_timer.stop()
+                viewer.crop_quality.setCurrentIndex(viewer.crop_quality.findData(crop_mode))
+                secondary = next(row for key, row in viewer.rows.items() if key != reference)
+                # Local fixtures have one fixed encoding, without platform quality tiers.
+                with patch.object(viewer, '_crop_source_policy', return_value='source'):
+                    floating = viewer.show_floating_crop(secondary, (.65, .1, .12, .18), None)
+                QTimer.singleShot(2500, loop.quit)
+                loop.exec()  # Prepare the previously hidden source's real display decoder.
             phase[0] = 'measure'
             frames, cpu, started = viewer.canvas.presented, time.process_time(), time.perf_counter()
             QTimer.singleShot(15000, loop.quit)
@@ -119,11 +141,20 @@ def run(app, host, output, sources, module=None):
                       'diagnostics': {key: row.decoder.diagnostics() for key, row in viewer.rows.items()},
                       'ahead': {key: row.decoder.history.bounds()[1] - viewer.audio.clock() - viewer.shifts()[key]
                                 for key, row in viewer.rows.items()}}
+            if floating is not None:
+                report['floating'] = dict(mode=crop_mode, fps=max(0, len(crop_stamps) - 1) / elapsed,
+                    frame_gap_ms=stats(crop_gaps), backwards=sum(b < a for a, b in zip(crop_stamps, crop_stamps[1:])),
+                    source_backwards=sum(b < a for a, b in zip(source_stamps, source_stamps[1:])),
+                    diagnostics=floating.diagnostics())
             output.write_text(json.dumps(report, indent=2), encoding='utf-8')
             assert report['overlay_comments'] > 0 and not report['overlay_quick_requested']
             assert painted > 100 and scroll_moved[0], 'Scrolling comments must paint pixels and advance'
             assert report['fps'] >= 55, report
             assert report['frame_gap_ms']['max'] < 150, report
+            if floating is not None:
+                assert report['floating']['backwards'] == 0 and report['floating']['fps'] >= 50, report
+                if crop_mode == 'light':
+                    assert floating.enhance_state == 'active' and not floating.enhanced.isNull(), report
             print(json.dumps(report), flush=True)
         finally:
             observer.stop()
@@ -140,6 +171,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--host', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--crop-mode', choices=('source', 'light'))
     args = parser.parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     sys.path[:0] = [str(args.host.resolve()), str(ROOT)]
@@ -164,7 +196,7 @@ def main():
     host.settings = {'video_danmaku_size': 24, 'video_danmaku_area': 100}
     with patch.object(socket.socket, 'connect', side_effect=AssertionError('Network forbidden')):
         try:
-            run(app, host, args.output, sources)
+            run(app, host, args.output, sources, crop_mode=args.crop_mode)
         finally:
             host.close()
 

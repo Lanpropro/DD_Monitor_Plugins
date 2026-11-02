@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import deque, OrderedDict
+from contextlib import contextmanager
 from bisect import bisect_right
 from itertools import islice
 from dataclasses import dataclass, replace
@@ -93,6 +94,17 @@ class EncodedPacket:
         return packet
 
 
+@contextmanager
+def recording_template(history, container):
+    with history.lock:
+        history.stream_template = container.streams.video[0]
+    try:
+        yield
+    finally:
+        with history.lock:
+            history.stream_template = None
+
+
 class VideoHistory(History):
     """Retain complete GOPs under the existing time/byte limits, without JPEG."""
 
@@ -105,6 +117,7 @@ class VideoHistory(History):
         self.packets = deque()
         self.keyframes = deque()
         self.codec = None
+        self.stream_template = None
         self.video_size = (0, 0)
         self.sequence = 0
         self.received_frames = 0

@@ -1,7 +1,9 @@
 """One selectable match picture, independently mixed audio, and labelled chat."""
 from __future__ import annotations
 
+import logging
 import re
+import shutil
 import sys
 import threading
 import time
@@ -18,18 +20,19 @@ from PySide6.QtGui import QColor, QCursor, QDrag, QIcon, QImage, QKeySequence, Q
 from PySide6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices
 from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QCheckBox, QComboBox, QDialog,
     QDialogButtonBox, QDoubleSpinBox, QFrame,
-    QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLayout, QLineEdit,
+    QGridLayout, QHBoxLayout, QLabel, QLayout, QLineEdit,
     QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QSlider, QSplitter, QStyle, QTextEdit, QToolTip, QVBoxLayout, QWidget)
 
-from ddm.widgets import AUTO_QUALITY, Avatar, ROOM_MIME, Tile
+from ddm.widgets import AUTO_QUALITY, Avatar, DanmakuToggleButton, RefreshButton, ROOM_MIME, Tile, TileButton, VolumeButton
 from ddm.fullscreen_cursor import FullscreenCursor
 from ddm.dialogs import SHORTCUT_ACTIONS
 from ddm import config as config_module, motion, theme
 from .engine import route_pcm_s16_stereo, Alignment, Match, RATE, SafetyBuffer, LateBuffer, match_scenes, refine_match, mix_pcm, resample_pcm
 from .media import Chat, Decoder, PlatformChat
 from .fullscreen import mark_fullscreen
+from .recording import MultiTrackRecorder
 from .sending import SendConsole, SendingDanmakuPanel
-from .panels import ConsoleIconButton, MatchSettingsDialog, SettingsPanel, style_checkbox
+from .panels import ConsoleChannels, ConsoleChoice, ConsoleIconButton, ConsoleModeToggle, MatchSettingsDialog, SettingsPanel, console_hover_color, console_role_icon, native_console_button, style_checkbox, use_link_cursor
 from .replay import ReplayBar, ReplayTimeline
 from .floating import FloatingCrop
 from .regions import match_regions
@@ -229,10 +232,20 @@ class Canvas(QFrame):
         self.update()
 
     def wheelEvent(self, event):
-        if not self.selecting or not event.modifiers() & Qt.ControlModifier or self.image_rect.isEmpty():
+        if not self.selecting or self.image_rect.isEmpty():
             super().wheelEvent(event)
             return
         if self.anchor is not None:
+            event.accept()
+            return
+        if not event.modifiers() & Qt.ControlModifier:
+            delta = QPointF(event.pixelDelta())
+            if delta.isNull():
+                delta = QPointF(event.angleDelta()) * .5
+            if event.modifiers() & Qt.ShiftModifier:
+                delta = QPointF(delta.x() or delta.y(), 0)
+            self.selection_pan += delta
+            self.update()
             event.accept()
             return
         zoom = max(1., min(12., self.selection_zoom * 1.2 ** (event.angleDelta().y() / 120)))
@@ -873,11 +886,16 @@ class RoomRow(QFrame):
         self.correction_remaining = 0.0
         self.reset_pending = False
         self.needs_epoch_samples = False
+        self.alignment_hint = None
+        self.hint_pending = False
+        self.hint_serial = None
+        self.hint_searching = False
         room = next((item for item in getattr(viewer.context.window, "rooms", [])
                      if str(item.get("room_id") or "") == room_id), {})
         self.title = room.get("title") or (viewer.sources.get(room_id) or {}).get("title") or ""
         self.quality = int(preferences.get("quality", 10000 if self.platform is not None else 250))
         self.actual_quality = 0
+        self.record_tracks = tuple(number for number in range(1, 7) if number in preferences.get('record_tracks', []))
         self.pending = deque(maxlen=2000)
         self.color = preferences.get("color", color)
         if self.color not in COLORS:
@@ -898,45 +916,56 @@ class RoomRow(QFrame):
         self.refresh_avatar()
         self.main_button = QPushButton("主画面")
         self.main_button.setCheckable(True)
-        self.main_button.setFixedWidth(64)
+        self.main_button.setFixedWidth(96)
+        self.main_button.setFixedHeight(28)
+        self.main_button.setAutoDefault(False)
+        use_link_cursor(self.main_button)
+        self.main_button.setIcon(console_role_icon())
+        self.main_button.setStyleSheet(f'''QPushButton {{background: transparent; border: 1px solid {theme.BORDER_STRONG};
+            border-radius: 5px; outline: none; padding: 3px 6px; font-size: 12px;}}
+            QPushButton:checked {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}
+            QPushButton:hover, QPushButton:checked:hover {{background: {console_hover_color()}; color: {theme.ACCENT};}}''')
         self.main_button.setToolTip("选择这位主播作为主画面，其他路声音与弹幕继续播放。")
         self.main_button.clicked.connect(lambda: viewer.select_main(room_id))
-        self.audible = QCheckBox("声音")
+        self.audible = native_console_button(VolumeButton(), '声音开关')
+        self.audible.setCheckable(True)
         self.audible.setChecked(preferences.get("audible", True))
         self.volume = QSlider(Qt.Horizontal)
         self.volume.setRange(0, 100)
         self.volume.setValue(int(preferences.get("volume", getattr(
             viewer.context.window, "settings", {}).get("default_volume", config_module.DEFAULT_VOLUME))))
         self.volume.setFixedWidth(72)
+        use_link_cursor(self.volume)
         self.volume_number = QLabel(str(self.volume.value()))
         self.volume_number.setFixedWidth(26)
         self.volume_number.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.volume_number.setStyleSheet('font-size: 12px;')
         self.volume.valueChanged.connect(lambda value: self.volume_number.setText(str(value)))
-        self.channel = QComboBox()
-        for label, value in (("原始声道", 0), ("仅左输出", 3), ("仅右输出", 4)):
-            self.channel.addItem(label, value)
+        self.channel = ConsoleChannels()
+        self.channel.setAccessibleName('输出声道')
         self.channel.setCurrentIndex(max(0, self.channel.findData(preferences.get("audio_channel", 0))))
-        self.channel.setToolTip("仅左/仅右：将完整声音混为单声道，送到指定耳机一侧。")
-        self.channel.setFixedWidth(100)
+        self.channel.setToolTip("点击 L / R 切换输出声道；两侧点亮为双声道，至少保留一侧输出。")
         self.channel.currentIndexChanged.connect(viewer.changed)
         for signal in (self.channel.currentIndexChanged, self.volume.valueChanged, self.audible.toggled):
+            signal.connect(self.refresh_audio_icon)
             signal.connect(viewer.sync_picture)
+        self.audible.volumeChanged.connect(self.volume.setValue)
+        self.refresh_audio_icon()
         self.delay = self._offset(0 if viewer.automatic.isChecked() else preferences.get("delay", 0))
         self.previous_delay = self.delay.value()
         self.delay.setFixedWidth(74)
         self.delay.installEventFilter(viewer)
-        self.show_chat = QCheckBox("弹幕")
+        self.show_chat = native_console_button(DanmakuToggleButton('弹'), '弹幕开关')
+        self.show_chat.setCheckable(True)
         self.show_chat.setChecked(preferences.get("show_chat", True))
-        for checkbox in (self.audible, self.show_chat):
-            style_checkbox(checkbox)
-        self.color_choice = QComboBox()
+        self.color_choice = ConsoleChoice('color')
+        self.color_choice.setAccessibleName('弹幕来源颜色')
         for name, value in zip(("蓝色", "粉色", "紫色", "绿色", "黄色", "橙色"), COLORS):
             swatch = QPixmap(16, 16)
             swatch.fill(QColor(value))
             self.color_choice.addItem(QIcon(swatch), name, value)
         self.color_choice.setCurrentIndex(self.color_choice.findData(self.color))
         self.color_choice.currentIndexChanged.connect(self._color)
-        self.color_choice.setFixedWidth(82)
         self.color_choice.setToolTip("弹幕来源颜色")
         self.decrease = QPushButton("−")
         self.increase = QPushButton("+")
@@ -944,70 +973,129 @@ class RoomRow(QFrame):
         self.increase.setToolTip("+ 正数：延后本路画面、声音和弹幕。单位秒，例如 +3 表示延后 3 秒。")
         for button in (self.decrease, self.increase):
             button.setFixedWidth(24)
+            use_link_cursor(button)
         self.decrease.clicked.connect(lambda: viewer.show_comparison(self.room_id))
         self.increase.clicked.connect(lambda: viewer.show_comparison(self.room_id))
         self.decrease.clicked.connect(self.delay.stepDown)
         self.increase.clicked.connect(self.delay.stepUp)
-        region = QPushButton("选择对照区域")
-        region.setFixedWidth(112)
+        region = ConsoleIconButton('region', '选择对照区域', size=32)
         region.setToolTip("仅用于放大对照：框选计时器后手动微调偏移；自动匹配始终使用完整画面。")
         region.clicked.connect(lambda: viewer.choose_crop(self))
-        floating = QPushButton('裁取悬浮画面')
+        floating = self.floating_button = ConsoleIconButton('floating', '裁取悬浮画面', size=32)
         floating.setToolTip('框选摄像头等区域，在软件内自由移动、缩放；双击悬浮画面可重新框选。')
         floating.clicked.connect(lambda: viewer.choose_crop(self, floating=True))
-        self.independent = ConsoleIconButton('independent', '独立播放：不等待对齐，使用本路缓存进度')
+        self.independent = ConsoleIconButton('independent', '独立播放：不等待对齐，使用本路缓存进度', size=32)
         self.independent.setCheckable(True)
         self.independent.clicked.connect(lambda: viewer.toggle_independent(room_id))
-        self.realign = QPushButton("重新对齐")
+        self.realign = native_console_button(RefreshButton(), '重新对齐')
         policy = self.realign.sizePolicy()
         policy.setRetainSizeWhenHidden(True)
         self.realign.setSizePolicy(policy)
         self.realign.setToolTip("重新匹配本路比赛画面，不重启直播流，不改变其他路已确认偏移。")
         self.realign.clicked.connect(lambda: viewer.retry_alignment(room_id))
-        remove = QPushButton("移除")
-        remove.setFixedWidth(52)
-        remove.clicked.connect(lambda: viewer.remove_room(room_id))
-        self.join = QPushButton("增加延后并加入")
-        self.join.setSizePolicy(policy)
+        self.independent.setSizePolicy(policy)
+        self.remove_button = native_console_button(TileButton('×'), '移除此路')
+        self.remove_button.clicked.connect(lambda: viewer.remove_room_with_undo(room_id))
+        self.assist = ConsoleIconButton('assist', '辅助自动对齐', size=32)
+        self.assist.setCheckable(True)
+        self.hint_fast = native_console_button(QPushButton('偏快'), '本路比主画面偏快')
+        self.hint_slow = native_console_button(QPushButton('偏慢'), '本路比主画面偏慢')
+        for button, direction in ((self.hint_fast, -1), (self.hint_slow, 1)):
+            button.setFixedSize(44, 28)
+            policy = button.sizePolicy()
+            policy.setRetainSizeWhenHidden(True)
+            button.setSizePolicy(policy)
+            button.hide()
+            button.clicked.connect(lambda _checked=False, d=direction: viewer.submit_alignment_hint(room_id, d))
+        self.assist.toggled.connect(self._toggle_hint_choices)
+        self.join = QPushButton("确认对齐并加入")
+        self.join.setAutoDefault(False)
+        self.join.setFixedHeight(28)
+        self.join.setStyleSheet(self.main_button.styleSheet())
+        use_link_cursor(self.join)
+        self.join.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.join.setToolTip("本路内容到达更晚；增加整组观看延迟后加入，原有各路保持相对同步。")
         self.join.clicked.connect(lambda: viewer.confirm_alignment(room_id))
         self.join.hide()
-        self.control_widgets = (self.avatar, self.main_button, floating, self.independent, self.realign, self.join, self.audible, self.volume,
-                                self.volume_number, self.channel,
-                                self.show_chat, self.color_choice, QLabel("偏移"), self.decrease,
-                                self.delay, self.increase, region, remove)
-        controls = QGridLayout()
-        self.controls_grid = controls
-        controls.setHorizontalSpacing(6)
-        controls.setVerticalSpacing(4)
-        columns = []
-        column = 0
-        for index, widget in enumerate(self.control_widgets):
-            if index in (6, 10, 12, 16):
-                controls.setColumnStretch(column, 1)
-                column += 1
-            columns.append(column)
-            controls.addWidget(widget, 0, column)
-            column += 1
-        self.control_columns = columns
+        self.name_label = QLabel()
+        self.name_label.setMaximumWidth(140)
+        self.name_label.setStyleSheet('font-size: 14px; font-weight: 600;')
         self.status = CompactStatus()
-        self.offset_hint = QLabel("单位：秒 · + 正数延后本路 · − 负数相对提前本路")
-        self.offset_hint.setObjectName("MatchSyncOffsetHint")
-        self.offset_hint.setWordWrap(True)
-        self.offset_hint.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.offset_hint.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-        self.offset_hint.setStyleSheet(
-            f"QLabel#MatchSyncOffsetHint {{ color: palette(window-text); font-size: {theme.FONT_CAPTION}px; }}")
-        controls.addWidget(self.status, 1, 0, 1, columns[11] - 1)
-        controls.addWidget(self.offset_hint, 1, columns[11], 1, columns[15] - columns[11])
+        self.status.setStyleSheet(f'font-size: 12px; color: {theme.TEXT2};')
+        identity = QWidget()
+        identity_layout = QHBoxLayout(identity)
+        identity_layout.setContentsMargins(0, 0, 0, 0)
+        identity_layout.setSpacing(10)
+        identity_layout.addWidget(self.avatar, 0, Qt.AlignVCenter)
+        identity_text = QVBoxLayout()
+        identity_text.setSpacing(2)
+        identity_heading = QHBoxLayout()
+        identity_heading.setSpacing(8)
+        identity_heading.addWidget(self.name_label)
+        identity_heading.addWidget(self.main_button)
+        identity_heading.addWidget(self.join)
+        identity_heading.addStretch()
+        identity_text.addLayout(identity_heading)
+        identity_text.addWidget(self.status)
+        identity_layout.addLayout(identity_text)
+        identity_layout.addStretch(1)
+        self.offset_box = QFrame()
+        self.offset_box.setObjectName('MatchSyncOffset')
+        self.offset_box.setFixedSize(128, 32)
+        self.offset_box.setStyleSheet(f'''QFrame#MatchSyncOffset {{background: {theme.ELEVATED};
+            border: 1px solid {theme.BORDER_STRONG}; border-radius: 6px;}}''')
+        offset_layout = QHBoxLayout(self.offset_box)
+        offset_layout.setContentsMargins(2, 0, 2, 0)
+        offset_layout.setSpacing(0)
+        self.delay.setFixedWidth(72)
+        self.delay.setAlignment(Qt.AlignCenter)
+        self.delay.setStyleSheet('QDoubleSpinBox {background: transparent; border: none; padding: 0; font-size: 12px;}')
+        for step in (self.decrease, self.increase):
+            step.setFixedHeight(30)
+            step.setStyleSheet(f'''QPushButton {{background: transparent; border: none; padding: 0; border-radius: 0;}}
+                QPushButton:hover {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}''')
+        for widget in (self.decrease, self.delay, self.increase):
+            offset_layout.addWidget(widget)
+        groups = [identity]
+        self.group_separators = []
+        for index, widgets in enumerate(((floating, self.realign),
+                        (self.independent, self.audible, self.volume, self.volume_number, self.channel),
+                        (self.show_chat, self.color_choice),
+                        (self.offset_box, self.assist, self.hint_fast, self.hint_slow), (region, self.remove_button)), 1):
+            group = QWidget()
+            line = QHBoxLayout(group)
+            line.setContentsMargins(0, 0, 0, 0)
+            line.setSpacing(4)
+            line.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            if index in (2, 3, 4):
+                separator = QFrame()
+                separator.setFixedSize(1, 24)
+                separator.setStyleSheet(f'background: {theme.BORDER_STRONG};')
+                line.addWidget(separator)
+                line.addSpacing(8)
+                self.group_separators.append(separator)
+            for widget in widgets:
+                line.addWidget(widget)
+                if isinstance(widget, QPushButton):
+                    widget.setFocusPolicy(Qt.StrongFocus)
+            groups.append(group)
+        self.control_widgets = tuple(groups)
+        self.control_columns = tuple(range(6))
+        self.group_labels = [QLabel(text, self) for text in ('直播来源', '画面', '声音', '弹幕', '偏移', '其他')]
+        for label in self.group_labels:
+            label.setStyleSheet(f'color: {theme.TEXT3}; font-size: {theme.FONT_CAPTION}px;')
+        self.controls_grid = QGridLayout()
+        self.controls_grid.setHorizontalSpacing(12)
+        self.controls_grid.setVerticalSpacing(5)
+        self._compact_controls = None
+        self.layout_controls(False, True)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(4)
         layout.setSizeConstraint(QLayout.SetMinimumSize)
-        line = QHBoxLayout()
-        line.addLayout(controls, 1)
-        layout.addLayout(line)
+        layout.addLayout(self.controls_grid)
         self.setFrameShape(QFrame.NoFrame)
+        self.setStyleSheet(f'QFrame#MatchSyncRoomRow {{border: none; border-bottom: 1px solid {theme.BORDER_STRONG};}}')
         self.refresh_status()
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.delay.setToolTip("单位秒；+ 延后本路，− 相对提前本路（必要时延后其他路）。画面、声音和弹幕一起移动。")
@@ -1017,9 +1105,32 @@ class RoomRow(QFrame):
         self.audible.toggled.connect(viewer.changed)
         self.audible.toggled.connect(self.refresh_status)
         self.show_chat.toggled.connect(self._chat_toggle)
+        self.show_chat.toggled.connect(self.refresh_status)
         self.alias.textChanged.connect(viewer.changed)
         self.alias.textChanged.connect(self.refresh_avatar)
         self.alias.editingFinished.connect(viewer.update_main_choices)
+        self.refresh_avatar()
+
+    def layout_controls(self, compact, heading):
+        for label in self.group_labels:
+            label.setVisible(heading)
+        if compact == self._compact_controls:
+            return
+        self._compact_controls = compact
+        grid = self.controls_grid
+        for widget in (*self.control_widgets, *self.group_labels):
+            grid.removeWidget(widget)
+        for column in range(6):
+            grid.setColumnMinimumWidth(column, 0)
+            grid.setColumnStretch(column, 0)
+        positions = (((1, 0, 2), (3, 0, 1), (5, 0, 1), (5, 1, 1), (7, 0, 2), (3, 1, 1))
+                     if compact else tuple((1, i, 1) for i in range(6)))
+        for widget, label, (line, column, span) in zip(self.control_widgets, self.group_labels, positions):
+            grid.addWidget(label, line - 1, column, 1, span)
+            grid.addWidget(widget, line, column, 1, span)
+        for column in range(2 if compact else 6):
+            grid.setColumnStretch(column, 1 if compact or column in (0, 4) else 0)
+        self.control_columns = tuple(column for _, column, _ in positions)
 
     def event(self, event):
         result = super().event(event)
@@ -1039,7 +1150,10 @@ class RoomRow(QFrame):
         return spin
 
     def refresh_avatar(self, *_args):
-        self.avatar.setToolTip(f"{self.label()} · 拖动整张卡片调整顺序，右键修改名称")
+        if hasattr(self, 'name_label'):
+            self.name_label.setText(self.name_label.fontMetrics().elidedText(self.label(), Qt.ElideRight, 140))
+            self.name_label.setToolTip(self.label())
+        self.avatar.setToolTip(f"{self.label()} · 拖动整张卡片调整顺序")
         self.setToolTip(self.avatar.toolTip())
         sidebar = getattr(self.viewer.context.window, "sidebar", None)
         item = next((item for item in getattr(sidebar, "_items", [])
@@ -1052,20 +1166,10 @@ class RoomRow(QFrame):
         elif self.avatar_key is None:
             self.avatar.setText(self.label()[0])
 
-    def contextMenuEvent(self, event):
-        menu = motion.AnimatedMenu(self)
-        action = menu.addAction("修改主播名称")
-        def rename():
-            value, accepted = QInputDialog.getText(self, "修改主播名称", "主播名称", text=self.alias.text())
-            if accepted and value.strip():
-                self.alias.setText(value.strip())
-                self.viewer.update_main_choices()
-        action.triggered.connect(rename)
-        menu.exec_context(event)
-
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.anchor = event.position().toPoint()
+            self.setCursor(Qt.ClosedHandCursor)
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
@@ -1093,10 +1197,12 @@ class RoomRow(QFrame):
                 drag.exec(Qt.MoveAction)
             finally:
                 self.viewer.end_row_drag()
+                self.setCursor(Qt.OpenHandCursor)
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
         self.anchor = None
+        self.setCursor(Qt.OpenHandCursor)
         super().mouseReleaseEvent(event)
 
     def dragEnterEvent(self, event):
@@ -1139,22 +1245,53 @@ class RoomRow(QFrame):
             self.viewer._start_chat(self)
         self.viewer.changed()
 
+    def refresh_audio_icon(self, *_args):
+        self.audible.set_state(not self.audible.isChecked(), self.volume.value(), self.channel.currentData())
+
+    def _toggle_hint_choices(self, expanded):
+        for button in (self.hint_fast, self.hint_slow):
+            button.setVisible(expanded)
+
     def preferences(self):
         return {"room_id": self.room_id, "alias": self.alias.text(), "color": self.color,
                 "audible": self.audible.isChecked(), "volume": self.volume.value(),
                 "audio_channel": self.channel.currentData(),
+                "record_tracks": list(self.record_tracks),
                 "quality": self.quality,
                 "delay": self.delay.value(),
                 "show_chat": self.show_chat.isChecked(), "crop": list(self.crop)}
 
     def refresh_status(self):
+        for button, label in ((self.audible, '声音'), (self.show_chat, '弹幕')):
+            hint = ('关闭' if button.isChecked() else '开启') + label
+            if button.toolTip() != hint:
+                button.setToolTip(hint)
+                button.setAccessibleName(hint)
         independent = self.room_id in self.viewer.independent_playback
-        self.independent.setVisible(self.room_id != self.viewer.alignment.reference)
+        self.independent.setEnabled(self.room_id != self.viewer.alignment.reference)
         self.independent.setChecked(independent)
         self.independent.kind = 'resync' if independent else 'independent'
         self.independent.setToolTip('恢复自动对齐' if independent else '独立播放：不等待对齐，使用本路缓存进度')
+        self.independent.setAccessibleName(self.independent.toolTip())
         self.independent.update()
-        self.realign.setVisible(self.viewer.alignment.automatic and self.room_id != self.viewer.alignment.reference)
+        self.realign.setEnabled(self.viewer.alignment.automatic and self.room_id != self.viewer.alignment.reference)
+        can_submit_hint = (self.viewer.running and self.viewer.alignment.automatic
+                           and self.room_id != self.viewer.alignment.reference and not self.hint_pending
+                           and not self.viewer.replay.active and not self.paused and not independent)
+        hint = '辅助自动对齐：本路偏快 / 本路偏慢'
+        if self.hint_pending:
+            hint = '正在按你的判断完整重新搜索，完成后可再次提交'
+        elif self.alignment_hint is not None:
+            _, direction, weight = self.alignment_hint
+            hint += f"（{'偏快' if direction < 0 else '偏慢'}，判断权重 {weight}）"
+        self.assist.setEnabled(can_submit_hint)
+        self.assist.setToolTip(hint)
+        self.assist.setAccessibleName(hint)
+        if not can_submit_hint:
+            self.assist.setChecked(False)
+        for button in (self.hint_fast, self.hint_slow):
+            button.setEnabled(can_submit_hint)
+            button.setToolTip(button.text() + '：' + hint)
         match_text = self.match_text
         if independent:
             match_text = "独立播放，不参与自动对齐"
@@ -1267,6 +1404,9 @@ class Viewer(QDialog):
         self.skin_visible = False
         self.panel_alpha = 1.0
         self.independent_playback = {}
+        self.multi_recorder = None
+        self.record_started = None
+        self.record_elapsed = ''
         self.independent_shifts = {}
         self.rematch_rooms = set()
         self.rematch_admit = set()
@@ -1288,6 +1428,16 @@ class Viewer(QDialog):
         self.prefer_highest = False
         self.embedded = False
         self.floating_crops = {}
+        self.stream_info_dialog = None
+        self.crop_quality = QComboBox(self)
+        for label, mode in (('流畅优先：直接裁切', 'source'), ('轻量增强：放大与轻锐化', 'light')):
+            self.crop_quality.addItem(label, mode)
+        mode = context.setting('crop_quality', 'source')
+        mode = {'highest': 'source', 'superres': 'light'}.get(mode, mode)
+        self.crop_quality.setCurrentIndex(max(0, self.crop_quality.findData(mode)))
+        self.crop_quality.setAccessibleName('画中画画质')
+        self.crop_quality.hide()
+        self.crop_quality.currentIndexChanged.connect(self._crop_quality_changed)
         self.crop_repaint_regions = {}
         self.crop_repaint_timer = QTimer(self)
         self.crop_repaint_timer.setSingleShot(True)
@@ -1303,12 +1453,12 @@ class Viewer(QDialog):
         self.main = QComboBox(self)
         self.main.setFixedWidth(180)
         self.main.currentIndexChanged.connect(self._main_changed)
-        self.automatic = QCheckBox("自动对齐比赛画面")
+        self.automatic = ConsoleModeToggle("自动对齐比赛画面", 'automatic')
         self.automatic.setToolTip("关闭时保存当前相对偏移；重新勾选或主动修改偏移可解除保存状态。切换不收起对照。")
         self.automatic.setChecked(context.setting("automatic", True))
         self.alignment.automatic = self.automatic.isChecked()
         self.automatic.toggled.connect(self._automatic_changed)
-        self.compare = QCheckBox("对照微调")
+        self.compare = ConsoleModeToggle("对照微调", 'compare')
         self.automatic.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
         self.compare.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
         self.compare.toggled.connect(self.set_comparison_visible)
@@ -1338,7 +1488,10 @@ class Viewer(QDialog):
         self.add_controls = (self.input, add, use_current)
         self.settings_panel = SettingsPanel(self)
         self.match_settings = None
-        self.settings_height = 220
+        self.settings_height = 280
+        self.console_size_timer = QTimer(self)
+        self.console_size_timer.setSingleShot(True)
+        self.console_size_timer.timeout.connect(self.fit_console_height)
         self.minimize_settings = ConsoleIconButton('minimize', '最小化播放控制台')
         self.minimize_settings.setToolTip("收起设置栏，保留画面、声音和弹幕播放。")
         self.minimize_settings.clicked.connect(lambda: self.set_settings_visible(False))
@@ -1346,8 +1499,12 @@ class Viewer(QDialog):
         self.restore_settings.setFixedWidth(90)
         self.restore_settings.clicked.connect(lambda: self.set_settings_visible(True))
         self.restore_settings.hide()
-        heading = QHBoxLayout()
-        heading.setSpacing(6)
+        self.console_toolbar = QWidget()
+        self.console_toolbar.setObjectName('MatchSyncToolbar')
+        self.console_toolbar.setStyleSheet(f'QWidget#MatchSyncToolbar {{border-bottom: 1px solid {theme.BORDER_STRONG};}}')
+        heading = QHBoxLayout(self.console_toolbar)
+        heading.setContentsMargins(16, 10, 16, 10)
+        heading.setSpacing(16)
         self.main.hide()
         heading.addWidget(self.automatic)
         heading.addWidget(self.compare)
@@ -1355,7 +1512,7 @@ class Viewer(QDialog):
         for widget in self.add_controls:
             heading.addWidget(widget)
         heading.addStretch(0)
-        self.match_settings_button = ConsoleIconButton('settings', '比赛二路设置')
+        self.match_settings_button = native_console_button(TileButton('⚙'), '比赛二路设置')
         self.match_settings_button.clicked.connect(self.open_match_settings)
         heading.addWidget(self.match_settings_button)
         heading.addWidget(self.minimize_settings)
@@ -1387,6 +1544,7 @@ class Viewer(QDialog):
         video_layout.addWidget(self.canvas)
         self.picture.roomDropped.connect(self._add_dragged)
         self.picture.qualityChanged.connect(self._quality_changed)
+        self.picture.streamInfoRequested.connect(self._open_stream_info)
         self.picture.volumeChanged.connect(lambda _room, value: self._picture_setting("volume", value))
         self.picture.muteToggled.connect(lambda _room, muted: self._picture_setting("audible", not muted))
         self.picture.audioChannelChanged.connect(lambda _room, value: self._picture_setting("channel", value))
@@ -1448,20 +1606,45 @@ class Viewer(QDialog):
         self.comparison_panel = ComparisonPanel(self)
         self.body_split.addWidget(self.comparison_panel)
         self.body_split.addWidget(self.settings_panel)
-        self.body_split.setSizes([660, 0, 220])
+        self.body_split.setSizes([660, 0, 280])
+        self.body_split.splitterMoved.connect(self.remember_console_height)
         self.audio_status = QLabel()
         settings_layout = QVBoxLayout(self.settings_panel)
-        settings_layout.setContentsMargins(12, 8, 12, 8)
-        settings_layout.setSpacing(4)
-        settings_layout.addLayout(heading)
+        settings_layout.setContentsMargins(1, 1, 1, 1)
+        settings_layout.setSpacing(0)
+        settings_layout.addWidget(self.console_toolbar)
         settings_layout.addWidget(self.controls, 1)
-        footer = QHBoxLayout()
+        self.console_footer = QWidget()
+        self.console_footer.setObjectName('MatchSyncFooter')
+        self.console_footer.setStyleSheet(f'''QWidget#MatchSyncFooter {{background: {theme.BG};
+            border-bottom-left-radius: 9px; border-bottom-right-radius: 9px;}}
+            #MatchSyncFooter QLabel {{color: {theme.TEXT2}; font-size: 12px;}}''')
+        footer = QHBoxLayout(self.console_footer)
+        footer.setContentsMargins(16, 10, 16, 10)
         footer.setSpacing(16)
         footer.addWidget(self.notice, 1)
         self.audio_status.setWordWrap(True)
         self.audio_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         footer.addWidget(self.audio_status, 1)
-        settings_layout.addLayout(footer)
+        settings_layout.addWidget(self.console_footer)
+        self.removal_notice = QFrame(self.settings_panel)
+        self.removal_notice.setObjectName('MatchSyncRemovalNotice')
+        self.removal_notice.setStyleSheet(f'''#MatchSyncRemovalNotice {{background: {theme.ELEVATED};
+            border: 1px solid {theme.BORDER_STRONG}; border-radius: 6px;}}''')
+        removal_layout = QHBoxLayout(self.removal_notice)
+        removal_layout.setContentsMargins(12, 6, 12, 6)
+        self.removal_label = QLabel()
+        removal_layout.addWidget(self.removal_label)
+        undo = QPushButton('撤销')
+        undo.setAutoDefault(False)
+        undo.clicked.connect(self.undo_remove_room)
+        removal_layout.addWidget(undo)
+        self.removal_notice.hide()
+        self.removed_room = None
+        self.removal_timer = QTimer(self)
+        self.removal_timer.setSingleShot(True)
+        self.removal_timer.setInterval(5000)
+        self.removal_timer.timeout.connect(self.dismiss_removal_notice)
         self.left_pane = QWidget()
         left_layout = QVBoxLayout(self.left_pane)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -1664,9 +1847,11 @@ class Viewer(QDialog):
                 watched.hide()
         elif (kind in (QEvent.DragEnter, QEvent.DragMove, QEvent.Drop)
                 and getattr(self, "controls", None) is not None
-                and watched in (self.controls.widget(), self.controls.viewport())
-                and isinstance(event.source(), RoomRow) and event.source().viewer is self
-                and event.mimeData().hasFormat(ROW_MIME)):
+                and isinstance(watched, QWidget)
+                and (watched is self.controls.viewport() or watched is self.controls.widget()
+                     or self.controls.widget().isAncestorOf(watched))
+                and self.dragged_row is not None and event.mimeData().hasFormat(ROW_MIME)
+                and bytes(event.mimeData().data(ROW_MIME)).decode('utf-8') == self.dragged_row):
             point = watched.mapTo(self.controls.widget(), event.position().toPoint())
             if kind == QEvent.Drop:
                 self.finish_row_drag(point)
@@ -1675,8 +1860,12 @@ class Viewer(QDialog):
             event.acceptProposedAction()
             return True
         elif kind == QEvent.Resize:
+            if hasattr(self, 'controls') and watched is self.controls.viewport():
+                self.align_room_controls()
             if watched is self.settings_panel and hasattr(self, 'send_console'):
                 self.send_console.sync_height()
+                self.position_removal_notice()
+                self.queue_console_height()
             if watched is self.picture.bottom:
                 QTimer.singleShot(0, self._layout_restore_control)
             if self.embedded and watched is self.parentWidget():
@@ -1711,6 +1900,8 @@ class Viewer(QDialog):
         with self._switch_stage('show_controls'):
             self._sync_sidebar_marks()
             self.send_console.sync_height()
+        self.console_content_height = None
+        self.align_room_controls()
         super().showEvent(event)
 
     def hideEvent(self, event):
@@ -1842,16 +2033,46 @@ class Viewer(QDialog):
 
     def align_room_controls(self):
         rows = list(self.rows.values())
-        if not rows:
+        if self.dragged_row is not None:
             return
+        if not rows:
+            self.queue_console_height()
+            return
+        name_width = min(140, max(row.name_label.fontMetrics().horizontalAdvance(row.name_label.text()) for row in rows))
+        for row in rows:
+            if row.name_label.width() != name_width or row.name_label.minimumWidth() != name_width:
+                row.name_label.setFixedWidth(name_width)
         widths = [max(min(widget.maximumWidth(), max(widget.minimumWidth(), widget.sizeHint().width()))
                       for widget in widgets) for widgets in zip(*(row.control_widgets for row in rows))]
-        for row in rows:
-            for column, width in zip(row.control_columns, widths):
-                if row.controls_grid.columnMinimumWidth(column) != width:
-                    row.controls_grid.setColumnMinimumWidth(column, width)
+        compact = self.controls.viewport().width() < sum(widths) + 12 * 5 + 16
+        for index, row in enumerate(rows):
+            row.layout_controls(compact, index == 0)
+            for column in set(row.control_columns):
+                needed = max(w for c, w in zip(row.control_columns, widths) if c == column)
+                if row.controls_grid.columnMinimumWidth(column) != needed:
+                    row.controls_grid.setColumnMinimumWidth(column, needed)
+        self.queue_console_height()
+
+    def queue_console_height(self):
+        height = self.settings_height
+        if height != getattr(self, 'console_content_height', None) or self.settings_panel.height() != height:
+            self.console_content_height = height
+            self.settings_height = height
+            self.console_size_timer.start(0)
+
+    def remember_console_height(self, _position, _index):
+        if not self.settings_panel.isHidden() and self.dragged_row is None:
+            self.settings_height = self.console_content_height = self.settings_panel.height()
+
+    def fit_console_height(self):
+        if self.settings_panel.isHidden() or self.dragged_row is not None:
+            return
+        sizes = self.body_split.sizes()
+        height = self.console_content_height
+        self.body_split.setSizes([max(1, sizes[0] + sizes[2] - height), sizes[1], height])
 
     def begin_row_drag(self, room_id):
+        self.console_size_timer.stop()
         self.dragged_row = room_id
         self.row_preview = list(self.rows)
         self.row_slots = {key: row.geometry() for key, row in self.rows.items()}
@@ -1861,6 +2082,9 @@ class Viewer(QDialog):
     def preview_row_drag(self, point):
         if self.dragged_row is None:
             return
+        for animation in self.row_animations.values():
+            elapsed = round((time.perf_counter() - animation.property('started_at')) * 1000)
+            animation.setCurrentTime(min(animation.duration(), max(animation.currentTime(), elapsed)))
         order = [key for key in self.rows if key != self.dragged_row]
         index = sum(point.y() >= self.row_slots[key].center().y() for key in order)
         order.insert(index, self.dragged_row)
@@ -1881,6 +2105,7 @@ class Viewer(QDialog):
                         animation.setEasingCurve(QEasingCurve.OutCubic)
                         animation.setStartValue(row.pos())
                         animation.setEndValue(target)
+                        animation.setProperty('started_at', time.perf_counter())
                         self.row_animations[key] = animation
                         animation.start()
                     else:
@@ -1955,11 +2180,45 @@ class Viewer(QDialog):
         for key in targets:
             self.alignment.lags[key] = before[key] - before[reference]
             row = self.rows[key]
+            row.alignment_hint, row.hint_pending, row.hint_searching = None, False, False
             self._queue_rematch(row, local=row.user_confirmed and not row.needs_epoch_samples)
             self.rematch_admit.add(key)
         self.generation += 1
         self.changed()
         self.render()
+        self.analyse()
+
+    def submit_alignment_hint(self, room_id, direction):
+        row = self.rows.get(room_id)
+        if (row is None or direction not in (-1, 1) or not self.running or not self.alignment.automatic
+                or room_id == self.alignment.reference or row.hint_pending or row.paused
+                or self.replay.active or room_id in self.independent_playback):
+            return
+        clock, shifts = self.live_clock(), self.shifts()
+        main_position = self.canvas.frame_key
+        if main_position is None:
+            main_position = clock + shifts[self.alignment.reference]
+        position = clock + shifts[room_id]
+        floating = self.floating_crops.get(room_id)
+        card = self.comparison_panel.cards.get(room_id)
+        if self.compare.isChecked() and card is not None and card[2].isVisible() and card[2].frame_key is not None:
+            position = card[2].frame_key
+        elif floating is not None and floating.isVisible() and floating.frame_key is not None:
+            position = floating.frame_key
+        previous = row.alignment_hint
+        weight = min(4, previous[2] + 1) if previous is not None and previous[1] == direction else 1
+        # An ahead picture needs a smaller same-scene arrival lag than the displayed difference.
+        row.alignment_hint = (position - main_position, direction, weight)
+        row.hint_pending, row.hint_serial = True, None
+        row.hint_searching = True
+        row.match_text = f"已提交{'偏快' if direction < 0 else '偏慢'}判断（权重 {weight}），正在完整重新搜索"
+        row.next_analysis = 0.
+        self.alignment.candidates.pop(room_id, None)
+        self.analysis_serial += 1
+        self.matching = False
+        row.refresh_status()
+        logging.getLogger(__name__).info('Alignment hint submitted: slot=%s baseline=%.3f direction=%s weight=%s',
+            tuple(self.rows).index(room_id), row.alignment_hint[0], direction, weight)
         self.analyse()
 
     def _delay_changed(self, *_args):
@@ -2069,6 +2328,45 @@ class Viewer(QDialog):
         self.context.set_setting("main_room", self.main.currentData() or "")
         self.context.set_setting("automatic", self.automatic.isChecked())
         self.context.set_setting('buffer_reserve', self.reserve_seconds)
+        self.context.set_setting('crop_quality', self.crop_quality.currentData())
+
+    def _crop_source_policy(self, row):
+        if row.room_id not in self.floating_crops:
+            return 'source'
+        if row.room_id != self.alignment.reference:
+            return 'balanced'
+        return 'source'
+
+    def _crop_quality_changed(self):
+        for floating in self.floating_crops.values():
+            floating.set_quality_mode(self.crop_quality.currentData())
+        self._apply_crop_quality()
+        self.changed()
+
+    def _apply_crop_quality(self):
+        if not self.running:
+            return
+        for key, row in self.rows.items():
+            seed = getattr(row.decoder, 'seed', {})
+            if row.decoder is None or seed.get('crop_quality_policy', 'source') == self._crop_source_policy(row):
+                continue
+            floating = self.floating_crops.get(key)
+            if floating is not None:
+                floating.set_frame(None)
+            if key == self.alignment.reference:
+                self._reload_picture()
+            else:
+                self._stop_row(row)
+                self.sources.pop(key, None)
+                self._start_row(row)
+                if not self.alignment.manual_locked:
+                    self.alignment.lags.pop(key, None)
+                self.alignment.candidates.pop(key, None)
+                self.generation += 1
+
+    def _close_floating_crop(self, key):
+        self.floating_crops.pop(key, None)
+        self._apply_crop_quality()
 
     def _buffer_reserve_changed(self):
         self.reserve_seconds = self.buffer_reserve.currentData()
@@ -2087,6 +2385,48 @@ class Viewer(QDialog):
                                    int(settings.get('danmaku_font_size') or 13))
             self.panel.set_max_blocks(int(settings.get('danmaku_max_blocks') or 3000))
 
+    def position_removal_notice(self):
+        self.removal_notice.move(max(0, (self.settings_panel.width() - self.removal_notice.width()) // 2),
+            max(0, self.settings_panel.height() - self.console_footer.height() - self.removal_notice.height() - 8))
+
+    def dismiss_removal_notice(self):
+        self.removal_timer.stop()
+        self.removal_notice.hide()
+        self.removed_room = None
+
+    def remove_room_with_undo(self, room_id):
+        row = self.rows[room_id]
+        saved = (room_id, row.preferences(), self.sources.get(room_id),
+                 list(self.rows).index(room_id), self.main.currentData() == room_id, self.running)
+        label = row.label()
+        self.remove_room(room_id)
+        self.removed_room = saved
+        self.removal_label.setText('已移除 ' + label)
+        self.removal_notice.adjustSize()
+        self.position_removal_notice()
+        self.removal_notice.show()
+        self.removal_notice.raise_()
+        self.removal_timer.start()
+
+    def undo_remove_room(self):
+        saved = self.removed_room
+        self.dismiss_removal_notice()
+        if saved is None:
+            return
+        room_id, preferences, source, index, main, running = saved
+        if room_id in self.rows:
+            return
+        if source is not None:
+            self.sources[room_id] = source
+        self.add_room(room_id, preferences)
+        keys = list(self.rows)
+        if index < len(keys) - 1:
+            self.reorder_room(room_id, keys[index], False)
+        if main:
+            self.select_main(room_id)
+        if running and not self.running:
+            self.toggle_running()
+
     def _add_input(self):
         if self.add_room(self.input.text()):
             self.input.clear()
@@ -2100,8 +2440,11 @@ class Viewer(QDialog):
         if room_id in self.rows:
             self.notice.setText("这位主播已经加入")
             return False
+        self._stop_recording()
         options = dict(self.saved_rooms.get(room_id, {}))
         options.update(preferences or {})
+        used = {number for row in self.rows.values() for number in row.record_tracks}
+        options.setdefault('record_tracks', next(([number] for number in range(1, 7) if number not in used), []))
         row = RoomRow(self, room_id, options, COLORS[len(self.rows) % len(COLORS)])
         self.rows[room_id] = row
         self.rows_layout.addWidget(row)
@@ -2138,12 +2481,14 @@ class Viewer(QDialog):
         self.independent_playback.pop(selected, None)
         for room_id, row in self.rows.items():
             row.main_button.setChecked(room_id == selected)
-            row.realign.setVisible(self.automatic.isChecked() and room_id != selected)
+            row.main_button.setText('主画面' if room_id == selected else '设为主画面')
+            row.realign.setEnabled(self.automatic.isChecked() and room_id != selected)
         if selected != self.alignment.reference:
             self.late_buffer = LateBuffer(self.reserve_seconds)
             self.late_notice.hide()
             for current in self.rows.values():
                 current.large_candidate = None
+                current.alignment_hint, current.hint_pending, current.hint_searching = None, False, False
             saved = self.shifts() if self.alignment.manual_locked else None
             self.stable_reference_shift = self.independent_shifts.pop(selected, None)
             self.prefer_highest = True
@@ -2168,6 +2513,7 @@ class Viewer(QDialog):
                     self._reload_picture()
                 elif row.decoder is not None:
                     row.decoder.seed["highest_quality"] = True
+        self._apply_crop_quality()
         self.sync_picture()
         self.changed()
 
@@ -2181,6 +2527,49 @@ class Viewer(QDialog):
             self.canvas.update()
         if getattr(self.picture, "_buffering", False) != bool(active):
             self.picture.set_buffering(bool(active))
+
+    def _stream_info_snapshot(self):
+        row = self.rows.get(self.main.currentData())
+        if row is None:
+            return None
+        info = {'room': f'{row.label()} · {row.room_id}', 'state': 'idle',
+                'core': 'FFmpeg / PyAV（比赛二路）'}
+        decoder = row.decoder
+        if not self.running or decoder is None:
+            return info
+        width, height = decoder.video_size
+        info.update(state=('paused' if row.paused else 'connecting' if not width else
+                           'buffering' if self.canvas.waiting else 'playing'),
+                    host=urlsplit(decoder.source_url).hostname or '',
+                    video={'w': width, 'h': height}, fps=decoder.fps, decoder='no')
+        history = decoder.history
+        # Read retained-cache metadata only; never wait for decoding or inspect
+        # the FFmpeg pipe on the GUI thread. Unknown source properties stay unknown.
+        if history.lock.acquire(blocking=False):
+            try:
+                info['video_codec'] = history.codec[0] if history.codec else None
+                bounds = history.bounds()
+                info['buffer_seconds'] = bounds[1] - bounds[0] if bounds else None
+                info['buffer_bytes'] = history.byte_size
+            finally:
+                history.lock.release()
+        return info
+
+    def _open_stream_info(self):
+        if self._stream_info_snapshot() is None:
+            return
+        if self.stream_info_dialog is None:
+            from ddm.stream_info import StreamInfoDialog
+            dialog = StreamInfoDialog(self._stream_info_snapshot, self)
+            dialog.finished.connect(self._stream_info_closed)
+            self.stream_info_dialog = dialog
+        self.stream_info_dialog.refresh()
+        self.stream_info_dialog.show()
+        self.stream_info_dialog.raise_()
+        self.stream_info_dialog.activateWindow()
+
+    def _stream_info_closed(self, _result):
+        self.stream_info_dialog = None
 
     def sync_picture(self, *_args, refresh_metadata=True):
         row = self.rows.get(self.main.currentData())
@@ -2278,6 +2667,7 @@ class Viewer(QDialog):
         live_clock = self.live_clock()
         was_replaying = self.replay.active
         if self.replay.seek(stamp, now, self.replay_histories()):
+            self._stop_recording()
             if not was_replaying:
                 self._replay_live_anchor = live_clock - self.audio.correction
                 self._replay_live_updated = now
@@ -2289,6 +2679,8 @@ class Viewer(QDialog):
             self.replay_bar.refresh(force=True)
 
     def return_live(self):
+        if self.replay.active:
+            self._stop_recording()
         clock = self.live_clock()
         self.replay.live()
         self.canvas.set_frame(None)
@@ -2380,18 +2772,82 @@ class Viewer(QDialog):
         dialog._fullscreen_cursor.start()
 
     def _stop_recording(self):
+        if self.multi_recorder is not None:
+            self.multi_recorder.stop()
+            self.picture.recording_button.setEnabled(False)
         recorder = getattr(self.context.window, "recorder", None)
         if recorder is not None and self.picture in recorder.sessions:
             recorder.stop(self.picture)
 
     def _record_picture(self):
-        recorder = getattr(self.context.window, "recorder", None)
-        if recorder is not None:
-            session = recorder.sessions.get(self.picture)
-            if session and session.recording:
-                recorder.stop(self.picture)
-            else:
-                recorder.start(self.picture, recording=True)
+        if self.multi_recorder is not None:
+            self._stop_recording()
+            return
+        settings = getattr(self.context.window, 'settings', {})
+        if not settings.get('recording_enabled', True):
+            self.notice.setText('录制功能已在「设置 → 录制」关闭')
+            return
+        row = self.rows.get(self.alignment.reference)
+        history = row.decoder.history if row is not None and row.decoder is not None else None
+        if not self.running or history is None or not getattr(history, 'codec', None) or history.origin is None:
+            self.notice.setText('请等待主画面缓存就绪后再录制')
+            return
+        tracks = tuple((number, '、'.join(current.label() for current in self.rows.values() if number in current.record_tracks),
+                        tuple(key for key, current in self.rows.items() if number in current.record_tracks))
+                       for number in range(1, 7) if any(number in current.record_tracks for current in self.rows.values()))
+        if not tracks:
+            self.notice.setText('请先在二路控制台设置中选择至少一条录制音轨')
+            return
+        directory = str(settings.get('recording_dir') or '').strip()
+        if not directory:
+            self.notice.setText('请先在「设置 → 录制」选择保存目录')
+            return
+        try:
+            folder = Path(directory).expanduser().resolve()
+            folder.mkdir(parents=True, exist_ok=True)
+            minimum = max(256, int(settings.get('recording_min_free_mb', 2048))) * 1024 * 1024
+            if shutil.disk_usage(folder).free < minimum:
+                self.notice.setText('录制未开始：保存目录所在磁盘剩余空间不足')
+                return
+            path = folder / f'match_sync_{time.strftime("%Y%m%d_%H%M%S")}_{time.time_ns() % 1000000000:09d}.mkv'
+            worker = MultiTrackRecorder(path, history, tracks, self._recording_snapshot(), minimum_free=minimum)
+        except (OSError, ValueError) as error:
+            self.notice.setText(f'无法开始分音轨录制：{error}')
+            return
+        self.multi_recorder = worker
+        self.record_started = time.monotonic()
+        worker.completed.connect(self._recording_finished, Qt.QueuedConnection)
+        self.picture.set_recording_state('record')
+        self.picture.recording_button.setToolTip('停止录制主画面与所选音轨')
+        if self.match_settings is not None:
+            self.match_settings.refresh_recording_routes()
+        self.notice.setText(f'开始分音轨录制：{path}')
+        worker.start()
+
+    def _recording_snapshot(self):
+        clock, shifts = self.replay.presentation(self.live_clock(), self.shifts())
+        main = shifts.get(self.alignment.reference, 0)
+        sources = {key: (row.decoder.history if row.decoder is not None and
+                        (key == self.alignment.reference or row.sync_state == '已同步' or key in self.independent_playback)
+                        else None, shift - main)
+                   for key, shift in shifts.items() if (row := self.rows.get(key)) is not None}
+        return clock + main, sources
+
+    @Slot(str, str)
+    def _recording_finished(self, path, error):
+        worker = self.sender()
+        if self.multi_recorder is worker:
+            self.multi_recorder = None
+            self.record_started = None
+            self.record_elapsed = ''
+            self.picture.set_recording_state('')
+            self.picture.set_recording_elapsed('')
+            self.picture.recording_button.setEnabled(True)
+            self.picture.recording_button.setToolTip('录制主画面与所选音轨；在二路控制台设置中分配音轨')
+            self.notice.setText(f'分音轨录制停止：{error} · 文件：{path}' if error else f'分音轨录制已保存：{path}')
+            if self.match_settings is not None:
+                self.match_settings.refresh_recording_routes()
+        worker.deleteLater()
 
     def _save_delay_offsets(self, shifts):
         reference = self.alignment.reference
@@ -2413,6 +2869,8 @@ class Viewer(QDialog):
         self.rematch_admit.clear()
 
     def _automatic_changed(self, *_args):
+        for current in self.rows.values():
+            current.alignment_hint, current.hint_pending, current.hint_searching = None, False, False
         self.analysis_serial += 1
         self.matching = False
         preserved_main = (self.shifts().get(self.alignment.reference)
@@ -2458,11 +2916,12 @@ class Viewer(QDialog):
             self.alignment.candidates.clear()
             self.generation += 1
         for row in self.rows.values():
-            row.realign.setVisible(self.alignment.automatic and row.room_id != self.alignment.reference)
+            row.realign.setEnabled(self.alignment.automatic and row.room_id != self.alignment.reference)
             row.refresh_status()
         self.changed()
 
     def remove_room(self, room_id):
+        self._stop_recording()
         if room_id in self.floating_crops:
             self.floating_crops[room_id].close()
         self.independent_playback.pop(room_id, None)
@@ -2642,6 +3101,7 @@ class Viewer(QDialog):
         self.match_timer.start()
 
     def _start_row(self, row):
+        row.alignment_hint, row.hint_pending, row.hint_searching = None, False, False
         row.large_candidate = None
         row.paused = False
         row.sync_state = "准备缓存"
@@ -2669,7 +3129,12 @@ class Viewer(QDialog):
         if seed.get("quality", row.quality) != row.quality:
             seed.pop("url", None)
         seed["quality"] = row.quality
+        policy = self._crop_source_policy(row)
+        seed['crop_quality_policy'] = policy
+        seed['balanced_quality'] = policy == 'balanced'
         seed["highest_quality"] = self.prefer_highest and row.room_id == self.alignment.reference
+        if policy != 'source':
+            seed.pop('url', None)
         row.decoder = Decoder(row.room_id, seed, row.platform)
         row.decoder.set_crop((0, 0, 1, 1))
         decoder = row.decoder
@@ -2725,7 +3190,7 @@ class Viewer(QDialog):
     def _information(self, row, worker, info):
         if not self._valid(row, worker):
             return
-        if info.get("requested_quality"):
+        if info.get("requested_quality") and self._crop_source_policy(row) == 'source':
             row.quality = int(info["requested_quality"])
         if "title" in info:
             row.title = info.get("title") or ""
@@ -2734,7 +3199,7 @@ class Viewer(QDialog):
             self.update_main_choices()
         if info.get("actual_quality"):
             row.actual_quality = int(info["actual_quality"])
-            if (row.platform is not None and row.platform.kind != "douyu"
+            if (self._crop_source_policy(row) == 'source' and row.platform is not None and row.platform.kind != "douyu"
                     and not (self.prefer_highest and row.room_id == self.alignment.reference)):
                 row.quality = row.actual_quality
             if row.room_id == self.main.currentData():
@@ -3113,9 +3578,13 @@ class Viewer(QDialog):
             received, event = pending
             if key not in shifts or not self.rows[key].show_chat.isChecked() or clock + shifts[key] - received > 5:
                 self.overlay_pending.pop(key, None)
-            elif self.video_danmaku.add_event(event):
-                self.overlay_pending.pop(key, None)
-                self.overlay_last = key
+            else:
+                overlay_event = dict(event)
+                if not event.get('color'):
+                    overlay_event['text'] = f"【{event['source_label']}】 {event.get('text') or ''}"
+                if self.video_danmaku.add_event(overlay_event):
+                    self.overlay_pending.pop(key, None)
+                    self.overlay_last = key
 
     def render(self):
         if not self.running:
@@ -3202,6 +3671,7 @@ class Viewer(QDialog):
                                      playback_rate=self.playback_rate, replay=self.replay.active,
                                      audio_clock_interpolated=self.audio.clock_observation is not None,
                                      native_clip_retry_blocks=self.native_clip_retry_blocks,
+                                     floating=[crop.diagnostics() for crop in self.floating_crops.values()],
                                      render_interval_ms=self.render_timer.interval())
             target = shown_clock + shown_shifts[row.room_id]
             requested = time.perf_counter()
@@ -3289,17 +3759,26 @@ class Viewer(QDialog):
                 self.panel.add_event(event)
             received = _due + shifts[event["source_room"]]
             if not self.replay.active:
-                self.overlay_pending[event["source_room"]] = (received, {**event,
-                    "text": f"【{event['source_label']}】 {event.get('text') or ''}"})
+                self.overlay_pending[event["source_room"]] = (received, event)
         if self.replay.active:
             for event in self.replay.messages_between(self.replay.cursor, shown_clock):
                 key = event['source_room']
                 if key in shown_shifts:
                     self.panel.add_event(event)
-                    self.overlay_pending[key] = (shown_clock + shown_shifts[key], {**event,
-                        'text': f"【{event['source_label']}】 {event.get('text') or ''}"})
+                    self.overlay_pending[key] = (shown_clock + shown_shifts[key], event)
             self.replay.cursor = shown_clock
         self._render_overlay(shown_clock, shown_shifts)
+        if self.multi_recorder is not None and not self.multi_recorder.cancelled.is_set():
+            main = self.rows.get(self.alignment.reference)
+            if main is None or main.decoder is None or main.decoder.history is not self.multi_recorder.history:
+                self._stop_recording()
+            else:
+                self.multi_recorder.snapshot = self._recording_snapshot()
+                elapsed = max(0, int(time.monotonic() - self.record_started))
+                text = f'{elapsed // 3600:02d}:{elapsed // 60 % 60:02d}:{elapsed % 60:02d}'
+                if text != self.record_elapsed:
+                    self.record_elapsed = text
+                    self.picture.set_recording_elapsed(text)
 
     def _configure_picture_budget(self):
         reference = self.alignment.reference
@@ -3336,7 +3815,7 @@ class Viewer(QDialog):
                   and time.monotonic() >= value.next_analysis}
         if not others:
             return
-        keys = list(others)
+        keys = [key for key in others if self.rows[key].hint_pending] or list(others)
         key = keys[self.analysis_cursor % len(keys)]
         self.analysis_cursor += 1
         others = {key: others[key]}
@@ -3351,6 +3830,9 @@ class Viewer(QDialog):
                     with value.decoder.lock:
                         region_frames[key] = list(value.decoder.region_frames)
         known = {key: lag for key, lag in self.alignment.lags.items() if key not in self.independent_playback}
+        hints = {key: self.rows[key].alignment_hint for key in others if self.rows[key].hint_searching}
+        for key in hints:
+            known.pop(key, None)
         for key in self.rematch_rooms:
             if not self.rows[key].rematch_locally:
                 known.pop(key, None)
@@ -3377,11 +3859,17 @@ class Viewer(QDialog):
         epoch, bridge = self.generation, self.results
         self.analysis_serial += 1
         serial = self.analysis_serial
+        for key in hints:
+            a, b = details.get(reference_id, []), details.get(key, [])
+            ready = min(len(a), len(b)) >= 40 if a and b else min(len(reference), len(others[key])) >= 8
+            if self.rows[key].hint_pending:
+                self.rows[key].hint_serial = serial if ready else None
         self.matching = True
 
         def calculate():
             results = {}
             for key, samples in others.items():
+                hint_options = {'hint': hints[key]} if key in hints else {}
                 reference_details = details.get(reference_id, [])
                 other_details = details.get(key, [])
                 if key in tracking_rooms and has_picture:
@@ -3390,14 +3878,14 @@ class Viewer(QDialog):
                     candidate = (refine_match(Match(known[key], .9, "跟踪已确认偏移"), reference_details, other_details)
                                  if key in known else Match(None, 0, "首次匹配"))
                     if candidate.lag is None:
-                        candidate = match_scenes(reference_details[::4], other_details[::4])
+                        candidate = match_scenes(reference_details[::4], other_details[::4], **hint_options)
                 else:
-                    candidate = match_scenes(reference, samples)
+                    candidate = match_scenes(reference, samples, **hint_options)
                 if reference_details and other_details:
                     if candidate.lag is None and not candidate.candidates and key in known:
                         candidate = Match(known[key], .9, "复核已确认偏移")
                     if not candidate.refined:
-                        candidate = refine_match(candidate, reference_details, other_details)
+                        candidate = refine_match(candidate, reference_details, other_details, **hint_options)
                     if candidate.lag is not None and key in known and has_picture and key not in preview_rooms:
                         shown_reference = [s for s in details[reference_id] if s.time <= positions[reference_id]]
                         shown_other = [s for s in details[key] if s.time <= positions[key]]
@@ -3422,7 +3910,7 @@ class Viewer(QDialog):
                     candidate = Match(None, 0, "恢复精校正需要连续至少 4 秒比赛画面，继续收集")
                 if candidate.lag is None and region_frames.get(reference_id) and region_frames.get(key):
                     regional = match_regions(region_frames[reference_id], region_frames[key],
-                                             cached_regions.get(key, ()), known.get(key))
+                                             cached_regions.get(key, ()), known.get(key), **hint_options)
                     if regional.lag is not None:
                         peers = [peer for peer in known if peer not in (key, reference_id)
                                  and peer in confirmed_peers and region_frames.get(peer)]
@@ -3446,6 +3934,14 @@ class Viewer(QDialog):
 
     def _analysis_finished(self, serial, epoch, results):
         if serial == self.analysis_serial:
+            if self.running and epoch == self.generation and self.alignment.automatic:
+                for key, match in results.items():
+                    row = self.rows.get(key)
+                    if row is not None and row.hint_pending and row.hint_serial == serial:
+                        if not match.reason.startswith('匹配异常：'):
+                            row.hint_pending = False
+                        logging.getLogger(__name__).info('Alignment hint search: slot=%s lag=%s confidence=%.3f refined=%s reason=%s',
+                            tuple(self.rows).index(key), match.lag, match.confidence, match.refined, match.reason)
             self.results.matched.emit(epoch, results)
 
     def _matched(self, epoch, results):
@@ -3525,6 +4021,8 @@ class Viewer(QDialog):
                 row.refresh_status()
                 continue
             applied = self.alignment.accept(room_id, match)
+            if applied and match.refined:
+                row.hint_searching = False
             if match.lag is None:
                 row.large_candidate = None
                 insufficient = any(reason in match.reason for reason in (
@@ -3632,7 +4130,7 @@ class Viewer(QDialog):
         if floating is None:
             floating = FloatingCrop(self.floating_surface(), row.label(), crop)
             self.floating_crops[row.room_id] = floating
-            floating.closed.connect(lambda key=row.room_id: self.floating_crops.pop(key, None))
+            floating.closed.connect(lambda key=row.room_id: self._close_floating_crop(key))
             floating.background_exposed.connect(lambda rect, item=floating: self.restore_crop_background(item, rect))
             floating.gesture_finished.connect(self.flush_crop_background)
             floating.recrop.connect(lambda: self.choose_crop(row, floating=True))
@@ -3640,6 +4138,8 @@ class Viewer(QDialog):
         floating.picture_widget = self.picture
         self.picture.installEventFilter(floating)
         floating.crop = QRectF(*crop)
+        floating.reset_enhancement()
+        floating.set_quality_mode(self.crop_quality.currentData())
         pixmap = row.avatar.pixmap()
         floating.set_avatar(pixmap if pixmap is not None and not pixmap.isNull() else row.avatar.grab())
         floating.frame_key = None
@@ -3647,6 +4147,7 @@ class Viewer(QDialog):
         floating.fit_geometry(floating.x(), floating.y(), floating.width() if floating.isVisible() else 320)
         floating.show()
         floating.raise_()
+        self._apply_crop_quality()
         return floating
 
     def render_floating_crops(self, clock, shifts):
@@ -3724,7 +4225,7 @@ class Viewer(QDialog):
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         layout = QVBoxLayout(dialog)
-        hint = QLabel('Ctrl＋滚轮以指针为中心缩放画面；拖动边框或四角精调，内部移动选区；使用整个画面重置，确认后可通过微调按钮再次调整。'
+        hint = QLabel('Ctrl＋滚轮：缩放　滚轮：上下平移　Shift＋滚轮：左右平移'
                       if floating else "自动匹配始终使用完整画面；框选仅用于放大对照、人工微调偏移。"
                       "两路请选择相同计时器，框选不会改变自动匹配或读取计时器数字。")
         hint.setWordWrap(True)
@@ -3772,6 +4273,7 @@ class Viewer(QDialog):
 
     @staticmethod
     def _stop_row(row):
+        row.alignment_hint, row.hint_pending, row.hint_searching = None, False, False
         if row.decoder is not None:
             row.decoder.stop()
         if row.chat is not None:
@@ -3791,6 +4293,9 @@ class Viewer(QDialog):
         row.refresh_status()
 
     def stop(self):
+        self.running = False
+        if self.stream_info_dialog is not None:
+            self.stream_info_dialog.close()
         with self._switch_stage('stop_playback_probe'):
             self.playback_probe.stop()
         self.independent_playback.clear()
@@ -3803,8 +4308,9 @@ class Viewer(QDialog):
         if self.fullscreen_dialog is not None:
             self.fullscreen_dialog.close()
         self._stop_recording()
-        self.running = False
         self.replay = ReplayTimeline()
+        if self.multi_recorder is not None:
+            self.multi_recorder.stop(wait=True)
         self.replay_bar.refresh(force=True)
         self.sync_waiting = False
         self.locked_clock = None
