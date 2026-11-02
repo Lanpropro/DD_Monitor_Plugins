@@ -181,15 +181,28 @@ class ViewerWiringTests(unittest.TestCase):
         self.assertIn('tuple(row.pip_crop) if row is not None else (0.0, 0.0, 1.0, 1.0)', self.source)
         self.assertNotIn('self.canvas.pip_crop = QRectF(', self.source)
 
-    def test_the_manual_crop_is_the_only_way_to_set_the_box(self):
+    def test_the_crop_comes_from_the_dialog_or_the_detector(self):
         for text in ('self.pip_crop_button.clicked.connect(self._pip_crop_clicked)',
-                     'row.pip_crop = rect', 'self._keep_pip_centre(previous, rect)'):
+                     'self.pip_auto_button.clicked.connect(self._auto_pip_crop_clicked)',
+                     'row.pip_crop = rect', 'self._keep_pip_centre(previous, rect)',
+                     'rect, _score = detect_auto_crop(frames, faces=True)',
+                     'row.pip_crop = clamp_auto_crop(rect)'):
             with self.subTest(text=text):
                 self.assertIn(text, self.source)
-        for stale in ('自动框选', 'pip_auto_button', 'auto_pip', 'detect_best', 'snap_auto_crop',
-                      'snap_gray', '_snap_selection', 'autocrop', 'pip_follow', 'pip_follower'):
+        for stale in ('snap_gray', '_snap_selection', 'detect_best', 'pip_follow', 'pip_follower',
+                      '_auto_pip_first', 'auto_pip_done'):
             with self.subTest(stale=stale):
                 self.assertNotIn(stale, self.source)
+
+    def test_the_automatic_crop_keeps_the_inset_centre_too(self):
+        start = self.source.index('def _auto_pip_crop_for')
+        end = self.source.index('def _pip_crop_clicked', start)
+        body = self.source[start:end]
+        for text in ('previous = tuple(row.pip_crop)', 'self._keep_pip_centre(previous, row.pip_crop)',
+                     'self._sync_pip_geometry()'):
+            with self.subTest(text=text):
+                self.assertIn(text, body)
+        self.assertNotIn('QApplication.setOverrideCursor', body)
 
     def test_the_crop_change_keeps_the_inset_centre(self):
         start = self.source.index('def _keep_pip_centre')

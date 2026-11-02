@@ -5,6 +5,8 @@ import re
 import sys
 import threading
 import time
+
+import numpy as np
 from collections import deque
 from dataclasses import replace
 from urllib.parse import urlsplit
@@ -31,6 +33,7 @@ from .panels import ConsoleIconButton, MatchSettingsDialog, SettingsPanel, style
 from .replay import ReplayBar, ReplayTimeline
 from .regions import match_regions
 
+from .autocrop import clamp as clamp_auto_crop, detect as detect_auto_crop
 from .pip import (CORNERS as PIP_CORNERS, DEFAULT_WIDTH, HANDLE, MAX_WIDTH, MIN_BOX, MIN_WIDTH,
                 clamp_box, clamp_crop, crop_pixels, fit, from_normalized, inset as pip_inset,
                 resize_keeping_aspect, to_normalized)
@@ -1478,17 +1481,23 @@ class Viewer(QDialog):
         self.pip_source.setToolTip("画中画取自哪一路：通常是画质较糊、但想看到人脸的那一路。")
         self.pip_crop_button = QPushButton("框选画面")
         self.pip_crop_button.setToolTip("拖选画中画要显示的部分，例如二路解说的人脸。")
+        self.pip_auto_button = QPushButton("自动框选")
+        self.pip_auto_button.setToolTip(
+            "在二路画面里找解说摄像头的小窗并直接裁成画中画：按人脸大小和窗口边框估计，"
+            "认不出就提示你手动框选。")
         self.pip_hint = QLabel("小窗可拖动，拖右下角缩放")
         self.pip_hint.setStyleSheet(f"color: {theme.TEXT3};")
         self.pip_hint.setToolTip("在画面上直接拖动小窗移动位置；拖小窗右下角调整大小。")
         self.pip_check.toggled.connect(self._pip_changed)
         self.pip_source.currentIndexChanged.connect(self._pip_changed)
         self.pip_crop_button.clicked.connect(self._pip_crop_clicked)
+        self.pip_auto_button.clicked.connect(self._auto_pip_crop_clicked)
         self.pip_row = QHBoxLayout()
         self.pip_row.setSpacing(6)
         self.pip_row.addWidget(self.pip_check)
         self.pip_row.addWidget(self.pip_source, 1)
         self.pip_row.addWidget(self.pip_crop_button)
+        self.pip_row.addWidget(self.pip_auto_button)
         self.pip_row.addWidget(self.pip_hint)
         self.hidden_host_widgets = {}
         self.sidebar_style = None
@@ -3862,6 +3871,7 @@ class Viewer(QDialog):
             self.pip_room = str(data)
         self.pip_source.setEnabled(self.pip_enabled)
         self.pip_crop_button.setEnabled(self.pip_enabled and bool(self.pip_room))
+        self.pip_auto_button.setEnabled(self.pip_enabled and bool(self.pip_room))
         self.pip_hint.setEnabled(self.pip_enabled)
         if self.pip_enabled and not self.pip_room:
             self.notice.setText("画中画没有可选来源：请再拖入至少一位主播，或先取消勾选")
@@ -3888,7 +3898,78 @@ class Viewer(QDialog):
         self.pip_room = str(self.pip_source.currentData() or self.pip_room)
         self.pip_source.setEnabled(self.pip_enabled and bool(items))
         self.pip_crop_button.setEnabled(self.pip_enabled and bool(self.pip_room))
+        self.pip_auto_button.setEnabled(self.pip_enabled and bool(self.pip_room))
         self._sync_pip_geometry()
+
+    @staticmethod
+    def _pip_thumb(image, width=640, height=360):
+        """A small grayscale copy of ``image`` for the auto crop detector."""
+        if image is None or image.isNull():
+            return None
+        small = image.scaled(width, height, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        if small.isNull():
+            return None
+        small = small.convertToFormat(QImage.Format_Grayscale8)
+        stride = small.bytesPerLine()
+        data = np.frombuffer(small.constBits(), dtype=np.uint8, count=stride * small.height())
+        return data.reshape(small.height(), stride)[:, :small.width()].copy()
+
+    def _grab_picture(self, row, back=0.0):
+        """The decoded picture of one room ``back`` seconds before the live edge."""
+        if row is None or row.decoder is None:
+            return None
+        timestamp = self.live_clock() + self.shifts().get(row.room_id, 0) - back
+        picture = (row.decoder.picture_at(timestamp) if hasattr(row.decoder, "picture_at")
+                   else row.decoder.history.frame_at(timestamp))
+        if isinstance(picture, (tuple, list)) and len(picture) > 1:
+            picture = picture[1]
+        return picture
+
+    def _pip_frames(self, row):
+        """A few recent grayscale frames of ``row``, oldest first."""
+        frames = []
+        seen = set()
+        for back in (0.75, 0.5, 0.25, 0.0):
+            picture = self._grab_picture(row, back)
+            if picture is None or id(picture) in seen:
+                continue
+            seen.add(id(picture))
+            thumb = self._pip_thumb(picture)
+            if thumb is not None:
+                frames.append(thumb)
+        return frames
+
+    def _auto_pip_crop_clicked(self):
+        row = self.rows.get(self.pip_source.currentData() or self.pip_room)
+        if row is None:
+            self.notice.setText("请先把要放进画中画的那一路加入比赛二路，再自动框选")
+            return
+        self._auto_pip_crop_for(row)
+
+    def _auto_pip_crop_for(self, row):
+        """Find the talker camera window in ``row`` and use it as the crop."""
+        frames = self._pip_frames(row)
+        if not frames:
+            self.notice.setText("这一路还没有画面：等播放稳定后再点「自动框选」，或用「框选画面」手动框")
+            return False
+        rect = None
+        try:
+            rect, _score = detect_auto_crop(frames, faces=True)
+        except Exception:  # a detector hiccup must never break playback
+            rect = None
+        if rect is None:
+            self.notice.setText("没认出摄像头小窗：等画面稳定后再点一次，或用「框选画面」手动框")
+            return False
+        previous = tuple(row.pip_crop)
+        row.pip_crop = clamp_auto_crop(rect)
+        self._keep_pip_centre(previous, row.pip_crop)
+        if not self.pip_enabled:
+            self.pip_check.setChecked(True)
+        self._sync_pip_geometry()
+        self.render()
+        self.changed()
+        self.notice.setText("已自动框选摄像头小窗，可再用「框选画面」手动微调")
+        return True
 
     def _pip_crop_clicked(self):
         row = self.rows.get(self.pip_source.currentData() or self.pip_room)
