@@ -40,13 +40,17 @@ MAX_WIDTH = 0.62
 MIN_HEIGHT = 0.10
 MAX_HEIGHT = 0.78
 
-ASPECT = 16.0 / 9.0
+# Talkers mount their camera window in many shapes: square face-cams, 4:3 webcams
+# and 16:9 broadcast boxes all show up, so every shape is scored.
+ASPECTS = (1.0, 1.3, 16.0 / 9.0)
 FACINGS = (1.8, 2.4, 3.0, 3.6)
 FACING_SLACK = 0.55
 DETECT_WIDTH = 720.0
 SNAP_TOLERANCE = 0.03
 FINAL_SNAP = 0.02
 GROW = 0.06
+# The camera window barely changes between frames while the game picture moves.
+STILL_WEIGHT = 3.0
 
 CASCADES = (
     "haarcascade_frontalface_default.xml",
@@ -88,32 +92,69 @@ def detect(frames, faces=True):
     prepared = _prepare(frames)
     if not prepared or not faces:
         return None, 0.0
+    if len(prepared) < 2:
+        # One frame cannot separate the talker from a face inside the game.
+        return None, 0.0
     clusters = _face_clusters(prepared)
     if not clusters:
         return None, 0.0
     current = prepared[-1]
     height, width = current.shape[:2]
-    # The first cluster (most frames, then largest face) is the talker; other
-    # clusters are stray matches inside the game picture. A wrong box is worse
-    # than no box, so the caller keeps the old crop when this one fails.
-    cluster = clusters[0]
+    # Every cluster gets a chance: the character in the game picture often looks
+    # like a face too, and only the camera window has a real border around the
+    # person. A wrong box is worse than no box, so the caller keeps the old crop
+    # when nothing scores.
+    # A stray face inside the game picture turns up in one frame; the talker turns
+    # up in every frame, so only the most persistent clusters are considered.
+    steady = [cluster for cluster in clusters if cluster["frames"] == clusters[0]["frames"]]
+    motion = _motion(prepared)
+    moving = float(motion.mean()) if motion is not None else 0.0
     candidates = []
-    for facing in FACINGS:
-        seed = _seed(cluster["box"], facing, width, height)
-        if seed is None:
-            continue
-        candidates.append((_border_score(current, seed), seed, cluster))
+    for cluster in steady:
+        for aspect in ASPECTS:
+            for facing in FACINGS:
+                seed = _seed(cluster["box"], facing, aspect, width, height)
+                if seed is None:
+                    continue
+                score = _border_score(current, seed) + STILL_WEIGHT * _stillness(motion, seed)
+                candidates.append((score, seed, cluster))
     top = max((entry[0] for entry in candidates), default=0.0)
     if top <= 0.0:
         return None, 0.0
     # Cropping a little wide still shows the whole person; cropping narrow cuts
-    # their head off. Among the plausible candidates keep the largest.
+    # their head off. Among the plausible candidates keep the best scored one.
     near = [entry for entry in candidates if entry[0] >= top * FACING_SLACK]
     _score, rect, cluster = max(near, key=lambda entry: entry[0])
     rect = _widen(rect, GROW)
     rect = snap(current, rect, tolerance=FINAL_SNAP) or rect
     confidence = min(1.0, float(cluster["frames"]) / max(1.0, float(len(prepared))))
     return clamp(rect), confidence
+
+
+def _motion(frames):
+    """Per-pixel change between the oldest and newest frame, or None."""
+    if frames is None or len(frames) < 2:
+        return None
+    first = frames[0].astype(np.float32)
+    last = frames[-1].astype(np.float32)
+    if first.shape != last.shape:
+        return None
+    return np.abs(first - last)
+
+
+def _stillness(motion, rect):
+    """1.0 when the box barely changed while the rest of the picture did."""
+    if motion is None:
+        return 0.0
+    height, width = motion.shape[:2]
+    x, y, w, h = rect
+    x0 = max(0, min(width - 1, int(round(x * width))))
+    y0 = max(0, min(height - 1, int(round(y * height))))
+    x1 = max(x0 + 1, min(width, int(round((x + w) * width))))
+    y1 = max(y0 + 1, min(height, int(round((y + h) * height))))
+    inside = float(motion[y0:y1, x0:x1].mean())
+    reference = float(motion.mean()) * 1.2 + 1.0
+    return max(0.0, min(1.0, 1.0 - inside / reference))
 
 
 def _widen(rect, grow):
@@ -141,13 +182,24 @@ def _prepare(frames):
     return prepared[-5:]
 
 
+def _nearby(first, second):
+    """Same talker across frames even when the box jitters or grows."""
+    fx, fy, fw, fh = first
+    sx, sy, sw, sh = second
+    dx = (fx + fw / 2.0) - (sx + sw / 2.0)
+    dy = (fy + fh / 2.0) - (sy + sh / 2.0)
+    reach = 0.75 * max(fw, fh, sw, sh)
+    size = min(fw, fh) / max(1.0, max(sw, sh))
+    return (dx * dx + dy * dy) ** 0.5 <= reach and 0.50 <= size <= 2.0
+
+
 def _face_clusters(frames):
     """Faces seen in two or more frames at the same spot, best first."""
     groups = []
     for index, frame in enumerate(frames):
         for face in _faces(frame):
             for group in groups:
-                if _overlap(group["box"], face) >= 0.30:
+                if _overlap(group["box"], face) >= 0.20 or _nearby(group["box"], face):
                     group["boxes"].append(face)
                     group["indices"].add(index)
                     group["box"] = _average(group["boxes"])
@@ -155,7 +207,7 @@ def _face_clusters(frames):
             else:
                 groups.append({"box": face, "boxes": [face], "indices": {index}})
     confident = []
-    needed = 1 if len(frames) == 1 else 2
+    needed = 1 if len(frames) == 1 else 2  # a single frame cannot separate the talker from the game
     for group in groups:
         if len(group["indices"]) < needed:
             continue
@@ -211,19 +263,19 @@ def _merge(boxes):
     return merged
 
 
-def _seed(face, facing, width, height):
-    """A 16:9 window around the face, ``facing`` times its height."""
+def _seed(face, facing, aspect, width, height):
+    """A window around the face, ``facing`` times its height and ``aspect`` wide."""
     x, y, w, h = face
     if w <= 1 or h <= 1:
         return None
     window_h = max(8.0, h * float(facing))
-    window_w = window_h * ASPECT
+    window_w = window_h * float(aspect)
     if window_w > width * MAX_WIDTH:
         window_w = width * MAX_WIDTH
-        window_h = window_w / ASPECT
+        window_h = window_w / float(aspect)
     if window_h > height * MAX_HEIGHT:
         window_h = height * MAX_HEIGHT
-        window_w = window_h * ASPECT
+        window_w = window_h * float(aspect)
     centre_x = x + w / 2.0
     centre_y = y + h / 2.0
     # Shift the window to stay fully inside the frame instead of clipping it:

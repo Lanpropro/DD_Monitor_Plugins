@@ -296,6 +296,8 @@ class AutoCropPathTests(unittest.TestCase):
         image = module.QImage(320, 180, module.QImage.Format_RGB32)
         image.fill(0x204060)
         viewer.canvas = types.SimpleNamespace(pip_image=image, image_rect=module.QRect(0, 0, 1600, 900))
+        thumbs = [viewer._pip_thumb(image), viewer._pip_thumb(image)]
+        viewer._pip_frames = lambda row: list(thumbs)
         viewer.pip_rect = (0.10, 0.10, 0.30, 0.30)
         viewer.pip_stamp = ('', 0.0)
         viewer.pip_active_room = lambda: ''
@@ -363,6 +365,7 @@ class AutoCropPathTests(unittest.TestCase):
     def test_an_empty_crop_source_retries_before_giving_up(self):
         viewer = self._viewer(lambda row, back=0.0: None)
         viewer.canvas.pip_image = self.module.QImage()
+        viewer._pip_frames = lambda row: []
         row = types.SimpleNamespace(pip_crop=(0.0, 0.0, 1.0, 1.0))
         result = self.module.Viewer._auto_pip_crop_for(viewer, row, retries=1)
         self.assertFalse(result)

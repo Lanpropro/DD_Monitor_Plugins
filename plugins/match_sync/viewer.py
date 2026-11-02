@@ -4003,21 +4003,41 @@ class Viewer(QDialog):
         if row is None:
             self.say("请先把要放进画中画的那一路加入比赛二路，再自动框选", hold=6.0)
             return
-        self._auto_pip_crop_for(row, retries=2)
+        # The decoder cannot always hand back past frames, but the canvas already
+        # shows what the viewer sees, so sample it a few times instead.
+        frames = []
+        self._auto_grab_frames(row, frames, 4)
 
-    def _auto_pip_crop_for(self, row, retries=0):
+    def _auto_grab_frames(self, row, frames, left):
+        """Take one canvas snapshot now and keep sampling for a few hundred ms."""
+        image = getattr(self.canvas, "pip_image", None)
+        if image is not None and not image.isNull():
+            try:
+                frames.append(self._pip_thumb(image))
+            except Exception as error:
+                self._auto_pip_log(f"缩略图失败：{error!r}")
+        if left > 1:
+            QTimer.singleShot(140, lambda: self._auto_grab_frames(row, frames, left - 1))
+            return
+        self._auto_pip_crop_for(row, frames=frames)
+
+    def _auto_pip_crop_for(self, row, retries=0, frames=None):
         """Find the talker camera window in ``row`` and use it as the crop."""
         decoder = getattr(row, "decoder", None)
         self._auto_pip_log(f"取帧开始 retries={retries} 解码器={'有' if decoder is not None else '无'} "
                            f"pip_stamp={getattr(self, 'pip_stamp', None)!r}")
-        try:
-            frames = self._pip_frames(row)
-        except Exception as error:  # a detector hiccup must never break playback
-            self._auto_pip_log(f"取帧异常：{error!r}")
-            self.say(f"自动框选取画面失败：{error}", hold=8.0)
-            return False
+        frames = list(frames or [])
+        if len(frames) < 2:
+            # One frame cannot separate the talker from a face inside the game, so
+            # top the samples up from the decoder history when the canvas ran dry.
+            try:
+                for extra in self._pip_frames(row):
+                    if extra is not None:
+                        frames.append(extra)
+            except Exception as error:  # a detector hiccup must never break playback
+                self._auto_pip_log(f"取帧异常：{error!r}")
         self._auto_pip_log(f"取到 {len(frames)} 帧，尺寸 {[tuple(frame.shape) for frame in frames]}")
-        if not frames:
+        if len(frames) < 2:
             if retries > 0:
                 self.say("正在取这一路的画面…", hold=3.0)
                 QTimer.singleShot(250, lambda: self._auto_pip_crop_for(row, retries - 1))

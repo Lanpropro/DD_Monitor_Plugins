@@ -118,7 +118,7 @@ class GeometryTests(unittest.TestCase):
         self.assertGreaterEqual(AUTOCROP._border_score(frame, hugging), 0.0)
 
     def test_the_seed_follows_the_face_and_stays_inside(self):
-        rect = AUTOCROP._seed((300.0, 10.0, 30.0, 30.0), 3.6, 320.0, 180.0)
+        rect = AUTOCROP._seed((300.0, 10.0, 30.0, 30.0), 3.6, 1.0, 320.0, 180.0)
         self.assertIsNotNone(rect)
         self.assertGreaterEqual(rect[0], 0.0)
         self.assertGreaterEqual(rect[1], 0.0)
@@ -127,8 +127,8 @@ class GeometryTests(unittest.TestCase):
         self.assertGreaterEqual(rect[2], AUTOCROP.MIN_WIDTH)
 
     def test_a_wider_face_means_a_larger_window(self):
-        small = AUTOCROP._seed((40.0, 40.0, 20.0, 20.0), 3.6, 320.0, 180.0)
-        large = AUTOCROP._seed((40.0, 40.0, 40.0, 40.0), 3.6, 320.0, 180.0)
+        small = AUTOCROP._seed((40.0, 40.0, 20.0, 20.0), 3.6, 1.0, 320.0, 180.0)
+        large = AUTOCROP._seed((40.0, 40.0, 40.0, 40.0), 3.6, 1.0, 320.0, 180.0)
         self.assertGreater(large[2] * large[3], small[2] * small[3])
 
     def test_the_cascades_are_optional(self):
