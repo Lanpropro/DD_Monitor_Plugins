@@ -120,12 +120,8 @@ def check(app, host, module, output=None):
             assert first.name_label.toolTip() == first.label()
             assert first.name_label.text() != first.label()
             first.alias.setText('Machine')
-            # The same native combo keeps its full labels and keyboard behavior.
-            assert first.channel.itemText(1) == '仅左输出'
-            first.channel.view().window().setAttribute(Qt.WA_DontShowOnScreen)
-            first.channel.showPopup()
-            assert first.channel.view().isVisible()
-            first.channel.hidePopup()
+            # L/R buttons retain saved values and keyboard routing without a popup.
+            assert first.channel.left.text() == 'L' and first.channel.right.text() == 'R'
             QTest.keyClick(first.channel, Qt.Key_Down)
             assert first.channel.currentData() == 4
             for width in (1100, 900, 2000):

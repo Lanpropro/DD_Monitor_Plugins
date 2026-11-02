@@ -30,7 +30,7 @@ from .engine import route_pcm_s16_stereo, Alignment, Match, RATE, SafetyBuffer, 
 from .media import Chat, Decoder, PlatformChat
 from .fullscreen import mark_fullscreen
 from .sending import SendConsole, SendingDanmakuPanel
-from .panels import ConsoleChoice, ConsoleIconButton, ConsoleModeToggle, MatchSettingsDialog, SettingsPanel, console_hover_color, console_role_icon, native_console_button, style_checkbox, use_link_cursor
+from .panels import ConsoleChannels, ConsoleChoice, ConsoleIconButton, ConsoleModeToggle, MatchSettingsDialog, SettingsPanel, console_hover_color, console_role_icon, native_console_button, style_checkbox, use_link_cursor
 from .replay import ReplayBar, ReplayTimeline
 from .floating import FloatingCrop
 from .regions import match_regions
@@ -938,12 +938,10 @@ class RoomRow(QFrame):
         self.volume_number.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.volume_number.setStyleSheet('font-size: 12px;')
         self.volume.valueChanged.connect(lambda value: self.volume_number.setText(str(value)))
-        self.channel = ConsoleChoice('channel')
+        self.channel = ConsoleChannels()
         self.channel.setAccessibleName('输出声道')
-        for label, value in (("原始声道", 0), ("仅左输出", 3), ("仅右输出", 4)):
-            self.channel.addItem(label, value)
         self.channel.setCurrentIndex(max(0, self.channel.findData(preferences.get("audio_channel", 0))))
-        self.channel.setToolTip("点击选择原始 / 仅左 / 仅右声道；仅左、仅右会将完整声音混为单声道，送到指定一侧。")
+        self.channel.setToolTip("点击 L / R 切换输出声道；两侧点亮为双声道，至少保留一侧输出。")
         self.channel.currentIndexChanged.connect(viewer.changed)
         for signal in (self.channel.currentIndexChanged, self.volume.valueChanged, self.audible.toggled):
             signal.connect(self.refresh_audio_icon)
@@ -995,11 +993,18 @@ class RoomRow(QFrame):
         self.independent.setSizePolicy(policy)
         self.remove_button = native_console_button(TileButton('×'), '移除此路')
         self.remove_button.clicked.connect(lambda: viewer.remove_room_with_undo(room_id))
+        self.assist = ConsoleIconButton('assist', '辅助自动对齐', size=32)
+        self.assist.setCheckable(True)
         self.hint_fast = native_console_button(QPushButton('偏快'), '本路比主画面偏快')
         self.hint_slow = native_console_button(QPushButton('偏慢'), '本路比主画面偏慢')
         for button, direction in ((self.hint_fast, -1), (self.hint_slow, 1)):
             button.setFixedSize(44, 28)
+            policy = button.sizePolicy()
+            policy.setRetainSizeWhenHidden(True)
+            button.setSizePolicy(policy)
+            button.hide()
             button.clicked.connect(lambda _checked=False, d=direction: viewer.submit_alignment_hint(room_id, d))
+        self.assist.toggled.connect(self._toggle_hint_choices)
         self.join = QPushButton("确认对齐并加入")
         self.join.setAutoDefault(False)
         self.join.setFixedHeight(28)
@@ -1053,7 +1058,7 @@ class RoomRow(QFrame):
         for index, widgets in enumerate(((floating, self.realign),
                         (self.independent, self.audible, self.volume, self.volume_number, self.channel),
                         (self.show_chat, self.color_choice),
-                        (self.offset_box, self.hint_fast, self.hint_slow), (region, self.remove_button)), 1):
+                        (self.offset_box, self.assist, self.hint_fast, self.hint_slow), (region, self.remove_button)), 1):
             group = QWidget()
             line = QHBoxLayout(group)
             line.setContentsMargins(0, 0, 0, 0)
@@ -1240,6 +1245,10 @@ class RoomRow(QFrame):
     def refresh_audio_icon(self, *_args):
         self.audible.set_state(not self.audible.isChecked(), self.volume.value(), self.channel.currentData())
 
+    def _toggle_hint_choices(self, expanded):
+        for button in (self.hint_fast, self.hint_slow):
+            button.setVisible(expanded)
+
     def preferences(self):
         return {"room_id": self.room_id, "alias": self.alias.text(), "color": self.color,
                 "audible": self.audible.isChecked(), "volume": self.volume.value(),
@@ -1271,6 +1280,11 @@ class RoomRow(QFrame):
         elif self.alignment_hint is not None:
             _, direction, weight = self.alignment_hint
             hint += f"（{'偏快' if direction < 0 else '偏慢'}，判断权重 {weight}）"
+        self.assist.setEnabled(can_submit_hint)
+        self.assist.setToolTip(hint)
+        self.assist.setAccessibleName(hint)
+        if not can_submit_hint:
+            self.assist.setChecked(False)
         for button in (self.hint_fast, self.hint_slow):
             button.setEnabled(can_submit_hint)
             button.setToolTip(button.text() + '：' + hint)

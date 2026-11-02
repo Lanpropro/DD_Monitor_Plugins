@@ -3,7 +3,7 @@ import ctypes
 import sys
 from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QCursor, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QListView, QPushButton, QStyledItemDelegate, QStyle, QToolTip, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel, QListView, QPushButton, QStyledItemDelegate, QStyle, QToolTip, QVBoxLayout, QWidget
 
 from ddm import theme
 
@@ -180,6 +180,11 @@ class ConsoleIconButton(QPushButton):
                 painter.drawLine(x * 8, y * 3, x * 8, y * 8)
                 painter.drawLine(x * 3, y * 8, x * 8, y * 8)
             painter.drawRect(QRectF(-3, -3, 6, 6))
+        elif self.kind == 'assist':
+            for x, direction in ((-4, -1), (4, 1)):
+                painter.drawLine(x, -6, x, 6)
+                painter.drawLine(x, direction * 6, x - 3, direction * 3)
+                painter.drawLine(x, direction * 6, x + 3, direction * 3)
         elif self.kind == 'independent':
             painter.setBrush(Qt.NoBrush)
             painter.drawRoundedRect(QRectF(-8, -7, 16, 14), 2, 2)
@@ -235,6 +240,7 @@ def native_console_button(button, tooltip, size=32):
         padding: 0; border-radius: 6px;}}
         QPushButton:hover, QPushButton:focus {{background: {console_hover_color()};}}
         QPushButton:checked {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}
+        QPushButton:checked:hover, QPushButton:checked:focus {{background: {console_hover_color()};}}
         QPushButton:disabled {{color: {theme.TEXT4};}}''')
     return button
 
@@ -258,12 +264,54 @@ class ColorSwatchDelegate(QStyledItemDelegate):
         painter.restore()
 
 
+class ConsoleChannels(QComboBox):
+    """Direct L/R buttons backed by the existing saved channel values and signals."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(62, 32)
+        self.setFocusPolicy(Qt.NoFocus)
+        for label, value in (('原始声道', 0), ('仅左输出', 3), ('仅右输出', 4)):
+            self.addItem(label, value)
+        self.left = native_console_button(QPushButton('L'), '左声道')
+        self.right = native_console_button(QPushButton('R'), '右声道')
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        for button in (self.left, self.right):
+            button.setFixedSize(30, 32)
+            button.setCheckable(True)
+            button.clicked.connect(lambda _checked=False, b=button: self._clicked(b))
+            layout.addWidget(button)
+        use_link_cursor(self)
+        self.currentIndexChanged.connect(self._sync_buttons)
+        self._sync_buttons()
+
+    def _sync_buttons(self, *_args):
+        self.left.setChecked(self.currentData() in (0, 3))
+        self.right.setChecked(self.currentData() in (0, 4))
+
+    def _clicked(self, button):
+        if not self.left.isChecked() and not self.right.isChecked():
+            button.setChecked(True)
+        value = 0 if self.left.isChecked() and self.right.isChecked() else 3 if self.left.isChecked() else 4
+        self.setCurrentIndex(self.findData(value))
+
+    def showPopup(self):
+        pass
+
+    def paintEvent(self, event):
+        pass
+
+    def wheelEvent(self, event):
+        event.ignore()
+
+
 class ConsoleChoice(QComboBox):
-    """Keep native popup options while using a compact channel/color face."""
+    """Keep native popup options while using a compact color face."""
     def __init__(self, kind, parent=None):
         super().__init__(parent)
         self.kind = kind
-        self.setFixedSize(62 if kind == 'channel' else 48, 32)
+        self.setFixedSize(48, 32)
         use_link_cursor(self)
         if kind == 'color':
             view = QListView()
@@ -293,21 +341,8 @@ class ConsoleChoice(QComboBox):
         font.setPixelSize(12)
         painter.setFont(font)
         painter.setPen(QPen(theme.qcolor(theme.TEXT1), 1.5, Qt.SolidLine, Qt.RoundCap))
-        if self.kind == 'channel':
-            font.setBold(True)
-            painter.setFont(font)
-            for label, x, channel in (('L', 4, 3), ('R', 24, 4)):
-                selected = self.currentData() in (0, channel)
-                if selected:
-                    painter.setPen(Qt.NoPen)
-                    painter.setBrush(theme.qcolor(theme.ACCENT_SOFT))
-                    painter.drawRoundedRect(QRectF(x, 3, 18, 22), 4, 4)
-                painter.setPen(theme.qcolor(theme.ACCENT if selected else theme.TEXT3))
-                painter.drawText(QRectF(x, 3, 18, 22), Qt.AlignCenter, label)
-            painter.setPen(QPen(theme.qcolor(theme.TEXT1), 1.5, Qt.SolidLine, Qt.RoundCap))
-        else:
-            painter.setBrush(QColor(self.currentData() or theme.ACCENT))
-            painter.drawRoundedRect(QRectF(8, 8, 12, 12), 2, 2)
+        painter.setBrush(QColor(self.currentData() or theme.ACCENT))
+        painter.drawRoundedRect(QRectF(8, 8, 12, 12), 2, 2)
         x = self.width() - 12
         painter.drawLine(x - 3, 12, x, 15)
         painter.drawLine(x, 15, x + 3, 12)

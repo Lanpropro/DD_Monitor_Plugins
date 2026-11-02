@@ -31,7 +31,8 @@ def check_ranking(engine):
 
 
 def check(app, host, module, output=None):
-    from PySide6.QtCore import QEvent, QObject, QPoint, Qt
+    from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, Qt
+    from PySide6.QtGui import QWheelEvent
     from PySide6.QtTest import QTest
     from ddm import plugins
     engine = import_module(module.__package__ + '.engine')
@@ -70,8 +71,10 @@ def check(app, host, module, output=None):
             QTest.qWait(20)
             assert viewer.settings_panel.height() == manual_height, 'Keep explicit splitter adjustments too'
             row = viewer.rows['2']
-            assert row.hint_fast.x() > row.offset_box.geometry().right()
+            assert row.assist.x() > row.offset_box.geometry().right()
+            assert row.hint_fast.x() > row.assist.geometry().right()
             assert row.hint_slow.x() > row.hint_fast.geometry().right()
+            assert row.hint_fast.isHidden() and row.hint_slow.isHidden()
             assert row.independent.parentWidget() is row.audible.parentWidget()
             assert row.independent.parentWidget() is not row.floating_button.parentWidget()
             assert isinstance(row.audible, module.VolumeButton)
@@ -84,6 +87,22 @@ def check(app, host, module, output=None):
                 assert row.audible.audio_channel == value
             assert all(a != b for i, a in enumerate(channel_faces) for b in channel_faces[i + 1:])
             assert '点击' in row.channel.toolTip()
+            assert row.channel.left.isChecked() and row.channel.right.isChecked()
+            QTest.mouseClick(row.channel.left, Qt.LeftButton)
+            assert row.channel.currentData() == 4 and not row.channel.left.isChecked()
+            assert app.activePopupWidget() is None
+            row.channel.right.click()
+            assert row.channel.currentData() == 4 and row.channel.right.isChecked(), 'Retain an output side'
+            row.channel.left.click()
+            assert row.channel.currentData() == 0
+            wheel = QWheelEvent(QPointF(10, 10), QPointF(row.channel.mapToGlobal(QPoint(10, 10))),
+                                QPoint(), QPoint(0, -120), Qt.NoButton, Qt.NoModifier, Qt.ScrollUpdate, False)
+            app.sendEvent(row.channel, wheel)
+            assert row.channel.currentData() == 0, 'Scrolling the console must not change the channel'
+            row.channel.right.click()
+            assert row.channel.currentData() == 3
+            row.channel.right.click()
+            assert row.channel.currentData() == 0
             assert not hasattr(row, 'rename') and not hasattr(row, 'more_menu')
             color = row.color_choice
             popup = color.view().window()
@@ -112,7 +131,7 @@ def check(app, host, module, output=None):
             QTest.mouseClick(color.view().viewport(), Qt.LeftButton, pos=rects[-1].center())
             assert row.preferences()['color'] == module.COLORS[-1]
             color.hidePopup()
-            for button in (viewer.automatic, viewer.compare, row.hint_fast, row.hint_slow):
+            for button in (viewer.automatic, viewer.compare, row.assist, row.hint_fast, row.hint_slow):
                 with patch.object(button, 'hasFocus', return_value=True):
                     focused = button.grab().toImage()
                     accent = module.theme.qcolor(module.theme.ACCENT)
@@ -144,9 +163,27 @@ def check(app, host, module, output=None):
             with patch.object(viewer, 'live_clock', return_value=103.), \
                     patch.object(viewer, 'shifts', return_value=positions), patch.object(viewer, 'analyse'):
                 row.refresh_status()
+                fixed_height = viewer.settings_panel.height()
+                remove_position = row.remove_button.mapTo(row, QPoint())
+                row.assist.click()
+                app.processEvents()
+                assert not row.hint_fast.isHidden() and not row.hint_slow.isHidden()
+                assert row.remove_button.mapTo(row, QPoint()) == remove_position
+                assert viewer.settings_panel.height() == fixed_height
+                if output:
+                    viewer.settings_panel.grab().save(str(output.with_name(output.stem + '-expanded.png')))
+                row.assist.click()
+                assert row.hint_fast.isHidden() and row.hint_slow.isHidden() and not row.hint_pending
+                row.assist.click()
                 row.hint_fast.click()
                 assert row.alignment_hint == (0., -1, 1) and row.hint_pending
                 assert not row.hint_fast.isEnabled() and not row.hint_slow.isEnabled()
+                assert row.hint_fast.isHidden() and row.hint_slow.isHidden()
+                assert not row.assist.isEnabled() and not row.assist.isChecked()
+                if output:
+                    viewer.settings_panel.grab().save(str(output.with_name(output.stem + '-cooldown.png')))
+                row.assist.click()
+                assert row.hint_fast.isHidden() and row.hint_slow.isHidden()
                 row.hint_slow.click()
                 assert row.alignment_hint[2] == 1, 'Do not count clicks during a pending scan'
                 viewer._analysis_finished(viewer.analysis_serial - 1, viewer.generation, {'2': engine.Match(-4, 1, 'stale')})
@@ -170,12 +207,15 @@ def check(app, host, module, output=None):
                 viewer.analyse()
                 assert received and coarse.call_args.kwargs['hint'] == (0., -1, 1)
                 assert not row.hint_pending and row.hint_fast.isEnabled() and row.hint_slow.isEnabled()
+                assert row.assist.isEnabled() and row.hint_fast.isHidden() and row.hint_slow.isHidden()
                 with patch.object(viewer, 'analyse'):
+                    row.assist.click()
                     row.hint_fast.click()
                 assert row.alignment_hint[2] == 2
                 viewer.analyse()
                 assert coarse.call_args.kwargs['hint'][2] == 2
                 with patch.object(viewer, 'analyse'):
+                    row.assist.click()
                     row.hint_slow.click()
                 assert row.alignment_hint[1:] == (1, 1), 'Changed direction starts new evidence'
                 viewer.analyse()
@@ -190,7 +230,8 @@ def check(app, host, module, output=None):
                         completed_job_gate=True, repeated_weight=True, stale_job_rejected=True,
                         fixed_height_five_sources=True, horizontal_palette=True,
                         native_host_icons=True, no_focus_border=True, first_popup_sized=True,
-                        inline_hint_buttons=True, independent_sound_group=True, channel_faces=True,
+                        expandable_hint_buttons=True, completion_cooldown=True, stable_hint_expansion=True,
+                        direct_channels=True, independent_sound_group=True, channel_faces=True,
                         media_playback=False)
         finally:
             viewer.close()
