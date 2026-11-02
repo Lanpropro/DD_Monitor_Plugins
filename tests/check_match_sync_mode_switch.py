@@ -7,13 +7,15 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
+import time
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
 def check(app, _host, module):
     from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest
-    from PySide6.QtWidgets import QDialog, QHBoxLayout, QToolButton, QVBoxLayout, QWidget
+    from PySide6.QtWidgets import QDialog, QFrame, QHBoxLayout, QToolButton, QVBoxLayout, QWidget
     from ddm import plugins
     diagnostic = import_module(module.__package__ + '.diagnostics')
     calls, switches = [], []
@@ -126,11 +128,42 @@ def check(app, _host, module):
                 sidebar.collapsed = False
                 plugin.on_load(context)
                 real_probe = plugin.switch_probe
-                plugin.button.setChecked(True)
-                QTest.qWait(100)
-                assert plugin.viewer is not None and not plugin.viewer.running
-                plugin.button.setChecked(False)
-                QTest.qWait(100)
+                sidebar._items = cards = [QFrame(sidebar) for _ in range(3)]
+                for index, card in enumerate(cards):
+                    card.setObjectName('NavItem')
+                    card.room = {'room_id': str(index + 1)}
+                    card.thumb = SimpleNamespace(face_pixmap=lambda: None)
+                    card.setProperty('onWall', index == 1)
+                    card.setStyleSheet('#NavItem { margin: 0; }')
+                original_styles = [card.styleSheet() for card in cards]
+                with patch.object(sidebar, 'setStyleSheet', side_effect=AssertionError('Repolished the whole sidebar')):
+                    plugin.button.setChecked(True)
+                    QTest.qWait(100)
+                    viewer = plugin.viewer
+                    assert viewer is not None and not viewer.running
+                    assert cards[0].styleSheet() == original_styles[0]
+                    assert 'border: none' in cards[1].styleSheet() and cards[1].property('onWall')
+                    viewer.add_room('1')
+                    viewer.rows['1'].decoder = SimpleNamespace(
+                        history=import_module(module.__package__ + '.video').VideoHistory(), stop=lambda: None)
+                    viewer.running = True
+                    with patch.object(cards[2], 'setStyleSheet', side_effect=AssertionError('Touched an unrelated card')):
+                        viewer._sync_sidebar_marks()
+                    assert cards[0].property('matchSync') and '#fb7299' in cards[0].styleSheet()
+                    viewer.changed()
+                    with patch.object(viewer, 'stop', wraps=viewer.stop) as stop, \
+                            patch.object(viewer, '_restore_host_widgets', wraps=viewer._restore_host_widgets) as restore, \
+                            patch.object(viewer, 'save', wraps=viewer.save) as save:
+                        plugin.button.setChecked(False)
+                        deadline = time.monotonic() + 2
+                        while viewer.isVisible() and time.monotonic() < deadline:
+                            QTest.qWait(10)
+                        counts = (stop.call_count, restore.call_count, save.call_count)
+                        assert counts == (1, 1, 1), ('stop/restore/save', counts,
+                            plugin.button.isChecked(), plugin._pending_enabled,
+                            plugin._switch_timer.isActive(), plugin._applying, viewer.isVisible())
+                assert [card.styleSheet() for card in cards] == original_styles
+                assert not cards[0].property('matchSync') and cards[1].property('onWall')
                 plugin.on_unload()
                 real_probe.thread.join(2)
                 stages = {r.get('stage') for r in map(json.loads, real_probe.path.read_text(encoding='utf-8').splitlines())}
@@ -166,7 +199,8 @@ def check(app, _host, module):
                 return dict(passed=True, media_playback=False, feedback_before_construction=True,
                             latest_request_only=True, portrait_and_animation_off=True,
                             hidden_entry_fallback=True, unload_cancels_pending=True,
-                            real_viewer_hooks=True, background_writer=True, bounded_sampling=True)
+                            real_viewer_hooks=True, local_sidebar_styles=True, single_close_cleanup=True,
+                            background_writer=True, bounded_sampling=True)
             finally:
                 plugin.on_unload()
                 host.close()
