@@ -141,11 +141,16 @@ def check(app, _host, module):
                 original_styles = [card.styleSheet() for card in cards]
                 with patch.object(sidebar, 'setStyleSheet', side_effect=AssertionError('Repolished the whole sidebar')):
                     plugin.button.setChecked(True)
-                    QTest.qWait(100)
+                    deadline = time.monotonic() + 2
+                    while (plugin._pending_enabled is not None or plugin._applying) and time.monotonic() < deadline:
+                        QTest.qWait(10)
+                    assert plugin._pending_enabled is None and not plugin._applying
                     viewer = plugin.viewer
                     assert viewer is not None and not viewer.running
                     assert cards[0].styleSheet() == original_styles[0]
-                    assert 'border: none' in cards[1].styleSheet() and cards[1].property('onWall')
+                    assert 'border: none' in cards[1].styleSheet() and cards[1].property('onWall'), (
+                        cards[1].styleSheet(), cards[1].property('onWall'), viewer.isHidden(), viewer.embedded,
+                        len(viewer.sidebar_item_styles), getattr(viewer, 'sidebar_marks_state', None))
                     viewer.add_room('1')
                     viewer.rows['1'].decoder = SimpleNamespace(
                         history=import_module(module.__package__ + '.video').VideoHistory(), stop=lambda: None)
