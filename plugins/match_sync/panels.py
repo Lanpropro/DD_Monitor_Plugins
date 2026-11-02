@@ -91,7 +91,7 @@ class ConsoleModeToggle(QCheckBox):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        hovered = self.isEnabled() and (self.underMouse() or self.hasFocus())
+        hovered = self.isEnabled() and self.underMouse()
         if hovered:
             painter.setPen(Qt.NoPen)
             painter.setBrush(theme.qcolor(console_hover_color()))
@@ -163,7 +163,7 @@ class ConsoleIconButton(QPushButton):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         hovered = self.isEnabled() and QApplication.widgetAt(QCursor.pos()) is self
-        if hovered or self.isChecked() or self.hasFocus():
+        if hovered or self.isChecked():
             painter.setPen(Qt.NoPen)
             painter.setBrush(theme.qcolor(console_hover_color() if hovered else theme.ACCENT_SOFT))
             painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 6, 6)
@@ -238,9 +238,9 @@ def native_console_button(button, tooltip, size=32):
     use_link_cursor(button)
     button.setStyleSheet(f'''QPushButton {{background: transparent; border: none; outline: none;
         padding: 0; border-radius: 6px;}}
-        QPushButton:hover, QPushButton:focus {{background: {console_hover_color()};}}
+        QPushButton:hover {{background: {console_hover_color()};}}
         QPushButton:checked {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}
-        QPushButton:checked:hover, QPushButton:checked:focus {{background: {console_hover_color()};}}
+        QPushButton:checked:hover {{background: {console_hover_color()};}}
         QPushButton:disabled {{color: {theme.TEXT4};}}''')
     return button
 
@@ -280,6 +280,8 @@ class ConsoleChannels(QComboBox):
         for button in (self.left, self.right):
             button.setFixedSize(30, 32)
             button.setCheckable(True)
+            button.setStyleSheet(button.styleSheet() + f'''
+                QPushButton:!checked:hover {{background: {theme.CONTENT_HOVER};}}''')
             button.clicked.connect(lambda _checked=False, b=button: self._clicked(b))
             layout.addWidget(button)
         use_link_cursor(self)
@@ -333,7 +335,7 @@ class ConsoleChoice(QComboBox):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(Qt.NoPen)
-        if self.underMouse() or self.hasFocus():
+        if self.underMouse():
             painter.setBrush(theme.qcolor(console_hover_color()))
             painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 5, 5)
         painter.translate(0, 2)

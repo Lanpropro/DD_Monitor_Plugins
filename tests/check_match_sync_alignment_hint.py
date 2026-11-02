@@ -32,7 +32,7 @@ def check_ranking(engine):
 
 def check(app, host, module, output=None):
     from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, Qt
-    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtGui import QEnterEvent, QMouseEvent, QWheelEvent
     from PySide6.QtTest import QTest
     from ddm import plugins
     engine = import_module(module.__package__ + '.engine')
@@ -91,6 +91,20 @@ def check(app, host, module, output=None):
             QTest.mouseClick(row.channel.left, Qt.LeftButton)
             assert row.channel.currentData() == 4 and not row.channel.left.isChecked()
             assert app.activePopupWidget() is None
+            inactive = row.channel.left
+            inactive.setAttribute(Qt.WA_UnderMouse, True)
+            app.sendEvent(inactive, QEnterEvent(QPointF(5, 5), QPointF(5, 5), QPointF(5, 5)))
+            app.sendEvent(inactive, QMouseEvent(QEvent.MouseMove, QPointF(5, 5), QPointF(5, 5),
+                                              Qt.NoButton, Qt.NoButton, Qt.NoModifier))
+            face = inactive.grab().toImage()
+            scale = face.devicePixelRatio()
+            background = face.pixelColor(round(6 * scale), round(6 * scale))
+            assert background.blue() - background.red() <= 10, 'An inactive hovered channel must not look blue/on'
+            inactive.setAttribute(Qt.WA_UnderMouse, False)
+            app.sendEvent(inactive, QEvent(QEvent.Leave))
+            face = inactive.grab().toImage()
+            background = face.pixelColor(round(6 * scale), round(6 * scale))
+            assert background.blue() - background.red() <= 10, 'Click focus must not leave an inactive channel blue'
             row.channel.right.click()
             assert row.channel.currentData() == 4 and row.channel.right.isChecked(), 'Retain an output side'
             row.channel.left.click()
@@ -136,6 +150,14 @@ def check(app, host, module, output=None):
                     focused = button.grab().toImage()
                     accent = module.theme.qcolor(module.theme.ACCENT)
                     assert all(focused.pixelColor(x, 1) != accent for x in range(focused.width()))
+            panels = import_module(module.__package__ + '.panels')
+            for button in (viewer.compare, row.floating_button, row.color_choice):
+                with patch.object(button, 'underMouse', return_value=False), \
+                        patch.object(panels.QApplication, 'widgetAt', return_value=None):
+                    with patch.object(button, 'hasFocus', return_value=False):
+                        normal = button.grab().toImage()
+                    with patch.object(button, 'hasFocus', return_value=True):
+                        assert button.grab().toImage() == normal, 'Focus alone must not leave a blue selection background'
             assert not hasattr(viewer, 'alignment_hint_menu')
             assert row.hint_fast.text() == '偏快' and row.hint_slow.text() == '偏慢'
             # Numeric history descriptors exercise the real job dispatch, without decoding.
@@ -232,6 +254,7 @@ def check(app, host, module, output=None):
                         native_host_icons=True, no_focus_border=True, first_popup_sized=True,
                         expandable_hint_buttons=True, completion_cooldown=True, stable_hint_expansion=True,
                         direct_channels=True, independent_sound_group=True, channel_faces=True,
+                        state_only_channel_blue=True, no_focus_tint=True,
                         media_playback=False)
         finally:
             viewer.close()

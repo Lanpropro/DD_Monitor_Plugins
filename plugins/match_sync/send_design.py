@@ -166,7 +166,7 @@ def stylesheet():
             border: 1px solid {theme.BORDER_STRONG}; border-radius: {theme.RADIUS_MD}px; padding: 5px 10px; min-height: 18px;}}
         #MatchSyncSendConsole QPushButton:hover {{background: {console_hover_color()}; border-color: {c['accent']};}}
         #MatchSyncSendConsole QPushButton:pressed {{background: {c['inset']};}}
-        #MatchSyncSendConsole QPushButton:focus {{background: {console_hover_color()}; outline: none;}}
+        #MatchSyncSendConsole QPushButton:focus {{outline: none;}}
         #MatchSyncSendConsole QPushButton[sendPrimary="true"],
         #MatchSyncSendConsole QPushButton[sendPrimary="true"]:disabled {{background: transparent; border: none;}}
         #MatchSyncSendConsole QPushButton:disabled {{background: {c['raised']}; color: {c['secondary']};}}
