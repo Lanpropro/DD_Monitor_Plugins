@@ -219,8 +219,9 @@ def check(app, host, module, output=None):
             QTest.mouseClick(viewer.match_settings_button, Qt.LeftButton)
             assert viewer.match_settings is not None and viewer.match_settings.isVisible()
             assert viewer.buffer_reserve.parentWidget() is viewer.match_settings
-            assert viewer.automatic.parentWidget() is viewer.settings_panel
-            assert viewer.compare.parentWidget() is viewer.settings_panel
+            assert viewer.automatic.parentWidget() is viewer.console_toolbar
+            assert viewer.compare.parentWidget() is viewer.console_toolbar
+            assert viewer.settings_panel.isAncestorOf(viewer.console_toolbar)
             old_reserve = viewer.buffer_reserve.currentIndex()
             viewer.buffer_reserve.setCurrentIndex(viewer.buffer_reserve.findData(8))
             assert viewer.reserve_seconds == 8

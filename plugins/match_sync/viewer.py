@@ -29,7 +29,7 @@ from .engine import route_pcm_s16_stereo, Alignment, Match, RATE, SafetyBuffer, 
 from .media import Chat, Decoder, PlatformChat
 from .fullscreen import mark_fullscreen
 from .sending import SendConsole, SendingDanmakuPanel
-from .panels import ConsoleChoice, ConsoleIconButton, MatchSettingsDialog, SettingsPanel, style_checkbox
+from .panels import ConsoleChoice, ConsoleIconButton, ConsoleModeToggle, MatchSettingsDialog, SettingsPanel, console_role_icon, style_checkbox
 from .replay import ReplayBar, ReplayTimeline
 from .floating import FloatingCrop
 from .regions import match_regions
@@ -900,10 +900,14 @@ class RoomRow(QFrame):
         self.refresh_avatar()
         self.main_button = QPushButton("主画面")
         self.main_button.setCheckable(True)
-        self.main_button.setFixedWidth(88)
+        self.main_button.setFixedWidth(96)
+        self.main_button.setIcon(console_role_icon())
+        self.main_button.setStyleSheet(f'''QPushButton {{background: transparent; border: 1px solid {theme.BORDER_STRONG};
+            border-radius: 5px; padding: 3px 6px; font-size: 12px;}}
+            QPushButton:checked {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT}; border-color: {theme.ACCENT};}}''')
         self.main_button.setToolTip("选择这位主播作为主画面，其他路声音与弹幕继续播放。")
         self.main_button.clicked.connect(lambda: viewer.select_main(room_id))
-        self.audible = ConsoleIconButton('sound', '声音开关')
+        self.audible = ConsoleIconButton('sound', '声音开关', size=32)
         self.audible.setCheckable(True)
         self.audible.setChecked(preferences.get("audible", True))
         self.volume = QSlider(Qt.Horizontal)
@@ -914,6 +918,7 @@ class RoomRow(QFrame):
         self.volume_number = QLabel(str(self.volume.value()))
         self.volume_number.setFixedWidth(26)
         self.volume_number.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.volume_number.setStyleSheet('font-size: 12px;')
         self.volume.valueChanged.connect(lambda value: self.volume_number.setText(str(value)))
         self.channel = ConsoleChoice('channel')
         self.channel.setAccessibleName('输出声道')
@@ -928,7 +933,7 @@ class RoomRow(QFrame):
         self.previous_delay = self.delay.value()
         self.delay.setFixedWidth(74)
         self.delay.installEventFilter(viewer)
-        self.show_chat = ConsoleIconButton('chat', '弹幕开关')
+        self.show_chat = ConsoleIconButton('chat', '弹幕开关', size=32)
         self.show_chat.setCheckable(True)
         self.show_chat.setChecked(preferences.get("show_chat", True))
         self.color_choice = ConsoleChoice('color')
@@ -950,23 +955,23 @@ class RoomRow(QFrame):
         self.increase.clicked.connect(lambda: viewer.show_comparison(self.room_id))
         self.decrease.clicked.connect(self.delay.stepDown)
         self.increase.clicked.connect(self.delay.stepUp)
-        region = ConsoleIconButton('region', '选择对照区域')
+        region = ConsoleIconButton('region', '选择对照区域', size=32)
         region.setToolTip("仅用于放大对照：框选计时器后手动微调偏移；自动匹配始终使用完整画面。")
         region.clicked.connect(lambda: viewer.choose_crop(self))
-        floating = self.floating_button = ConsoleIconButton('floating', '裁取悬浮画面')
+        floating = self.floating_button = ConsoleIconButton('floating', '裁取悬浮画面', size=32)
         floating.setToolTip('框选摄像头等区域，在软件内自由移动、缩放；双击悬浮画面可重新框选。')
         floating.clicked.connect(lambda: viewer.choose_crop(self, floating=True))
-        self.independent = ConsoleIconButton('independent', '独立播放：不等待对齐，使用本路缓存进度')
+        self.independent = ConsoleIconButton('independent', '独立播放：不等待对齐，使用本路缓存进度', size=32)
         self.independent.setCheckable(True)
         self.independent.clicked.connect(lambda: viewer.toggle_independent(room_id))
-        self.realign = ConsoleIconButton('resync', '重新对齐')
+        self.realign = ConsoleIconButton('resync', '重新对齐', size=32)
         policy = self.realign.sizePolicy()
         policy.setRetainSizeWhenHidden(True)
         self.realign.setSizePolicy(policy)
         self.realign.setToolTip("重新匹配本路比赛画面，不重启直播流，不改变其他路已确认偏移。")
         self.realign.clicked.connect(lambda: viewer.retry_alignment(room_id))
         self.independent.setSizePolicy(policy)
-        self.more = ConsoleIconButton('more', '更多操作')
+        self.more = ConsoleIconButton('more', '更多操作', size=32)
         self.more.clicked.connect(self.open_more)
         self.join = QPushButton("确认对齐并加入")
         self.join.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
@@ -974,27 +979,60 @@ class RoomRow(QFrame):
         self.join.clicked.connect(lambda: viewer.confirm_alignment(room_id))
         self.join.hide()
         self.name_label = QLabel()
-        self.name_label.setFixedWidth(108)
+        self.name_label.setMaximumWidth(140)
+        self.name_label.setStyleSheet('font-size: 14px; font-weight: 600;')
         self.status = CompactStatus()
+        self.status.setStyleSheet(f'font-size: 12px; color: {theme.TEXT2};')
         identity = QWidget()
-        identity_layout = QGridLayout(identity)
+        identity_layout = QHBoxLayout(identity)
         identity_layout.setContentsMargins(0, 0, 0, 0)
-        identity_layout.setHorizontalSpacing(8)
-        identity_layout.setVerticalSpacing(0)
-        identity_layout.addWidget(self.avatar, 0, 0, 2, 1)
-        identity_layout.addWidget(self.name_label, 0, 1)
-        identity_layout.addWidget(self.main_button, 0, 2)
-        identity_layout.addWidget(self.status, 1, 1, 1, 2)
+        identity_layout.setSpacing(10)
+        identity_layout.addWidget(self.avatar, 0, Qt.AlignVCenter)
+        identity_text = QVBoxLayout()
+        identity_text.setSpacing(2)
+        identity_heading = QHBoxLayout()
+        identity_heading.setSpacing(8)
+        identity_heading.addWidget(self.name_label)
+        identity_heading.addWidget(self.main_button)
+        identity_heading.addStretch()
+        identity_text.addLayout(identity_heading)
+        identity_text.addWidget(self.status)
+        identity_layout.addLayout(identity_text)
+        identity_layout.addStretch(1)
+        self.offset_box = QFrame()
+        self.offset_box.setObjectName('MatchSyncOffset')
+        self.offset_box.setFixedSize(128, 32)
+        self.offset_box.setStyleSheet(f'''QFrame#MatchSyncOffset {{background: {theme.ELEVATED};
+            border: 1px solid {theme.BORDER_STRONG}; border-radius: 6px;}}''')
+        offset_layout = QHBoxLayout(self.offset_box)
+        offset_layout.setContentsMargins(2, 0, 2, 0)
+        offset_layout.setSpacing(0)
+        self.delay.setFixedWidth(72)
+        self.delay.setAlignment(Qt.AlignCenter)
+        self.delay.setStyleSheet('QDoubleSpinBox {background: transparent; border: none; padding: 0; font-size: 12px;}')
+        for step in (self.decrease, self.increase):
+            step.setFixedHeight(30)
+            step.setStyleSheet('QPushButton {background: transparent; border: none; padding: 0; border-radius: 0;}')
+        for widget in (self.decrease, self.delay, self.increase):
+            offset_layout.addWidget(widget)
         groups = [identity]
-        for widgets in ((floating, self.independent, self.realign),
+        self.group_separators = []
+        for index, widgets in enumerate(((floating, self.independent, self.realign),
                         (self.audible, self.volume, self.volume_number, self.channel),
                         (self.show_chat, self.color_choice),
-                        (self.decrease, self.delay, self.increase), (region, self.more)):
+                        (self.offset_box,), (region, self.more)), 1):
             group = QWidget()
             line = QHBoxLayout(group)
-            line.setContentsMargins(10, 0, 0, 0)
+            line.setContentsMargins(0, 0, 0, 0)
             line.setSpacing(4)
             line.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            if index in (2, 3, 4):
+                separator = QFrame()
+                separator.setFixedSize(1, 24)
+                separator.setStyleSheet(f'background: {theme.BORDER_STRONG};')
+                line.addWidget(separator)
+                line.addSpacing(8)
+                self.group_separators.append(separator)
             for widget in widgets:
                 line.addWidget(widget)
                 if isinstance(widget, ConsoleIconButton):
@@ -1011,11 +1049,12 @@ class RoomRow(QFrame):
         self._compact_controls = None
         self.layout_controls(False, True)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(4)
         layout.setSizeConstraint(QLayout.SetMinimumSize)
         layout.addLayout(self.controls_grid)
         self.setFrameShape(QFrame.NoFrame)
+        self.setStyleSheet(f'QFrame#MatchSyncRoomRow {{border: none; border-bottom: 1px solid {theme.BORDER_STRONG};}}')
         self.refresh_status()
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.delay.setToolTip("单位秒；+ 延后本路，− 相对提前本路（必要时延后其他路）。画面、声音和弹幕一起移动。")
@@ -1071,7 +1110,7 @@ class RoomRow(QFrame):
 
     def refresh_avatar(self, *_args):
         if hasattr(self, 'name_label'):
-            self.name_label.setText(self.name_label.fontMetrics().elidedText(self.label(), Qt.ElideRight, 108))
+            self.name_label.setText(self.name_label.fontMetrics().elidedText(self.label(), Qt.ElideRight, 140))
             self.name_label.setToolTip(self.label())
         self.avatar.setToolTip(f"{self.label()} · 拖动整张卡片调整顺序，右键修改名称")
         self.setToolTip(self.avatar.toolTip())
@@ -1102,7 +1141,7 @@ class RoomRow(QFrame):
         menu.addAction("修改主播名称…", self.rename)
         menu.addSeparator()
         menu.addAction("移除此路", lambda: QTimer.singleShot(0, self,
-            lambda: self.viewer.remove_room(self.room_id)))
+            lambda: self.viewer.remove_room_with_undo(self.room_id)))
         return menu
 
     def open_more(self):
@@ -1199,13 +1238,13 @@ class RoomRow(QFrame):
                 button.setToolTip(hint)
                 button.setAccessibleName(hint)
         independent = self.room_id in self.viewer.independent_playback
-        self.independent.setVisible(self.room_id != self.viewer.alignment.reference)
+        self.independent.setEnabled(self.room_id != self.viewer.alignment.reference)
         self.independent.setChecked(independent)
         self.independent.kind = 'resync' if independent else 'independent'
         self.independent.setToolTip('恢复自动对齐' if independent else '独立播放：不等待对齐，使用本路缓存进度')
         self.independent.setAccessibleName(self.independent.toolTip())
         self.independent.update()
-        self.realign.setVisible(self.viewer.alignment.automatic and self.room_id != self.viewer.alignment.reference)
+        self.realign.setEnabled(self.viewer.alignment.automatic and self.room_id != self.viewer.alignment.reference)
         match_text = self.match_text
         if independent:
             match_text = "独立播放，不参与自动对齐"
@@ -1364,12 +1403,12 @@ class Viewer(QDialog):
         self.main = QComboBox(self)
         self.main.setFixedWidth(180)
         self.main.currentIndexChanged.connect(self._main_changed)
-        self.automatic = QCheckBox("自动对齐比赛画面")
+        self.automatic = ConsoleModeToggle("自动对齐比赛画面", 'automatic')
         self.automatic.setToolTip("关闭时保存当前相对偏移；重新勾选或主动修改偏移可解除保存状态。切换不收起对照。")
         self.automatic.setChecked(context.setting("automatic", True))
         self.alignment.automatic = self.automatic.isChecked()
         self.automatic.toggled.connect(self._automatic_changed)
-        self.compare = QCheckBox("对照微调")
+        self.compare = ConsoleModeToggle("对照微调", 'compare')
         self.automatic.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
         self.compare.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
         self.compare.toggled.connect(self.set_comparison_visible)
@@ -1399,7 +1438,7 @@ class Viewer(QDialog):
         self.add_controls = (self.input, add, use_current)
         self.settings_panel = SettingsPanel(self)
         self.match_settings = None
-        self.settings_height = 220
+        self.settings_height = 280
         self.minimize_settings = ConsoleIconButton('minimize', '最小化播放控制台')
         self.minimize_settings.setToolTip("收起设置栏，保留画面、声音和弹幕播放。")
         self.minimize_settings.clicked.connect(lambda: self.set_settings_visible(False))
@@ -1407,8 +1446,12 @@ class Viewer(QDialog):
         self.restore_settings.setFixedWidth(90)
         self.restore_settings.clicked.connect(lambda: self.set_settings_visible(True))
         self.restore_settings.hide()
-        heading = QHBoxLayout()
-        heading.setSpacing(6)
+        self.console_toolbar = QWidget()
+        self.console_toolbar.setObjectName('MatchSyncToolbar')
+        self.console_toolbar.setStyleSheet(f'QWidget#MatchSyncToolbar {{border-bottom: 1px solid {theme.BORDER_STRONG};}}')
+        heading = QHBoxLayout(self.console_toolbar)
+        heading.setContentsMargins(16, 10, 16, 10)
+        heading.setSpacing(16)
         self.main.hide()
         heading.addWidget(self.automatic)
         heading.addWidget(self.compare)
@@ -1416,7 +1459,10 @@ class Viewer(QDialog):
         for widget in self.add_controls:
             heading.addWidget(widget)
         heading.addStretch(0)
-        self.match_settings_button = ConsoleIconButton('settings', '比赛二路设置')
+        self.add_room_button = ConsoleIconButton('add', '添加直播间', size=32)
+        self.add_room_button.clicked.connect(self.add_room_dialog)
+        heading.addWidget(self.add_room_button)
+        self.match_settings_button = ConsoleIconButton('settings', '比赛二路设置', size=32)
         self.match_settings_button.clicked.connect(self.open_match_settings)
         heading.addWidget(self.match_settings_button)
         heading.addWidget(self.minimize_settings)
@@ -1510,20 +1556,44 @@ class Viewer(QDialog):
         self.comparison_panel = ComparisonPanel(self)
         self.body_split.addWidget(self.comparison_panel)
         self.body_split.addWidget(self.settings_panel)
-        self.body_split.setSizes([660, 0, 220])
+        self.body_split.setSizes([660, 0, 280])
         self.audio_status = QLabel()
         settings_layout = QVBoxLayout(self.settings_panel)
-        settings_layout.setContentsMargins(12, 8, 12, 8)
-        settings_layout.setSpacing(4)
-        settings_layout.addLayout(heading)
+        settings_layout.setContentsMargins(1, 1, 1, 1)
+        settings_layout.setSpacing(0)
+        settings_layout.addWidget(self.console_toolbar)
         settings_layout.addWidget(self.controls, 1)
-        footer = QHBoxLayout()
+        self.console_footer = QWidget()
+        self.console_footer.setObjectName('MatchSyncFooter')
+        self.console_footer.setStyleSheet(f'''QWidget#MatchSyncFooter {{background: {theme.BG};
+            border-bottom-left-radius: 9px; border-bottom-right-radius: 9px;}}
+            #MatchSyncFooter QLabel {{color: {theme.TEXT2}; font-size: 12px;}}''')
+        footer = QHBoxLayout(self.console_footer)
+        footer.setContentsMargins(16, 10, 16, 10)
         footer.setSpacing(16)
         footer.addWidget(self.notice, 1)
         self.audio_status.setWordWrap(True)
         self.audio_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         footer.addWidget(self.audio_status, 1)
-        settings_layout.addLayout(footer)
+        settings_layout.addWidget(self.console_footer)
+        self.removal_notice = QFrame(self.settings_panel)
+        self.removal_notice.setObjectName('MatchSyncRemovalNotice')
+        self.removal_notice.setStyleSheet(f'''#MatchSyncRemovalNotice {{background: {theme.ELEVATED};
+            border: 1px solid {theme.BORDER_STRONG}; border-radius: 6px;}}''')
+        removal_layout = QHBoxLayout(self.removal_notice)
+        removal_layout.setContentsMargins(12, 6, 12, 6)
+        self.removal_label = QLabel()
+        removal_layout.addWidget(self.removal_label)
+        undo = QPushButton('撤销')
+        undo.setAutoDefault(False)
+        undo.clicked.connect(self.undo_remove_room)
+        removal_layout.addWidget(undo)
+        self.removal_notice.hide()
+        self.removed_room = None
+        self.removal_timer = QTimer(self)
+        self.removal_timer.setSingleShot(True)
+        self.removal_timer.setInterval(5000)
+        self.removal_timer.timeout.connect(self.dismiss_removal_notice)
         self.left_pane = QWidget()
         left_layout = QVBoxLayout(self.left_pane)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -1741,6 +1811,7 @@ class Viewer(QDialog):
                 self.align_room_controls()
             if watched is self.settings_panel and hasattr(self, 'send_console'):
                 self.send_console.sync_height()
+                self.position_removal_notice()
             if watched is self.picture.bottom:
                 QTimer.singleShot(0, self._layout_restore_control)
             if self.embedded and watched is self.parentWidget():
@@ -1775,6 +1846,8 @@ class Viewer(QDialog):
         with self._switch_stage('show_controls'):
             self._sync_sidebar_marks()
             self.send_console.sync_height()
+        self.console_content_height = None
+        self.align_room_controls()
         super().showEvent(event)
 
     def hideEvent(self, event):
@@ -1917,6 +1990,13 @@ class Viewer(QDialog):
                 needed = max(w for c, w in zip(row.control_columns, widths) if c == column)
                 if row.controls_grid.columnMinimumWidth(column) != needed:
                     row.controls_grid.setColumnMinimumWidth(column, needed)
+        height = (self.console_toolbar.sizeHint().height() + self.rows_layout.sizeHint().height()
+                  + self.console_footer.sizeHint().height() + 2)
+        if height != getattr(self, 'console_content_height', None):
+            self.console_content_height = height
+            self.settings_height = height
+            sizes = self.body_split.sizes()
+            self.body_split.setSizes([max(1, sizes[0] + sizes[2] - height), sizes[1], height])
 
     def begin_row_drag(self, room_id):
         self.dragged_row = room_id
@@ -2193,6 +2273,54 @@ class Viewer(QDialog):
                                    int(settings.get('danmaku_font_size') or 13))
             self.panel.set_max_blocks(int(settings.get('danmaku_max_blocks') or 3000))
 
+    def add_room_dialog(self):
+        value, accepted = QInputDialog.getText(self, '添加直播间', '房间号、平台前缀或官方直播链接')
+        if accepted and value.strip():
+            self.input.setText(value.strip())
+            self._add_input()
+
+    def position_removal_notice(self):
+        self.removal_notice.move(max(0, (self.settings_panel.width() - self.removal_notice.width()) // 2),
+            max(0, self.settings_panel.height() - self.console_footer.height() - self.removal_notice.height() - 8))
+
+    def dismiss_removal_notice(self):
+        self.removal_timer.stop()
+        self.removal_notice.hide()
+        self.removed_room = None
+
+    def remove_room_with_undo(self, room_id):
+        row = self.rows[room_id]
+        saved = (room_id, row.preferences(), self.sources.get(room_id),
+                 list(self.rows).index(room_id), self.main.currentData() == room_id, self.running)
+        label = row.label()
+        self.remove_room(room_id)
+        self.removed_room = saved
+        self.removal_label.setText('已移除 ' + label)
+        self.removal_notice.adjustSize()
+        self.position_removal_notice()
+        self.removal_notice.show()
+        self.removal_notice.raise_()
+        self.removal_timer.start()
+
+    def undo_remove_room(self):
+        saved = self.removed_room
+        self.dismiss_removal_notice()
+        if saved is None:
+            return
+        room_id, preferences, source, index, main, running = saved
+        if room_id in self.rows:
+            return
+        if source is not None:
+            self.sources[room_id] = source
+        self.add_room(room_id, preferences)
+        keys = list(self.rows)
+        if index < len(keys) - 1:
+            self.reorder_room(room_id, keys[index], False)
+        if main:
+            self.select_main(room_id)
+        if running and not self.running:
+            self.toggle_running()
+
     def _add_input(self):
         if self.add_room(self.input.text()):
             self.input.clear()
@@ -2245,7 +2373,7 @@ class Viewer(QDialog):
         for room_id, row in self.rows.items():
             row.main_button.setChecked(room_id == selected)
             row.main_button.setText('主画面' if room_id == selected else '设为主画面')
-            row.realign.setVisible(self.automatic.isChecked() and room_id != selected)
+            row.realign.setEnabled(self.automatic.isChecked() and room_id != selected)
         if selected != self.alignment.reference:
             self.late_buffer = LateBuffer(self.reserve_seconds)
             self.late_notice.hide()
@@ -2605,7 +2733,7 @@ class Viewer(QDialog):
             self.alignment.candidates.clear()
             self.generation += 1
         for row in self.rows.values():
-            row.realign.setVisible(self.alignment.automatic and row.room_id != self.alignment.reference)
+            row.realign.setEnabled(self.alignment.automatic and row.room_id != self.alignment.reference)
             row.refresh_status()
         self.changed()
 

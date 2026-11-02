@@ -30,6 +30,19 @@ def check(app, host, module, output=None):
             first, second = viewer.rows.values()
             assert not first._compact_controls
             assert len(first.control_widgets) == 6
+            assert isinstance(viewer.automatic, panels.ConsoleModeToggle)
+            assert isinstance(viewer.compare, panels.ConsoleModeToggle)
+            assert len(first.group_separators) == 3
+            assert first.decrease.parentWidget() is first.offset_box
+            assert first.delay.parentWidget() is first.offset_box
+            assert first.increase.parentWidget() is first.offset_box
+            assert not first.main_button.icon().isNull()
+            assert not first.independent.isHidden() and not first.independent.isEnabled()
+            assert not first.realign.isHidden() and not first.realign.isEnabled()
+            with patch.object(module.QInputDialog, 'getText', return_value=('303', True)):
+                viewer.add_room_button.click()
+            assert '303' in viewer.rows
+            viewer.remove_room('303')
             assert all(not label.isHidden() for label in first.group_labels)
             assert all(label.isHidden() for label in second.group_labels)
             for name in ('audible', 'channel', 'show_chat', 'color_choice', 'delay', 'more'):
@@ -87,6 +100,18 @@ def check(app, host, module, output=None):
             if output:
                 output = Path(output)
                 output.parent.mkdir(parents=True, exist_ok=True)
+                host.setAttribute(Qt.WA_DontShowOnScreen)
+                host.resize(1600, 1000)
+                viewer.embed(host)
+                host.show()
+                viewer.show()
+                viewer.automatic.setChecked(True)
+                viewer.compare.setChecked(False)
+                viewer.console_content_height = None
+                viewer.align_room_controls()
+                viewer.notice.setText('主画面：Machine · 自动对齐已开启')
+                viewer.audio_status.setText('声音已接管')
+                QTest.qWait(30)
                 viewer.settings_panel.grab().save(str(output))
             menu = second.more_menu()
             assert [action.text() for action in menu.actions() if not action.isSeparator()] == ['修改主播名称…', '移除此路']
@@ -94,9 +119,36 @@ def check(app, host, module, output=None):
             assert '202' in viewer.rows, 'Removal must wait until the menu callback returns'
             app.processEvents()
             assert list(viewer.rows) == ['101']
+            assert not viewer.removal_notice.isHidden()
+            viewer.undo_remove_room()
+            assert list(viewer.rows) == ['101', '202']
+            assert viewer.rows['202'].label() == '大东彦'
+            assert not viewer.rows['202'].audible.isChecked()
+            assert viewer.removal_notice.isHidden()
+            viewer.remove_room_with_undo('202')
+            viewer.removal_timer.timeout.emit()
+            assert viewer.removed_room is None and viewer.removal_notice.isHidden()
+            # Match the reported case: one source in a very wide embedded console.
+            if output:
+                host.resize(2500, 1000)
+            else:
+                viewer.resize(2500, 1000)
+            QTest.qWait(30)
+            viewer.align_room_controls()
+            assert first.avatar.mapTo(first.control_widgets[0], QPoint()).x() <= 2
+            name_x = first.name_label.mapTo(first, QPoint()).x()
+            avatar_right = first.avatar.mapTo(first, QPoint()).x() + first.avatar.width()
+            role_x = first.main_button.mapTo(first, QPoint()).x()
+            assert 0 <= name_x - avatar_right <= 12
+            assert 0 <= role_x - name_x - first.name_label.width() <= 12
+            assert abs(viewer.settings_panel.height() - viewer.console_content_height) < 24
+            if output:
+                viewer.settings_panel.grab().save(str(output.with_name('single-wide.png')))
             return dict(passed=True, native_controls=True, column_alignment=True,
                         responsive=True, toggles=True, persisted_values=True,
-                        crop_action=True, deferred_remove=True, no_playback_relayout=True,
+                        crop_action=True, deferred_remove=True, undo_remove=True,
+                        compact_identity=True, shared_offset=True, prototype_modes=True,
+                        no_playback_relayout=True,
                         media_playback=False)
         finally:
             viewer.close()

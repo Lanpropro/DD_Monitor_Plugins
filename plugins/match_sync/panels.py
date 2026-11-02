@@ -2,9 +2,9 @@
 import math
 import ctypes
 import sys
-from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QCursor, QLinearGradient, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QPushButton, QToolTip, QVBoxLayout, QWidget
+from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, QSize, Qt, QTimer
+from PySide6.QtGui import QColor, QCursor, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QPushButton, QToolTip, QVBoxLayout, QWidget
 
 from ddm import theme
 
@@ -64,11 +64,70 @@ def style_checkbox(checkbox):
         QCheckBox:hover {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}''')
 
 
+class ConsoleModeToggle(QCheckBox):
+    """Native checkbox behavior with the approved switch/compare presentation."""
+    def __init__(self, text, kind):
+        super().__init__(text)
+        self.kind = kind
+        self.setFocusPolicy(Qt.StrongFocus)
+        use_link_cursor(self)
+
+    def sizeHint(self):
+        return QSize(self.fontMetrics().horizontalAdvance(self.text()) + 42, 32)
+
+    def minimumSizeHint(self):
+        return self.sizeHint()
+
+    def hitButton(self, point):
+        return self.rect().contains(point)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        y = self.height() / 2
+        font = painter.font()
+        font.setPixelSize(13)
+        painter.setFont(font)
+        if self.kind == 'automatic':
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(theme.qcolor(theme.ACCENT if self.isChecked() else theme.TEXT3))
+            painter.drawRoundedRect(QRectF(1, y - 8, 27, 16), 8, 8)
+            painter.setBrush(QColor('#e9edf2'))
+            painter.drawEllipse(QPointF(20 if self.isChecked() else 9, y), 5, 5)
+        else:
+            painter.setPen(QPen(theme.qcolor(theme.ACCENT if self.isChecked() else theme.TEXT2), 1.5))
+            painter.setBrush(Qt.NoBrush)
+            for x in (3, 17):
+                painter.drawRoundedRect(QRectF(x, y - 8, 8, 16), 1, 1)
+        painter.setPen(theme.qcolor(theme.TEXT1 if self.isChecked() else theme.TEXT2))
+        painter.drawText(QRect(38, 0, self.width() - 38, self.height()), Qt.AlignVCenter, self.text())
+        if self.hasFocus():
+            painter.setPen(QPen(theme.qcolor(theme.ACCENT), 1, Qt.DashLine))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 4, 4)
+
+
+def console_role_icon():
+    icon = QIcon()
+    for state, color in ((QIcon.Off, theme.TEXT2), (QIcon.On, theme.ACCENT)):
+        pixmap = QPixmap(16, 16)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(theme.qcolor(color), 1.2))
+        painter.drawRoundedRect(QRectF(1, 2, 14, 10), 1, 1)
+        painter.drawLine(8, 12, 8, 15)
+        painter.drawLine(5, 15, 11, 15)
+        painter.end()
+        icon.addPixmap(pixmap, QIcon.Normal, state)
+    return icon
+
+
 class ConsoleIconButton(QPushButton):
-    def __init__(self, kind, tooltip, parent=None):
+    def __init__(self, kind, tooltip, parent=None, *, size=28):
         super().__init__(parent)
         self.kind = kind
-        self.setFixedSize(28, 26)
+        self.setFixedSize(size, 26 if size == 28 else size)
         self.setToolTip(tooltip)
         self.setAccessibleName(tooltip)
         self.setAutoDefault(False)
@@ -78,7 +137,8 @@ class ConsoleIconButton(QPushButton):
         self.setAttribute(Qt.WA_Hover)
         self.setMouseTracking(True)
         self.setStyleSheet(f'''QPushButton {{background: transparent; border: none; padding: 0; border-radius: 6px;
-            min-width: 28px; max-width: 28px; min-height: 26px; max-height: 26px;}}''')
+            min-width: {self.width()}px; max-width: {self.width()}px;
+            min-height: {self.height()}px; max-height: {self.height()}px;}}''')
 
     def event(self, event):
         if (event.type() == QEvent.FocusIn and event.reason() in (Qt.TabFocusReason, Qt.BacktabFocusReason)):
@@ -103,7 +163,10 @@ class ConsoleIconButton(QPushButton):
         pen = QPen(theme.qcolor(color), 1.6)
         pen.setCapStyle(Qt.RoundCap)
         painter.setPen(pen)
-        if self.kind == 'floating':
+        if self.kind == 'add':
+            painter.drawLine(-6, 0, 6, 0)
+            painter.drawLine(0, -6, 0, 6)
+        elif self.kind == 'floating':
             painter.drawRoundedRect(QRectF(-8, -6, 16, 12), 2, 2)
             painter.drawRect(QRectF(1, 0, 5, 4))
         elif self.kind in ('sound', 'chat'):
@@ -192,15 +255,20 @@ class ConsoleChoice(QComboBox):
     def __init__(self, kind, parent=None):
         super().__init__(parent)
         self.kind = kind
-        self.setFixedSize(62 if kind == 'channel' else 48, 28)
+        self.setFixedSize(62 if kind == 'channel' else 48, 32)
         use_link_cursor(self)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(theme.qcolor(theme.ACCENT_SOFT if self.underMouse() or self.hasFocus() else theme.ELEVATED))
-        painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 5, 5)
+        if self.underMouse() or self.hasFocus():
+            painter.setBrush(theme.qcolor(theme.ACCENT_SOFT))
+            painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 5, 5)
+        painter.translate(0, 2)
+        font = painter.font()
+        font.setPixelSize(12)
+        painter.setFont(font)
         painter.setPen(QPen(theme.qcolor(theme.TEXT1), 1.5, Qt.SolidLine, Qt.RoundCap))
         if self.kind == 'channel':
             painter.drawArc(QRectF(7, 7, 14, 14), 0, 180 * 16)
@@ -292,7 +360,8 @@ class SettingsPanel(QWidget):
         self.setObjectName(object_name)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMinimumHeight(130)
-        self.setMaximumHeight(240)
+        if object_name != 'MatchSyncSettings':
+            self.setMaximumHeight(240)
         self.setStyleSheet(f"""
             #MatchSyncSettings, #MatchSyncRows {{
                 background: transparent; border: none;
@@ -316,6 +385,14 @@ class SettingsPanel(QWidget):
         path = QPainterPath()
         # Match the host's Tile and DanmakuPanel outer corners.
         path.addRoundedRect(QRectF(self.rect()), 10, 10)
+        if self.objectName() == 'MatchSyncSettings':
+            color = theme.qcolor(theme.CONTENT)
+            color.setAlpha(round(255 * self.viewer.panel_alpha) if self.viewer.skin_visible else 255)
+            painter.fillPath(path, color)
+            painter.setPen(QPen(theme.qcolor(theme.BORDER_STRONG), 1))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(QRectF(self.rect()).adjusted(.5, .5, -.5, -.5), 10, 10)
+            return
         if self.objectName() == 'MatchSyncSendConsole':
             path.setFillRule(Qt.WindingFill)
             path.addRect(QRectF(0, 0, self.width(), 10))
