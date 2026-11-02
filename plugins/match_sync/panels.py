@@ -3,8 +3,8 @@ import math
 import ctypes
 import sys
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QTimer
-from PySide6.QtGui import QCursor, QLinearGradient, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QApplication, QDialog, QDialogButtonBox, QFormLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtGui import QColor, QCursor, QLinearGradient, QPainter, QPainterPath, QPen
+from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QPushButton, QToolTip, QVBoxLayout, QWidget
 
 from ddm import theme
 
@@ -80,21 +80,61 @@ class ConsoleIconButton(QPushButton):
         self.setStyleSheet(f'''QPushButton {{background: transparent; border: none; padding: 0; border-radius: 6px;
             min-width: 28px; max-width: 28px; min-height: 26px; max-height: 26px;}}''')
 
+    def event(self, event):
+        if (event.type() == QEvent.FocusIn and event.reason() in (Qt.TabFocusReason, Qt.BacktabFocusReason)):
+            QToolTip.showText(self.mapToGlobal(self.rect().bottomLeft()), self.toolTip(), self)
+        return super().event(event)
+
     def paintEvent(self, event):
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         hovered = self.isEnabled() and QApplication.widgetAt(QCursor.pos()) is self
-        if hovered or self.isChecked():
+        if hovered or self.isChecked() or self.hasFocus():
             painter.setPen(Qt.NoPen)
             painter.setBrush(theme.qcolor(theme.ACCENT_SOFT))
             painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 6, 6)
+        if self.hasFocus():
+            painter.setBrush(Qt.NoBrush)
+            painter.setPen(QPen(theme.qcolor(theme.ACCENT), 1, Qt.DashLine))
+            painter.drawRoundedRect(QRectF(self.rect()).adjusted(2, 2, -2, -2), 4, 4)
         painter.translate(self.width() / 2, self.height() / 2)
-        color = theme.TEXT4 if not self.isEnabled() else theme.ACCENT if hovered else theme.TEXT1
+        color = theme.TEXT4 if not self.isEnabled() else theme.ACCENT if hovered or self.isChecked() else theme.TEXT1
         pen = QPen(theme.qcolor(color), 1.6)
         pen.setCapStyle(Qt.RoundCap)
         painter.setPen(pen)
-        if self.kind == 'settings':
+        if self.kind == 'floating':
+            painter.drawRoundedRect(QRectF(-8, -6, 16, 12), 2, 2)
+            painter.drawRect(QRectF(1, 0, 5, 4))
+        elif self.kind in ('sound', 'chat'):
+            if self.kind == 'sound':
+                path = QPainterPath()
+                path.moveTo(-7, -2)
+                for x, y in ((-4, -2), (0, -6), (0, 6), (-4, 2), (-7, 2)):
+                    path.lineTo(x, y)
+                path.closeSubpath()
+                painter.drawPath(path)
+                if self.isChecked():
+                    painter.drawArc(QRectF(-1, -5, 10, 10), -60 * 16, 120 * 16)
+            else:
+                path = QPainterPath()
+                path.moveTo(-7, -6)
+                for x, y in ((7, -6), (7, 4), (-2, 4), (-7, 8), (-7, -6)):
+                    path.lineTo(x, y)
+                painter.drawPath(path)
+                painter.drawLine(-4, -2, 4, -2)
+                painter.drawLine(-4, 1, 1, 1)
+            if not self.isChecked():
+                painter.drawLine(-7, -8, 8, 8)
+        elif self.kind == 'region':
+            for x, y in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
+                painter.drawLine(x * 8, y * 3, x * 8, y * 8)
+                painter.drawLine(x * 3, y * 8, x * 8, y * 8)
+            painter.drawRect(QRectF(-3, -3, 6, 6))
+        elif self.kind == 'more':
+            for x in (-5, 0, 5):
+                painter.drawPoint(x, 0)
+        elif self.kind == 'settings':
             gear = QPainterPath()
             for index in range(24):
                 angle = math.radians(index * 15 - 7.5)
@@ -145,6 +185,35 @@ class ConsoleIconButton(QPushButton):
             painter.drawLine(QPointF(0, -4), QPointF(4, 0))
             painter.drawLine(QPointF(0, 4), QPointF(4, 0))
             painter.drawLine(QPointF(7, -6), QPointF(7, 6))
+
+
+class ConsoleChoice(QComboBox):
+    """Keep native popup options while using a compact channel/color face."""
+    def __init__(self, kind, parent=None):
+        super().__init__(parent)
+        self.kind = kind
+        self.setFixedSize(62 if kind == 'channel' else 48, 28)
+        use_link_cursor(self)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(theme.qcolor(theme.ACCENT_SOFT if self.underMouse() or self.hasFocus() else theme.ELEVATED))
+        painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 5, 5)
+        painter.setPen(QPen(theme.qcolor(theme.TEXT1), 1.5, Qt.SolidLine, Qt.RoundCap))
+        if self.kind == 'channel':
+            painter.drawArc(QRectF(7, 7, 14, 14), 0, 180 * 16)
+            painter.drawRoundedRect(QRectF(6, 14, 4, 7), 1, 1)
+            painter.drawRoundedRect(QRectF(18, 14, 4, 7), 1, 1)
+            painter.drawText(QRectF(26, 0, 18, 28), Qt.AlignCenter,
+                             {0: '原', 3: 'L', 4: 'R'}.get(self.currentData(), '原'))
+        else:
+            painter.setBrush(QColor(self.currentData() or theme.ACCENT))
+            painter.drawRoundedRect(QRectF(8, 8, 12, 12), 2, 2)
+        x = self.width() - 12
+        painter.drawLine(x - 3, 12, x, 15)
+        painter.drawLine(x, 15, x + 3, 12)
 
 
 class MatchSettingsDialog(QDialog):
