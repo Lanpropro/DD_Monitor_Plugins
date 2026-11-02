@@ -27,8 +27,6 @@ class EntryButton(QToolButton):
         self.sidebar = sidebar
         self._top = None
         self._mode = False
-        self._closing = False
-        self._compact_width = 0
         self._paint_width = None
         self._feedback_pending = False
         self._stretch = QVariantAnimation(self)
@@ -64,17 +62,13 @@ class EntryButton(QToolButton):
         if self._mode == bool(active):
             return
         old_width = self._paint_width if self._paint_width is not None else self.width()
-        if active and not self._closing:
-            self._compact_width = self.width()
         self._mode = bool(active)
         self._stretch.stop()
         self._paint_width = None
-        self._closing = bool(not active and self.isVisible() and motion.enabled()
-                             and old_width > self._compact_width)
         self._place()
         self.parentWidget().layout().activate()
-        target = self._compact_width if self._closing else self.width()
-        if self.isVisible() and motion.enabled() and target != old_width:
+        target = self.width()
+        if active and self.isVisible() and motion.enabled() and target != old_width:
             self._stretch.setStartValue(float(old_width))
             self._stretch.setEndValue(float(target))
             self._stretch.start()
@@ -86,10 +80,6 @@ class EntryButton(QToolButton):
 
     def _stretch_finished(self):
         self._paint_width = None
-        if self._closing:
-            self._closing = False
-            self._place()
-            self.parentWidget().layout().activate()
         self.update()
 
     def paintEvent(self, event):
@@ -119,11 +109,8 @@ class EntryButton(QToolButton):
         self._place()
 
     def eventFilter(self, watched, event):
-        if watched is self.sidebar.layout_button and event.type() == QEvent.Show and (self._mode or self._closing):
+        if watched is self.sidebar.layout_button and event.type() == QEvent.Show and self._mode:
             watched.hide()
-        if watched is self.sidebar and event.type() == QEvent.Resize and self._closing:
-            self._stretch.stop()
-            self._stretch_finished()
         if watched is self.sidebar and event.type() in (
                 QEvent.LayoutRequest, QEvent.Resize, QEvent.Show):
             self._placement.start(0)
@@ -131,7 +118,7 @@ class EntryButton(QToolButton):
 
     def _place(self):
         sidebar = self.sidebar
-        occupied = self._mode or self._closing
+        occupied = self._mode
         top = getattr(sidebar, "side", "left") == "top" and not occupied
         sidebar.layout_button.setVisible(not occupied)
         if top:

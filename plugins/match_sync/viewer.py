@@ -11,6 +11,7 @@ from dataclasses import replace
 from math import ceil
 from pathlib import Path
 from urllib.parse import urlsplit
+from shiboken6 import isValid
 
 from PySide6.QtCore import QEasingCurve, QEvent, QMetaObject, QMimeData, QObject, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QColor, QCursor, QDrag, QIcon, QImage, QKeySequence, QPainter, QPen, QPixmap, QRegion
@@ -1305,7 +1306,7 @@ class Viewer(QDialog):
         self.crop_repaint_timer.setInterval(16)
         self.crop_repaint_timer.timeout.connect(self.flush_crop_background)
         self.hidden_host_widgets = {}
-        self.sidebar_style = None
+        self.sidebar_item_styles = {}
         self.setAcceptDrops(True)
         self.setWindowTitle("比赛二路同步")
         self.setObjectName("MatchSync")
@@ -1743,23 +1744,34 @@ class Viewer(QDialog):
         for row in self.rows.values():
             row.refresh_avatar()
             self.send_console.refresh_avatar(row.room_id)
-        if self.sidebar_style is None:
-            self.sidebar_style = sidebar.styleSheet()
-            sidebar.setStyleSheet(self.sidebar_style + """
+        for item in getattr(sidebar, "_items", []):
+            row = self.rows.get(str(item.room.get("room_id") or ""))
+            active = self.running and row is not None and row.decoder is not None
+            self._style_sidebar_item(item, active, bool(item.property('onWall')))
+        self._sync_strip_marks(sidebar, True)
+
+    def _style_sidebar_item(self, item, active, hold):
+        changed = bool(item.property('matchSync')) != active
+        if changed:
+            item.setProperty('matchSync', active)
+        if active or hold:
+            original = self.sidebar_item_styles.setdefault(item, item.styleSheet())
+            style = original + """
                 #NavItem[onWall="true"] { border: none; }
                 #NavItem[matchSync="true"], #NavItem[matchSync="true"][onWall="true"] {
                     border: 1px solid #fb7299;
                 }
-            """)
-        for item in getattr(sidebar, "_items", []):
-            row = self.rows.get(str(item.room.get("room_id") or ""))
-            active = self.running and row is not None and row.decoder is not None
-            if item.property("matchSync") != active:
-                item.setProperty("matchSync", active)
-                item.style().unpolish(item)
-                item.style().polish(item)
-                item.update()
-        self._sync_strip_marks(sidebar, True)
+            """
+        elif item in self.sidebar_item_styles:
+            style = self.sidebar_item_styles.pop(item)
+        else:
+            return
+        if item.styleSheet() != style:
+            item.setStyleSheet(style)
+        elif changed:
+            item.style().unpolish(item)
+            item.style().polish(item)
+            item.update()
 
     def _sync_strip_marks(self, sidebar, enabled):
         strip = getattr(sidebar, "_head_strip", None)
@@ -2026,14 +2038,12 @@ class Viewer(QDialog):
         self.host_audio_timer.stop()
         self._release_host_audio()
         sidebar = getattr(self.context.window, "sidebar", None)
-        if sidebar is not None and self.sidebar_style is not None:
-            sidebar.setStyleSheet(self.sidebar_style)
-            self.sidebar_style = None
-            for item in getattr(sidebar, "_items", []):
-                item.setProperty("matchSync", False)
-                item.style().unpolish(item)
-                item.style().polish(item)
-                item.update()
+        if sidebar is not None:
+            for item in tuple(self.sidebar_item_styles):
+                if isValid(item):
+                    self._style_sidebar_item(item, False, False)
+                else:
+                    self.sidebar_item_styles.pop(item)
             self._sync_strip_marks(sidebar, False)
         previous, self.hidden_host_widgets = self.hidden_host_widgets, {}
         for widget, visible in previous.items():
@@ -3906,6 +3916,10 @@ class Viewer(QDialog):
         self._sync_sidebar_marks()
 
     def closeEvent(self, event):
+        if self.embedded:
+            self.reject()
+            event.accept()
+            return
         self.stop()
         if self.save_timer.isActive():
             self.save_timer.stop()
@@ -3917,8 +3931,12 @@ class Viewer(QDialog):
     def reject(self):
         if self.embedded:
             self.stop()
+            if self.save_timer.isActive():
+                self.save_timer.stop()
+                self.save()
             self.hide()
-            self._restore_host_widgets()
+            with self._switch_stage('restore_host_widgets'):
+                self._restore_host_widgets()
             self.finished.emit(0)
         else:
             super().reject()
