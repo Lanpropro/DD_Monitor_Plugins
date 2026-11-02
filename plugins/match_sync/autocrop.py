@@ -41,7 +41,7 @@ MIN_HEIGHT = 0.10
 MAX_HEIGHT = 0.78
 
 ASPECT = 16.0 / 9.0
-FACINGS = (3.0, 3.6, 4.2)
+FACINGS = (1.8, 2.4, 3.0, 3.6)
 FACING_SLACK = 0.55
 DETECT_WIDTH = 720.0
 SNAP_TOLERANCE = 0.03
@@ -109,7 +109,7 @@ def detect(frames, faces=True):
     # Cropping a little wide still shows the whole person; cropping narrow cuts
     # their head off. Among the plausible candidates keep the largest.
     near = [entry for entry in candidates if entry[0] >= top * FACING_SLACK]
-    _score, rect, cluster = max(near, key=lambda entry: entry[1][2] * entry[1][3])
+    _score, rect, cluster = max(near, key=lambda entry: entry[0])
     rect = _widen(rect, GROW)
     rect = snap(current, rect, tolerance=FINAL_SNAP) or rect
     confidence = min(1.0, float(cluster["frames"]) / max(1.0, float(len(prepared))))
@@ -253,7 +253,7 @@ def _border_score(gray, rect):
     cols = slice(x0 + band, max(x0 + band + 1, x1 - band))
     steps = []
     # A window hugging the frame edge has no outside strip to compare against;
-    # score the sides that exist, and refuse when fewer than three of them do.
+    # score the sides that exist, and refuse when fewer than two of them do.
     if x0 - band >= 0:
         steps.append(abs(float(gray[rows, x0:x0 + band].mean())
                          - float(gray[rows, x0 - band:x0].mean())))
@@ -266,7 +266,7 @@ def _border_score(gray, rect):
     if y1 + band <= height:
         steps.append(abs(float(gray[y1 - band:y1, cols].mean())
                          - float(gray[y1:y1 + band, cols].mean())))
-    if len(steps) < 3:
+    if len(steps) < 2:
         return 0.0
     return min(steps) + 0.25 * (sum(steps) / len(steps))
 

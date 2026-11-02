@@ -256,6 +256,26 @@ class ViewerWiringTests(unittest.TestCase):
                 self.assertIn(text, self.source)
 
 
+    def test_the_detector_answer_stays_on_the_status_line(self):
+        for text in ('self.notice_hold = 0.0', 'def say(self, text, hold=0.0)',
+                     'def _status_says(self, text)',
+                     'self.notice_hold = time.monotonic() + hold',
+                     'self.say("已自动框选摄像头小窗',
+                     'if time.monotonic() >= self.notice_hold'):
+            with self.subTest(text=text):
+                self.assertIn(text, self.source)
+        self.assertNotIn('self.notice.setText("已自动框选', self.source)
+        self.assertIn('self._status_says(f"主画面：', self.source)
+
+    def test_the_detector_reads_the_frame_the_inset_shows(self):
+        for text in ("self.pip_stamp = ('', 0.0)",
+                     'self.pip_stamp = (room_id, timestamp)',
+                     'room_id, shown = self.pip_stamp',
+                     'timestamp = shown - back'):
+            with self.subTest(text=text):
+                self.assertIn(text, self.source)
+
+
 class ConsoleQualityTests(unittest.TestCase):
     """Every row owns its quality switch, and the splitter must not re-flow mid-drag."""
 

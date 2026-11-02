@@ -819,6 +819,16 @@ class CompactStatus(QLabel):
         self.setMinimumHeight(22)
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
+    def say(self, text, hold=0.0):
+        """Show one message; a positive ``hold`` keeps the frame status off it."""
+        if hold > 0.0:
+            self.notice_hold = time.monotonic() + hold
+        self.notice.setText(text)
+
+    def _status_says(self, text):
+        if time.monotonic() >= self.notice_hold:
+            self.notice.setText(text)
+
     def set_status(self, parts, detail, hints=None):
         self.parts = parts
         self.hints = hints if hints is not None else [text for _, text in parts]
@@ -1616,6 +1626,8 @@ class Viewer(QDialog):
         self.picture_split = split
         self.notice = QLabel('')
         self.notice.setWordWrap(True)
+        self.notice_hold = 0.0
+        self.pip_stamp = ('', 0.0)
         body = QWidget()
         body.setObjectName("MatchSyncRows")
         self.rows_layout = QVBoxLayout(body)
@@ -3357,24 +3369,24 @@ class Viewer(QDialog):
                                                    self.sync_waiting and not self.replay.active)
             self._show_buffering(waiting)
             if self.sync_waiting:
-                self.notice.setText("主画面等待缓存恢复；异常二路已静音，已确认偏移保持不变")
+                self._status_says("主画面等待缓存恢复；异常二路已静音，已确认偏移保持不变")
             elif waiting:
                 bounds = row.decoder.history.bounds_at(clock + shifts[row.room_id])
                 target = clock + shifts[row.room_id]
                 if bounds and target < bounds[0]:
-                    self.notice.setText(f"主画面当前缓存约 {bounds[1] - bounds[0]:.1f} 秒；"
+                    self._status_says(f"主画面当前缓存约 {bounds[1] - bounds[0]:.1f} 秒；"
                                         "偏移超出可用范围，请等待缓存或减小延后量")
                 elif bounds and target > bounds[1] + 1:
-                    self.notice.setText("主画面所需内容尚未收到；请减小提前量，或检查该路连接")
+                    self._status_says("主画面所需内容尚未收到；请减小提前量，或检查该路连接")
                 elif bounds and bounds[0] <= target <= bounds[1]:
-                    self.notice.setText("主画面显示帧准备较慢；正在追赶播放进度，声音继续播放")
+                    self._status_says("主画面显示帧准备较慢；正在追赶播放进度，声音继续播放")
                 else:
-                    self.notice.setText("主画面等待缓存或连接；较大延后量需要先积累足够内容")
+                    self._status_says("主画面等待缓存或连接；较大延后量需要先积累足够内容")
             else:
                 delay = time.monotonic() - clock - shifts[row.room_id]
                 mode = ("自动对齐已开启" if self.alignment.automatic else
                         "自动对齐已关闭；手动偏移")
-                self.notice.setText(f"主画面：{row.label()} · 本地播放延后约 {delay:.1f} 秒 · {mode}")
+                self._status_says(f"主画面：{row.label()} · 本地播放延后约 {delay:.1f} 秒 · {mode}")
         if self.compare.isChecked():
             self.comparison_panel.render(shown_clock, shown_shifts)
         if self.replay.active:
@@ -3902,7 +3914,7 @@ class Viewer(QDialog):
         self._sync_pip_geometry()
 
     @staticmethod
-    def _pip_thumb(image, width=640, height=360):
+    def _pip_thumb(image, width=960, height=540):
         """A small grayscale copy of ``image`` for the auto crop detector."""
         if image is None or image.isNull():
             return None
@@ -3915,10 +3927,14 @@ class Viewer(QDialog):
         return data.reshape(small.height(), stride)[:, :small.width()].copy()
 
     def _grab_picture(self, row, back=0.0):
-        """The decoded picture of one room ``back`` seconds before the live edge."""
+        """The decoded picture of one room ``back`` seconds before what the inset shows."""
         if row is None or row.decoder is None:
             return None
-        timestamp = self.live_clock() + self.shifts().get(row.room_id, 0) - back
+        room_id, shown = self.pip_stamp
+        if room_id == self.pip_active_room():
+            timestamp = shown - back
+        else:
+            timestamp = self.live_clock() + self.shifts().get(row.room_id, 0) - back
         picture = (row.decoder.picture_at(timestamp) if hasattr(row.decoder, "picture_at")
                    else row.decoder.history.frame_at(timestamp))
         if isinstance(picture, (tuple, list)) and len(picture) > 1:
@@ -3942,7 +3958,7 @@ class Viewer(QDialog):
     def _auto_pip_crop_clicked(self):
         row = self.rows.get(self.pip_source.currentData() or self.pip_room)
         if row is None:
-            self.notice.setText("请先把要放进画中画的那一路加入比赛二路，再自动框选")
+            self.say("请先把要放进画中画的那一路加入比赛二路，再自动框选", hold=6.0)
             return
         self._auto_pip_crop_for(row)
 
@@ -3950,7 +3966,7 @@ class Viewer(QDialog):
         """Find the talker camera window in ``row`` and use it as the crop."""
         frames = self._pip_frames(row)
         if not frames:
-            self.notice.setText("这一路还没有画面：等播放稳定后再点「自动框选」，或用「框选画面」手动框")
+            self.say("这一路还没有画面：等播放稳定后再点「自动框选」，或用「框选画面」手动框", hold=6.0)
             return False
         rect = None
         try:
@@ -3958,7 +3974,7 @@ class Viewer(QDialog):
         except Exception:  # a detector hiccup must never break playback
             rect = None
         if rect is None:
-            self.notice.setText("没认出摄像头小窗：等画面稳定后再点一次，或用「框选画面」手动框")
+            self.say("没认出摄像头小窗：等画面稳定后再点一次，或用「框选画面」手动框", hold=6.0)
             return False
         previous = tuple(row.pip_crop)
         row.pip_crop = clamp_auto_crop(rect)
@@ -3968,7 +3984,7 @@ class Viewer(QDialog):
         self._sync_pip_geometry()
         self.render()
         self.changed()
-        self.notice.setText("已自动框选摄像头小窗，可再用「框选画面」手动微调")
+        self.say("已自动框选摄像头小窗，可再用「框选画面」手动微调", hold=6.0)
         return True
 
     def _pip_crop_clicked(self):
@@ -4000,6 +4016,7 @@ class Viewer(QDialog):
             self.canvas.clear_pip()
             return
         timestamp = clock + shifts[room_id]
+        self.pip_stamp = (room_id, timestamp)
         picture = (row.decoder.picture_at(timestamp) if hasattr(row.decoder, "picture_at")
                    else row.decoder.history.frame_at(timestamp))
         if picture is None:

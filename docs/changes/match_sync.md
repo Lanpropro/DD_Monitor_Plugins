@@ -8,13 +8,13 @@
 
 ## 待发布
 
-### 2026-11-02｜新增：让「自动框选」认得出真实摄像头
+### 2026-11-02｜修复：自动框选在真实二路画面上认不出摄像头
 
-- 更新内容：`plugins/match_sync/autocrop.py` 重写为按人脸定位的检测器——`detect(frames, faces=True)` 取最近 4 帧灰度图，用 OpenCV 三个 Haar 级联（正面、正面 alt2、侧脸）在 720 宽上放大 1.0/2.0 倍检测，按框重叠 ≥0.30 聚类并要求同一张脸出现在至少两帧；对帧数最多、脸最大的那一簇按 `FACINGS=(3.0, 3.6, 4.2)`（窗口高/脸高）生成 16:9 候选，用窗口四边的亮度跃变（`_border_score`，至少三条边在画面内才有效）打分，在 ≥55% 最高分的候选里取面积最大的一个，再放大 6% 并以 `snap(tolerance=0.02)` 把四边贴到真实分界，最后 `clamp` 进画面。`viewer.py` 恢复「自动框选」按钮（`pip_auto_button`）、`_grab_picture`/`_pip_thumb`/`_pip_frames`/`_auto_pip_crop_for`，结果写入 `row.pip_crop` 后仍走 `_keep_pip_centre` 与 `_sync_pip_geometry`；识别失败只写提示，不改裁剪，也不再有开启画中画后的定时识别。版本号 `2.0r2`。
-- 验收：2026-11-02，`tests/check_match_sync_autocrop.py` 14 例通过（平帧无结果、人脸开关、矩形窗口合成用例 IoU ≥0.55、贴边人脸不出框、夹取/最小尺寸、`snap` 贴边与平帧不动、边框分至少三条边、seed 跟随人脸），`tests/check_match_sync_pip.py` 45 例（含「自动框选结果也要走中心锚定」「不再有定时识别」两条断言）、`tests/check_match_sync_console.py` 3 例、`tests/check_contributing.py` 8 例、`tests/check_packages.py`、`compileall` 通过；合成序列标定 8 例中 7 例 IoU 0.65–0.98（均值 0.90），摄像头缩到画面宽度 20% 的极端小窗仍认不出，会提示手动框选。实机验收待维护者确认。
+- 更新内容：`plugins/match_sync/autocrop.py` 里 `_border_score` 的最低边数由三条改为两条（`if len(steps) < 2: return 0.0`）——解说画面贴着画面右上角时，摄像头小窗的上边和右边就是画面边缘，旧规则直接判 0 分，导致点击后毫无反应；`FACINGS` 由 `(3.0, 3.6, 4.2)` 改为 `(1.8, 2.4, 3.0, 3.6)`（真实 6657 二路画面的摄像头窗口高只有约 1.8 倍脸高）；及格候选的选择由「取面积最大」改为「取边框分最高」（`max(near, key=lambda entry: entry[0])`）。`viewer.py` 增加 `self.notice_hold` 与 `say(text, hold)` / `_status_says(text)`，识别结果停留 6 秒不被每帧状态覆盖；`_pip_thumb` 默认尺寸 640×360 → 960×540；新增 `self.pip_stamp = (room_id, timestamp)` 并在 `_grab_picture` 里按它取帧，与画中画实际显示的那一帧对齐。版本号 `2.0r3`。
+- 验收：2026-11-02，`tests/check_match_sync_pip.py` 47 例（新增「识别结果留在状态行」「按画中画显示的帧取图」两条断言）、`tests/check_match_sync_autocrop.py` 14 例、`tests/check_match_sync_console.py` 3 例、`tests/check_contributing.py` 8 例、`tests/check_packages.py` 与 `compileall` 通过；合成序列标定 8/8 检出、IoU 均值 0.78（最小 0.28 是「框明显偏大但仍完整包含摄像头」），`game only`/`empty`/`faces off` 三个反例仍返回 `None`；真实 530×320 二路帧（`E:\dy录6-11-02 21-57-53.mp4`）识别为右上角 `96×57` 小窗，与人工标定的 `90×60` 基本一致。实机验收待维护者确认。
 - 追踪：本次提交。
 - 集成状态：尚未合入默认分支。
-- 发布注意：相对 `2.0r1` 只增加识别入口，配置无需迁移；缺少 OpenCV 的环境仍可安装，点击会提示改用手动框选。
+- 发布注意：`2.0r2` 被本版取代（认不出摄像头的缺陷在 `2.0r3` 修复）；相对 `2.0r2` 只改识别与提示，配置无需迁移。
 
 ## 已发布 v2.0r1（2026-11-02）
 
