@@ -369,6 +369,29 @@ class AutoCropPathTests(unittest.TestCase):
         self.assertIn('正在取这一路的画面', viewer.messages[-1])
 
 
+    def test_the_auto_crop_leaves_a_line_in_the_host_log(self):
+        lines = []
+        viewer = types.SimpleNamespace(context=types.SimpleNamespace(log=lines.append))
+        self.module.Viewer._auto_pip_log(viewer, "hello")
+        self.assertEqual(lines, ["自动框选：hello"])
+
+    def test_logging_survives_a_host_without_a_log(self):
+        self.module.Viewer._auto_pip_log(types.SimpleNamespace(), "hello")
+        self.module.Viewer._auto_pip_log(types.SimpleNamespace(context=object()), "hello")
+
+    def test_the_click_reports_which_room_it_could_not_find(self):
+        lines = []
+        viewer = types.SimpleNamespace(
+            context=types.SimpleNamespace(log=lines.append),
+            pip_source=types.SimpleNamespace(currentData=lambda: None),
+            pip_room='', rows={}, messages=[])
+        viewer.say = lambda text, hold=0.0: viewer.messages.append(text)
+        viewer._auto_pip_log = lambda text: self.module.Viewer._auto_pip_log(viewer, text)
+        self.module.Viewer._auto_pip_crop_clicked(viewer)
+        self.assertTrue(any('row=无' in line for line in lines), lines)
+        self.assertIn('请先把要放进画中画的那一路', viewer.messages[-1])
+
+
 class ViewerStatusTests(unittest.TestCase):
     """The frame status must never hide an answer, and must never crash render."""
 

@@ -1,16 +1,16 @@
-# 比赛二路同步 v2.0r5
+# 比赛二路同步 v2.0r6
 
-当前提供 `match_sync-2.0r5.zip` 安装包，插件清单版本为 `2.0r2`。
+当前提供 `match_sync-2.0r6.zip` 安装包，插件清单版本为 `2.0r6`。
 
 ## 维护说明
 
-本目录的 `match_sync` 由 [@Sarff11](https://github.com/Sarff11) 在原作者版本基础上独立维护，当前为修改版 `2.0r5`。
+本目录的 `match_sync` 由 [@Sarff11](https://github.com/Sarff11) 在原作者版本基础上独立维护，当前为修改版 `2.0r6`。
 
 - **用途**：多路观看同一场比赛时，选定一路清晰的直播作为主画面，其他路（通常是二路解说）只贡献声音与合并弹幕，并按画面自动对齐比赛进度。
 - **与上游的关系**：修改版以原作者发布的 `match_sync-1.5.zip`（上游 Release `match-sync-v1.5-pre.1`）为基线，保留其整组回看、弹幕发送台、区域匹配、面板拆分等全部功能。上游 `1.4` 及更早的历史说明见 [`docs/releases/`](../../docs/releases/README.md)。
 - **当前修改版功能**：主画面内可拖动、可缩放的画中画小窗，每一路独立的画质按钮；不依赖弹出菜单的声道按钮（原始 → 仅左 → 仅右）；跟随光标拖动的弹幕栏分隔条。
 - **相比上游的改动**：逐版本记录见 [CHANGELOG.md](CHANGELOG.md)。
-- **安装方法**：见下文「安装与入口」；安装包为 `match_sync-2.0r5.zip`。
+- **安装方法**：见下文「安装与入口」；安装包为 `match_sync-2.0r6.zip`。
 - **使用方法**：入口与拖入直播间见「安装与入口」，各路控制与偏移见「调节」，缓冲与资源占用见「运行与资源」，人工验收见「人工验收」。
 - **兼容性**：需要 DD 监控室 CE `0.6` 及以上（`plugin.json` 的 `min_app_version` 为 `0.6`），宿主需提供 `ddm.plugins` 平台接口、libmpv 播放、PyAV/NumPy 与 FFmpeg；限 Windows 桌面宿主。其他平台的直播间需要先启用对应的平台插件。
 - **下载与更新**：安装包来自 [本仓库 Releases](https://github.com/Sarff11/DD_Monitor_Plugins/releases)；源码在本仓库 `plugins/match_sync/`，可用 `python tools/build_plugins.py` 打包。旧版插件不支持同 ID 覆盖安装，需先在设置页删除。

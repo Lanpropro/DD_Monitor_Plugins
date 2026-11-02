@@ -20,6 +20,7 @@
 
 | 版本 | 本地说明 | GitHub 来源 |
 | --- | --- | --- |
+| 2.0r6 | [2.0r6](RELEASE-match-sync-v2.0r6.md) | 待维护者实测后发布 |
 | 2.0r5 | [2.0r5](RELEASE-match-sync-v2.0r5.md) | 待维护者实测后发布 |
 | 2.0r4 | [2.0r4](RELEASE-match-sync-v2.0r4.md) | 被 `2.0r5` 取代（每帧异常） |
 | 2.0r3 | [2.0r3](RELEASE-match-sync-v2.0r3.md) | 被 `2.0r4` 取代 |

@@ -1,4 +1,5 @@
 """Package entry point loaded by DD Monitor CE's single-file plugin loader."""
+import json
 import os
 
 from PySide6.QtCore import QEasingCurve, QEvent, QSize, Qt, QTimer, QVariantAnimation
@@ -13,6 +14,15 @@ __path__ = [os.path.dirname(__file__)]
 __package__ = __name__
 
 from .viewer import Viewer
+
+
+def _version() -> str:
+    """Read our own manifest so the log shows which build the host loaded."""
+    try:
+        with open(os.path.join(os.path.dirname(__file__), "plugin.json"), encoding="utf-8") as fh:
+            return str(json.load(fh).get("version", ""))
+    except Exception:
+        return ""
 
 
 class EntryButton(QToolButton):
@@ -183,7 +193,7 @@ class MatchSyncPlugin(api.Plugin):
             self.button.setCheckable(True)
             self.button.toggled.connect(self.set_enabled)
             self.entry = EntryButton(sidebar, self.button)
-        context.log("比赛二路同步已就绪；点击关注栏「比赛二路」入口开启")
+        context.log(f"比赛二路同步 {_version()} 已就绪；点击关注栏「比赛二路」入口开启")
 
     def on_event(self, event, payload):
         if event == api.EVENT_STREAM_RESOLVED:

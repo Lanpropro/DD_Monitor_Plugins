@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import re
 import sys
+import tempfile
 import threading
 import time
 
 import numpy as np
 from collections import deque
 from dataclasses import replace
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from PySide6.QtCore import QEasingCurve, QEvent, QMetaObject, QMimeData, QObject, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, QSize, Qt, QThread, QTimer, Signal, Slot
@@ -3967,8 +3969,37 @@ class Viewer(QDialog):
                     frames.append(thumb)
         return frames
 
+    def _auto_pip_log(self, text):
+        """Report one line about the auto crop into the host log."""
+        log = getattr(getattr(self, "context", None), "log", None)
+        if callable(log):
+            try:
+                log(f"自动框选：{text}")
+            except Exception:
+                pass
+
+    def _auto_pip_dump(self, frames, rect):
+        """Leave the detector input and answer on disk for troubleshooting."""
+        try:
+            folder = Path(tempfile.gettempdir()) / "match_sync_autocrop"
+            folder.mkdir(parents=True, exist_ok=True)
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            for name in sorted(folder.glob("frame-*.png"))[:-4]:
+                name.unlink()
+            if frames:
+                image = QImage(frames[-1].data, frames[-1].shape[1], frames[-1].shape[0],
+                               frames[-1].strides[0], QImage.Format_Grayscale8)
+                image.save(str(folder / ("frame-" + stamp + ".png")))
+            note = stamp + " frames=" + str(len(frames)) + " rect=" + str(rect) + chr(10)
+            (folder / "result.txt").write_text(note, encoding="utf-8")
+            return str(folder)
+        except Exception:
+            return ""
+
     def _auto_pip_crop_clicked(self):
         row = self.rows.get(self.pip_source.currentData() or self.pip_room)
+        self._auto_pip_log(f"点击；来源={self.pip_source.currentData()!r} pip_room={self.pip_room!r} "
+                           f"rows={list(self.rows)!r} row={'有' if row is not None else '无'}")
         if row is None:
             self.say("请先把要放进画中画的那一路加入比赛二路，再自动框选", hold=6.0)
             return
@@ -3976,11 +4007,16 @@ class Viewer(QDialog):
 
     def _auto_pip_crop_for(self, row, retries=0):
         """Find the talker camera window in ``row`` and use it as the crop."""
+        decoder = getattr(row, "decoder", None)
+        self._auto_pip_log(f"取帧开始 retries={retries} 解码器={'有' if decoder is not None else '无'} "
+                           f"pip_stamp={getattr(self, 'pip_stamp', None)!r}")
         try:
             frames = self._pip_frames(row)
         except Exception as error:  # a detector hiccup must never break playback
+            self._auto_pip_log(f"取帧异常：{error!r}")
             self.say(f"自动框选取画面失败：{error}", hold=8.0)
             return False
+        self._auto_pip_log(f"取到 {len(frames)} 帧，尺寸 {[tuple(frame.shape) for frame in frames]}")
         if not frames:
             if retries > 0:
                 self.say("正在取这一路的画面…", hold=3.0)
@@ -3995,6 +4031,7 @@ class Viewer(QDialog):
             self.say(f"自动框选识别出错：{error}", hold=8.0)
             return False
         if rect is None:
+            self._auto_pip_log(f"没有候选；已导出 {self._auto_pip_dump(frames, None)}")
             self.say("没认出摄像头小窗：等画面稳定后再点一次，或用「框选画面」手动框", hold=6.0)
             return False
         previous = tuple(row.pip_crop)
@@ -4005,6 +4042,7 @@ class Viewer(QDialog):
         self._sync_pip_geometry()
         self.render()
         self.changed()
+        self._auto_pip_log(f"识别 {rect} → 裁剪 {row.pip_crop}；已导出 {self._auto_pip_dump(frames, rect)}")
         self.say("已自动框选摄像头小窗，可再用「框选画面」手动微调", hold=6.0)
         return True
 

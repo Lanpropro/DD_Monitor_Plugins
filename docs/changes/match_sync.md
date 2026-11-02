@@ -8,6 +8,14 @@
 
 ## 待发布
 
+### 2026-11-02｜可观测性：自动框选把每一步写进宿主日志并导出检测输入
+
+- 更新内容：`2.0r2`–`2.0r5` 四版都在「点了没有变化」上反复试错，实机只有画面、没有证据。本次给自动框选加可观测性：新增 `_auto_pip_log(text)` 走 `context.log("自动框选：…")`，记录点击来源/`pip_room`/`rows`/是否找到行、取帧的 `retries`/解码器/`pip_stamp`、帧数与尺寸、识别结果、最终 `row.pip_crop`，异常连文本一起记；新增 `_auto_pip_dump(frames, rect)` 把检测输入帧与结果写到 `%TEMP%\match_sync_autocrop`（`frame-<时间戳>.png` + `result.txt`，保留最近四张）；`plugin.py` 的装载日志改为带版本号，版本从插件自己的 `plugin.json` 读取。识别算法与交互行为不变。版本号 `2.0r6`。
+- 验收：2026-11-02，`tests/check_match_sync_pip.py` 57 例通过（新增 `test_the_auto_crop_leaves_a_line_in_the_host_log`、`test_logging_survives_a_host_without_a_log`、`test_the_click_reports_which_room_it_could_not_find`），`tests/check_match_sync_autocrop.py` 14 例、`tests/check_match_sync_console.py` 3 例、`tests/check_contributing.py` 8 例、`tests/check_packages.py` 与 `compileall` 通过。实机验收待维护者确认。
+- 追踪：本次提交。
+- 集成状态：尚未合入默认分支。
+- 发布注意：只加日志与临时文件导出，配置无需迁移；`%TEMP%\match_sync_autocrop` 可随时删除。
+
 ### 2026-11-02｜修复：2.0r3/r2 每帧抛异常，自动框选与状态行全部停更
 
 - 更新内容：`say(text, hold)` 与 `_status_says(text)` 在 `2.0r3` 被打补丁时误加进了 `CompactStatus` 类，而 `Viewer.render()` 调用的是 `self._status_says(...)`，实机日志每 33 毫秒一条 `AttributeError: 'Viewer' object has no attribute '_status_says'`（`viewer.py:3389`），`render()` 在写状态行处直接抛出，导致状态行、画中画、同步与弹幕刷新全部停更。本次把两个方法移入 `Viewer` 类（`render()` 之前），`CompactStatus` 恢复原样。自动框选的取帧回退、重试、报错提示以及识别参数修正保持不变。版本号 `2.0r5`。
