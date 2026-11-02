@@ -171,7 +171,13 @@ class EntryButton(QToolButton):
                 QEvent.LayoutRequest, QEvent.Resize, QEvent.Show):
             if event.type() == QEvent.Resize:
                 self._stretch_finished()
-            self._placement.start(0)
+            if event.type() in (QEvent.Resize, QEvent.Show):
+                # The host paints the completed sidebar before resizing players.
+                # Restore our entry before that paint, not in the next timer turn.
+                self._placement.stop()
+                self._place()
+            else:
+                self._placement.start(0)
         return super().eventFilter(watched, event)
 
     def hideEvent(self, event):
