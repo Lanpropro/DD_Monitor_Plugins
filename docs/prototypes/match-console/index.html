@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>比赛二路 · 控制台图标方案</title>
+<style>
+:root{color-scheme:dark;--bg:#202225;--panel:#2c2f34;--field:#383c42;--line:#41454c;--text:#e9edf2;--muted:#acb5c0;--accent:#00a8d1;--soft:#073f50;--pink:#fb7299;--green:#49d68b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "Segoe UI","Microsoft YaHei",sans-serif}button,input,select{font:inherit;color:inherit}button,select,input[type=range]{cursor:pointer}button{border:0}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #50d8fc;outline-offset:3px}button:disabled{opacity:.4;cursor:default}button:hover{background:#424750}button:active{transform:translateY(1px)}svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}main{max-width:1512px;margin:auto;padding:38px 36px 100px}.eyebrow{font-size:11px;letter-spacing:2px;color:#81cadd}.intro{display:flex;align-items:end;justify-content:space-between;gap:24px;margin-bottom:30px}h1{font-size:27px;font-weight:600;letter-spacing:-.7px;margin:8px 0 5px}.subtitle{margin:0;color:var(--muted);font-size:13px}.page-chip{font-size:12px;border:1px solid var(--line);border-radius:6px;padding:5px 10px;color:var(--muted);white-space:nowrap}
+.frame{border:1px solid #42464d;border-radius:10px;background:var(--panel);box-shadow:0 14px 40px #0002;position:relative}.toolbar{display:flex;align-items:center;gap:20px;padding:12px 16px;border-bottom:1px solid var(--line);min-height:57px}.tool-toggle{display:flex;align-items:center;gap:9px;background:none;padding:5px 0;color:var(--muted);font-size:13px}.tool-toggle[aria-pressed=true]{color:var(--text)}.switch{width:27px;height:16px;border-radius:20px;background:#50565e;padding:3px;display:inline-flex}.switch:after{content:"";width:10px;height:10px;border-radius:50%;background:#dfe6ed}.tool-toggle[aria-pressed=true] .switch{background:var(--accent);justify-content:end}.spacer{flex:1}.icon{width:32px;height:32px;display:inline-flex;justify-content:center;align-items:center;position:relative;border-radius:6px;background:transparent;color:#b7c0cc;flex-shrink:0}.icon[aria-pressed=true]{color:#56d9f9;background:#07495a}.icon.danger:hover{color:#ff97af;background:#522d37}.icon.small{width:28px;height:30px}.icon[data-tip]:after,.role[data-tip]:after{content:attr(data-tip);position:absolute;z-index:25;left:50%;bottom:calc(100% + 8px);transform:translateX(-50%);white-space:nowrap;background:#111519;border:1px solid #555d68;padding:5px 8px;border-radius:5px;font-size:12px;font-weight:400;color:#fff;pointer-events:none;opacity:0}.icon:hover:after,.icon:focus-visible:after,.role:hover:after{opacity:1}.icon:last-child:after{left:auto;right:0;transform:none}.icon.subtle{border:1px solid var(--line)}.role{border:1px solid #3d666f;background:transparent;border-radius:5px;padding:3px 8px;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;font-size:12px;position:relative}.role.selected{background:#004658;border-color:var(--accent);color:#79e3ff}.role svg{width:15px;height:15px}.row{padding:16px;position:relative;border-bottom:1px solid var(--line)}.row:last-child{border-bottom:0}.rail{display:flex;gap:12px;align-items:center;min-width:0}.identity{display:flex;align-items:center;gap:11px;min-width:190px;width:23%;flex-shrink:0}.avatar{height:36px;width:36px;background:#534438;color:#f8d6a2;border:1px solid #7a6550;display:grid;place-items:center;font-size:17px;border-radius:50%;flex-shrink:0}.row:nth-child(2) .avatar{background:#503744;color:#f7c6d6;border-color:#745261}.name{font-weight:600;white-space:nowrap}.identity-title{display:flex;gap:9px;align-items:center}.status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap}.dot{width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block}.status.pending .dot{background:#f5be67}.status.pending{color:#e4bc82}.status svg{width:12px;height:12px}.group{display:flex;align-items:center;gap:5px;position:relative;flex-shrink:0}.divider{width:1px;align-self:center;height:24px;background:var(--line);margin:0 6px;flex-shrink:0}.volume{width:70px;accent-color:var(--accent);height:16px;margin:0 5px}.volume-val{font-size:12px;color:#c8d1dd;font-variant-numeric:tabular-nums;min-width:20px}.channel{display:inline-flex;gap:4px;align-items:center;font-size:11px;min-width:47px;width:auto;padding:0 7px}.channel svg{width:15px}.swatch{width:11px;height:11px;border-radius:3px;background:var(--row-color);border:1px solid #ffffff40}.chevron{width:11px!important}.color-button{gap:5px;width:43px}.offset{display:flex;align-items:center;background:var(--field);border:1px solid #494e56;border-radius:6px;gap:0;height:32px}.offset .icon{width:25px;background:transparent}.offset svg{width:13px}.offset input{width:63px;padding:0 4px;border:0;background:none;text-align:center;font:12px "Segoe UI",sans-serif;font-variant-numeric:tabular-nums;appearance:textfield;-moz-appearance:textfield}.offset input::-webkit-inner-spin-button{appearance:none}.offset .unit{font-size:11px;color:var(--muted);padding-right:7px}.caption{font-size:11px;color:var(--muted);margin-right:4px}.join{margin-left:10px;display:flex;gap:7px;align-items:center;padding:5px 9px;font-size:12px;background:#513f28;border:1px solid #8a6b3f;border-radius:5px;color:#f4d4a0;white-space:nowrap}.join:hover{background:#674e30}.join svg{width:15px;height:15px}.pending-line{display:flex;align-items:center;justify-content:space-between;padding-left:47px;margin-top:10px}.pending-line p{margin:0;color:#c6b399;font-size:12px}.footer{padding:11px 16px;display:flex;align-items:center;gap:8px;color:var(--muted);font-size:11px;background:#25282c;border-radius:0 0 10px 10px}.footer svg{width:13px;height:13px}.foot-note{margin-left:auto}.column-labels{display:flex;gap:12px;padding:10px 16px 0;color:#b8c0cb;font-size:11px}.column-labels .label-name{width:23%;min-width:190px}.column-labels .label-picture{width:108px}.column-labels .label-audio{width:210px}.column-labels .label-chat{width:93px}.column-labels .label-time{flex:1}.card .row{margin:12px;padding:14px;border:1px solid #454b53;border-radius:8px;background:#30343a}.card .identity{width:auto;min-width:0}.card .rail{justify-content:space-between}.card .card-tools{display:flex;align-items:center;gap:8px;margin-top:13px;padding-top:12px;border-top:1px solid var(--line)}.labeled-group{display:flex;align-items:center;gap:9px}.labeled-group .caption{font-size:12px;color:#bac5d1}.card .pending-line{padding-left:0;margin-top:14px}.compact .row{padding:12px 16px}.compact .identity{flex:1;width:auto}.compact .volume{width:58px}.inspector{margin:14px 0 0 47px;padding:13px 15px;background:#24272c;border:1px solid #4a535e;border-radius:7px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}.inspector .labeled-group{gap:10px}.inspector-title{font-size:12px;color:#d4dce6;padding-right:12px}.is-expanded{color:#78e4ff!important;background:#084657!important}.guidance{display:grid;grid-template-columns:repeat(3,1fr);gap:28px;margin-top:24px}.guidance article{border-top:1px solid #41464d;padding-top:14px}.guidance h2{font-size:13px;font-weight:500;margin:0 0 5px;display:flex;align-items:center;gap:8px}.guidance h2 svg{color:#b1beca;width:16px}.guidance p{font-size:12px;color:var(--muted);margin:0;line-height:1.8}.hint{font-size:12px;color:#a8b4c2;margin-top:20px}.popover{position:fixed;z-index:50;min-width:180px;border:1px solid #56606c;border-radius:8px;background:#30353d;padding:5px;box-shadow:0 12px 30px #0008}.popover button{display:flex;gap:12px;align-items:center;width:100%;border-radius:4px;background:none;padding:8px;color:#e3eaf1;text-align:left;font-size:13px}.popover button:hover{background:#424b58}.palette{display:flex;gap:7px;padding:8px}.palette button{width:26px;height:26px;padding:0;border-radius:5px;border:2px solid transparent}.palette button:focus-visible{outline-offset:1px}.palette button:hover{border-color:white}.dialog{width:430px;padding:22px;border-radius:10px;border:1px solid #596270;background:#2d3239;color:var(--text);box-shadow:0 20px 80px #0008}.dialog::backdrop{background:#0006}.dialog h2{font-size:17px;margin:0 0 18px}.dialog label{display:flex;justify-content:space-between;align-items:center;gap:15px;margin:16px 0;font-size:13px}.dialog select{background:var(--field);border:1px solid #57606a;padding:6px;border-radius:5px}.dialog button.close{display:block;margin-left:auto;background:var(--accent);padding:7px 18px;border-radius:5px}.dialog p{font-size:12px;color:var(--muted)}.toast{position:fixed;bottom:82px;left:50%;transform:translateX(-50%);border:1px solid #5c6876;background:#303943;border-radius:6px;padding:9px 15px;font-size:13px;z-index:70;box-shadow:0 4px 20px #0005}.toast button{margin-left:16px;background:none;color:#6fddf5}.crop-preview{padding:15px;border-top:1px solid var(--line);display:flex;gap:12px;align-items:center;background:#22272d;color:#b3c0ce;font-size:12px}.preview-pip{height:66px;width:104px;border-radius:5px;background:#3c454e;border:1px solid var(--accent);display:grid;place-items:center;color:#d6e5ee;flex-shrink:0}.compare-preview{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line)}.compare-cell{padding:12px;border:1px solid #4e5965;border-radius:5px;font-size:12px;color:#b9c7d5;background:#24282d}.compare-cell strong{float:right;color:var(--text)}.collapsed .content,.collapsed .column-labels{display:none}.collapsed .footer{border-top:0}
+
+.grouped .rail,.grouped .column-labels{display:grid;grid-template-columns:minmax(220px,1.7fr) 108px 1px 210px 1px 93px 1px 127px minmax(0,1fr) 69px;gap:12px}.grouped .identity{width:auto;min-width:0}.grouped .divider{margin:0}.grouped .column-labels span{width:auto;min-width:0}.label-name{grid-column:1}.label-picture{grid-column:2}.label-audio{grid-column:4}.label-chat{grid-column:6}.label-time{grid-column:8}.column-labels>span:last-child{grid-column:10;text-align:right}
+
+@media(max-width:1170px){.grouped .rail,.grouped .column-labels{grid-template-columns:minmax(190px,1fr) 100px 1px 190px 1px 82px 1px 127px minmax(0,1fr) 69px;gap:8px}main{padding:28px 22px 95px}.identity{min-width:160px;width:20%}.rail{gap:7px}.divider{margin:0 2px}.volume{width:55px}.column-labels .label-name{width:20%;min-width:160px}.column-labels .label-audio{width:190px}.column-labels .label-picture{width:100px}.channel{min-width:39px}.row{padding:13px 12px}.card .card-tools{gap:4px}.card .labeled-group{gap:5px}.card .caption{font-size:11px}}
+@media(max-width:980px){.grouped .column-labels{display:none}.grouped .rail{display:flex}.grouped .identity{width:100%}.column-labels{display:none}.rail{flex-wrap:wrap;row-gap:10px}.identity{width:100%}.row .rail>.spacer{display:none}.card .rail .identity,.compact .identity{width:auto;flex:1}.card .card-tools{flex-wrap:wrap;row-gap:12px}.guidance{gap:15px}.foot-note{display:none}.inspector{margin-left:0}.compact .group .volume{display:none}.intro{align-items:start}.page-chip{display:none}}
+.proto-picker {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(10, 10, 10, 0.82);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  backdrop-filter: blur(12px) saturate(1.4);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset,
+    0 8px 24px rgba(0, 0, 0, 0.24),
+    0 2px 6px rgba(0, 0, 0, 0.12);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  line-height: 1;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.proto-picker-highlight {
+  position: absolute;
+  top: 4px;
+  left: 0;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  will-change: transform;
+}
+
+/* The slide is enabled only after first paint (data-ready), so load doesn't animate. */
+.proto-picker[data-ready] .proto-picker-highlight {
+  transition:
+    transform 250ms cubic-bezier(0.23, 1, 0.32, 1),
+    width 250ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .proto-picker[data-ready] .proto-picker-highlight { transition: none; }
+}
+
+.proto-picker-item {
+  position: relative; /* sits above the highlight */
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  font: inherit;
+  cursor: pointer;
+  transition: color 150ms ease-out;
+}
+
+.proto-picker-item:hover {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.proto-picker-item:active {
+  transform: scale(0.97);
+}
+
+.proto-picker-item:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.4);
+  outline-offset: 2px;
+}
+
+.proto-picker-item[data-active] {
+  color: #fff;
+}
+
+.proto-picker-divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.proto-picker-replay {
+  padding: 0 10px;
+  font-size: 14px;
+}
+
+.proto-picker[data-position="top"] {
+  bottom: auto;
+  top: 24px;
+}
+
+</style>
+<main>
+ <header class="intro"><div><div class="eyebrow">DD监控室 CE / 比赛二路</div><h1 id="direction">分组工具条</h1><p class="subtitle" id="description"></p></div><span class="page-chip">控制台交互原型 · 不连接直播</span></header>
+ <div id="stage"></div>
+ <section class="guidance"><article><h2>01 · 图标处理操作</h2><p>裁取悬浮画面、独立播放、重新对齐、区域选择与移除统一使用线性图标；悬停或键盘聚焦显示名称。</p></article><article><h2>02 · 文字保留语义</h2><p>主播名、主画面身份、同步状态、偏移数值保留；“确认对齐并加入”继续使用文字按钮。</p></article><article><h2>03 · 状态直接可见</h2><p>声音和弹幕以图标底色表示开关；静音切换斜杠图标，待确认状态同时使用文字和颜色。</p></article></section>
+ <p class="hint">可点击图标、调整音量与偏移、切换主画面。按 1 / 2 / 3 或方向键切换方案。</p>
+</main>
+<nav class="proto-picker" aria-label="Prototype variants">
+  <span class="proto-picker-highlight" aria-hidden="true"></span>
+  <button class="proto-picker-item" data-active aria-current="true">分组工具条</button>
+  <button class="proto-picker-item">双层卡片</button>
+  <button class="proto-picker-item">按需展开</button>
+</nav>
+<div id="floating-layer"></div>
+<dialog class="dialog" id="settings"><h2>比赛二路设置</h2><label>画中画画质<select aria-label="画中画画质"><option>流畅优先：直接裁切</option><option>轻量增强：放大与轻锐化</option></select></label><label>抗波动缓存<select aria-label="抗波动缓存"><option>2 秒 · 低延迟</option><option selected>5 秒 · 均衡</option><option>8 秒 · 抗波动</option></select></label><p>原型内调整只影响本页展示。</p><button class="close" data-action="close-settings">完成</button></dialog>
+<script>
+const paths={
+ monitor:'<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/>',
+ pip:'<rect x="3" y="4" width="18" height="16" rx="2"/><rect x="12" y="11" width="6" height="6" rx="1"/>',
+ play:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m10 8 6 4-6 4Z"/>',
+ sync:'<path d="M20 11a8 8 0 1 0-2.3 6.7M20 4v7h-7"/>',
+ volume:'<path d="m11 4-6 5H2v6h3l6 5Z"/><path d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>',
+ mute:'<path d="m11 4-6 5H2v6h3l6 5ZM16 9l5 6m0-6-5 6"/>',
+ chat:'<path d="M21 11a8 8 0 0 1-8 8H8l-5 3V6a3 3 0 0 1 3-3h7a8 8 0 0 1 8 8Z"/><path d="M7 8h9M7 12h6"/>',
+ chatoff:'<path d="M3 6v16l5-3h5a8 8 0 0 0 6-3M8 3h5a8 8 0 0 1 8 8M3 2l19 20"/>',
+ phones:'<path d="M4 14v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="12" width="4" height="8" rx="2"/><rect x="17" y="12" width="4" height="8" rx="2"/>',
+ chevron:'<path d="m7 10 5 5 5-5"/>', minus:'<path d="M5 12h14"/>', plus:'<path d="M5 12h14m-7-7v14"/>',
+ region:'<path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><rect x="8" y="8" width="8" height="8" rx="1"/>',
+ more:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+ trash:'<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/>',
+ clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+ cache:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h10M7 16h6"/>',
+ settings:'<path d="m9 3-1 3-3 1-2 3 2 2v3l2 3h3l2 3 3-1 1-3 3-1 2-3-2-2V8l-2-3h-3l-2-3Z"/><circle cx="12" cy="12" r="3"/>',
+ sliders:'<path d="M3 6h4m4 0h10M3 12h10m4 0h4M3 18h4m4 0h10"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="9" cy="18" r="2"/>',
+ check:'<path d="m5 12 4 4L19 6"/>',compare:'<rect x="2" y="5" width="8" height="14" rx="1"/><rect x="14" y="5" width="8" height="14" rx="1"/>',
+ close:'<path d="m6 6 12 12M18 6 6 18"/>',info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v.1"/>'};
+const icon=n=>`<svg viewBox="0 0 24 24" aria-hidden="true">${paths[n]}</svg>`;
+let rows,mode=0,auto=true,compare=false,collapsed=false,expanded='202',pipRoom=null,lastRemoved=null;
+const descriptions=['常用操作直接可见，沿用现有横向操作习惯。','身份与操作分两层，优先照顾阅读和点击空间。','常用操作留在行内，低频控制集中到展开区。'];
+function reset(){rows=[{id:'101',name:'Machine',initial:'M',main:true,sound:true,volume:40,chat:true,color:'#38bdf8',channel:'原',delay:0,cache:'8.5',pending:false,independent:false},{id:'202',name:'大东彦',initial:'彦',main:false,sound:false,volume:40,chat:true,color:'#fb7185',channel:'原',delay:.74,cache:'8.2',pending:true,independent:false}];auto=true;compare=false;collapsed=false;expanded='202';pipRoom=null;document.querySelector('.toast')?.remove();closeLayer()}
+function button(symbol,label,action,id='',active=null,cls=''){return `<button class="icon ${cls}" aria-label="${label}" data-tip="${label}" data-action="${action}" data-id="${id}"${active===null?'':` aria-pressed="${active}"`}>${icon(symbol)}</button>`}
+function role(r){return `<button class="role ${r.main?'selected':''}" aria-pressed="${r.main}" data-action="main" data-id="${r.id}" data-tip="${r.main?'当前主画面':'设为主画面'}">${icon('monitor')}${r.main?'主画面':'设为主画面'}</button>`}
+function status(r){return `<div class="status ${r.pending?'pending':''}"><span class="dot"></span>${r.main?'主画面':r.pending?'待确认对齐':r.independent?'独立播放':'已同步'} <span>·</span> ${icon('cache')}${r.cache}s</div>`}
+function identity(r){return `<div class="identity"><div class="avatar">${r.initial}</div><div><div class="identity-title"><span class="name">${r.name}</span>${role(r)}</div>${status(r)}</div></div>`}
+function picture(r){return `<div class="group">${button('pip','裁取悬浮画面','pip',r.id,pipRoom===r.id)}${button('play','独立播放','independent',r.id,r.independent)}${button('sync','重新对齐','resync',r.id)}</div>`}
+function audio(r){return `<div class="group">${button(r.sound?'volume':'mute',r.sound?'静音':'开启声音','sound',r.id,r.sound)}<input class="volume" type="range" min="0" max="100" value="${r.volume}" aria-label="${r.name}音量" data-volume="${r.id}"><span class="volume-val">${r.volume}</span><button class="icon channel" aria-label="选择声道，当前${r.channel==='原'?'原始声道':r.channel+'输出'}" data-tip="输出声道" data-action="channel" data-id="${r.id}">${icon('phones')}${r.channel}${icon('chevron')}</button></div>`}
+function chat(r){return `<div class="group">${button(r.chat?'chat':'chatoff',r.chat?'关闭弹幕':'开启弹幕','chat',r.id,r.chat)}<button class="icon color-button" aria-label="弹幕来源颜色" data-tip="弹幕来源颜色" data-action="color" data-id="${r.id}"><span class="swatch" style="--row-color:${r.color}"></span>${icon('chevron')}</button></div>`}
+function offset(r){return `<div class="offset" title="偏移：正数延后本路，负数相对提前本路">${button('minus','提前 0.1 秒','minus',r.id,null,'small')}<input type="number" step="0.01" min="-60" max="60" value="${r.delay.toFixed(2)}" aria-label="${r.name}偏移秒数" data-delay="${r.id}"><span class="unit">s</span>${button('plus','延后 0.1 秒','plus',r.id,null,'small')}</div>`}
+const divider='<span class="divider"></span>';
+function extras(r){return `<div class="group">${button('region','选择对照区域','region',r.id)}${button('more','更多操作','more',r.id)}</div>`}
+function pending(r){return r.pending?`<div class="pending-line"><p>匹配已完成，请确认两路比赛画面一致</p><button class="join" data-action="join" data-id="${r.id}">${icon('check')}确认对齐并加入</button></div>`:''}
+function toolbar(){return `<div class="toolbar"><button class="tool-toggle" aria-pressed="${auto}" data-action="auto"><span class="switch"></span>自动对齐比赛画面</button><button class="tool-toggle" aria-pressed="${compare}" data-action="compare">${icon('compare')}对照微调</button><span class="spacer"></span>${button('plus','添加直播间','add')}${button('settings','比赛二路设置','settings')}${button(collapsed?'chevron':'minus',collapsed?'展开控制台':'收起控制台','collapse')}</div>`}
+function footer(){return `<div class="footer"><span class="dot"></span>主画面：${rows.find(r=>r.main)?.name||'未选择'}<span>·</span>本地播放延后约 1.1 秒<span>·</span>${auto?'自动对齐已开启':'手动偏移'}<span class="foot-note">${icon('phones')} 声音已接管</span></div>`}
+function renderRow(r){if(mode===0)return `<div class="row" data-row="${r.id}"><div class="rail">${identity(r)}${picture(r)}${divider}${audio(r)}${divider}${chat(r)}${divider}${offset(r)}<span class="spacer"></span>${extras(r)}</div>${pending(r)}</div>`;
+ if(mode===1)return `<div class="row" data-row="${r.id}"><div class="rail">${identity(r)}<div class="group">${button('more','更多操作','more',r.id)}</div></div><div class="card-tools"><div class="labeled-group"><span class="caption">画面</span>${picture(r)}</div>${divider}<div class="labeled-group"><span class="caption">声音</span>${audio(r)}</div>${divider}<div class="labeled-group"><span class="caption">弹幕</span>${chat(r)}</div><span class="spacer"></span><span class="caption">偏移</span>${offset(r)}${button('region','选择对照区域','region',r.id)}</div>${pending(r)}</div>`;
+ return `<div class="row" data-row="${r.id}"><div class="rail">${identity(r)}${button('pip','裁取悬浮画面','pip',r.id,pipRoom===r.id)}${button(r.sound?'volume':'mute',r.sound?'静音':'开启声音','sound',r.id,r.sound)}${button(r.chat?'chat':'chatoff',r.chat?'关闭弹幕':'开启弹幕','chat',r.id,r.chat)}${offset(r)}${button('sliders',expanded===r.id?'收起详细控制':'展开详细控制','expand',r.id,expanded===r.id)}${button('more','更多操作','more',r.id)}</div>${expanded===r.id?`<div class="inspector"><span class="inspector-title">详细控制</span><div class="labeled-group"><span class="caption">声音</span>${audio(r)}</div>${divider}<div class="labeled-group"><span class="caption">弹幕</span>${chat(r)}</div>${divider}${button('play','独立播放','independent',r.id,r.independent)}${button('sync','重新对齐','resync',r.id)}${button('region','选择对照区域','region',r.id)}</div>`:''}${pending(r)}</div>`}
+function render(){document.querySelector('.frame')?.remove();closeLayer();document.getElementById('direction').textContent=['分组工具条','双层卡片','按需展开'][mode];document.getElementById('description').textContent=descriptions[mode];return `<section class="frame ${['grouped','card','compact'][mode]} ${collapsed?'collapsed':''}" aria-label="比赛二路控制台">${toolbar()}${mode===0?'<div class="column-labels"><span class="label-name">直播来源</span><span class="label-picture">画面</span><span class="label-audio">声音</span><span class="label-chat">弹幕</span><span class="label-time">偏移</span><span>其他</span></div>':''}<div class="content">${compare?'<div class="compare-preview"><div class="compare-cell">Machine · 对照区域 <strong>01:31.00</strong></div><div class="compare-cell">大东彦 · 对照区域 <strong>01:31.74</strong></div></div>':''}${rows.map(renderRow).join('')}${pipRoom?`<div class="crop-preview"><div class="preview-pip">${rows.find(r=>r.id===pipRoom)?.name}</div><span>悬浮画面已开启</span><span class="spacer"></span>${button('region','微调悬浮选区','region',pipRoom)}${button('close','关闭悬浮画面','pip',pipRoom)}</div>`:''}</div>${footer()}</section>`}
+function refresh(){document.getElementById('stage').innerHTML=render()}
+function closeLayer(){document.getElementById('floating-layer')?.replaceChildren()}
+function popup(anchor,content){closeLayer();const layer=document.getElementById('floating-layer');layer.innerHTML=`<div class="popover" role="group">${content}</div>`;const pop=layer.firstElementChild,rect=anchor.getBoundingClientRect();pop.style.left=Math.min(rect.left,innerWidth-pop.offsetWidth-15)+'px';pop.style.top=rect.bottom+7+'px'}
+function notify(text,undo=false){document.querySelector('.toast')?.remove();const el=document.createElement('div');el.className='toast';el.setAttribute('role','status');el.innerHTML=text+(undo?'<button data-action="undo">撤销</button>':'');document.body.append(el);setTimeout(()=>el.remove(),4000)}
+document.addEventListener('click',e=>{const b=e.target.closest('[data-action]');if(!b){if(!e.target.closest('.popover'))closeLayer();return}const action=b.dataset.action,r=rows.find(r=>r.id===b.dataset.id);let update=true;
+ if(action==='main'){rows.forEach(row=>row.main=row===r);r.pending=false}
+ else if(action==='sound')r.sound=!r.sound;
+ else if(action==='chat')r.chat=!r.chat;
+ else if(action==='independent'){r.independent=!r.independent;if(r.independent)r.pending=false}
+ else if(action==='resync'){r.pending=true;notify('比赛画面已重新匹配，请确认后加入')}
+ else if(action==='join'){r.pending=false;r.independent=false;notify(`${r.name} 已加入同步播放`)}
+ else if(action==='plus'||action==='minus')r.delay=Math.max(-60,Math.min(60,Math.round((r.delay+(action==='plus'?.1:-.1))*100)/100));
+ else if(action==='pip')pipRoom=pipRoom===r.id?null:r.id;
+ else if(action==='expand')expanded=expanded===r.id?null:r.id;
+ else if(action==='auto')auto=!auto;
+ else if(action==='compare')compare=!compare;
+ else if(action==='collapse')collapsed=!collapsed;
+ else if(action==='settings'){document.getElementById('settings').showModal();update=false}
+ else if(action==='close-settings'){document.getElementById('settings').close();notify('原型设置已保留');update=false}
+ else if(action==='channel'){popup(b,['原','L','R'].map(c=>`<button data-action="set-channel" data-id="${r.id}" data-value="${c}">${icon('phones')}${c==='原'?'原始声道':c==='L'?'仅左输出':'仅右输出'}${c===r.channel?' ✓':''}</button>`).join(''));update=false}
+ else if(action==='set-channel')r.channel=b.dataset.value;
+ else if(action==='color'){popup(b,`<div class="palette">${['#38bdf8','#fb7185','#a78bfa','#4ade80','#fbbf24','#fb923c'].map((c,i)=>`<button aria-label="${['蓝色','粉色','紫色','绿色','黄色','橙色'][i]}" style="background:${c}" data-action="set-color" data-id="${r.id}" data-value="${c}"></button>`).join('')}</div>`);update=false}
+ else if(action==='set-color')r.color=b.dataset.value;
+ else if(action==='more'){popup(b,`<button data-action="info" data-id="${r.id}">${icon('info')}直播流信息</button><button data-action="remove" data-id="${r.id}">${icon('trash')}移除此路</button>`);update=false}
+ else if(action==='remove'){lastRemoved=r;rows=rows.filter(row=>row!==r);if(r.main&&rows.length)rows[0].main=true;if(pipRoom===r.id)pipRoom=null;notify(`已移除 ${r.name}`,true)}
+ else if(action==='undo'&&lastRemoved){if(lastRemoved.main)rows.forEach(row=>row.main=false);rows.push(lastRemoved);lastRemoved=null}
+ else if(action==='add'){if(rows.length<4){rows.push({id:String(Date.now()),name:'KMD',initial:'K',main:!rows.length,sound:false,volume:40,chat:true,color:'#a78bfa',channel:'原',delay:0,cache:'7.9',pending:true,independent:false})}else notify('原型最多展示四路')}
+ else if(action==='region'){compare=true;notify(`${r.name} 对照区域已选中，可调整偏移`)}
+ else if(action==='info'){notify(`${r.name} · 1920 × 1080 · 60 FPS（原型数据）`);closeLayer();update=false}
+ if(update)refresh();
+});
+document.addEventListener('input',e=>{const id=e.target.dataset.volume||e.target.dataset.delay;if(!id)return;const r=rows.find(row=>row.id===id);if(e.target.dataset.volume){r.volume=Number(e.target.value);e.target.nextElementSibling.textContent=r.volume}else{const v=Number(e.target.value);if(Number.isFinite(v))r.delay=Math.max(-60,Math.min(60,v))}});
+const variants=[0,1,2].map(i=>()=>{mode=i;reset();return render()});
+// `variants` is an array of render functions, one per variant, in picker order.
+const stage = document.getElementById('stage');
+const picker = document.querySelector('.proto-picker');
+const highlight = picker.querySelector('.proto-picker-highlight');
+const items = [...picker.querySelectorAll('.proto-picker-item:not(.proto-picker-replay)')];
+const replay = picker.querySelector('.proto-picker-replay');
+let current = 0;
+
+function moveHighlight() {
+  const el = items[current];
+  highlight.style.width = el.offsetWidth + 'px';
+  highlight.style.transform = `translateX(${el.offsetLeft}px)`;
+}
+
+function mount(i) {
+  stage.innerHTML = '';
+  // Clear first, render next frame, so entrance animations re-run.
+  requestAnimationFrame(() => { stage.innerHTML = variants[i](); });
+}
+
+function setActive(i) {
+  if (i < 0 || i >= variants.length) return;
+  current = i;
+  items.forEach((el, j) => {
+    el.toggleAttribute('data-active', j === i);
+    if (j === i) el.setAttribute('aria-current', 'true');
+    else el.removeAttribute('aria-current');
+  });
+  moveHighlight();
+  const url = new URL(location);
+  url.searchParams.set('v', i + 1);
+  history.replaceState(null, '', url);
+  mount(i);
+}
+
+items.forEach((el, i) => el.addEventListener('click', () => setActive(i)));
+replay?.addEventListener('click', () => mount(current));
+window.addEventListener('resize', moveHighlight);
+
+document.addEventListener('keydown', (e) => {
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const num = parseInt(e.key, 10);
+  if (num >= 1 && num <= variants.length) setActive(num - 1);
+  else if (e.key === 'ArrowRight') setActive((current + 1) % variants.length);
+  else if (e.key === 'ArrowLeft') setActive((current - 1 + variants.length) % variants.length);
+  else if (e.key === 'r' || e.key === 'R') mount(current);
+});
+
+setActive((parseInt(new URLSearchParams(location.search).get('v'), 10) || 1) - 1);
+// Enable the slide only after first paint, so load doesn't animate.
+requestAnimationFrame(() => requestAnimationFrame(() => picker.setAttribute('data-ready', '')));
+
+</script>
+</html>
