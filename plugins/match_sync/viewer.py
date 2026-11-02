@@ -33,7 +33,7 @@ from .panels import ConsoleIconButton, MatchSettingsDialog, SettingsPanel, style
 from .replay import ReplayBar, ReplayTimeline
 from .floating import FloatingCrop
 from .regions import match_regions
-from .diagnostics import PlaybackProbe
+from .diagnostics import AudioReadMetrics, PlaybackProbe
 
 COLORS = ("#38bdf8", "#fb7185", "#a78bfa", "#4ade80", "#fbbf24", "#fb923c")
 ROW_MIME = "application/x-ddm-match-sync-row"
@@ -353,6 +353,7 @@ class AudioFeed(QObject):
             pump.clock_snapshot = clock
             pump.clock_observation = pump.clock_floor = None
             pump.replay_cursors.clear()
+            pump.read_metrics.reset()
 
     @Slot()
     def state_changed(self):
@@ -397,6 +398,7 @@ class AudioPump(QObject):
         self.flush_clock = None
         self.replay_offset = None
         self.replay_cursors = {}
+        self.read_metrics = AudioReadMetrics()
         self.independent_histories = frozenset()
         self.timer = QTimer(self)
         self.timer.setInterval(10)
@@ -450,6 +452,7 @@ class AudioPump(QObject):
         self.clock_snapshot = None
         self.clock_observation = self.clock_floor = None
         self.snapshot = (1.0, ())
+        self.read_metrics.reset()
 
     def flush(self, target_clock=None):
         self.replay_offset = None
@@ -571,7 +574,9 @@ class AudioPump(QObject):
             actual_rate = media_frames / frames
             self.clock_segments.append((self.written, self.written + written, self.media_written, actual_rate))
             self.media_written += written / RATE * actual_rate
-            for history, target, source_frames in positions:
+            for (history, target, source_frames), source in zip(positions, sources):
+                self.read_metrics.record(id(history), target,
+                    source_frames / RATE * written / frames, source[2], source[3], source[4])
                 if self.replay_offset is not None or history in self.independent_histories:
                     self.replay_cursors[history] = (clock + written / RATE * actual_rate,
                         target + source_frames / RATE * written / frames)
