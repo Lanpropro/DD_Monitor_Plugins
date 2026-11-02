@@ -369,7 +369,10 @@ def check(app, host, module, output=None):
                     QTest.qWait(40)
                     left = viewer.settings_panel.mapTo(viewer, QPoint()).y()
                     right = console.mapTo(viewer, QPoint()).y()
-                    assert abs(left - right) <= 1, (left, right)
+                    assert abs(left - right) <= 1, (
+                        width, height, sizes, left, right, viewer.settings_panel.height(), console.height(),
+                        viewer.chat_pane.height(), viewer.panel.minimumHeight(),
+                        viewer.panel.minimumSizeHint().height())
                     regular = console.width() >= 520
                     assert console.body_layout.direction() == QBoxLayout.LeftToRight
                     assert first.isVisible() == (console.selected_room == '1')

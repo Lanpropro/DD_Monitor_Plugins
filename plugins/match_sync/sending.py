@@ -662,6 +662,7 @@ class SendConsole(SettingsPanel):
             self.viewer.panel.update()
         self.restore.setVisible(not visible)
         self.restore_bar.setVisible(not visible)
+        self.parentWidget().layout().activate()
 
     def set_collapsed(self, collapsed):
         self.collapsed = collapsed
