@@ -55,6 +55,8 @@
 </tr>
 </table>
 
+比赛二路同步 [v1.5 候选更新说明](docs/releases/RELEASE-match-sync-v1.5.md)（待实播录制验收）；已发布测试版：[v1.5-pre.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.5-pre.1)。
+
 插件依赖配套的 [DD监控室CE](https://github.com/Lanpropro/DD_Monitor_CE/releases/latest) 运行。具体能力、账号要求与最低本体版本，以各插件说明及对应 Release 为准。
 
 ## 安装与更新
@@ -95,7 +97,7 @@ ZIP 内只有插件 ID 对应的顶层文件夹。GitHub 自动生成的 **Sourc
 | --- | --- | --- |
 | 国内直播平台 | `domestic_live` | 1.4 |
 | 海外直播平台 | `global_live` | 1.2 |
-| 比赛二路同步 | `match_sync` | 1.4 |
+| 比赛二路同步 | `match_sync` | 1.5 |
 | B站直播互动 | `bili_live` | 1.0 |
 
 先按文件明确暂存需要发布的源码，再执行：
@@ -105,7 +107,7 @@ python tools/build_plugins.py
 python tests/check_packages.py --host ../DD_Monitor_CE
 ```
 
-输出为 `dist/domestic_live-1.4.zip`、`dist/global_live-1.2.zip`、`dist/match_sync-1.4.zip` 和 `dist/bili_live-1.0.zip`。
+输出为 `dist/domestic_live-1.4.zip`、`dist/global_live-1.2.zip`、`dist/match_sync-1.5.zip` 和 `dist/bili_live-1.0.zip`。
 构建只读取 Git 跟踪文件，并将许可与来源说明放入每个安装包。
 
 每个插件使用独立的版本标签和 Release，同一个 Release 不混放不同插件的 ZIP。`plugin-catalog.json` 汇总各插件独立 Release 的在线更新信息。
@@ -114,8 +116,14 @@ python tests/check_packages.py --host ../DD_Monitor_CE
 
 </details>
 
+## 作者与贡献
+
+感谢 [@reon-nynes](https://github.com/reon-nynes) 提供 B站直播互动插件，感谢 [@Soraray](https://github.com/Soraray) 对 Enter 交互的贡献。
+国内、海外和比赛二路插件由 [@Lanpropro](https://github.com/Lanpropro) 维护；B站插件的本体兼容适配与集成验收也由本仓库维护者完成。
+
 欢迎通过 [Issue](https://github.com/Lanpropro/DD_Monitor_Plugins/issues) 反馈问题，或提交 Pull Request 贡献插件与改进。提交时请注明适用插件、本体版本及复现步骤。
 
 ## 来源与许可
 
+插件首次提取自 [DD监控室CE](https://github.com/Lanpropro/DD_Monitor_CE) 的 `4bf84bc` 基线，后续在本仓库独立维护。
 保留原项目的 GNU LGPL v2.1 许可，第三方来源与声明见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE.md)。

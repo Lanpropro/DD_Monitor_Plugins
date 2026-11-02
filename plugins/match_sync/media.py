@@ -6,6 +6,7 @@ import http.cookies
 import subprocess
 import threading
 import time
+from collections import deque
 
 from PySide6.QtCore import QObject, Signal, Qt
 from PySide6.QtGui import QImage
@@ -13,7 +14,9 @@ from PySide6.QtGui import QImage
 from ddm import bili, danmaku, recording
 from ddm.auto_quality import AUTO_QUALITY
 from .engine import FPS, Sample, SIGNATURE_BITS, np
-from .video import av, VideoHistory, PictureReader, StreamInput, reformat_frame
+from .video import av, VideoHistory, PictureReader, StreamInput, reformat_frame, recording_template
+from .replay_cache import CACHE_BYTES, CACHE_SECONDS
+from .diagnostics import FrameCadence, StageTimings
 
 FRAME_TIMEOUT = 8.0
 
@@ -60,11 +63,26 @@ def scene_feature(image, crop, size=(16, 16)):
     return np.clip(np.rint(128 + (pixels.astype(np.float32) - centre) * 48 / scale), 0, 255).astype(np.uint8).tobytes()
 
 
-def frame_sample(frame, timestamp, crop, size):
+def analysis_gray(frame, timings, conversions, **options):
+    key = tuple(sorted(options.items()))
+    repeated = conversions is not None and key in conversions
+    started = time.perf_counter()
+    gray = reformat_frame(frame, **options)
+    if timings is not None:
+        timings.record('analysis_gray_convert', time.perf_counter() - started)
+        timings.record('analysis_gray_repeat' if repeated else 'analysis_gray_unique', 0.)
+    if conversions is not None:
+        conversions[key] = gray
+    return gray
+
+
+def frame_sample(frame, timestamp, crop, size, timings=None, conversions=None):
     width, height = size
     selected = crop != (0, 0, 1, 1)
-    gray = (reformat_frame(frame, format="gray") if selected else
-            reformat_frame(frame, width=min(width, frame.width), height=min(height, frame.height), format="gray"))
+    gray = (analysis_gray(frame, timings, conversions, format="gray") if selected else
+            analysis_gray(frame, timings, conversions, width=min(width, frame.width),
+                          height=min(height, frame.height), format="gray"))
+    started = time.perf_counter()
     plane = gray.planes[0]
     image = QImage(memoryview(plane), gray.width, gray.height, plane.line_size, QImage.Format_Grayscale8)
     if selected:
@@ -75,7 +93,10 @@ def frame_sample(frame, timestamp, crop, size):
             image = image.scaled(width, height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         crop = (0, 0, 1, 1)
     signature, texture = fingerprint(image, crop)
-    return Sample(timestamp, signature, texture, scene_feature(image, crop, (128, 48) if selected else (16, 16)))
+    sample = Sample(timestamp, signature, texture, scene_feature(image, crop, (128, 48) if selected else (16, 16)))
+    if timings is not None:
+        timings.record('analysis_features', time.perf_counter() - started)
+    return sample
 
 
 def decode_command(executable: str, url: str, headers: dict, port: int, quality: int = 250,
@@ -108,18 +129,25 @@ class Decoder:
         self.source_url = ""
         self.source_headers = {}
         self.events = Events()
-        self.history = VideoHistory()
+        self.history = self._history()
         self.playback_timestamp = None
         self.pictures = PictureReader()
         self.video_size = (0, 0)
         self.last_frame_received = 0.0
+        self.received_cadence = FrameCadence()
+        self.timings = StageTimings()
         self.crop = (0.0, 0.0, 1.0, 1.0)
         self.crop_generation = 0
         self.analysis_size = (640, 360)
+        self.region_frames = deque(maxlen=600)
         self.cancelled = threading.Event()
         self.process = None
         self.thread = None
         self.lock = threading.RLock()
+
+    @staticmethod
+    def _history():
+        return VideoHistory(seconds=CACHE_SECONDS, byte_limit=CACHE_BYTES, disk_cache=True)
 
     def start(self) -> None:
         self.thread = threading.Thread(target=self._run,
@@ -159,6 +187,8 @@ class Decoder:
             gaps = sorted((b - a for a, b in zip(stamps, stamps[1:])), reverse=True)
             recent = [stamp for stamp in stamps if stamps and stamp >= stamps[-1] - 3]
             return {"size": self.video_size, "fps": self.fps,
+                    "crop_quality_policy": self.seed.get('crop_quality_policy', 'source'),
+                    "requested_quality": self.seed.get('quality'),
                     "codec": self.history.codec[0] if self.history.codec else "",
                     "received_packets": self.history.sequence,
                     "received_frames": self.history.received_frames,
@@ -172,13 +202,18 @@ class Decoder:
     def _resolve(self, attempt: int) -> tuple[str, dict]:
         if self.cancelled.is_set():
             raise bili.Cancelled()
-        if self.seed.get("highest_quality"):
+        if self.seed.get("highest_quality") or self.seed.get("balanced_quality"):
             # The host lists tiers from highest to lowest; IDs are platform-specific.
             options = (self.platform.room_quality_options(self.room_id) if self.platform is not None
                        else bili.room_quality_options(self.room_id))
             if self.cancelled.is_set():
                 raise bili.Cancelled()
-            self.seed["quality"] = next((int(item["qn"]) for item in options if int(item["qn"]) != AUTO_QUALITY), 10000)
+            tiers = [item for item in options if int(item['qn']) != AUTO_QUALITY]
+            selected = tiers[0] if tiers else {'qn': self.seed.get('quality', 10000)}
+            if tiers and self.seed.get('balanced_quality'):
+                # Prefer 720p; tier IDs are not comparable across platforms.
+                selected = next((item for item in tiers if '720' in str(item.get('desc', ''))), tiers[len(tiers) // 2])
+            self.seed["quality"] = int(selected['qn'])
             self.seed.pop("url", None)
             self.events.information.emit({"requested_quality": self.seed["quality"], "quality_options": options})
         # Douyu signed addresses may allow only one consumer; do not reuse the wall's URL.
@@ -237,7 +272,7 @@ class Decoder:
                     previous = (self.history.segment_at(self.playback_timestamp)
                                 if self.playback_timestamp is not None else None) or self.history
                     previous.previous = None
-                    self.history = VideoHistory()
+                    self.history = self._history()
                     self.history.previous = previous
                     self.events.reset.emit()
                 self._capture(executable, url, headers)
@@ -303,8 +338,11 @@ class Decoder:
             watchdog.start()
             next_sample = 0.0
             next_detail = 0.0
+            next_region = next_region_large = 0.0
+            with self.lock:
+                self.region_frames.clear()
             with av.open(StreamInput(process.stdout), "r", format="nut",
-                         options={"probesize": "65536", "analyzeduration": "100000"}) as container:
+                         options={"probesize": "65536", "analyzeduration": "100000"}) as container, recording_template(self.history, container):
                 stream = container.streams.video[0]
                 stream.codec_context.thread_count = (4 if stream.width * stream.height >= 3840 * 2160 else 2)
                 stream.codec_context.thread_type = "AUTO"
@@ -312,11 +350,16 @@ class Decoder:
                 rate = stream.average_rate or stream.base_rate or stream.codec_context.framerate
                 if rate:
                     self.fps = float(rate)
+                reading = time.perf_counter()
                 for packet in container.demux():
+                    self.timings.record('input_wait', time.perf_counter() - reading)
                     if self.cancelled.is_set():
                         break
                     if packet.stream.type == "audio":
-                        for frame in packet.decode():
+                        started = time.perf_counter()
+                        frames = packet.decode()
+                        self.timings.record('capture_audio_decode', time.perf_counter() - started, items=len(frames))
+                        for frame in frames:
                             if frame.pts is None:
                                 continue
                             pts = float(frame.pts * frame.time_base)
@@ -324,20 +367,47 @@ class Decoder:
                                 # Ignore an old cached video keyframe when anchoring live time.
                                 self.history.set_origin(time.monotonic() - pts)
                                 self.events.state.emit("取流已连接")
+                            started = time.perf_counter()
                             pcm = bytes(frame.planes[0])[:frame.samples * 4]
                             self.history.audio.append_at(round(pts * 48000), pcm)
+                            self.timings.record('capture_audio_cache', time.perf_counter() - started, payload_bytes=len(pcm))
+                        reading = time.perf_counter()
                         continue
                     if packet.size:
+                        started = time.perf_counter()
                         self.history.append_packet(packet)
-                    for frame in packet.decode():
+                        self.timings.record('capture_packet_cache', time.perf_counter() - started, payload_bytes=packet.size)
+                    started = time.perf_counter()
+                    frames = packet.decode()
+                    self.timings.record('capture_video_decode', time.perf_counter() - started, items=len(frames))
+                    for frame in frames:
                         if frame.pts is None:
                             continue
                         pts = float(frame.pts * frame.time_base)
                         if abs(pts) > 1e9:
                             continue  # An invalid/missing source timestamp cannot establish time.
                         timestamp = (self.history.origin or 0) + pts
+                        self.received_cadence.record(time.perf_counter(), timestamp)
                         self.video_size = (frame.width, frame.height)
                         self.history.video_size = self.video_size
+                        conversions = {}
+                        if pts + .0001 >= next_region:
+                            next_region = pts + .1
+                            large = pts + .0001 >= next_region_large
+                            if large:
+                                next_region_large = pts + 1
+                            gray = analysis_gray(frame, self.timings, conversions, width=320 if large else 160,
+                                                 height=180 if large else 90, format='gray')
+                            started = time.perf_counter()
+                            image = QImage(memoryview(gray.planes[0]), gray.width, gray.height,
+                                           gray.planes[0].line_size, QImage.Format_Grayscale8)
+                            full = image.copy() if large else None
+                            small = image.scaled(160, 90, Qt.IgnoreAspectRatio, Qt.SmoothTransformation) if large else image.copy()
+                            self.timings.record('analysis_region_images', time.perf_counter() - started)
+                            with self.lock:
+                                self.region_frames.append((timestamp, small, full))
+                                while self.region_frames and timestamp - self.region_frames[0][0] > 60:
+                                    self.region_frames.popleft()
                         sample = None
                         if pts + .0001 >= next_detail:
                             while next_detail <= pts + .0001:
@@ -348,12 +418,12 @@ class Decoder:
                                 width, height = self.analysis_size
                             if crop != (0, 0, 1, 1):
                                 width, height = 640, 360
-                            detail = frame_sample(frame, timestamp, crop, (width, height))
+                            detail = frame_sample(frame, timestamp, crop, (width, height), self.timings, conversions)
                             with self.lock:
                                 if crop_generation == self.crop_generation:
                                     with self.history.lock:
                                         self.history.details.append(detail)
-                                        while self.history.details and timestamp - self.history.details[0].time > self.history.seconds:
+                                        while self.history.details and timestamp - self.history.details[0].time > self.history.analysis_seconds:
                                             self.history.details.popleft()
                                     if pts + .0001 >= next_sample:
                                         next_sample = pts + .5
@@ -363,6 +433,7 @@ class Decoder:
                             self.history.append(timestamp, pts, sample)
                         last_frame[0] = time.monotonic()
                         self.last_frame_received = last_frame[0]
+                    reading = time.perf_counter()
             if not self.cancelled.is_set():
                 refresh = getattr(hls_proxy, "refresh_required", None)
                 self.events.state.emit("播放地址已失效，正在重新取流" if refresh is not None and refresh.is_set()

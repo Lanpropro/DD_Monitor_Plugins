@@ -43,8 +43,8 @@ def run():
             thread.join(10)
             assert not thread.is_alive()
     assert not errors, errors
-    assert len(made) == 2, ('Converters should be reused within each worker', made)
-    print('PASS: one converter per worker; RGB/gray pixels, size/format changes and retained image ownership preserved')
+    assert len(made) == 12, ('Reuse one converter per source/output configuration in each worker', made)
+    print('PASS: bounded converters per worker/configuration; RGB/gray pixels, size/format changes and retained image ownership preserved')
 
 
 if __name__ == '__main__':

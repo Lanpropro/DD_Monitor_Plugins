@@ -89,11 +89,15 @@ def main():
             try:
                 viewer.add_room('1')
                 for mode in ('toggle', 'escape', 'stop', 'close'):
+                    image = module.QImage(640, 360, module.QImage.Format_RGB32)
+                    image.fill(Qt.red)
+                    floating = viewer.show_floating_crop(viewer.rows['1'], (0, 0, .5, .5), (1, image))
                     sizes = viewer.body_split.sizes()
                     with patch.object(module.QApplication, 'platformName', return_value='windows'), \
                             patch.object(module, 'mark_fullscreen', return_value=True, create=True) as mark:
                         viewer._fullscreen_picture()
                         dialog = viewer.fullscreen_dialog
+                        assert floating.parentWidget() is dialog
                         hwnd = int(dialog.winId())
                         assert dialog.windowType() == Qt.Window
                         assert dialog.settings is host.settings
@@ -114,6 +118,10 @@ def main():
                         assert mark.call_args_list[-1].args == (hwnd, False), (mode, hwnd, mark.call_args_list)
                         assert mark.call_count == 2
                         assert viewer.fullscreen_dialog is None
+                        if mode in ('stop', 'close'):
+                            assert not viewer.floating_crops
+                        else:
+                            assert floating.parentWidget() is viewer
                         assert viewer.body_split.widget(0) is viewer.picture
                         assert viewer.body_split.sizes() == sizes
                         assert not dialog._fullscreen_cursor.timer.isActive()
