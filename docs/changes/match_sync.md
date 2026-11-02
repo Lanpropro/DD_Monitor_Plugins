@@ -8,13 +8,13 @@
 
 ## 待发布
 
-### 2026-11-02｜修复：自动框选在实机上取不到帧，点了毫无反应
+### 2026-11-02｜修复：2.0r3/r2 每帧抛异常，自动框选与状态行全部停更
 
-- 更新内容：`plugins/match_sync/viewer.py` 的取帧链路改为「先取样、拿不到就用画中画正在显示的那一帧」——`_grab_picture` 增加 `QImage` 类型校验（`picture_at` 命中缓存时返回 `(帧号, 图片)` 元组）；`_pip_frames` 在四个取样点（0.75/0.5/0.25/0 秒前）全空时回退到 `self.canvas.pip_image`；`_auto_pip_crop_clicked` 传入 `retries=2`，`_auto_pip_crop_for(row, retries=0)` 在无帧时用 `QTimer.singleShot(250, …)` 重试并提示「正在取这一路的画面…」，取帧/识别异常分别写「自动框选取画面失败：…」「自动框选识别出错：…」并停留 8 秒。识别参数沿用 `2.0r3`（`_border_score` 至少两条边、`FACINGS=(1.8, 2.4, 3.0, 3.6)`、取边框分最高）。版本号 `2.0r4`。
-- 验收：2026-11-02，`tests/check_match_sync_pip.py` 52 例通过（新增 `AutoCropPathTests` 5 例，用 `Viewer.__new__` 直接跑真实代码路径：取样全空时回退到画中画帧、成功时写入检测框并提示、认不出时保留原裁剪、检测器抛异常时把原因说出来、无帧时先重试），`tests/check_match_sync_autocrop.py` 14 例、`tests/check_match_sync_console.py` 3 例、`tests/check_contributing.py` 8 例、`tests/check_packages.py` 与 `compileall` 通过；录屏 `E:\dy录6-11-02 22-18-13.mp4` 的二路小窗按 960×540 复原后仍识别为右上角摄像头，证明识别本身可用，问题在取帧。实机验收待维护者确认。
+- 更新内容：`say(text, hold)` 与 `_status_says(text)` 在 `2.0r3` 被打补丁时误加进了 `CompactStatus` 类，而 `Viewer.render()` 调用的是 `self._status_says(...)`，实机日志每 33 毫秒一条 `AttributeError: 'Viewer' object has no attribute '_status_says'`（`viewer.py:3389`），`render()` 在写状态行处直接抛出，导致状态行、画中画、同步与弹幕刷新全部停更。本次把两个方法移入 `Viewer` 类（`render()` 之前），`CompactStatus` 恢复原样。自动框选的取帧回退、重试、报错提示以及识别参数修正保持不变。版本号 `2.0r5`。
+- 验收：2026-11-02，`tests/check_match_sync_pip.py` 54 例通过（新增 `ViewerStatusTests`：直接 import 插件模块断言 `Viewer` 自己定义 `say`/`_status_says`、`CompactStatus` 里不再有 `self._status_says(` 调用、hold 生效期间状态行不被覆盖），`tests/check_match_sync_autocrop.py` 14 例、`tests/check_match_sync_console.py` 3 例、`tests/check_contributing.py` 8 例、`tests/check_packages.py` 与 `compileall` 通过；实机日志 `E:\DDMonitorCE-v0.6-exe\DD监控室CE\logs\ddm-2026-11-02.log` 已确认修复前的异常来源。实机验收待维护者确认。
 - 追踪：本次提交。
 - 集成状态：尚未合入默认分支。
-- 发布注意：`2.0r2`、`2.0r3` 均被本版取代；配置无需迁移。
+- 发布注意：`2.0r3`、`2.0r4` 均被本版取代；配置无需迁移。
 
 ## 已发布 v2.0r1（2026-11-02）
 

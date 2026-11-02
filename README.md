@@ -1,6 +1,6 @@
 # DD监控室CE · 二路插件（分支修改版）
 
-这是 [DD 监控室 CE](https://github.com/Lanpropro/DD_Monitor_CE) 二路插件 `match_sync` 的**分支修改版**：基于原作者 `1.5` 修改，当前版本 `2.0r4`。
+这是 [DD 监控室 CE](https://github.com/Lanpropro/DD_Monitor_CE) 二路插件 `match_sync` 的**分支修改版**：基于原作者 `1.5` 修改，当前版本 `2.0r5`。
 
 本仓库只包含二路插件本体，不包含其他插件，也没有其他插件的下载入口。
 
@@ -17,13 +17,13 @@
 ## 下载
 
 - 已发布版本：[本仓库 Releases](https://github.com/Sarff11/DD_Monitor_Plugins/releases)（最新公开版 `2.0.0`）
-- `2.0r1` 去掉画中画的自动框选、修好手动框选后小窗跳位（已发布）；`2.0r2` 重新加上「自动框选」；`2.0r4` 修好自动框选取不到帧（异步解码取空）、提示被状态行覆盖、以及角上摄像头认不出的问题，先在本地构建归档，实测确认后再发布，安装包为 `match_sync-2.0r3.zip`
+- `2.0r1` 去掉画中画的自动框选、修好手动框选后小窗跳位（已发布）；`2.0r2` 重新加上「自动框选」；`2.0r5` 修好自动框选（取帧回退 + 提示不被覆盖 + 角上摄像头）以及 2.0r3/r2 里 `_status_says` 类归属错误导致的每帧异常，先在本地构建归档，实测确认后再发布，安装包为 `match_sync-2.0r3.zip`
 - 逐版本变化：[plugins/match_sync/CHANGELOG.md](plugins/match_sync/CHANGELOG.md)
 - 版本与发布规则：[docs/versioning.md](docs/versioning.md)、[docs/releases.md](docs/releases.md)
 
 | 插件 | ID | 版本 |
 | --- | --- | --- |
-| 比赛二路同步 | `match_sync` | 2.0r4 |
+| 比赛二路同步 | `match_sync` | 2.0r5 |
 
 ## 修改版做了什么
 
@@ -35,7 +35,7 @@
 
 ## 安装
 
-1. 下载 `match_sync-2.0r4.zip`（实测确认后才会挂到 Releases；此前用本地归档的包）；GitHub 自动生成的 Source code ZIP 不能当作安装包
+1. 下载 `match_sync-2.0r5.zip`（实测确认后才会挂到 Releases；此前用本地归档的包）；GitHub 自动生成的 Source code ZIP 不能当作安装包
 2. 先在「设置 → 插件」删除旧的 `match_sync`（本体不支持同 ID 覆盖）
 3. 「装载插件…」选择该 ZIP，或把 ZIP 拖入插件页面
 4. 勾选插件，点「保存并重启」

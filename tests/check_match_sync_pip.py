@@ -1,6 +1,8 @@
 """Picture-in-picture geometry for the match sync plugin; standard library only."""
 from pathlib import Path
 import sys
+import inspect
+import time
 import types
 import unittest
 
@@ -365,6 +367,39 @@ class AutoCropPathTests(unittest.TestCase):
         result = self.module.Viewer._auto_pip_crop_for(viewer, row, retries=1)
         self.assertFalse(result)
         self.assertIn('正在取这一路的画面', viewer.messages[-1])
+
+
+class ViewerStatusTests(unittest.TestCase):
+    """The frame status must never hide an answer, and must never crash render."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import match_sync.viewer as module
+        except Exception as error:
+            raise unittest.SkipTest(f"viewer unavailable: {error}")
+        cls.module = module
+
+    def test_the_viewer_itself_owns_the_status_helpers(self):
+        for name in ('say', '_status_says'):
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(self.module.Viewer, name),
+                                f'Viewer does not define {name}')
+        self.assertIn('self._status_says(', inspect.getsource(self.module.Viewer))
+        self.assertNotIn('self._status_says(', inspect.getsource(self.module.CompactStatus))
+
+    def test_the_frame_status_waits_for_the_hold_to_expire(self):
+        viewer = self.module.Viewer.__new__(self.module.Viewer)
+        written = []
+        viewer.notice = types.SimpleNamespace(setText=written.append)
+        viewer.notice_hold = time.monotonic() + 5.0
+        self.module.Viewer._status_says(viewer, 'frame status')
+        self.assertEqual(written, [])
+        self.module.Viewer.say(viewer, 'answer', hold=0.0)
+        self.assertEqual(written[-1], 'answer')
+        viewer.notice_hold = 0.0
+        self.module.Viewer._status_says(viewer, 'frame status again')
+        self.assertEqual(written[-1], 'frame status again')
 
 
 class ConsoleQualityTests(unittest.TestCase):

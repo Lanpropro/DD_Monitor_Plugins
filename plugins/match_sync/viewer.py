@@ -819,16 +819,6 @@ class CompactStatus(QLabel):
         self.setMinimumHeight(22)
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
-    def say(self, text, hold=0.0):
-        """Show one message; a positive ``hold`` keeps the frame status off it."""
-        if hold > 0.0:
-            self.notice_hold = time.monotonic() + hold
-        self.notice.setText(text)
-
-    def _status_says(self, text):
-        if time.monotonic() >= self.notice_hold:
-            self.notice.setText(text)
-
     def set_status(self, parts, detail, hints=None):
         self.parts = parts
         self.hints = hints if hints is not None else [text for _, text in parts]
@@ -3324,6 +3314,17 @@ class Viewer(QDialog):
             elif self.video_danmaku.add_event(event):
                 self.overlay_pending.pop(key, None)
                 self.overlay_last = key
+
+    def say(self, text, hold=0.0):
+        """Show one message; a positive ``hold`` keeps the frame status off it."""
+        if hold > 0.0:
+            self.notice_hold = time.monotonic() + hold
+        self.notice.setText(text)
+
+    def _status_says(self, text):
+        """Write the frame status unless a recent answer is still on screen."""
+        if time.monotonic() >= self.notice_hold:
+            self.notice.setText(text)
 
     def render(self):
         if not self.running:

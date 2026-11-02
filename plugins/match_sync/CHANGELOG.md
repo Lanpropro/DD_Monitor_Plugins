@@ -9,6 +9,18 @@
 
 暂无。
 
+## 2.0r5
+
+**修复**
+
+- **2.0r3 / 2.0r4 每帧都在抛异常**：`say()` 与 `_status_says()` 被误加到了 `CompactStatus` 类里，而 `render()` 里调用的是 `self._status_says(...)`，于是每一帧都报 `AttributeError: 'Viewer' object has no attribute '_status_says'` 并中断 `render()` —— 状态行、画中画、对齐信息全部停更，界面上看起来「还是没效果，也没有提升」。两个帮助方法已移到 `Viewer` 类里，`render()` 恢复正常。
+- 取帧、识别、写裁剪的异常提示仍走 `say(..., hold=…)`，一次失败会在状态行留 8 秒。
+
+**说明**
+
+- 相对 `2.0r4` 只修这个类归属错误，识别算法与取帧回退逻辑不变。
+- 新增 `ViewerStatusTests`：直接 import 插件模块断言 `Viewer` 自己定义了 `say`/`_status_says`、`CompactStatus` 里没有，并验证 hold 生效期间状态行不被覆盖——这正是上一版漏掉的检查。
+
 ## 2.0r4
 
 **修复**
