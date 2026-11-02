@@ -188,9 +188,13 @@ class SendConsole(SettingsPanel):
         self.collapsed = False
         self.expanded_without_settings = False
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 10, 16, 10)
-        layout.setSpacing(10)
-        heading = QHBoxLayout()
+        layout.setContentsMargins(1, 1, 1, 1)
+        layout.setSpacing(0)
+        self.toolbar = QWidget(self)
+        self.toolbar.setObjectName('SendToolbar')
+        heading = QHBoxLayout(self.toolbar)
+        heading.setContentsMargins(16, 10, 16, 10)
+        heading.setSpacing(16)
         self.title = QLabel('弹幕控制台')
         self.title.setObjectName('SendTitle')
         heading.addWidget(self.title, 1)
@@ -200,7 +204,7 @@ class SendConsole(SettingsPanel):
         self.minimize.setToolTip('收起发送控制台，保留草稿并扩展弹幕栏。')
         self.minimize.clicked.connect(lambda: self.set_collapsed(True))
         heading.addWidget(self.minimize)
-        layout.addLayout(heading)
+        layout.addWidget(self.toolbar)
         self.restore_bar = QWidget(viewer.panel)
         self.restore_bar.setObjectName('DanmakuBar')
         restore_layout = QHBoxLayout(self.restore_bar)
@@ -362,6 +366,7 @@ class SendConsole(SettingsPanel):
         if self.styleSheet() != style:
             self.setStyleSheet(style)
         c = colors()
+        self.toolbar.setFixedHeight(self.viewer.console_toolbar.sizeHint().height())
         for row in self.rows.values():
             for entry in row.tile._plugin_controls.applicable():
                 align_composer(entry.control.widget, self)
@@ -442,9 +447,8 @@ class SendConsole(SettingsPanel):
             self.rooms.setProperty('avatarOnly', compact)
             self.rooms.doItemsLayout()
             self.rooms.viewport().update()
-        self.layout().setContentsMargins(16 if regular else 12, 10 if regular else 8,
-                                        16 if regular else 12, 10 if regular else 8)
-        self.layout().setSpacing(10 if regular else 6)
+        self.body_layout.setContentsMargins(16 if regular else 12, 12 if regular else 8,
+                                           16 if regular else 12, 12 if regular else 8)
         self.body_layout.setSpacing(12 if regular else 6)
         self.body_layout.setDirection(QBoxLayout.LeftToRight)
         self.rooms.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Ignored)

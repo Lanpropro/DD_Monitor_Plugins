@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 from shiboken6 import isValid
 
 from PySide6.QtCore import QEasingCurve, QEvent, QMetaObject, QMimeData, QObject, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, Qt, QThread, QTimer, Signal, Slot
-from PySide6.QtGui import QColor, QCursor, QDrag, QIcon, QImage, QKeySequence, QPainter, QPen, QPixmap, QRegion
+from PySide6.QtGui import QColor, QCursor, QDrag, QFont, QFontMetrics, QIcon, QImage, QKeySequence, QPainter, QPen, QPixmap, QRegion
 from PySide6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices
 from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QCheckBox, QComboBox, QDialog,
     QDialogButtonBox, QDoubleSpinBox, QFrame,
@@ -1813,9 +1813,11 @@ class Viewer(QDialog):
                 watched.hide()
         elif (kind in (QEvent.DragEnter, QEvent.DragMove, QEvent.Drop)
                 and getattr(self, "controls", None) is not None
-                and watched in (self.controls.widget(), self.controls.viewport())
-                and isinstance(event.source(), RoomRow) and event.source().viewer is self
-                and event.mimeData().hasFormat(ROW_MIME)):
+                and isinstance(watched, QWidget)
+                and (watched is self.controls.viewport() or watched is self.controls.widget()
+                     or self.controls.widget().isAncestorOf(watched))
+                and self.dragged_row is not None and event.mimeData().hasFormat(ROW_MIME)
+                and bytes(event.mimeData().data(ROW_MIME)).decode('utf-8') == self.dragged_row):
             point = watched.mapTo(self.controls.widget(), event.position().toPoint())
             if kind == QEvent.Drop:
                 self.finish_row_drag(point)
@@ -1996,7 +1998,10 @@ class Viewer(QDialog):
 
     def align_room_controls(self):
         rows = list(self.rows.values())
-        if not rows or self.dragged_row is not None:
+        if self.dragged_row is not None:
+            return
+        if not rows:
+            self.queue_console_height(self.empty_console_rows_height())
             return
         name_width = min(140, max(row.name_label.fontMetrics().horizontalAdvance(row.name_label.text()) for row in rows))
         for row in rows:
@@ -2011,9 +2016,23 @@ class Viewer(QDialog):
                 needed = max(w for c, w in zip(row.control_columns, widths) if c == column)
                 if row.controls_grid.columnMinimumWidth(column) != needed:
                     row.controls_grid.setColumnMinimumWidth(column, needed)
-        height = (self.console_toolbar.sizeHint().height() + self.rows_layout.sizeHint().height()
+        heading = max(label.sizeHint().height() for label in rows[0].group_labels) + rows[0].controls_grid.verticalSpacing()
+        bands = 2 if compact else 1
+        first_height = rows[0].sizeHint().height()
+        self.console_reserved_rows_height = 2 * first_height - bands * heading + self.rows_layout.spacing()
+        self.queue_console_height(max(self.rows_layout.sizeHint().height(), self.console_reserved_rows_height))
+
+    def empty_console_rows_height(self):
+        if hasattr(self, 'console_reserved_rows_height'):
+            return self.console_reserved_rows_height
+        font = QFont(self.font())
+        font.setPixelSize(theme.FONT_CAPTION)
+        return 2 * (24 + 28 + 22 + 2) + QFontMetrics(font).height() + 5 + self.rows_layout.spacing()
+
+    def queue_console_height(self, rows_height):
+        height = (self.console_toolbar.sizeHint().height() + rows_height
                   + self.console_footer.sizeHint().height() + 2)
-        if height != getattr(self, 'console_content_height', None):
+        if height != getattr(self, 'console_content_height', None) or self.settings_panel.height() != height:
             self.console_content_height = height
             self.settings_height = height
             self.console_size_timer.start(0)
@@ -2036,6 +2055,9 @@ class Viewer(QDialog):
     def preview_row_drag(self, point):
         if self.dragged_row is None:
             return
+        for animation in self.row_animations.values():
+            elapsed = round((time.perf_counter() - animation.property('started_at')) * 1000)
+            animation.setCurrentTime(min(animation.duration(), max(animation.currentTime(), elapsed)))
         order = [key for key in self.rows if key != self.dragged_row]
         index = sum(point.y() >= self.row_slots[key].center().y() for key in order)
         order.insert(index, self.dragged_row)
@@ -2056,6 +2078,7 @@ class Viewer(QDialog):
                         animation.setEasingCurve(QEasingCurve.OutCubic)
                         animation.setStartValue(row.pos())
                         animation.setEndValue(target)
+                        animation.setProperty('started_at', time.perf_counter())
                         self.row_animations[key] = animation
                         animation.start()
                     else:

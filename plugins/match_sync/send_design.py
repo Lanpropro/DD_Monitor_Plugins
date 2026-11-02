@@ -4,7 +4,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, Q
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QLineEdit, QListWidget, QPushButton, QSizePolicy, QStyle, QStyledItemDelegate, QWidget
 
 from ddm import motion, theme
-from .panels import console_button_style, use_link_cursor
+from .panels import console_button_style, console_hover_color, use_link_cursor
 
 
 def colors():
@@ -42,8 +42,8 @@ class SendIconFace(QObject):
         painter.setRenderHint(QPainter.Antialiasing)
         if button.isEnabled() and (button.underMouse() or button.isDown()):
             painter.setPen(Qt.NoPen)
-            painter.setBrush(theme.qcolor(theme.ACCENT_SOFT))
-            painter.drawRoundedRect(QRectF(button.rect()).adjusted(1, 1, -1, -1), 8, 8)
+            painter.setBrush(theme.qcolor(console_hover_color()))
+            painter.drawRoundedRect(QRectF(button.rect()).adjusted(1, 1, -1, -1), 6, 6)
         painter.translate(button.width() / 2, button.height() / 2)
         painter.setPen(QPen(theme.qcolor(theme.TEXT1 if button.isEnabled() else theme.TEXT4), 1.5))
         path = QPainterPath()
@@ -65,7 +65,7 @@ def style_compose(editor, send):
     editor.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     editor.setFixedHeight(INPUT_HEIGHT)
     editor_style = f'''QLineEdit {{background: {c['input']}; color: {c['text']};
-        border: 1px solid transparent; border-radius: 8px; padding: 4px 8px;
+        border: 1px solid {theme.BORDER_STRONG}; border-radius: {theme.RADIUS_MD}px; padding: 4px 8px;
         font-size: {theme.FONT_CONTROL}px;}}
         QLineEdit:focus {{border-color: {c['accent']};}}'''
     if editor.styleSheet() != editor_style:
@@ -139,8 +139,8 @@ def align_composer(widget, console=None):
                 button.setProperty('sendIconBaseStyle', button.styleSheet())
             button.setStyleSheet(button.property('sendIconBaseStyle') + f'''
                 QPushButton#TileCtrl:hover, QPushButton#TileCtrl[hovered="true"] {{
-                    background: {theme.ACCENT_SOFT if theme.is_light() else colors()['accent']};
-                    border: none; border-radius: 12px; padding: 0;
+                    background: {console_hover_color()};
+                    border: none; border-radius: 6px; padding: 0;
                 }}''')
             button.setProperty('sendIconStyled', True)
 
@@ -150,7 +150,8 @@ def stylesheet():
     return f'''
         #MatchSyncSendConsole {{background: transparent; border: none;}}
         #MatchSyncSendConsole QLabel {{color: {c['text']}; background: transparent; border: none;}}
-        #MatchSyncSendConsole #SendTitle {{font-weight: 600;}}
+        #MatchSyncSendConsole #SendTitle {{font-size: {theme.FONT_CONTROL}px; font-weight: 600;}}
+        #MatchSyncSendConsole #SendToolbar {{border-bottom: 1px solid {theme.BORDER_STRONG};}}
         #MatchSyncSendConsole #SendContext {{font-weight: 600;}}
         #MatchSyncSendConsole #SendFeedback {{color: {c['secondary']};}}
         #MatchSyncSendConsole QStackedWidget, #MatchSyncSendConsole QFrame {{border: none;}}
@@ -159,11 +160,11 @@ def stylesheet():
         #MatchSyncSendConsole QListWidget {{background: transparent; border: none; border-radius: 8px;}}
         #MatchSyncSendConsole #SavedTextList {{background: transparent;}}
         #MatchSyncSendConsole QLineEdit {{background: {c['input']}; color: {c['text']};
-            border: 1px solid transparent; border-radius: 8px; padding: 6px 8px;}}
+            border: 1px solid {theme.BORDER_STRONG}; border-radius: {theme.RADIUS_MD}px; padding: 6px 8px;}}
         #MatchSyncSendConsole QLineEdit:focus {{border-color: {c['accent']};}}
         #MatchSyncSendConsole QPushButton {{background: {c['raised']}; color: {c['text']};
-            border: none; border-radius: 8px; padding: 5px 10px; min-height: 18px;}}
-        #MatchSyncSendConsole QPushButton:hover {{border: 1px solid {c['secondary']};}}
+            border: 1px solid {theme.BORDER_STRONG}; border-radius: {theme.RADIUS_MD}px; padding: 5px 10px; min-height: 18px;}}
+        #MatchSyncSendConsole QPushButton:hover {{background: {console_hover_color()}; border-color: {c['accent']};}}
         #MatchSyncSendConsole QPushButton:pressed {{background: {c['inset']};}}
         #MatchSyncSendConsole QPushButton:focus {{border: 1px solid {c['accent']};}}
         #MatchSyncSendConsole QPushButton[sendPrimary="true"],
@@ -358,10 +359,14 @@ class RecipientDelegate(QStyledItemDelegate):
         painter.translate(0 if compact else 12 * progress, 0)
         painter.setPen(Qt.NoPen)
         if progress or option.state & QStyle.State_MouseOver:
-            color = QColor(c['raised'])
-            color.setAlphaF(max(progress, .5 if option.state & QStyle.State_MouseOver else 0))
+            color = theme.qcolor(console_hover_color() if option.state & QStyle.State_MouseOver else theme.ACCENT_SOFT)
+            color.setAlphaF(color.alphaF() * max(progress, .5 if option.state & QStyle.State_MouseOver else 0))
             painter.setBrush(color)
             painter.drawRoundedRect(rect, 6, 6)
+            if selected:
+                painter.setPen(QPen(QColor(c['accent']), 1))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawRoundedRect(rect.adjusted(.5, .5, -.5, -.5), 6, 6)
         avatar = QRectF(rect.left() + 8, rect.center().y() - 16, 32, 32)
         if compact:
             avatar.moveCenter(rect.center())

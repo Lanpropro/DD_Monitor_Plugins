@@ -202,7 +202,12 @@ def check(app, host, module, output=None):
             role_x = first.main_button.mapTo(first, QPoint()).x()
             assert 0 <= name_x - avatar_right <= 12
             assert 0 <= role_x - name_x - first.name_label.width() <= 12
-            assert abs(viewer.settings_panel.height() - viewer.console_content_height) < 24
+            QTest.qWait(20)  # Content sizing is applied outside the layout callback.
+            assert abs(viewer.settings_panel.height() - viewer.console_content_height) < 24, (
+                viewer.settings_panel.height(), viewer.console_content_height, viewer.body_split.sizes(),
+                viewer.settings_panel.minimumSizeHint().height(), viewer.settings_panel.maximumHeight(),
+                viewer.picture.minimumSizeHint().height(), viewer.comparison_panel.minimumSizeHint().height(),
+                viewer.console_size_timer.isActive())
             if output:
                 viewer.settings_panel.grab().save(str(output.with_name('single-wide.png')))
             return dict(passed=True, native_controls=True, column_alignment=True,

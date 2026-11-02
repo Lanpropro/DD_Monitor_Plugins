@@ -69,7 +69,7 @@ def check_platform_controls(app, host, module, source):
                 assert send.width() == 32 and hasattr(send, '_match_sync_face'), kind
                 gift = controls.applicable()[0].control.widget.gifts
                 assert 'QPushButton#TileCtrl:hover' in gift.styleSheet(), kind
-                assert 'border-radius: 12px' in gift.styleSheet(), kind
+                assert 'border-radius: 6px' in gift.styleSheet(), kind
                 assert 'background: transparent' in send.styleSheet(), kind
                 shared = controls.applicable()[0].control.widget.findChild(QWidget, 'SendInteractions')
                 assert shared is not None and len(shared.findChildren(QPushButton)) == 2
