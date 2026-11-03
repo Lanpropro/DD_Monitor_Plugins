@@ -20,7 +20,7 @@ from PySide6.QtCore import QEvent, QObject, QTimer, Qt
 
 def stream_error_codes(message):
     """Classify locally; never retain raw stderr, URLs, headers or exception text."""
-    text = message.lower()
+    text = re.sub(r'\b[a-z][a-z0-9+.-]*://\S+', '[address]', message.lower())
     codes = []
     status = re.search(r'(?:http(?:/\d(?:\.\d)?| error)?|server returned)\s*[: ]\s*([45]\d{2})\b|\b([45]\d{2}) (?:client|server) error', text)
     if status:
@@ -29,7 +29,7 @@ def stream_error_codes(message):
             ('timeout', r'timed? out|timeout'),
             ('dns', r'failed to resolve|name or service not known|temporary failure in name resolution'),
             ('connection', r'connection (?:refused|reset)|network is unreachable|broken pipe'),
-            ('tls', r'tls|ssl|certificate verify failed'),
+            ('tls', r'\b(?:tls|ssl)\b.*(?:failed|error)|certificate verify failed'),
             ('invalid_data', r'invalid data found|invalid nal|error while decoding'),
             ('decoder', r'unknown decoder|decoder .*not found|unsupported codec'),
             ('missing_audio', r'stream map .*0:a:0.*matches no streams'),

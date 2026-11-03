@@ -46,6 +46,7 @@ def check(app, host, diagnostic, media, video):
             ('Permission denied', 'permission'), ('Cannot allocate memory', 'memory')):
         assert code in diagnostic.stream_error_codes(message)
     assert diagnostic.stream_error_codes(address + ' Cookie: ' + secret) == []
+    assert diagnostic.stream_error_codes('Failed to resolve https://ssl.invalid/private?token=' + secret) == ['dns']
     assert secret not in json.dumps(first) + json.dumps(trace.snapshot())
 
     # Empty reads do not count as first input; the callback runs exactly once.
