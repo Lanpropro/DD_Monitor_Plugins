@@ -148,7 +148,10 @@ def check(app, host, diagnostic, media, video):
     # A real pipe must be drained beyond its capacity; never persist its raw text.
     pipe_trace = diagnostic.StreamAcquisition()
     pipe_trace.begin(0)
-    child = subprocess.Popen([sys.executable, '-c',
+    python = Path(sys.executable)
+    if python.name.lower() == 'pythonw.exe':
+        python = python.with_name('python.exe')
+    child = subprocess.Popen([str(python), '-c',
         "import sys; sys.stderr.write('DO_NOT_LOG_PRIVATE_VALUE' * 10000 + '\\nHTTP error 503\\n')"],
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
