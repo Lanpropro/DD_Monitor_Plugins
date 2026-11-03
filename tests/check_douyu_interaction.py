@@ -1542,6 +1542,7 @@ class DouyinTests(unittest.TestCase):
             bridge.finish(lambda:False)
             self.assertTrue(dialog.isVisible(), "A stale completion must not close the active request")
             bridge.finish(request['cancelled'])
+            self.assertEqual(page.runJavaScript.call_args.args[0], 'window.__ddmChatCancelled=true')
             self.assertFalse(dialog.isVisible())
             self.assertNotIn("登录",str(browser_module.InteractionError("窗口已关闭或请求已取消")))
         finally:bridge.shutdown();parent.close();parent.deleteLater();APP.processEvents()

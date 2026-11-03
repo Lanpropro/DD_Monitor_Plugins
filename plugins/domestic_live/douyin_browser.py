@@ -30,6 +30,7 @@ class BrowserChat(QObject):
 
     def close_request(self, cancelled):
         if self._active_request is not None and self._active_request['cancelled'] is cancelled:
+            self.active.browser.page().runJavaScript("window.__ddmChatCancelled=true")
             self.active.accept()
 
     def request(self, room, params, cancelled):
