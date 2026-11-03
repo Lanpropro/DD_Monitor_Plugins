@@ -743,7 +743,13 @@ class DouyinComposer(HuyaComposer):
             self.browser_chat = BrowserChat(self.owner.platform, self.owner.context, self)
         client = DouyinAPI(self.owner.platform, self.owner.platform._playback_cookies(),
                            transport=self.browser_chat.request)
-        self.start("text", lambda cancelled, progress: client.send_text(key[0], text, cancelled, progress=progress), key=key)
+        bridge = self.browser_chat
+        def send(cancelled, progress):
+            try:
+                return client.send_text(key[0], text, cancelled, progress=progress)
+            finally:
+                bridge.finish(cancelled)
+        self.start("text", send, key=key)
 
 
     def shutdown(self):

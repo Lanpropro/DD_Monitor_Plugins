@@ -861,6 +861,7 @@ class ReceiveTests(unittest.TestCase):
 
     def test_confirmed_event_uses_shared_bilibili_outline_renderer(self):
         from ddm.video_danmaku import VideoDanmaku
+        from ddm.danmaku_raster import CommentRaster
         self.client.receive_confirmed("douyu:9999", self.receipt)
         overlay = VideoDanmaku()
         overlay.resize(640, 360)
@@ -868,8 +869,11 @@ class ReceiveTests(unittest.TestCase):
         overlay.show()
         APP.processEvents()
         try:
-            with patch.object(VideoDanmaku, "_draw_self_sent_box", wraps=VideoDanmaku._draw_self_sent_box) as draw:
+            with patch.object(CommentRaster, "_draw_self_sent_box", wraps=CommentRaster._draw_self_sent_box) as draw:
                 self.assertTrue(overlay.add_event(self.events[0]))
+                deadline = time.monotonic() + 2
+                while not overlay.comments and time.monotonic() < deadline:
+                    QTest.qWait(10)
                 draw.assert_called_once()
             self.assertTrue(overlay.comments[0].self_sent)
         finally:
@@ -1454,6 +1458,7 @@ class DouyinTests(unittest.TestCase):
         transport.assert_called_once()
         self.session.get.assert_not_called()
         self.assertEqual(transport.call_args.args[1]["room_id"],"999999")
+        self.assertEqual(transport.call_args.args[1]["_sender_uid"],"42")
         transport.side_effect=api.InteractionError("official client failed")
         with self.assertRaises(api.InteractionError):self.client.send_text("douyin:123","hello")
         self.assertEqual(transport.call_count,2)
@@ -1531,6 +1536,13 @@ class DouyinTests(unittest.TestCase):
             timer.timeout.emit()
             self.assertTrue(request["done"].is_set())
             self.assertEqual(request["result"]["status_code"],0)
+            self.assertTrue(dialog.isVisible(), "The official page must remain alive while broadcast delivery is checked")
+            timer.timeout.emit()
+            self.assertTrue(dialog.isVisible())
+            bridge.finish(lambda:False)
+            self.assertTrue(dialog.isVisible(), "A stale completion must not close the active request")
+            bridge.finish(request['cancelled'])
+            self.assertFalse(dialog.isVisible())
             self.assertNotIn("登录",str(browser_module.InteractionError("窗口已关闭或请求已取消")))
         finally:bridge.shutdown();parent.close();parent.deleteLater();APP.processEvents()
 
@@ -1601,6 +1613,28 @@ class DouyinTests(unittest.TestCase):
             owner.context.request_login.assert_called_once_with("douyin",reauthenticate=True)
             widget.set_room({"platform":"huya","room_id":"huya:1"})
             self.assertTrue(widget.isHidden())
+        finally:widget.shutdown();parent.close();parent.deleteLater();APP.processEvents()
+
+    def test_composer_releases_official_page_after_delivery_success_or_error(self):
+        parent=QWidget()
+        owner=SimpleNamespace(platform=self.platform,context=SimpleNamespace(notify=Mock(),request_login=Mock()),sending=False,requests=set())
+        widget=ui.DouyinComposer(owner,parent)
+        widget.browser_chat=SimpleNamespace(request=Mock(),finish=Mock(),shutdown=Mock())
+        cancelled, progress=Mock(return_value=False),Mock()
+        try:
+            widget.set_room({'platform':'douyin','room_id':'douyin:123'})
+            widget.edit.setText('hello')
+            for failure in (None,api.InteractionError('broadcast unconfirmed')):
+                with self.subTest(failure=failure), patch.object(widget,'start') as start, \
+                        patch.object(self.module,'DouyinAPI') as client:
+                    client.return_value.send_text.side_effect=failure
+                    widget.browser_chat.finish.reset_mock()
+                    widget.send_text()
+                    operation=start.call_args.args[1]
+                    if failure:
+                        with self.assertRaises(api.InteractionError):operation(cancelled,progress)
+                    else:operation(cancelled,progress)
+                    widget.browser_chat.finish.assert_called_once_with(cancelled)
         finally:widget.shutdown();parent.close();parent.deleteLater();APP.processEvents()
 
 

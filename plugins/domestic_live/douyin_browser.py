@@ -13,13 +13,24 @@ CLIENT_SCRIPT = (Path(__file__).parent / "douyin_client.js").read_text(encoding=
 
 class BrowserChat(QObject):
     requested = Signal(object)
+    completed = Signal(object)
 
     def __init__(self, platform, context, parent):
         super().__init__(parent)
         self.platform, self.context = platform, context
         self.active = None
+        self._active_request = None
         self.closed = False
         self.requested.connect(self.open)
+        self.completed.connect(self.close_request)
+
+    def finish(self, cancelled):
+        if not self.closed:
+            self.completed.emit(cancelled)
+
+    def close_request(self, cancelled):
+        if self._active_request is not None and self._active_request['cancelled'] is cancelled:
+            self.active.accept()
 
     def request(self, room, params, cancelled):
         request = dict(room=room, params=dict(params), cancelled=cancelled,
@@ -39,10 +50,13 @@ class BrowserChat(QObject):
                       "official_security_changed": "官网安全环境模块结构已变化",
                       "official_security_timeout": "官网安全环境初始化超时，本次未提交",
                       "official_security_failed": "官网安全环境初始化失败，本次未提交",
+                      "official_context_not_ready": "官网登录与直播间信息尚未就绪，本次未提交",
+                      "wrong_room_session": "官网当前直播与目标直播不一致，本次未提交",
+                      "account_mismatch": "官网当前账号与所选账号不一致，本次未提交",
                       "official_request_failed": "官网客户端调用失败", "cancelled": "窗口已关闭或请求已取消"}
             reason = labels.get(code, "官网客户端返回未知错误")
             if isinstance(result, dict):
-                stages = {"page": "页面校验", "module": "模块初始化", "security": "安全环境准备",
+                stages = {"page": "页面校验", "context": "账号与直播间核对", "module": "模块初始化", "security": "安全环境准备",
                           "request": "官网请求", "response": "回执解析"}
                 stage = stages.get(result.get("stage"), "未知")
                 names = {"Error", "TypeError", "ReferenceError", "RangeError", "SyntaxError", "SecurityError",
@@ -65,6 +79,7 @@ class BrowserChat(QObject):
         dialog = PlatformFollowDialog(self.platform, self.parent(), login_only=True,
                                       defer_login=True, owner=self.context.window)
         self.active = dialog
+        self._active_request = request
         dialog.setWindowTitle("抖音 · 官网弹幕发送")
         dialog.status.setText("正在加载官网互动环境；如有登录或安全验证，请在下方完成。请勿重复点击网页发送。")
         dialog.remember.hide()
@@ -73,10 +88,12 @@ class BrowserChat(QObject):
         dialog.read_button.clicked.disconnect()
         dialog.read_button.setEnabled(True)
         task = dict(id=uuid.uuid4().hex, webRid=request["room"].split(":",1)[1],
-                    roomId=request["params"]["room_id"], text=request["params"]["content"])
+                    roomId=request["params"]["room_id"], text=request["params"]["content"],
+                    senderUid=request["params"].get("_sender_uid", ""))
         page = dialog.browser.page()
         page.setAudioMuted(True)
-        state = {"started": False, "submitted": False, "retry_safe": True, "polling": False, "epoch": 0}
+        state = {"started": False, "submitted": False, "retry_safe": True, "polling": False, "epoch": 0,
+                 "holding": False}
         prepare = """JSON.stringify((() => {
             if(location.origin!=='https://live.douyin.com'||
                location.pathname.replace(/\/$/,'')!=='/'+%s) return {ready:false,reason:'page'};
@@ -91,9 +108,10 @@ class BrowserChat(QObject):
             Promise.resolve().then(()=> (%s)(%s, (%s))).then(data=>{window.__ddmChatResult=data})
             .catch(e=>{const allowed=['wrong_room_page','cancelled_before_send','official_client_changed',
             'official_client_not_ready','invalid_response','official_security_changed',
-            'official_security_timeout','official_security_failed'];window.__ddmChatResult={error:
+            'official_security_timeout','official_security_failed','official_context_not_ready',
+            'wrong_room_session','account_mismatch'];window.__ddmChatResult={error:
             allowed.includes(e?.message)?e.message:'official_request_failed',
-            stage:['page','module','security','request','response'].includes(window.__ddmChatStage)?window.__ddmChatStage:'unknown',
+            stage:['page','context','module','security','request','response'].includes(window.__ddmChatStage)?window.__ddmChatStage:'unknown',
             exception:['Error','TypeError','ReferenceError','RangeError','SyntaxError','SecurityError',
             'NotAllowedError','AbortError','TimeoutError','NetworkError','AxiosError'].includes(e?.name)?e.name:'Other',
             cause:window.__ddmChatStage==='module'&&e?.name==='TypeError'&&typeof e.message==='string'?
@@ -110,9 +128,13 @@ class BrowserChat(QObject):
             dialog.browser.load(QUrl(self.platform.room_url(request["room"])))
         dialog.read_button.clicked.connect(retry)
         def poll():
-            if request["done"].is_set() or request["cancelled"]() or self.closed:
+            if request["cancelled"]() or self.closed:
                 page.runJavaScript("window.__ddmChatCancelled=true")
                 dialog.reject()
+                return
+            if request["done"].is_set():
+                if not state["holding"]:
+                    dialog.reject()
                 return
             if state["polling"] or state["started"] and state["retry_safe"]:
                 return
@@ -141,7 +163,7 @@ class BrowserChat(QObject):
                         return
                     state.update(started=True, retry_safe=False)
                     dialog.read_button.setEnabled(False)
-                    dialog.status.setText("官网模块已就绪，正在提交弹幕并等待回执。")
+                    dialog.status.setText("正在核对官网账号与直播间，准备发送弹幕。")
                     page.runJavaScript(submit)
                     return
                 state["submitted"] = state["submitted"] or bool(result.get("submitted"))
@@ -155,8 +177,13 @@ class BrowserChat(QObject):
                     dialog.status.setText("官网发送模块未就绪，本次尚未提交。可重新加载环境再试。")
                     return
                 request["result"] = outcome
+                state["holding"] = (not outcome.get('error') and type(outcome.get('status_code')) is int
+                                    and outcome['status_code'] == 0)
                 request["done"].set()
-                dialog.accept()
+                if state["holding"]:
+                    dialog.status.setText("官网已受理，正在核对弹幕投递，请勿重复发送。")
+                else:
+                    dialog.accept()
             page.runJavaScript(read_state if state["started"] else prepare, received)
         timer = QTimer(dialog)
         timer.setInterval(150)
@@ -166,6 +193,7 @@ class BrowserChat(QObject):
             request["done"].set()
             if self.active is dialog:
                 self.active = None
+                self._active_request = None
             dialog.deleteLater()
         dialog.finished.connect(finished)
         dialog.browser.load(QUrl(self.platform.room_url(request["room"])))

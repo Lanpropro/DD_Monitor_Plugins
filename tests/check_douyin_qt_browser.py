@@ -40,13 +40,15 @@ class BlockNetwork(QWebEngineUrlRequestInterceptor):
 
 
 class BrowserTests(unittest.TestCase):
-    def exercise(self, behavior, expected_error=None, *, module_error=False, delayed_dependency=False, security_status="success"):
+    def exercise(self, behavior, expected_error=None, *, module_error=False, delayed_dependency=False,
+                 security_status="success", room_id="999999", uid="42", hold_ack=False):
         dialogs = []
         initialization = "throw new ReferenceError('PRIVATE');" if module_error else ""
         if module_error == "missing_call":
             initialization = "throw new TypeError(\"Cannot read properties of undefined (reading 'call') PRIVATE\");"
         html = """<html><head></head><body><script>
             window.calls=0; window.webpackChunkdouyin_live_v2=[];
+            window.__STORE__={roomStore:{roomInfo:{roomId:%s}},userStore:{userInfo:{id_str:%s}}};
             const security={getSecuritySdkInitWebStatus:async()=>%s};
             const securityFactory=function(){return 'getSecuritySdkInitWebStatus:function securitySdkInitWeb:function';};
             const requireModule=id=>{ %s if(id==='789')return security; return {W:async params=>{
@@ -55,7 +57,7 @@ class BrowserTests(unittest.TestCase):
             }};};
             requireModule.m={123:function(){return '/webcast/room/chat/ paste_edit_method';},789:securityFactory};
             window.webpackChunkdouyin_live_v2.push=entry=>entry[2](requireModule);
-            </script></body></html>""" % (json.dumps(security_status), initialization, behavior)
+            </script></body></html>""" % (json.dumps(room_id), json.dumps(uid), json.dumps(security_status), initialization, behavior)
         if delayed_dependency:
             html = html.replace("requireModule.m={123:function(){return '/webcast/room/chat/ paste_edit_method';},789:securityFactory};", """
                 const cache={};
@@ -98,12 +100,19 @@ class BrowserTests(unittest.TestCase):
         bridge = module.BrowserChat(SimpleNamespace(room_url=lambda _: "https://live.douyin.com/123"),
                                     SimpleNamespace(window=None), parent)
         outcome = {}
+        accepted, release = threading.Event(), threading.Event()
+        cancelled = lambda: False
 
         def request():
             try:
-                outcome["result"] = bridge.request("douyin:123", {"room_id": "999999", "content": "fixture"}, lambda: False)
+                outcome["result"] = bridge.request("douyin:123", {"room_id": "999999", "content": "fixture", "_sender_uid":"42"}, cancelled)
+                if hold_ack:
+                    accepted.set()
+                    release.wait(3)
             except Exception as error:
                 outcome["error"] = error
+            finally:
+                bridge.finish(cancelled)
 
         with patch("ddm.platform_login.PlatformFollowDialog", Dialog):
             worker = threading.Thread(target=request)
@@ -111,12 +120,17 @@ class BrowserTests(unittest.TestCase):
             deadline = time.monotonic() + 12
             while worker.is_alive() and time.monotonic() < deadline:
                 QTest.qWait(20)
+                if hold_ack and accepted.is_set() and not release.is_set():
+                    outcome['held_open'] = bridge.active is not None and bridge.active.isVisible()
+                    release.set()
             if worker.is_alive():
                 bridge.shutdown()
                 QTest.qWait(200)
             worker.join(1)
             self.assertFalse(worker.is_alive(), "Qt browser bridge did not finish")
             self.assertEqual(len(dialogs), 1)
+            if hold_ack:
+                self.assertTrue(outcome.get('held_open'), 'Accepted response must not destroy the page before delivery confirmation')
             snapshot = []
             dialogs[0].browser.page().runJavaScript(
                 "JSON.stringify({calls:window.calls,params:window.params})", snapshot.append)
@@ -125,7 +139,7 @@ class BrowserTests(unittest.TestCase):
                 QTest.qWait(20)
             self.assertTrue(snapshot)
             state = json.loads(snapshot[0])
-            self.assertEqual(state["calls"], 0 if module_error or security_status != "success" else 1)
+            self.assertEqual(state["calls"], 0 if module_error or security_status != "success" or room_id != "999999" or uid != "42" else 1)
             if state["calls"]:
                 self.assertEqual(state["params"]["room_id_str"], "999999")
             if expected_error:
@@ -181,6 +195,16 @@ class BrowserTests(unittest.TestCase):
 
     def test_security_failure_does_not_submit(self):
         self.exercise("return {};", ["安全环境初始化失败", "已调用发送：否"], security_status="fail")
+
+    def test_wrong_live_session_never_submits(self):
+        self.exercise("return {};", ["官网当前直播与目标直播不一致", "已调用发送：否"], room_id="888888")
+
+    def test_wrong_account_never_submits(self):
+        self.exercise("return {};", ["官网当前账号与所选账号不一致", "已调用发送：否"], uid="43")
+
+    def test_accepted_request_keeps_page_alive_until_caller_finishes(self):
+        self.exercise("return {data:{status_code:0,data:{msg_id_str:'7560000000000000001',"
+                      "content_self_see_status:0}}};", hold_ack=True)
 
 
 if __name__ == "__main__":

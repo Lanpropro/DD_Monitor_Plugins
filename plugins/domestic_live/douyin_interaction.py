@@ -121,7 +121,7 @@ class DouyinAPI:
             progress("wait_ack")
             try:
                 if self.transport is not None:
-                    payload = self.transport(canonical, params, cancelled)
+                    payload = self.transport(canonical, dict(params, _sender_uid=str(account['uid'])), cancelled)
                 else:
                     # This GET is a write operation: no retries, redirects or alternate writes.
                     with session.get("https://live.douyin.com/webcast/room/chat/", params=params,

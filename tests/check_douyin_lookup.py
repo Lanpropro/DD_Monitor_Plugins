@@ -624,7 +624,7 @@ class LookupTests(unittest.TestCase):
                 module.time, 'monotonic', return_value=71):
             self.assertIn('hls1.test', provider.play_url('huya:123')[0])
 
-    def test_huya_player_failure_event_is_forwarded_only_while_loaded(self):
+    def test_huya_player_failure_event_is_independent_of_diagnostics_and_requires_context(self):
         plugin = module.LivePlatformsPlugin()
         provider = module.HuyaPlatform()
         plugin.context = SimpleNamespace(platform=lambda kind: provider)
@@ -635,6 +635,10 @@ class LookupTests(unittest.TestCase):
         self.assertIn('bad.test', provider._failed_cdns['huya:123'])
         provider._failed_cdns.clear()
         plugin._diagnostic_enabled = False
+        plugin.on_event(module.api.EVENT_STREAM_FAILED, payload)
+        self.assertIn('bad.test', provider._failed_cdns['huya:123'])
+        provider._failed_cdns.clear()
+        plugin.context = None
         plugin.on_event(module.api.EVENT_STREAM_FAILED, payload)
         self.assertFalse(provider._failed_cdns)
 

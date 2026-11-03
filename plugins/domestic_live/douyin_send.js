@@ -4,8 +4,25 @@ async (task, inspectClient) => {
     if (location.origin !== 'https://live.douyin.com' || location.pathname.replace(/\/$/, '') !== '/' + task.webRid)
         throw new Error('wrong_room_page');
     const deadline = Date.now() + 20000;
+    let contextSeen = false;
+    const contextReady = () => {
+        const store = window.__STORE__;
+        const room = store?.roomStore?.roomInfo?.roomId;
+        const uid = store?.userStore?.userInfo?.id_str;
+        if (!/^[1-9]\d{0,19}$/.test(String(room)) || !/^[1-9]\d{0,19}$/.test(String(uid))) return false;
+        if (String(room) !== task.roomId) throw new Error('wrong_room_session');
+        if (String(uid) !== task.senderUid) throw new Error('account_mismatch');
+        return true;
+    };
     while (Date.now() < deadline) {
         if (window.__ddmChatCancelled) throw new Error('cancelled_before_send');
+        window.__ddmChatStage = 'context';
+        if (!contextReady()) {
+            await new Promise(resolve => setTimeout(resolve, 150));
+            continue;
+        }
+        contextSeen = true;
+        window.__ddmChatStage = 'module';
         let require;
         const chunks = window.webpackChunkdouyin_live_v2;
         if (Array.isArray(chunks)) chunks.push([['ddm-chat-' + task.id], {}, r => { require = r; }]);
@@ -29,6 +46,8 @@ async (task, inspectClient) => {
             if (window.__ddmChatCancelled) throw new Error('cancelled_before_send');
             if (location.origin !== 'https://live.douyin.com' || location.pathname.replace(/\/$/, '') !== '/' + task.webRid)
                 throw new Error('wrong_room_page');
+            window.__ddmChatStage = 'context';
+            if (!contextReady()) throw new Error('official_context_not_ready');
             window.__ddmChatSubmitted = true;
             window.__ddmChatStage = 'request';
             // The official client supplies device data, SDK initialization and per-request signatures.
@@ -45,5 +64,5 @@ async (task, inspectClient) => {
         }
         await new Promise(resolve => setTimeout(resolve, 150));
     }
-    throw new Error('official_client_not_ready');
+    throw new Error(contextSeen ? 'official_client_not_ready' : 'official_context_not_ready');
 }
