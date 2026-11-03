@@ -461,6 +461,7 @@ class PlaybackProbe(QObject):
             for at, before, after in tuple(self.clock_gaps) if now - 1 <= at <= now]
         if self.audio is not None:
             result['audio_reads'] = self.audio.read_metrics.stats(now)
+            result['audio_pipeline'] = self.audio.timings.stats(now)
         result['source_pipelines'] = [dict(slot=slot, source_fps=decoder.fps,
             analysis_size=decoder.analysis_size, capture=decoder.timings.stats(now),
             display=decoder.pictures.timings.stats(now)) for slot, decoder in self.pipeline_sources]
@@ -482,12 +483,15 @@ class PlaybackProbe(QObject):
             write('start', schema=3, picture_code=hashlib.sha256(marshal.dumps(PictureReader.get.__code__)).hexdigest(),
                   capture_code=hashlib.sha256(marshal.dumps(Decoder._capture.__code__)).hexdigest(),
                   analysis_gray_code=hashlib.sha256(marshal.dumps(analysis_gray.__code__)).hexdigest(),
-                  audio_read_metrics=1, pts_gap_recovery=2)
+                  audio_read_metrics=1, pts_gap_recovery=2, stack_budget_window_s=60)
             sampled = 0
+            sample_window = time.perf_counter()
             last_stack = last_report = 0.0
             reported_stall = False
             while not self.stopped.wait(.05):
                 now = time.perf_counter()
+                if now - sample_window >= 60:
+                    sampled, sample_window = 0, now
                 # Coalesce rapid oscillations; preserve the transition target and timestamp.
                 if self.transitions:
                     transitions = []

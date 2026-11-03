@@ -64,7 +64,10 @@ def check(app, host, module):
              patch.object(module, 'resample_pcm', lambda data, frames: data), \
              patch.object(module, 'mix_pcm', lambda inputs, frames: output):
             sink.free, device.accepted = 480 * 4, 240 * 4
-            pump._fill()
+            with patch.object(pump, 'update_snapshot'):
+                pump.fill()
+            assert set(pump.timings.stats()['stages']) == {
+                'audio_lock_wait', 'audio_prepare', 'audio_mix', 'audio_device_write'}
             assert len(pump.read_metrics.samples) == 1
             assert abs(pump.read_metrics.previous[id(history)][2] - 490 / 48000 * .5) < 1e-9
             sink.free, device.accepted = 480 * 4, 0
@@ -77,15 +80,17 @@ def check(app, host, module):
             probe.audio = pump
             try:
                 assert probe.snapshot()['audio_reads'] == report
+                assert probe.snapshot()['audio_pipeline'] == pump.timings.stats()
             finally:
                 probe.deleteLater()
         pump.sink = pump.device = None
         pump.stop()
         assert not pump.read_metrics.samples and not pump.read_metrics.previous
+        assert not pump.timings.samples
         return dict(passed=True, media_playback=False, numeric_gap_and_overlap=True,
                     bounded_sources_and_samples=True, partial_and_rejected_write=True,
                     manual_channel_preserved=True, privacy=True, stop_reset=True,
-                    disabled_no_records=True, background_export=True)
+                    disabled_no_records=True, background_export=True, audio_stage_export=True)
     finally:
         pump.sink = pump.device = None
         pump.stop()

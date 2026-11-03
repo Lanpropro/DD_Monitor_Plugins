@@ -36,7 +36,7 @@ from .panels import ConsoleChannels, ConsoleChoice, ConsoleIconButton, ConsoleMo
 from .replay import ReplayBar, ReplayTimeline
 from .floating import FloatingCrop
 from .regions import match_regions
-from .diagnostics import AudioReadMetrics, PlaybackProbe
+from .diagnostics import AudioReadMetrics, PlaybackProbe, StageTimings
 
 COLORS = ("#38bdf8", "#fb7185", "#a78bfa", "#4ade80", "#fbbf24", "#fb923c")
 ROW_MIME = "application/x-ddm-match-sync-row"
@@ -412,6 +412,7 @@ class AudioPump(QObject):
         self.replay_offset = None
         self.replay_cursors = {}
         self.read_metrics = AudioReadMetrics()
+        self.timings = StageTimings()
         self.independent_histories = frozenset()
         self.timer = QTimer(self)
         self.timer.setInterval(10)
@@ -466,6 +467,7 @@ class AudioPump(QObject):
         self.clock_observation = self.clock_floor = None
         self.snapshot = (1.0, ())
         self.read_metrics.reset()
+        self.timings.samples.clear()
 
     def flush(self, target_clock=None):
         self.replay_offset = None
@@ -547,7 +549,9 @@ class AudioPump(QObject):
     def fill(self):
         if self.thread is None:
             self.update_snapshot()
+        started = time.perf_counter()
         with self.lock:
+            self.timings.record('audio_lock_wait', time.perf_counter() - started)
             self._fill()
 
     def _fill(self):
@@ -570,6 +574,7 @@ class AudioPump(QObject):
             clock = self.anchor + self.media_written + self.correction
             inputs = []
             positions = []
+            started = time.perf_counter()
             for history, shift, local_rate, channel, volume in sources:
                 target = clock + shift
                 cursor = self.replay_cursors.get(history) if self.replay_offset is not None or history in self.independent_histories else None
@@ -580,7 +585,13 @@ class AudioPump(QObject):
                 positions.append((history, target, source_frames))
                 pcm = route_pcm_s16_stereo(pcm, channel)
                 inputs.append((resample_pcm(pcm, frames), volume))
-            count = self.device.write(mix_pcm(inputs, frames))
+            self.timings.record('audio_prepare', time.perf_counter() - started)
+            started = time.perf_counter()
+            mixed = mix_pcm(inputs, frames)
+            self.timings.record('audio_mix', time.perf_counter() - started)
+            started = time.perf_counter()
+            count = self.device.write(mixed)
+            self.timings.record('audio_device_write', time.perf_counter() - started)
             if count <= 0:
                 break
             written = count // 4
