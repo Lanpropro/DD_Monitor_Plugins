@@ -26,11 +26,16 @@ from .diagnostics import FrameCadence, StageTimings
 class StreamInput:
     """Windows subprocess pipes advertise seek() but cannot actually seek."""
 
-    def __init__(self, pipe):
+    def __init__(self, pipe, on_first_read=None):
         self.pipe = pipe
+        self.on_first_read = on_first_read
 
     def read(self, size):
-        return self.pipe.read(size)
+        data = self.pipe.read(size)
+        if data and self.on_first_read is not None:
+            callback, self.on_first_read = self.on_first_read, None
+            callback()
+        return data
 
 
 _conversion = threading.local()

@@ -3,17 +3,132 @@ from collections import deque
 from contextlib import contextmanager
 from datetime import datetime
 import hashlib
+import io
 import json
 from logging.handlers import RotatingFileHandler
 import logging
 import marshal
 import os
+import re
 from pathlib import Path
 import sys
 import threading
 import time
 
 from PySide6.QtCore import QEvent, QObject, QTimer, Qt
+
+
+def stream_error_codes(message):
+    """Classify locally; never retain raw stderr, URLs, headers or exception text."""
+    text = message.lower()
+    codes = []
+    status = re.search(r'(?:http(?:/\d(?:\.\d)?| error)?|server returned)\s*[: ]\s*([45]\d{2})\b|\b([45]\d{2}) (?:client|server) error', text)
+    if status:
+        codes.append('http_' + (status[1] or status[2]))
+    for code, pattern in (
+            ('timeout', r'timed? out|timeout'),
+            ('dns', r'failed to resolve|name or service not known|temporary failure in name resolution'),
+            ('connection', r'connection (?:refused|reset)|network is unreachable|broken pipe'),
+            ('tls', r'tls|ssl|certificate verify failed'),
+            ('invalid_data', r'invalid data found|invalid nal|error while decoding'),
+            ('decoder', r'unknown decoder|decoder .*not found|unsupported codec'),
+            ('missing_audio', r'stream map .*0:a:0.*matches no streams'),
+            ('permission', r'permission denied|access is denied'),
+            ('memory', r'cannot allocate memory|out of memory')):
+        if re.search(pattern, text):
+            codes.append(code)
+    return codes
+
+
+class StreamAcquisition:
+    """Small per-attempt startup receipt, exported by the existing background probe."""
+    def __init__(self):
+        self.enabled = os.environ.get('DDM_MATCH_DIAGNOSTICS', '1') != '0'
+        self.lock = threading.Lock()
+        self.started = None
+        self.state = {}
+        self.milestones = {}
+        self.errors = deque(maxlen=8)
+        self.previous = None
+
+    def begin(self, attempt):
+        if not self.enabled:
+            return
+        with self.lock:
+            if self.state:
+                self.previous = self._receipt()
+            self.started = time.perf_counter()
+            self.state = dict(attempt=attempt, phase='resolve')
+            self.milestones = {}
+            self.errors.clear()
+
+    def phase(self, name):
+        if self.enabled:
+            with self.lock:
+                self.state['phase'] = name
+
+    def mark(self, name):
+        if not self.enabled or self.started is None or name in self.milestones:
+            return
+        with self.lock:
+            self.milestones.setdefault(name, round((time.perf_counter() - self.started) * 1000, 3))
+
+    def error(self, error):
+        if not self.enabled:
+            return
+        self.stderr(str(error))
+        kind = type(error).__name__
+        if kind not in ('TimeoutError', 'ConnectionError', 'PermissionError', 'FileNotFoundError',
+                        'OSError', 'HTTPError', 'InvalidDataError', 'FFmpegError', 'ValueError', 'RuntimeError'):
+            kind = 'other'
+        with self.lock:
+            self.state.update(error_phase=self.state.get('phase'), error_kind=kind)
+
+    def stderr(self, text):
+        if self.enabled:
+            codes = stream_error_codes(text)
+            with self.lock:
+                for code in codes:
+                    if code not in self.errors:
+                        self.errors.append(code)
+
+    def read_stderr(self, pipe):
+        try:
+            with io.BufferedReader(pipe, buffer_size=4096) as reader:
+                while chunk := reader.readline(4096):
+                    self.stderr(chunk.decode('utf-8', errors='replace'))
+        except (OSError, ValueError):
+            pass  # The capture worker may close its pipe during cancellation.
+
+    def exited(self, code):
+        if self.enabled:
+            with self.lock:
+                self.state['ffmpeg_exit_code'] = code
+            self.mark('ffmpeg_exited')
+
+    def finish(self, outcome):
+        if self.enabled:
+            self.mark('finished')
+            with self.lock:
+                self.state.update(outcome=outcome, phase='cancelled' if outcome == 'cancelled' else 'retry_wait')
+
+    def _receipt(self):
+        return dict(self.state, milestones_ms=dict(self.milestones), error_codes=list(self.errors))
+
+    def snapshot(self):
+        if not self.enabled:
+            return {}
+        if not self.lock.acquire(blocking=False):
+            return dict(busy=True)
+        try:
+            result = self._receipt()
+            if self.started is not None:
+                result['elapsed_ms'] = round((time.perf_counter() - self.started) * 1000, 3)
+            if self.previous is not None:
+                result['previous_attempt'] = self.previous
+            return result
+        finally:
+            self.lock.release()
 
 
 class FrameCadence:
@@ -464,7 +579,9 @@ class PlaybackProbe(QObject):
             result['audio_pipeline'] = self.audio.timings.stats(now)
         result['source_pipelines'] = [dict(slot=slot, source_fps=decoder.fps,
             analysis_size=decoder.analysis_size, capture=decoder.timings.stats(now),
-            display=decoder.pictures.timings.stats(now)) for slot, decoder in self.pipeline_sources]
+            display=decoder.pictures.timings.stats(now),
+            acquisition=decoder.acquisition.snapshot() if hasattr(decoder, 'acquisition') else {})
+            for slot, decoder in self.pipeline_sources]
         if frame is not None:
             result['picture'] = picture_state(*frame)
         return result
@@ -483,7 +600,7 @@ class PlaybackProbe(QObject):
             write('start', schema=3, picture_code=hashlib.sha256(marshal.dumps(PictureReader.get.__code__)).hexdigest(),
                   capture_code=hashlib.sha256(marshal.dumps(Decoder._capture.__code__)).hexdigest(),
                   analysis_gray_code=hashlib.sha256(marshal.dumps(analysis_gray.__code__)).hexdigest(),
-                  audio_read_metrics=1, pts_gap_recovery=2, stack_budget_window_s=60)
+                  audio_read_metrics=1, pts_gap_recovery=2, stack_budget_window_s=60, stream_acquisition=1)
             sampled = 0
             sample_window = time.perf_counter()
             last_stack = last_report = 0.0
