@@ -106,9 +106,17 @@ def check(app, host, module, output=None):
             background = face.pixelColor(round(6 * scale), round(6 * scale))
             assert background.blue() - background.red() <= 10, 'Click focus must not leave an inactive channel blue'
             row.channel.right.click()
-            assert row.channel.currentData() == 4 and row.channel.right.isChecked(), 'Retain an output side'
+            assert not row.channel.left.isChecked() and not row.channel.right.isChecked()
+            assert not row.audible.isChecked() and not row.preferences()['audible']
             row.channel.left.click()
+            assert row.channel.currentData() == 3 and row.audible.isChecked()
+            assert row.channel.left.isChecked() and not row.channel.right.isChecked()
+            row.channel.right.click()
             assert row.channel.currentData() == 0
+            row.audible.setChecked(False)
+            assert not row.channel.left.isChecked() and not row.channel.right.isChecked()
+            row.audible.setChecked(True)
+            assert row.channel.left.isChecked() and row.channel.right.isChecked()
             wheel = QWheelEvent(QPointF(10, 10), QPointF(row.channel.mapToGlobal(QPoint(10, 10))),
                                 QPoint(), QPoint(0, -120), Qt.NoButton, Qt.NoModifier, Qt.ScrollUpdate, False)
             app.sendEvent(row.channel, wheel)
@@ -253,7 +261,7 @@ def check(app, host, module, output=None):
                         fixed_height_five_sources=True, horizontal_palette=True,
                         native_host_icons=True, no_focus_border=True, first_popup_sized=True,
                         expandable_hint_buttons=True, completion_cooldown=True, stable_hint_expansion=True,
-                        direct_channels=True, independent_sound_group=True, channel_faces=True,
+                        direct_channels=True, channels_mute_linked=True, independent_sound_group=True, channel_faces=True,
                         state_only_channel_blue=True, no_focus_tint=True,
                         media_playback=False)
         finally:

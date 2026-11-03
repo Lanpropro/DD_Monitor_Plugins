@@ -11,6 +11,7 @@ from ddm import theme
 from .engine import RATE
 from .panels import ConsoleIconButton
 from .replay_cache import REPLAY_SECONDS
+from .replay_preview import ReplayPreview
 
 
 class ReplayTimeline:
@@ -113,12 +114,16 @@ class ReplayTimeline:
 
 
 class TimelineSlider(QSlider):
+    dragging = False
+
     def position_value(self, event):
         return QStyle.sliderValueFromPosition(self.minimum(), self.maximum(),
             round(event.position().x()), max(1, self.width() - 1))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
+            self.dragging = False
+            self.press_x = event.position().x()
             self.setSliderDown(True)
             self.setValue(self.position_value(event))
             self.sliderMoved.emit(self.value())
@@ -128,6 +133,7 @@ class TimelineSlider(QSlider):
 
     def mouseMoveEvent(self, event):
         if self.isSliderDown():
+            self.dragging |= abs(event.position().x() - self.press_x) >= 3
             self.setValue(self.position_value(event))
             self.sliderMoved.emit(self.value())
             event.accept()
@@ -138,6 +144,7 @@ class TimelineSlider(QSlider):
         if event.button() == Qt.LeftButton and self.isSliderDown():
             self.setValue(self.position_value(event))
             self.setSliderDown(False)
+            self.dragging = False
             event.accept()
         else:
             super().mouseReleaseEvent(event)
@@ -230,6 +237,8 @@ class ReplayBar(QWidget):
         self.viewer = viewer
         self.setFixedHeight(26)
         self.window_start = self.edit_origin = 0.0
+        self.drag_origin = None
+        self.preview = ReplayPreview(viewer)
         self.last_update = 0.0
         centered = QHBoxLayout(slot)
         centered.setContentsMargins(0, 0, 0, 0)
@@ -245,6 +254,7 @@ class ReplayBar(QWidget):
         track.setContentsMargins(0, 0, 0, 0)
         track.setSpacing(0)
         self.slider = TimelineSlider(Qt.Horizontal)
+        self.slider.sliderPressed.connect(self.begin_drag)
         self.slider.setMinimumWidth(0)
         self.slider.setFixedHeight(12)
         self.slider.setSingleStep(1000)
@@ -310,17 +320,31 @@ class ReplayBar(QWidget):
         seconds = max(0, int(seconds))
         return f'{seconds // 60:02d}:{seconds % 60:02d}'
 
+    def begin_drag(self):
+        self.drag_origin = self.window_start
+
     def seek(self):
-        self.seek_elapsed(self.slider.value() / 1000)
+        self.seek_elapsed(self.slider.value() / 1000, self.drag_origin)
+        self.drag_origin = None
 
     def seek_elapsed(self, seconds, origin=None):
         self.details.hide()
+        self.preview.dismiss()
         if seconds * 1000 >= self.slider.maximum() - 200:
             self.viewer.return_live()
         else:
             self.viewer.seek_replay((self.window_start if origin is None else origin) + seconds)
 
+    def show_preview(self, seconds, origin=None):
+        if not self.slider.isSliderDown() or not self.slider.dragging:
+            self.preview.dismiss()
+            return
+        stamp = (self.window_start if origin is None else origin) + seconds
+        self.preview.show_target(stamp, f'{self.format_time(seconds)} / {self.format_time(self.slider.maximum() / 1000)}')
+
     def preview_elapsed(self, seconds):
+        origin = self.time_edit._drag_origin if self.time_edit.scrubbing else self.drag_origin
+        self.show_preview(seconds, origin)
         self.time_edit.setText(self.format_time(seconds))
         self.slider.setValue(round(seconds * 1000))
         whole, millis = divmod(round(seconds * 1000), 1000)
@@ -371,6 +395,8 @@ class ReplayBar(QWidget):
         self.window_start = bounds[0] if bounds else now
         duration = min(REPLAY_SECONDS, max(0, now - self.window_start)) if bounds else 0
         enabled = duration > .5 and self.viewer.running
+        if not enabled:
+            self.preview.dismiss()
         self.slider.setEnabled(enabled)
         self.time_edit.setEnabled(enabled)
         self.back.setEnabled(timeline.active)
@@ -386,4 +412,5 @@ class ReplayBar(QWidget):
 
     def hideEvent(self, event):
         self.details.hide()
+        self.preview.dismiss()
         super().hideEvent(event)
