@@ -241,3 +241,11 @@ Qt 6.11.2 上 `selfcheck_match_sync_retry_rows.py` 的离屏全屏窗口退出�
 ### 回看目标缩略图
 
 `python tests/check_match_sync_replay_preview.py --host <宿主目录> --output <证据目录>` 检查本地 H.264 缓存的实际目标图像、历史偏移、悬停／按下不预览、拖动才预览、拖动时基准固定、设置与播放几何比例一致、拖拽改尺寸及双击恢复、设置保存及停止清理。使用隔离配置且禁网；结果仅为功能回归，不代表真实直播性能。
+
+### 回看预览真实采集
+
+`check_match_sync_preview_metrics.py --host <宿主目录>` 仅检查预览数值生命周期、非等待快照、导出隐私与禁用，不播放媒体。`check_match_sync_replay_preview.py` 的H.264夹具仅验证功能，不能作为真实性能结论。
+
+重新从根 `run.cmd` 加载后，在原直播场景依次观察不拖动、缓慢拖动、快速往返拖动及反复返回相同位置；各阶段约15秒。正常停止后保留 `logs/match-playback.jsonl` 及轮转。日志头 `replay_preview_metrics=1` 表示新采集有效；`playback.replay_preview` 与同记录的主画面、音频和进程CPU对应。
+
+`gui` 为最近一秒的目标查询、请求到提交/取图/绘制及get调用墙钟耗时；`worker_pipeline` 为独立预览线程的等候、读包、解码与缩图阶段。`targets/submissions/superseded/dismissed_pending/images_ready/images_painted` 为窗口累计数，`request_age_ms` 显示未出图目标的等待，`frame_error_ms` 为请求帧与返回帧的时间差。`thread_cpu_total_ms` 仅计Python预览工作线程的累计CPU，不包括FFmpeg内部辅助线程，也不包括等待时间；需结合进程CPU变化分析，不能直接等同预览总CPU。所有信息只含数值与有限状态；导出线程不调用QWidget或等待媒体锁。

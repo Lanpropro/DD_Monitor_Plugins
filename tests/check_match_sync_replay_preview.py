@@ -102,6 +102,12 @@ def check(app, host, module, output=None):
             assert first.red() > 160 and first.green() < 10
             second = wait_image(5)
             assert second.green() > 160 and second.red() < 10
+            evidence = viewer.playback_probe.snapshot()['replay_preview']
+            assert evidence['targets'] >= 2 and evidence['images_ready'] >= 2
+            assert evidence['request_to_image_ms'] is not None and not evidence['pending']
+            assert evidence['codec_creations'] >= 1 and evidence['rgb_count'] > 0
+            assert evidence['thread_cpu_total_ms'] >= 0
+            assert preview.reader.thread.name == 'match-sync-preview'
             assert viewer.replay.delay == delay
             assert decoder.pictures.target is live_target, 'Preview must not seek the main reader'
             assert preview.x() < 32 and preview.geometry().bottom() < viewer.picture.video.height()
@@ -179,7 +185,7 @@ def check(app, host, module, output=None):
             return dict(passed=True, real_cached_h264=True, thumbnail_width=360,
                         historical_offset=True, hover_does_not_open=True, drag_only=True, settings_ratio_matches=True, drag_origin_frozen=True,
                         main_reader_untouched=True, sizes_persisted=True, stop_cleanup=True,
-                        real_network_requests=0)
+                        real_network_requests=0, preview_metrics=True)
         finally:
             viewer.close()
             decoder.stop()

@@ -1721,6 +1721,7 @@ class Viewer(QDialog):
         self.render_timer.setInterval(33)
         self.render_timer.timeout.connect(self.render)
         self.playback_probe = PlaybackProbe(self, Path(config_module.REPO) / 'logs' / 'match-playback.jsonl')
+        self.playback_probe.preview = self.replay_bar.preview.metrics
         self.playback_probe.audio = self.audio
         self.canvas.paint_probe = self.playback_probe
         self.match_timer = QTimer(self)

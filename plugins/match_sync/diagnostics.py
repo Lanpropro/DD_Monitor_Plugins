@@ -192,6 +192,80 @@ class StageTimings:
                     and samples[0][0] >= now - 1), stages=result)
 
 
+class PreviewMetrics:
+    """Numeric preview lifecycle; the background exporter never accesses widgets."""
+    def __init__(self):
+        self.timings = StageTimings()
+        self.reader = None
+        self.requested_at = None
+        self.submitted = self.image_ready = self.image_painted = False
+        self.state = dict(active=False, pending=False, targets=0, submissions=0,
+                          superseded=0, dismissed_pending=0, images_ready=0, images_painted=0)
+
+    def request(self):
+        if not self.timings.enabled:
+            return
+        self.requested_at = time.perf_counter()
+        self.submitted = self.image_ready = self.image_painted = False
+        self.state = dict(self.state, active=True, pending=True,
+                          targets=self.state['targets'] + 1,
+                          superseded=self.state['superseded'] + int(self.state['pending']),
+                          request_to_image_ms=None, request_to_paint_ms=None)
+
+    def submit(self):
+        if self.requested_at is not None and not self.submitted:
+            self.submitted = True
+            self.timings.record('preview_request_to_submit', time.perf_counter() - self.requested_at)
+            self.state = dict(self.state, submissions=self.state['submissions'] + 1)
+
+    def ready(self, frame_error):
+        if self.requested_at is not None and not self.image_ready:
+            self.image_ready = True
+            elapsed = time.perf_counter() - self.requested_at
+            self.timings.record('preview_request_to_image', elapsed)
+            self.state = dict(self.state, pending=False, images_ready=self.state['images_ready'] + 1,
+                              request_to_image_ms=round(elapsed * 1000, 3),
+                              frame_error_ms=round(frame_error * 1000, 3))
+
+    def paint(self):
+        if self.image_ready and not self.image_painted:
+            self.image_painted = True
+            elapsed = time.perf_counter() - self.requested_at
+            self.timings.record('preview_request_to_paint', elapsed)
+            self.state = dict(self.state, images_painted=self.state['images_painted'] + 1,
+                              request_to_paint_ms=round(elapsed * 1000, 3))
+
+    def dismiss(self):
+        if not self.timings.enabled:
+            return
+        self.requested_at = None
+        self.submitted = self.image_ready = self.image_painted = False
+        self.state = dict(self.state, active=False, pending=False,
+                          dismissed_pending=self.state['dismissed_pending'] + int(self.state['pending']))
+
+    def snapshot(self, now):
+        if not self.timings.enabled:
+            return {}
+        result = dict(self.state, gui=self.timings.stats(now))
+        requested_at = self.requested_at
+        result['request_age_ms'] = round(max(0, now - requested_at) * 1000, 3) if requested_at is not None else None
+        reader = self.reader
+        if reader is not None:
+            result['worker_pipeline'] = reader.timings.stats(now)
+            result['thread_cpu_total_ms'] = round(reader.thread_cpu_s * 1000, 3)
+            if reader.lock.acquire(blocking=False):
+                try:
+                    result.update(worker_active=reader.active, decode_phase=reader.decode_phase,
+                                  codec_creations=reader.codec_creations, reset_reason=reader.reset_reason,
+                                  rgb_count=len(reader.images),
+                                  rgb_bytes=sum(image.sizeInBytes() for image in reader.images.values()))
+                finally:
+                    reader.lock.release()
+            else:
+                result['worker_busy'] = True
+        return result
+
+
 class AudioReadMetrics:
     """Numeric PCM read continuity; no audio content or sound-quality score."""
     def __init__(self):
@@ -476,6 +550,7 @@ class PlaybackProbe(QObject):
         self.clock_steps = FrameCadence()
         self.surface = {}
         self.pipeline_sources = ()
+        self.preview = None
         self.clock_gaps = deque(maxlen=32)
         self.timings = StageTimings()
         self.cpu_observation = (time.perf_counter(), time.process_time())
@@ -572,6 +647,8 @@ class PlaybackProbe(QObject):
                       painted_cadence=self.painted.stats(now, fps), clock_cadence=self.clock_steps.stats(now))
         result['process_cpu_cores'] = round((cpu - previous_cpu) / max(.001, now - previous_wall), 3)
         result['gui_pipeline'] = self.timings.stats(now)
+        if self.preview is not None:
+            result['replay_preview'] = self.preview.snapshot(now)
         result['clock_gap_recoveries'] = [dict(at=at, before=before, after=after)
             for at, before, after in tuple(self.clock_gaps) if now - 1 <= at <= now]
         if self.audio is not None:
@@ -600,7 +677,8 @@ class PlaybackProbe(QObject):
             write('start', schema=3, picture_code=hashlib.sha256(marshal.dumps(PictureReader.get.__code__)).hexdigest(),
                   capture_code=hashlib.sha256(marshal.dumps(Decoder._capture.__code__)).hexdigest(),
                   analysis_gray_code=hashlib.sha256(marshal.dumps(analysis_gray.__code__)).hexdigest(),
-                  audio_read_metrics=1, pts_gap_recovery=2, stack_budget_window_s=60, stream_acquisition=1)
+                  audio_read_metrics=1, pts_gap_recovery=2, stack_budget_window_s=60, stream_acquisition=1,
+                  replay_preview_metrics=1)
             sampled = 0
             sample_window = time.perf_counter()
             last_stack = last_report = 0.0

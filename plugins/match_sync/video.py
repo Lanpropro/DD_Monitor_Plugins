@@ -298,6 +298,8 @@ class PictureReader:
         self.codec_creations = 0
         self.reset_reason = 'initial'
         self.decode_phase = 'idle'
+        self.thread_cpu_s = 0.
+        self.preview_request = self.preview_started_request = None
 
     def configure(self, byte_limit, fps, lead=.35, active=True):
         with self.lock:
@@ -333,6 +335,8 @@ class PictureReader:
             self.requested = now
             cached_backward = frame[0] in self.images and self.target is not None and frame[0] < self.target[0]
             if not cached_backward and (frame != self.target or frame[0] not in self.images):
+                if self.thumbnail_width is not None and self.timings.enabled and frame != self.target:
+                    self.preview_request = (frame, time.perf_counter())
                 # A delayed GUI poll advances with elapsed playback time; it is
                 # not a seek and must not restart decoding from a keyframe.
                 if self.target is not None and (frame[1] < self.target[1] - .05 or frame[1] > self.target[1] + elapsed + .5):
@@ -341,7 +345,8 @@ class PictureReader:
                 self.target = frame
                 self.wake.set()
             if self.thread is None and not self.cancelled.is_set():
-                self.thread = threading.Thread(target=self._run, name="match-sync-picture", daemon=True)
+                self.thread = threading.Thread(target=self._run,
+                    name="match-sync-preview" if self.thumbnail_width is not None else "match-sync-picture", daemon=True)
                 self.thread.start()
             image = self.images.get(frame[0])
             if image is None and not exact:
@@ -357,6 +362,7 @@ class PictureReader:
         sequence = None
         decoded_until = None
         capacity = 8
+        cpu_started = time.thread_time() if self.thumbnail_width is not None and self.timings.enabled else None
         try:
             while not self.cancelled.is_set():
                 self.decode_phase = 'idle'
@@ -377,6 +383,10 @@ class PictureReader:
                         codec = owner = sequence = decoded_until = None
                         continue
                     history, (timestamp, target) = self.history, self.target
+                    request = self.preview_request
+                    if request is not None and request is not self.preview_started_request:
+                        self.preview_started_request = request
+                        self.timings.record('preview_worker_wait', time.perf_counter() - request[1])
                 if owner is not history:
                     codec = sequence = decoded_until = None
                     with self.lock:
@@ -444,9 +454,13 @@ class PictureReader:
                             self.decoded_cadence.record(time.perf_counter(), key)
                         complete = pts >= horizon
                     self.decode_ms = (time.perf_counter() - started) * 1000
+                    if cpu_started is not None:
+                        self.thread_cpu_s = time.thread_time() - cpu_started
                     if complete:
                         break
         finally:
+            if cpu_started is not None:
+                self.thread_cpu_s = time.thread_time() - cpu_started
             self.decode_phase = 'stopped'
             with self.lock:
                 self.images.clear()
