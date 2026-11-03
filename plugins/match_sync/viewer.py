@@ -1438,6 +1438,13 @@ class Viewer(QDialog):
         self.crop_quality.setAccessibleName('画中画画质')
         self.crop_quality.hide()
         self.crop_quality.currentIndexChanged.connect(self._crop_quality_changed)
+        self.record_format = QComboBox(self)
+        self.record_format.addItem('MKV', 'mkv')
+        self.record_format.addItem('MP4', 'mp4')
+        self.record_format.setCurrentIndex(max(0, self.record_format.findData(context.setting('record_format', 'mkv'))))
+        self.record_format.setAccessibleName('录制格式')
+        self.record_format.hide()
+        self.record_format.currentIndexChanged.connect(self.save)
         self.crop_repaint_regions = {}
         self.crop_repaint_timer = QTimer(self)
         self.crop_repaint_timer.setSingleShot(True)
@@ -2329,6 +2336,7 @@ class Viewer(QDialog):
         self.context.set_setting("automatic", self.automatic.isChecked())
         self.context.set_setting('buffer_reserve', self.reserve_seconds)
         self.context.set_setting('crop_quality', self.crop_quality.currentData())
+        self.context.set_setting('record_format', self.record_format.currentData())
 
     def _crop_source_policy(self, row):
         if row.room_id not in self.floating_crops:
@@ -2809,7 +2817,7 @@ class Viewer(QDialog):
             if shutil.disk_usage(folder).free < minimum:
                 self.notice.setText('录制未开始：保存目录所在磁盘剩余空间不足')
                 return
-            path = folder / f'match_sync_{time.strftime("%Y%m%d_%H%M%S")}_{time.time_ns() % 1000000000:09d}.mkv'
+            path = folder / f'match_sync_{time.strftime("%Y%m%d_%H%M%S")}_{time.time_ns() % 1000000000:09d}.{self.record_format.currentData()}'
             worker = MultiTrackRecorder(path, history, tracks, self._recording_snapshot(), minimum_free=minimum)
         except (OSError, ValueError) as error:
             self.notice.setText(f'无法开始分音轨录制：{error}')

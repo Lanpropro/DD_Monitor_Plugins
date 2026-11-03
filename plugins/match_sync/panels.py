@@ -361,6 +361,8 @@ class MatchSettingsDialog(QDialog):
         form = QFormLayout()
         form.addRow('缓存余量', viewer.buffer_reserve)
         form.addRow('画中画画质', viewer.crop_quality)
+        form.addRow('录制格式', viewer.record_format)
+        viewer.record_format.show()
         viewer.crop_quality.show()
         layout.addLayout(form)
         note = QLabel('自动对齐和对照微调保留在外部控制栏。\n重放最多回看十分钟，实际范围取主画面可用缓存。')
@@ -374,6 +376,9 @@ class MatchSettingsDialog(QDialog):
         self.quality_status = QLabel()
         self.quality_status.setWordWrap(True)
         layout.addWidget(self.quality_status)
+        format_note = QLabel('MKV：适合长时间录制。MP4：便于播放和剪辑，需正常停止录制以完成文件。')
+        format_note.setWordWrap(True)
+        layout.addWidget(format_note)
         layout.addWidget(QLabel('录制音轨'))
         routing_note = QLabel('每路可选 1～6 中的一条或多条；同一音轨混合所选来源。\n'
                               '不勾选则不录该路声音。收听音量、静音和 L/R 不影响录制。\n'
@@ -442,6 +447,7 @@ class MatchSettingsDialog(QDialog):
             grid.setRowStretch(len(rooms), 1)
             self.recording_routes.setWidget(body)
         self.recording_routes.setEnabled(self.viewer.multi_recorder is None)
+        self.viewer.record_format.setEnabled(self.viewer.multi_recorder is None)
 
     def _record_tracks_changed(self, key):
         if key in self.viewer.rows and self.viewer.multi_recorder is None:

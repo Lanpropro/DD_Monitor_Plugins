@@ -27,7 +27,7 @@ class CacheMuxer:
         first = result[1][0]
         self.start = self.origin + float((first.dts if first.dts is not None else first.pts) * first.time_base)
         try:
-            self.output = av.open(str(path), 'w', format='matroska')
+            self.output = av.open(str(path), 'w', format='mp4' if Path(path).suffix.lower() == '.mp4' else 'matroska')
             with history.lock:
                 if history.stream_template is None:
                     raise ValueError('Main stream is reconnecting; retry after video resumes')
@@ -39,6 +39,7 @@ class CacheMuxer:
                 stream.bit_rate = 192000
                 stream.metadata['title'] = f'音轨 {number} · {label}'
                 stream.metadata['DDM_TRACK_NUMBER'] = str(number)
+                stream.metadata['handler_name'] = f'音轨 {number} · {label}'
                 self.audio.append(stream)
         except Exception:
             self.close()
