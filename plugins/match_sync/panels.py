@@ -1,7 +1,7 @@
 """Shared appearance of the playback and sending consoles."""
 import ctypes
 import sys
-from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGridLayout, QHBoxLayout, QLabel, QListView, QPushButton, QScrollArea, QStyledItemDelegate, QStyle, QToolTip, QVBoxLayout, QWidget
 
@@ -265,9 +265,12 @@ class ColorSwatchDelegate(QStyledItemDelegate):
 
 
 class ConsoleChannels(QComboBox):
-    """Direct L/R buttons backed by the existing saved channel values and signals."""
+    """Direct L/R buttons backed by the existing saved channel values and mute."""
+    audibleChanged = Signal(bool)
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.audible = True
         self.setFixedSize(62, 32)
         self.setFocusPolicy(Qt.NoFocus)
         for label, value in (('原始声道', 0), ('仅左输出', 3), ('仅右输出', 4)):
@@ -282,21 +285,28 @@ class ConsoleChannels(QComboBox):
             button.setCheckable(True)
             button.setStyleSheet(button.styleSheet() + f'''
                 QPushButton:!checked:hover {{background: {theme.CONTENT_HOVER};}}''')
-            button.clicked.connect(lambda _checked=False, b=button: self._clicked(b))
+            button.clicked.connect(self._clicked)
             layout.addWidget(button)
         use_link_cursor(self)
         self.currentIndexChanged.connect(self._sync_buttons)
         self._sync_buttons()
 
     def _sync_buttons(self, *_args):
-        self.left.setChecked(self.currentData() in (0, 3))
-        self.right.setChecked(self.currentData() in (0, 4))
+        self.left.setChecked(self.audible and self.currentData() in (0, 3))
+        self.right.setChecked(self.audible and self.currentData() in (0, 4))
 
-    def _clicked(self, button):
-        if not self.left.isChecked() and not self.right.isChecked():
-            button.setChecked(True)
-        value = 0 if self.left.isChecked() and self.right.isChecked() else 3 if self.left.isChecked() else 4
-        self.setCurrentIndex(self.findData(value))
+    def set_audible(self, enabled):
+        self.audible = enabled
+        self._sync_buttons()
+
+    def _clicked(self, _checked=False):
+        enabled = self.left.isChecked() or self.right.isChecked()
+        if enabled:
+            value = 0 if self.left.isChecked() and self.right.isChecked() else 3 if self.left.isChecked() else 4
+            self.audible = True
+            self.setCurrentIndex(self.findData(value))
+        self.set_audible(enabled)
+        self.audibleChanged.emit(enabled)
 
     def showPopup(self):
         pass
@@ -356,35 +366,47 @@ class MatchSettingsDialog(QDialog):
         self.viewer = viewer
         self.setAttribute(Qt.WA_DontShowOnScreen, viewer.testAttribute(Qt.WA_DontShowOnScreen))
         self.setWindowTitle('比赛二路设置')
-        self.setMinimumWidth(340)
+        self.setMinimumSize(840, 580)
+        self.resize(1040, 720)
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 16)
+        layout.setSpacing(16)
+        upper = QHBoxLayout()
+        upper.setSpacing(24)
+        preview_column = QVBoxLayout()
+        preview_column.setSpacing(8)
+        preview_column.addWidget(QLabel('回看预览大小'))
+        from .replay_preview import PreviewSizePicker
+        self.preview_sizes = PreviewSizePicker(viewer, self)
+        self.preview_sizes.changed.connect(self._preview_size_changed)
+        preview_column.addWidget(self.preview_sizes, 1)
+        upper.addLayout(preview_column, 3)
+        options_column = QVBoxLayout()
+        options_column.setSpacing(12)
+        options_column.addWidget(QLabel('播放与画质'))
         form = QFormLayout()
+        form.setVerticalSpacing(16)
         form.addRow('缓存余量', viewer.buffer_reserve)
         form.addRow('画中画画质', viewer.crop_quality)
         viewer.crop_quality.show()
-        layout.addLayout(form)
-        note = QLabel('自动对齐和对照微调保留在外部控制栏。\n重放最多回看十分钟，实际范围取主画面可用缓存。')
-        note.setWordWrap(True)
-        layout.addWidget(note)
-        quality_note = QLabel('两种模式共用来源，副路优先720P，否则使用中间档；主画面不降档。\n'
-                              '轻量增强只处理摄像头选区，切换模式不重连来源。\n'
-                              '持续处理跟不上时保持普通缩放；切换到流畅优先后再选轻量增强可重试。')
-        quality_note.setWordWrap(True)
-        layout.addWidget(quality_note)
+        options_column.addLayout(form)
         self.quality_status = QLabel()
         self.quality_status.setWordWrap(True)
-        layout.addWidget(self.quality_status)
-        layout.addWidget(QLabel('录制音轨'))
-        routing_note = QLabel('每路可选 1～6 中的一条或多条；同一音轨混合所选来源。\n'
-                              '不勾选则不录该路声音。收听音量、静音和 L/R 不影响录制。\n'
-                              '录制期间音轨固定；添加、移除或切换主画面、跳转回看会结束当前文件。')
-        routing_note.setWordWrap(True)
-        layout.addWidget(routing_note)
+        options_column.addWidget(self.quality_status)
+        options_column.addStretch(1)
+        upper.addLayout(options_column, 2)
+        layout.addLayout(upper, 3)
+        recording_header = QHBoxLayout()
+        recording_header.addWidget(QLabel('录制音轨'))
+        recording_header.addStretch(1)
+        recording_header.addWidget(QLabel('录制格式'))
+        viewer.record_format.show()
+        recording_header.addWidget(viewer.record_format)
+        layout.addLayout(recording_header)
         self.recording_routes = QScrollArea()
         self.recording_routes.setWidgetResizable(True)
-        self.recording_routes.setMaximumHeight(240)
-        self.recording_routes.setMinimumHeight(80)
-        layout.addWidget(self.recording_routes)
+        self.recording_routes.setMinimumHeight(140)
+        layout.addWidget(self.recording_routes, 2)
         self.track_checks = {}
         self._recording_rooms = None
         self.refresh_recording_routes()
@@ -395,6 +417,11 @@ class MatchSettingsDialog(QDialog):
         close = QDialogButtonBox(QDialogButtonBox.Close)
         close.rejected.connect(self.close)
         layout.addWidget(close)
+
+    def _preview_size_changed(self, ratio):
+        self.viewer.replay_preview_ratio = ratio
+        self.viewer.replay_bar.preview.reposition()
+        self.viewer.changed()
 
     def refresh_quality_status(self):
         crops = list(self.viewer.floating_crops.values())
@@ -411,6 +438,7 @@ class MatchSettingsDialog(QDialog):
                               for crop in crops if crop.enhance_state == 'fallback'))
             suffix = f'（{detail}）' if detail else ''
             self.quality_status.setText(f'轻量增强：{enhanced} 路增强，{fallback} 路已回退{suffix}，{len(crops) - enhanced - fallback} 路准备中')
+        self.quality_status.setVisible(bool(self.quality_status.text()))
 
     def refresh_recording_routes(self):
         rooms = tuple((key, row.label()) for key, row in self.viewer.rows.items())
@@ -442,6 +470,7 @@ class MatchSettingsDialog(QDialog):
             grid.setRowStretch(len(rooms), 1)
             self.recording_routes.setWidget(body)
         self.recording_routes.setEnabled(self.viewer.multi_recorder is None)
+        self.viewer.record_format.setEnabled(self.viewer.multi_recorder is None)
 
     def _record_tracks_changed(self, key):
         if key in self.viewer.rows and self.viewer.multi_recorder is None:

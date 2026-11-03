@@ -1,4 +1,6 @@
 """Independent platform composers below the merged chat, one per live room."""
+import time
+
 from PySide6.QtCore import QEvent, QPointF, QPropertyAnimation, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QCursor, QFont, QImage, QPainter, QPalette, QPen, QTextCursor
 from PySide6.QtWidgets import (QApplication, QBoxLayout, QFrame, QHBoxLayout, QListView, QListWidget,
@@ -124,11 +126,10 @@ class SendingDanmakuPanel(DanmakuPanel):
         self._update_bottom_button()
         self.body._action_block = self.body.document().findBlockByNumber(index)
         self.body.viewport().update()
-        try:
-            self.viewer.send_console.show_chat_actions(self._blocks[index], position)
-        finally:
+        def finished():
             self.body._action_block = None
             self.body._hover_at(QPointF(self.body.viewport().mapFromGlobal(QCursor.pos())))
+        self.viewer.send_console.show_chat_actions(self._blocks[index], position, finished)
 
 
 class SendRow(QFrame):
@@ -351,20 +352,27 @@ class SendConsole(SettingsPanel):
         menu.layout().addWidget(save_button)
         return menu
 
-    def show_chat_actions(self, event, position):
+    def show_chat_actions(self, event, position, finished=None):
+        started = time.perf_counter()
         event = dict(event)
         text = str(event.get('text') or '')
         menu = self.create_chat_toolbar(event)
-        try:
-            chosen = menu.exec(position)
-            if chosen is menu.copy_action:
-                QApplication.clipboard().setText(text)
-            elif chosen is menu.save_action:
-                self.store_phrase(text)
-            elif chosen is menu.repeat_action and menu.repeat_action.isEnabled():
-                self.batch_panel.begin(text, event=event)
-        finally:
-            menu.deleteLater()
+        def complete(_result):
+            try:
+                if menu.chosen is menu.copy_action:
+                    QApplication.clipboard().setText(text)
+                elif menu.chosen is menu.save_action:
+                    self.store_phrase(text)
+                elif menu.chosen is menu.repeat_action and menu.repeat_action.isEnabled():
+                    self.batch_panel.begin(text, event=event)
+            finally:
+                if finished is not None:
+                    finished()
+                menu.deleteLater()
+        menu.finished.connect(complete)
+        menu.popup(position)
+        self.viewer.playback_probe.timings.record('chat_action_open', time.perf_counter() - started)
+        return menu
 
     def refresh_design(self):
         style = stylesheet()
@@ -620,6 +628,7 @@ class SendConsole(SettingsPanel):
                 item.setData(Qt.UserRole + 3, pixmap.cacheKey())
 
     def _room_checked(self, item):
+        started = time.perf_counter()
         key = item.data(Qt.UserRole)
         checked = item.checkState() == Qt.Checked
         if checked == (key in self.batch_targets):
@@ -634,6 +643,7 @@ class SendConsole(SettingsPanel):
             self.rooms.viewport().update()
         self.rooms.itemDelegate().animate(key, checked)
         self._update_selection()
+        self.viewer.playback_probe.timings.record('send_recipient_selection', time.perf_counter() - started)
 
     def _update_selection(self):
         keys = self.checked_rooms()

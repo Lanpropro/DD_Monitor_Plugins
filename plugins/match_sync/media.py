@@ -16,7 +16,7 @@ from ddm.auto_quality import AUTO_QUALITY
 from .engine import FPS, Sample, SIGNATURE_BITS, np
 from .video import av, VideoHistory, PictureReader, StreamInput, reformat_frame, recording_template
 from .replay_cache import CACHE_BYTES, CACHE_SECONDS
-from .diagnostics import FrameCadence, StageTimings
+from .diagnostics import FrameCadence, StageTimings, StreamAcquisition
 
 FRAME_TIMEOUT = 8.0
 
@@ -132,10 +132,12 @@ class Decoder:
         self.history = self._history()
         self.playback_timestamp = None
         self.pictures = PictureReader()
+        self.preview_frames = None
         self.video_size = (0, 0)
         self.last_frame_received = 0.0
         self.received_cadence = FrameCadence()
         self.timings = StageTimings()
+        self.acquisition = StreamAcquisition()
         self.crop = (0.0, 0.0, 1.0, 1.0)
         self.crop_generation = 0
         self.analysis_size = (640, 360)
@@ -203,9 +205,11 @@ class Decoder:
         if self.cancelled.is_set():
             raise bili.Cancelled()
         if self.seed.get("highest_quality") or self.seed.get("balanced_quality"):
+            self.acquisition.phase('quality_options')
             # The host lists tiers from highest to lowest; IDs are platform-specific.
             options = (self.platform.room_quality_options(self.room_id) if self.platform is not None
                        else bili.room_quality_options(self.room_id))
+            self.acquisition.mark('quality_options_ready')
             if self.cancelled.is_set():
                 raise bili.Cancelled()
             tiers = [item for item in options if int(item['qn']) != AUTO_QUALITY]
@@ -219,33 +223,44 @@ class Decoder:
         # Douyu signed addresses may allow only one consumer; do not reuse the wall's URL.
         reuse_seed = self.platform is None or self.platform.kind != "douyu"
         if attempt == 0 and self.seed.get("url") and reuse_seed:
+            self.acquisition.mark('seed_address')
             self.source_url = self.seed["url"]
             self.source_headers = dict(self.seed.get("headers") or {})
             self.events.information.emit({"uname": self.seed.get("uname") or "未命名主播",
                                           "title": self.seed.get("title") or ""})
             return self.seed["url"], dict(self.seed.get("headers") or {})
         if self.platform is not None:
+            self.acquisition.phase('room_info')
             info = self.platform.room_info(self.room_id)
+            self.acquisition.mark('room_info_ready')
             if self.cancelled.is_set():
                 raise bili.Cancelled()
             if info:
                 self.events.information.emit(info.as_dict())
+            self.acquisition.phase('play_url')
             result = self.platform.play_url(self.room_id, self.seed.get("quality", 10000))
+            self.acquisition.mark('play_url_ready')
             if self.cancelled.is_set():
                 raise bili.Cancelled()
             url, quality, _channel = result[:3]
             headers = dict(result[3]) if len(result) > 3 else {}
+            self.acquisition.phase('quality_metadata')
             self.events.information.emit({"actual_quality": quality,
                 "quality_options": self.platform.room_quality_options(self.room_id)})
+            self.acquisition.mark('quality_metadata_ready')
             self.source_url, self.source_headers = url, headers
             return url, headers
+        self.acquisition.phase('room_info')
         info = bili.room_info(self.room_id)
+        self.acquisition.mark('room_info_ready')
         if self.cancelled.is_set():
             raise bili.Cancelled()
         if info:
             self.events.information.emit(info)
+        self.acquisition.phase('play_url')
         url, quality, _profile, headers = bili.play_url(
             self.room_id, self.seed.get("quality", 250), cancelled=self.cancelled.is_set, source_offset=attempt)
+        self.acquisition.mark('play_url_ready')
         self.events.information.emit({"actual_quality": quality})
         self.source_url, self.source_headers = url, headers
         return url, headers
@@ -263,11 +278,15 @@ class Decoder:
             return
         attempt = 0
         while not self.cancelled.is_set():
+            self.acquisition.begin(attempt)
+            outcome = 'cancelled'
             self.events.state.emit("正在取流…" if attempt == 0 else "正在重新连接…")
             try:
                 url, headers = self._resolve(attempt)
+                self.acquisition.mark('resolved')
                 if self.cancelled.is_set():
                     return
+                self.acquisition.phase('capture_setup')
                 if attempt:
                     previous = (self.history.segment_at(self.playback_timestamp)
                                 if self.playback_timestamp is not None else None) or self.history
@@ -275,18 +294,23 @@ class Decoder:
                     self.history = self._history()
                     self.history.previous = previous
                     self.events.reset.emit()
-                self._capture(executable, url, headers)
+                outcome = self._capture(executable, url, headers) or 'eof'
             except bili.Cancelled:
                 return
-            except Exception:
+            except Exception as error:
+                outcome = 'cancelled' if self.cancelled.is_set() else 'error'
+                self.acquisition.error(error)
                 if not self.cancelled.is_set():
                     self.events.state.emit("连接或解码失败；稍后重试，可停止后重新开始")
+            finally:
+                self.acquisition.finish(outcome)
             if self.cancelled.wait(min(5, .5 + attempt * .5)):
                 break
             attempt += 1
 
-    def _capture(self, executable: str, url: str, headers: dict) -> None:
+    def _capture(self, executable: str, url: str, headers: dict) -> str:
         process = None
+        error_reader = None
         hls_proxy = None
         finished = threading.Event()
         timed_out = threading.Event()
@@ -314,12 +338,19 @@ class Decoder:
                 from ddm.hls_proxy import HlsProxy
                 hls_proxy = HlsProxy(url, headers, request_proxy(url))
                 url, headers = hls_proxy.url, {}
+            self.acquisition.phase('ffmpeg_start')
             process = subprocess.Popen(
                 decode_command(executable, url, headers, 0, self.seed.get("quality", 250),
                                hls_retry=hls_proxy is not None,
                                platform_kind=self.platform.kind if self.platform is not None else ""),
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE if self.acquisition.enabled else subprocess.DEVNULL, bufsize=0,
                 creationflags=recording._FFMPEG_FLAGS & ~0x00004000)
+            self.acquisition.mark('ffmpeg_started')
+            if self.acquisition.enabled:
+                error_reader = threading.Thread(target=self.acquisition.read_stderr,
+                    args=(process.stderr,), name='match-sync-input-errors', daemon=True)
+                error_reader.start()
             recording._adopt_process(process)
             # Playback retains the host's orphan-process job, at normal priority.
             kernel = getattr(recording, "_kernel32", None)
@@ -334,15 +365,18 @@ class Decoder:
                 self.process = process
             if self.cancelled.is_set():
                 process.terminate()
-                return
+                return 'cancelled'
             watchdog.start()
             next_sample = 0.0
             next_detail = 0.0
             next_region = next_region_large = 0.0
             with self.lock:
                 self.region_frames.clear()
-            with av.open(StreamInput(process.stdout), "r", format="nut",
+            self.acquisition.phase('input_open')
+            with av.open(StreamInput(process.stdout, lambda: self.acquisition.mark('first_byte')), "r", format="nut",
                          options={"probesize": "65536", "analyzeduration": "100000"}) as container, recording_template(self.history, container):
+                self.acquisition.mark('input_opened')
+                self.acquisition.phase('receive')
                 stream = container.streams.video[0]
                 stream.codec_context.thread_count = (4 if stream.width * stream.height >= 3840 * 2160 else 2)
                 stream.codec_context.thread_type = "AUTO"
@@ -352,6 +386,8 @@ class Decoder:
                     self.fps = float(rate)
                 reading = time.perf_counter()
                 for packet in container.demux():
+                    if packet.size:
+                        self.acquisition.mark('first_packet')
                     self.timings.record('input_wait', time.perf_counter() - reading)
                     if self.cancelled.is_set():
                         break
@@ -363,9 +399,11 @@ class Decoder:
                             if frame.pts is None:
                                 continue
                             pts = float(frame.pts * frame.time_base)
+                            self.acquisition.mark('first_audio_frame')
                             if self.history.origin is None:
                                 # Ignore an old cached video keyframe when anchoring live time.
                                 self.history.set_origin(time.monotonic() - pts)
+                                self.acquisition.mark('clock_anchored')
                                 self.events.state.emit("取流已连接")
                             started = time.perf_counter()
                             pcm = bytes(frame.planes[0])[:frame.samples * 4]
@@ -386,6 +424,7 @@ class Decoder:
                         pts = float(frame.pts * frame.time_base)
                         if abs(pts) > 1e9:
                             continue  # An invalid/missing source timestamp cannot establish time.
+                        self.acquisition.mark('first_video_frame')
                         timestamp = (self.history.origin or 0) + pts
                         self.received_cadence.record(time.perf_counter(), timestamp)
                         self.video_size = (frame.width, frame.height)
@@ -432,18 +471,30 @@ class Decoder:
                         else:
                             self.history.append(timestamp, pts, sample)
                         last_frame[0] = time.monotonic()
+                        previews = self.preview_frames
+                        if previews is not None:
+                            started = time.perf_counter()
+                            previews.submit(self, self.history, frame, pts)
+                            self.timings.record('preview_submit', time.perf_counter() - started)
                         self.last_frame_received = last_frame[0]
+                        self.acquisition.mark('first_cached_video')
                     reading = time.perf_counter()
             if not self.cancelled.is_set():
                 refresh = getattr(hls_proxy, "refresh_required", None)
                 self.events.state.emit("播放地址已失效，正在重新取流" if refresh is not None and refresh.is_set()
                                        else "画面接收超时，正在重新取流" if timed_out.is_set()
                                        else "直播流已结束或中断，正在重连")
+            refresh = getattr(hls_proxy, "refresh_required", None)
+            return ('cancelled' if self.cancelled.is_set() else
+                    'url_expired' if refresh is not None and refresh.is_set() else
+                    'frame_timeout' if timed_out.is_set() else 'eof')
         except Exception:
             if timed_out.is_set() and not self.cancelled.is_set():
                 self.events.state.emit("画面接收超时，正在重新取流")
+                return 'frame_timeout'
             elif not self.cancelled.is_set():
                 raise
+            return 'cancelled'
         finally:
             finished.set()
             if watchdog.is_alive():
@@ -459,6 +510,10 @@ class Decoder:
                     process.kill()
                     process.wait()
                 process.stdout.close()
+                if error_reader is not None:
+                    error_reader.join(1)
+                    process.stderr.close()
+                self.acquisition.exited(process.returncode)
             if hls_proxy is not None:
                 hls_proxy.stop()
 
