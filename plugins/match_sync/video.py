@@ -274,8 +274,7 @@ class VideoHistory(History):
 class PictureReader:
     """Only requested main/comparison pictures get full resolution RGB conversion."""
 
-    def __init__(self, thumbnail_width=None):
-        self.thumbnail_width = thumbnail_width
+    def __init__(self):
         self.lock = threading.RLock()
         self.wake = threading.Event()
         self.cancelled = threading.Event()
@@ -298,8 +297,6 @@ class PictureReader:
         self.codec_creations = 0
         self.reset_reason = 'initial'
         self.decode_phase = 'idle'
-        self.thread_cpu_s = 0.
-        self.preview_request = self.preview_started_request = None
 
     def configure(self, byte_limit, fps, lead=.35, active=True):
         with self.lock:
@@ -310,8 +307,7 @@ class PictureReader:
                 if previous_active:
                     self.reset_reason = 'inactive'
                 self.target = None
-                if self.thumbnail_width is None:
-                    self.images.clear()
+                self.images.clear()
             if (self.byte_limit, self.fps, self.lead, self.max_frames) == (byte_limit, max(1, fps), lead, 24):
                 return
             self.byte_limit = byte_limit
@@ -320,16 +316,6 @@ class PictureReader:
             self.lead = lead
             while len(self.images) > 1 and sum(image.sizeInBytes() for image in self.images.values()) > byte_limit:
                 self.images.pop(next(iter(self.images)))
-
-    def cached(self, history, frame):
-        with self.lock:
-            image = self.images.get(frame[0]) if self.history is history else None
-            if image is not None:
-                # Keep recently revisited thumbnails inside the existing budget.
-                self.images.pop(frame[0])
-                self.images[frame[0]] = image
-                return frame[0], image
-        return None
 
     def get(self, history, frame, exact=False):
         with self.lock:
@@ -341,17 +327,11 @@ class PictureReader:
                 self.images.clear()
                 self.history = history
                 self.reset_reason = 'source_changed'
-            if self.thumbnail_width is not None:
-                result = self.cached(history, frame)
-                if result is not None:
-                    return result
             now = time.monotonic()
             elapsed = max(0, now - self.requested)
             self.requested = now
             cached_backward = frame[0] in self.images and self.target is not None and frame[0] < self.target[0]
             if not cached_backward and (frame != self.target or frame[0] not in self.images):
-                if self.thumbnail_width is not None and self.timings.enabled and frame != self.target:
-                    self.preview_request = (frame, time.perf_counter())
                 # A delayed GUI poll advances with elapsed playback time; it is
                 # not a seek and must not restart decoding from a keyframe.
                 if self.target is not None and (frame[1] < self.target[1] - .05 or frame[1] > self.target[1] + elapsed + .5):
@@ -360,8 +340,7 @@ class PictureReader:
                 self.target = frame
                 self.wake.set()
             if self.thread is None and not self.cancelled.is_set():
-                self.thread = threading.Thread(target=self._run,
-                    name="match-sync-preview" if self.thumbnail_width is not None else "match-sync-picture", daemon=True)
+                self.thread = threading.Thread(target=self._run, name="match-sync-picture", daemon=True)
                 self.thread.start()
             image = self.images.get(frame[0])
             if image is None and not exact:
@@ -377,15 +356,13 @@ class PictureReader:
         sequence = None
         decoded_until = None
         capacity = 8
-        cpu_started = time.thread_time() if self.thumbnail_width is not None and self.timings.enabled else None
         try:
             while not self.cancelled.is_set():
                 self.decode_phase = 'idle'
                 if not self.wake.wait(1):
                     with self.lock:
                         if self.target is None or not self.active:
-                            if self.thumbnail_width is None:
-                                self.images.clear()
+                            self.images.clear()
                             codec = owner = sequence = decoded_until = None
                     continue
                 self.wake.clear()
@@ -399,15 +376,10 @@ class PictureReader:
                         codec = owner = sequence = decoded_until = None
                         continue
                     history, (timestamp, target) = self.history, self.target
-                    request = self.preview_request
-                    if request is not None and request is not self.preview_started_request:
-                        self.preview_started_request = request
-                        self.timings.record('preview_worker_wait', time.perf_counter() - request[1])
                 if owner is not history:
                     codec = sequence = decoded_until = None
                     with self.lock:
-                        if self.thumbnail_width is None:
-                            self.images.clear()
+                        self.images.clear()
                 horizon = target + min(self.lead, max(1, capacity * 3 // 4) / self.fps)
                 if decoded_until is not None and decoded_until >= horizon:
                     continue
@@ -456,12 +428,10 @@ class PictureReader:
                         if pts + .00001 < max(target, requested_target - .05):
                             continue
                         self.decode_phase = 'convert'
-                        image = (image_from_frame(frame, self.timings) if self.thumbnail_width is None
-                                 else image_from_frame(frame, self.timings, self.thumbnail_width))
+                        image = image_from_frame(frame, self.timings)
                         key = history.origin + pts
                         with self.lock:
-                            if (not self.active or self.history is not history or self.cancelled.is_set()
-                                    or self.thumbnail_width is not None and self.reset_requested):
+                            if not self.active or self.history is not history or self.cancelled.is_set():
                                 break
                             self.images[key] = image
                             capacity = max(1, min(self.max_frames, self.byte_limit // image.sizeInBytes()))
@@ -472,13 +442,9 @@ class PictureReader:
                             self.decoded_cadence.record(time.perf_counter(), key)
                         complete = pts >= horizon
                     self.decode_ms = (time.perf_counter() - started) * 1000
-                    if cpu_started is not None:
-                        self.thread_cpu_s = time.thread_time() - cpu_started
                     if complete:
                         break
         finally:
-            if cpu_started is not None:
-                self.thread_cpu_s = time.thread_time() - cpu_started
             self.decode_phase = 'stopped'
             with self.lock:
                 self.images.clear()

@@ -117,11 +117,14 @@ def check(app, host, diagnostic, media, video):
     def open_input(source, *_args, **_kwargs):
         assert source.read(1) == b'h'
         return nullcontext(container)
+    decoder.preview_frames = SimpleNamespace(submit=Mock())
     with patch.object(media.subprocess, 'Popen', return_value=process) as launch, \
             patch.object(media.recording, '_adopt_process'), patch.object(media.recording, '_kernel32', None), \
             patch.object(media, 'av', SimpleNamespace(open=open_input)), \
             patch.object(media, 'recording_template', return_value=nullcontext()):
         assert decoder._capture('ffmpeg', address, {'Cookie': secret}) == 'eof'
+    decoder.preview_frames.submit.assert_called_once_with(decoder, history, frame, -.01)
+    decoder.preview_frames = None
     assert launch.call_args.kwargs['stderr'] == subprocess.PIPE
     milestones = decoder.acquisition.snapshot()['milestones_ms']
     assert {'ffmpeg_started', 'first_byte', 'input_opened', 'first_packet', 'first_audio_frame',

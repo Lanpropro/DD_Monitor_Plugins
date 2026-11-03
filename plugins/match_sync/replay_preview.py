@@ -1,4 +1,4 @@
-"""Small, asynchronous cached-frame preview for timeline gestures."""
+"""Prepared-frame timeline scrubbing and preview size editing."""
 import time
 
 from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSizeF, Qt, QTimer, Signal
@@ -6,7 +6,7 @@ from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
 from ddm import theme
-from .video import PictureReader
+from .preview_frames import PreviewFrames
 from .diagnostics import PreviewMetrics
 
 
@@ -146,9 +146,9 @@ class ReplayPreview(QWidget):
         self.caption = ''
         self.request = None
         self.pending = False
-        self.decode_due = 0.
-        self.reader = None
+        self.frames = PreviewFrames()
         self.metrics = PreviewMetrics()
+        self.metrics.frames = self.frames
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.setAccessibleName('回看目标画面预览')
         self.timer = QTimer(self)
@@ -161,8 +161,22 @@ class ReplayPreview(QWidget):
         parent = self.parentWidget()
         self.setGeometry(preview_geometry(parent.width(), parent.height(), self.viewer.replay_preview_ratio))
 
+    def sync_source(self):
+        key = self.viewer.alignment.reference or self.viewer.main.currentData()
+        row = self.viewer.rows.get(key) if self.viewer.running else None
+        source = row.decoder if row is not None else None
+        old = self.frames.source
+        if old is source:
+            return
+        if old is not None:
+            old.preview_frames = None
+        self.frames.select(source)
+        if source is not None:
+            source.preview_frames = self.frames
+
     def show_target(self, stamp, caption):
         started = time.perf_counter()
+        self.sync_source()
         key = self.viewer.alignment.reference or self.viewer.main.currentData()
         row = self.viewer.rows.get(key)
         history = row.decoder.history if row is not None and row.decoder is not None else None
@@ -181,12 +195,9 @@ class ReplayPreview(QWidget):
         if request != self.request:
             if self.request is None or self.request[:2] != request[:2]:
                 self.image = QImage()
-            if self.reader is not None and self.pending:
-                self.reader.configure(2 * 1024 * 1024, 1, lead=0, active=False)
             self.metrics.request()
             self.request = request
             self.pending = True
-            self.decode_due = time.monotonic() + .12
         self.caption = caption
         self.reposition()
         self.show()
@@ -207,22 +218,14 @@ class ReplayPreview(QWidget):
             return
         if not self.pending:
             return
-        result = self.reader.cached(history, frame) if self.reader is not None else None
-        if result is not None:
-            self._accept(result, frame, cached=not self.metrics.submitted)
-            return
-        if time.monotonic() < self.decode_due:
-            return
-        if self.reader is None:
-            self.reader = PictureReader(thumbnail_width=360)
-            self.metrics.reader = self.reader
-        self.reader.configure(2 * 1024 * 1024, 1, lead=0)
         started = time.perf_counter()
-        result = self.reader.get(history, frame)
+        result = self.frames.get(history, frame)
         self.metrics.timings.record('preview_get', time.perf_counter() - started)
-        self.metrics.submit()
         if result is not None:
-            self._accept(result, frame)
+            self._accept(result, frame, cached=True)
+        elif not self.image.isNull():
+            self.image = QImage()
+            self.update()
 
     def _accept(self, result, frame, cached=False):
         if self.pending or self.image.cacheKey() != result[1].cacheKey():
@@ -238,15 +241,14 @@ class ReplayPreview(QWidget):
         self.request = None
         self.pending = False
         self.image = QImage()
-        if self.reader is not None:
-            self.reader.configure(2 * 1024 * 1024, 1, lead=0, active=False)
 
     def stop(self):
         self.dismiss()
-        if self.reader is not None:
-            self.reader.stop()
-            self.reader = None
-            self.metrics.reader = None
+        if self.frames.source is not None:
+            self.frames.source.preview_frames = None
+        self.frames.stop()
+        self.frames = PreviewFrames()
+        self.metrics.frames = self.frames
 
     def eventFilter(self, watched, event):
         if event.type() == QEvent.Resize:
@@ -257,8 +259,7 @@ class ReplayPreview(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        caption = self.caption + (' · 更新中' if self.pending and not self.image.isNull() else '')
-        paint_preview(painter, self.rect(), self.image, caption)
+        paint_preview(painter, self.rect(), self.image, self.caption, placeholder='此位置暂无预览')
         if not self.image.isNull() and not self.pending:
             self.metrics.paint()
 

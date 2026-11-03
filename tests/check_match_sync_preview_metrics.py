@@ -6,8 +6,6 @@ import os
 from pathlib import Path
 import sys
 import tempfile
-import threading
-from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -19,8 +17,6 @@ def check(app, host, module):
     with patch.object(diagnostic.time, 'perf_counter', side_effect=lambda: clock[0]):
         metrics.request()
         clock[0] += .08
-        metrics.submit()
-        metrics.submit()
         clock[0] += .08
         metrics.ready(.02)
         metrics.ready(.03)
@@ -28,7 +24,7 @@ def check(app, host, module):
         metrics.paint()
         metrics.paint()
         result = metrics.snapshot(clock[0])
-        assert result['targets'] == result['submissions'] == result['images_ready'] == result['images_painted'] == 1
+        assert result['targets'] == result['images_ready'] == result['images_painted'] == 1
         assert result['request_to_image_ms'] == 160 and result['request_to_paint_ms'] == 170
         assert result['frame_error_ms'] == 20 and not result['pending']
         assert result['request_age_ms'] == 170
@@ -48,15 +44,15 @@ def check(app, host, module):
         metrics.ready(0., cached=True)
         assert metrics.state['cache_hits'] == 1
         assert metrics.state['images_ready'] == 2
-    reader = SimpleNamespace(timings=diagnostic.StageTimings(), thread_cpu_s=.012,
-        lock=threading.Lock(), active=True, decode_phase='decode', codec_creations=2,
-        reset_reason='seek_backward', images={}, private_url='https://private.invalid/DO_NOT_LOG')
-    metrics.reader = reader
-    with reader.lock:
+    prepared = import_module(module.__package__ + '.preview_frames').PreviewFrames()
+    prepared.thread_cpu_s = .012
+    prepared.private_url = 'https://private.invalid/DO_NOT_LOG'
+    metrics.frames = prepared
+    with prepared.lock:
         assert metrics.snapshot(diagnostic.time.perf_counter())['worker_busy']
     result = metrics.snapshot(diagnostic.time.perf_counter())
-    assert result['thread_cpu_total_ms'] == 12 and result['codec_creations'] == 2
-    assert result['rgb_bytes'] == 0 and 'worker_busy' not in result
+    assert result['thread_cpu_total_ms'] == 12 and result['sample_fps'] == 8
+    assert result['prepared_bytes'] == 0 and 'worker_busy' not in result
     with tempfile.TemporaryDirectory() as directory:
         probe = diagnostic.PlaybackProbe(host, Path(directory) / 'preview.jsonl')
         try:
@@ -67,7 +63,7 @@ def check(app, host, module):
             probe.stop()
             raw = probe.path.read_text(encoding='utf-8')
             rows = [json.loads(line) for line in raw.splitlines()]
-            assert rows[0]['replay_preview_metrics'] == 1
+            assert rows[0]['replay_preview_metrics'] == rows[0]['replay_preview_continuous'] == 1
             exported = [row['replay_preview'] for row in rows if row['event'] == 'playback']
             assert exported and exported[-1]['active'] and exported[-1]['pending']
             assert 'private.invalid' not in raw and 'DO_NOT_LOG' not in raw
@@ -79,7 +75,6 @@ def check(app, host, module):
     with patch.dict(os.environ, DDM_MATCH_DIAGNOSTICS='0'):
         disabled = diagnostic.PreviewMetrics()
         disabled.request()
-        disabled.submit()
         disabled.ready(0.)
         disabled.paint()
         assert not disabled.timings.samples and disabled.snapshot(0.) == {}

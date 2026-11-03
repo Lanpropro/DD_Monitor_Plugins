@@ -2606,6 +2606,7 @@ class Viewer(QDialog):
         self.stream_info_dialog = None
 
     def sync_picture(self, *_args, refresh_metadata=True):
+        self.replay_bar.preview.sync_source()
         row = self.rows.get(self.main.currentData())
         # Poll twice per source frame: Qt paint/chat work can delay a timer by
         # several milliseconds. The audio clock still owns playback speed.

@@ -244,10 +244,8 @@ Qt 6.11.2 上 `selfcheck_match_sync_retry_rows.py` 的离屏全屏窗口退出�
 
 ### 回看预览真实采集
 
-`check_match_sync_replay_preview.py` 另覆盖连续200次目标变化的合并、停稳后准确取图、同来源保留旧图、缓存回拖及重新打开不创建解码器、空闲后保留但停止释放的2MB缓存、历史隔离，以及转换中取消后不发布旧结果。这些仅为调度及缓存功能回归。候选头标 `replay_preview_coalescing=1`，`cache_hits` 统计没有提交新解码就复用的请求；持续快速移动时等待目标停稳约120ms，最后一张图显示“更新中”，不承诺连续拖动时逐帧解码。
+`check_match_sync_preview_frames.py --host <宿主目录>` 检查已解码帧的后台缩图/JPEG往返、单待处理项、非等待提交、来源/重连世代、迟到结果丢弃与字节/时间上限。`check_match_sync_preview_metrics.py` 检查数值导出、非等待快照、隐私和禁用。`check_match_sync_replay_preview.py` 的H.264功能夹具覆盖捕获已解码帧预生成后持续200次拖动立即取图、历史偏移、来源隔离、几何设置、主reader目标不变与停止清理。以上均不是实播性能证据。
 
-`check_match_sync_preview_metrics.py --host <宿主目录>` 仅检查预览数值生命周期、非等待快照、导出隐私与禁用，不播放媒体。`check_match_sync_replay_preview.py` 的H.264夹具仅验证功能，不能作为真实性能结论。
+重新从根 `run.cmd` 加载，等待主来源播放并积累预览后，按正常观看、缓慢拖动、快速往返、反复回拖各约15秒操作。预览应在持续移动时更新，无需停稳；目标帧率约8fps，不承诺主视频同帧率。新实现只覆盖本次运行已准备到的主来源时间段，32MB压缩预算不足或工作繁忙丢帧时可能存在空缺。正常停止后保留 `logs/match-playback.jsonl` 及轮转。
 
-重新从根 `run.cmd` 加载后，在原直播场景依次观察不拖动、缓慢拖动、快速往返拖动及反复返回相同位置；各阶段约15秒。正常停止后保留 `logs/match-playback.jsonl` 及轮转。日志头 `replay_preview_metrics=1` 表示新采集有效；`playback.replay_preview` 与同记录的主画面、音频和进程CPU对应。
-
-`gui` 为最近一秒的目标查询、请求到提交/取图/绘制及get调用墙钟耗时；`worker_pipeline` 为独立预览线程的等候、读包、解码与缩图阶段。`targets/submissions/superseded/dismissed_pending/images_ready/images_painted` 为窗口累计数，`request_age_ms` 显示未出图目标的等待，`frame_error_ms` 为请求帧与返回帧的时间差。`thread_cpu_total_ms` 仅计Python预览工作线程的累计CPU，不包括FFmpeg内部辅助线程，也不包括等待时间；需结合进程CPU变化分析，不能直接等同预览总CPU。所有信息只含数值与有限状态；导出线程不调用QWidget或等待媒体锁。
+头标 `replay_preview_continuous=1`；`playback.replay_preview` 与同记录的主画面、音频、进程CPU关联。`gui` 为目标查询、取图和请求到绘图调用的墙钟时间；`worker_pipeline` 为后台缩图/拷贝/JPEG压缩与小图读取，不再包含第二条视频包解码。`prepared_count/bytes/bounds` 为当前压缩小图缓存；`produced/dropped/queued` 为完成、丢弃、单待处理项；`cache_hits` 为直接取得准备图的目标数，`frame_error_ms` 为小图与请求的时间差（最多250ms，超过即视为缺失）。线程累计CPU只覆盖预览处理线程，不等同于进程CPU。导出不保存画面/房间/账号或URL，不访问QWidget、不等待媒体锁。

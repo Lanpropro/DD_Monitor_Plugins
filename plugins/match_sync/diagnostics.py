@@ -196,27 +196,21 @@ class PreviewMetrics:
     """Numeric preview lifecycle; the background exporter never accesses widgets."""
     def __init__(self):
         self.timings = StageTimings()
-        self.reader = None
+        self.frames = None
         self.requested_at = None
-        self.submitted = self.image_ready = self.image_painted = False
-        self.state = dict(active=False, pending=False, targets=0, submissions=0,
+        self.image_ready = self.image_painted = False
+        self.state = dict(active=False, pending=False, targets=0,
                           superseded=0, dismissed_pending=0, images_ready=0, images_painted=0, cache_hits=0)
 
     def request(self):
         if not self.timings.enabled:
             return
         self.requested_at = time.perf_counter()
-        self.submitted = self.image_ready = self.image_painted = False
+        self.image_ready = self.image_painted = False
         self.state = dict(self.state, active=True, pending=True,
                           targets=self.state['targets'] + 1,
                           superseded=self.state['superseded'] + int(self.state['pending']),
                           request_to_image_ms=None, request_to_paint_ms=None)
-
-    def submit(self):
-        if self.requested_at is not None and not self.submitted:
-            self.submitted = True
-            self.timings.record('preview_request_to_submit', time.perf_counter() - self.requested_at)
-            self.state = dict(self.state, submissions=self.state['submissions'] + 1)
 
     def ready(self, frame_error, cached=False):
         if self.requested_at is not None and not self.image_ready:
@@ -240,7 +234,7 @@ class PreviewMetrics:
         if not self.timings.enabled:
             return
         self.requested_at = None
-        self.submitted = self.image_ready = self.image_painted = False
+        self.image_ready = self.image_painted = False
         self.state = dict(self.state, active=False, pending=False,
                           dismissed_pending=self.state['dismissed_pending'] + int(self.state['pending']))
 
@@ -250,20 +244,8 @@ class PreviewMetrics:
         result = dict(self.state, gui=self.timings.stats(now))
         requested_at = self.requested_at
         result['request_age_ms'] = round(max(0, now - requested_at) * 1000, 3) if requested_at is not None else None
-        reader = self.reader
-        if reader is not None:
-            result['worker_pipeline'] = reader.timings.stats(now)
-            result['thread_cpu_total_ms'] = round(reader.thread_cpu_s * 1000, 3)
-            if reader.lock.acquire(blocking=False):
-                try:
-                    result.update(worker_active=reader.active, decode_phase=reader.decode_phase,
-                                  codec_creations=reader.codec_creations, reset_reason=reader.reset_reason,
-                                  rgb_count=len(reader.images),
-                                  rgb_bytes=sum(image.sizeInBytes() for image in reader.images.values()))
-                finally:
-                    reader.lock.release()
-            else:
-                result['worker_busy'] = True
+        if self.frames is not None:
+            result.update(self.frames.snapshot(now))
         return result
 
 
@@ -679,7 +661,7 @@ class PlaybackProbe(QObject):
                   capture_code=hashlib.sha256(marshal.dumps(Decoder._capture.__code__)).hexdigest(),
                   analysis_gray_code=hashlib.sha256(marshal.dumps(analysis_gray.__code__)).hexdigest(),
                   audio_read_metrics=1, pts_gap_recovery=2, stack_budget_window_s=60, stream_acquisition=1,
-                  replay_preview_metrics=1, replay_preview_coalescing=1)
+                  replay_preview_metrics=1, replay_preview_continuous=1)
             sampled = 0
             sample_window = time.perf_counter()
             last_stack = last_report = 0.0

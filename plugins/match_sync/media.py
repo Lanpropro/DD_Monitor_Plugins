@@ -132,6 +132,7 @@ class Decoder:
         self.history = self._history()
         self.playback_timestamp = None
         self.pictures = PictureReader()
+        self.preview_frames = None
         self.video_size = (0, 0)
         self.last_frame_received = 0.0
         self.received_cadence = FrameCadence()
@@ -470,6 +471,11 @@ class Decoder:
                         else:
                             self.history.append(timestamp, pts, sample)
                         last_frame[0] = time.monotonic()
+                        previews = self.preview_frames
+                        if previews is not None:
+                            started = time.perf_counter()
+                            previews.submit(self, self.history, frame, pts)
+                            self.timings.record('preview_submit', time.perf_counter() - started)
                         self.last_frame_received = last_frame[0]
                         self.acquisition.mark('first_cached_video')
                     reading = time.perf_counter()
