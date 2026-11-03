@@ -16,7 +16,8 @@ def check(app, host, module):
     from PySide6.QtTest import QTest
     from ddm import plugins
     sending = import_module(module.__package__ + '.sending')
-    with tempfile.TemporaryDirectory() as directory:
+    with tempfile.TemporaryDirectory() as directory, \
+            patch.object(sending.SendingDanmakuPanel, '_ensure_emoticon', lambda *_args: None):
         host.settings, host.rooms = {}, []
         viewer = module.Viewer(plugins.PluginContext(
             plugins.PluginManager(window=host, plugins_dir=directory), 'ui_work'), {})

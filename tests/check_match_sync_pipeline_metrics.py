@@ -86,9 +86,36 @@ def check(app, host, diagnostic, media):
             probe.stop()
             probe.deleteLater()
             app.processEvents()
+        # The old lifetime cap silently lost stacks later in a real session.
+        # Exercise only timer values/descriptors; no playback or media fixture.
+        probe = diagnostic.PlaybackProbe(host, Path(directory) / 'stack-budget.jsonl')
+        stopped = probe.stopped
+        clock = [0.]
+        def wait(_timeout):
+            clock[0] += 1
+            return clock[0] > 126
+        probe.stopped = SimpleNamespace(wait=wait)
+        source = SimpleNamespace(pictures=SimpleNamespace(thread=SimpleNamespace(ident=123)))
+        probe.frame = (source, 0., 0., True)
+        probe.last_tick = 0.
+        try:
+            with patch.object(diagnostic.time, 'perf_counter', side_effect=lambda: clock[0]), \
+                    patch.object(probe, 'snapshot', return_value={'picture': {'waiting': True}}), \
+                    patch.object(diagnostic, 'stack', return_value=[]):
+                probe._run()
+            rows = list(map(json.loads, probe.path.read_text(encoding='utf-8').splitlines()))
+            playback = [row for row in rows if row['event'] == 'playback']
+            assert len(playback) == 126
+            assert all('picture_stack' in row for row in playback), 'Stack evidence must survive the lifetime cap'
+            assert rows[0]['stack_budget_window_s'] == 60 and rows[-1]['event'] == 'stop'
+        finally:
+            probe.stopped = stopped
+            probe.deleteLater()
+            app.processEvents()
     return dict(passed=True, media_generated=False, timestamp_only=True, independent_stages=True,
                 same_frame_repeat_count=True, baseline_conversions_preserved=True,
-                bounded_nonblocking_snapshot=True, all_source_export=True, privacy=True)
+                bounded_nonblocking_snapshot=True, all_source_export=True, privacy=True,
+                stack_budget_renews=True)
 
 
 def main():

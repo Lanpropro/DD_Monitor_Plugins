@@ -26,11 +26,16 @@ from .diagnostics import FrameCadence, StageTimings
 class StreamInput:
     """Windows subprocess pipes advertise seek() but cannot actually seek."""
 
-    def __init__(self, pipe):
+    def __init__(self, pipe, on_first_read=None):
         self.pipe = pipe
+        self.on_first_read = on_first_read
 
     def read(self, size):
-        return self.pipe.read(size)
+        data = self.pipe.read(size)
+        if data and self.on_first_read is not None:
+            callback, self.on_first_read = self.on_first_read, None
+            callback()
+        return data
 
 
 _conversion = threading.local()
@@ -54,9 +59,10 @@ def reformat_frame(frame, **options):
     return converter.reformat(frame, **options)
 
 
-def image_from_frame(frame, timings=None):
+def image_from_frame(frame, timings=None, width=None):
     started = time.perf_counter()
-    rgb = reformat_frame(frame, format="bgra")
+    size = {} if width is None else dict(width=min(width, frame.width), height=max(1, round(frame.height * min(width, frame.width) / frame.width)), threads=1)
+    rgb = reformat_frame(frame, format="bgra", **size)
     if timings is not None:
         timings.record('display_bgra_convert', time.perf_counter() - started)
     started = time.perf_counter()

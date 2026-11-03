@@ -36,7 +36,7 @@ from .panels import ConsoleChannels, ConsoleChoice, ConsoleIconButton, ConsoleMo
 from .replay import ReplayBar, ReplayTimeline
 from .floating import FloatingCrop
 from .regions import match_regions
-from .diagnostics import AudioReadMetrics, PlaybackProbe
+from .diagnostics import AudioReadMetrics, PlaybackProbe, StageTimings
 
 COLORS = ("#38bdf8", "#fb7185", "#a78bfa", "#4ade80", "#fbbf24", "#fb923c")
 ROW_MIME = "application/x-ddm-match-sync-row"
@@ -412,6 +412,7 @@ class AudioPump(QObject):
         self.replay_offset = None
         self.replay_cursors = {}
         self.read_metrics = AudioReadMetrics()
+        self.timings = StageTimings()
         self.independent_histories = frozenset()
         self.timer = QTimer(self)
         self.timer.setInterval(10)
@@ -466,6 +467,7 @@ class AudioPump(QObject):
         self.clock_observation = self.clock_floor = None
         self.snapshot = (1.0, ())
         self.read_metrics.reset()
+        self.timings.samples.clear()
 
     def flush(self, target_clock=None):
         self.replay_offset = None
@@ -529,7 +531,8 @@ class AudioPump(QObject):
             self.replay_offset = None
         inputs = []
         for room_id, row in self.viewer.rows.items():
-            if (row.decoder is not None and row.audible.isChecked() and not row.paused
+            audible, channel, volume = row.audio_controls
+            if (row.decoder is not None and audible and not row.paused
                     and room_id in shown_shifts
                     and (replaying or room_id in self.viewer.independent_playback or not self.viewer.sync_waiting and row.sync_state == "已同步")):
                 if replaying:
@@ -537,17 +540,24 @@ class AudioPump(QObject):
                     local_rate = 1 + change / .05 if abs(change) < .1 else 1.0
                 else:
                     local_rate = 1.0 if room_id in self.viewer.independent_playback else rate + self.viewer.relative_rates.get(room_id, 1.0) - 1.0
-                inputs.append((row.decoder.history, shown_clock + shown_shifts[room_id] - clock,
+                shift = shown_shifts[room_id] + (self.replay_offset if replaying else 0.)
+                inputs.append((row.decoder.history, shift,
                                local_rate,
-                               row.channel.currentData(), row.volume.value() * (1.0 if replaying else row.mix_gain)))
-        self.independent_histories = frozenset(row.decoder.history for key, row in self.viewer.rows.items()
-                                               if key in self.viewer.independent_playback and row.decoder is not None)
-        self.snapshot = (rate, tuple(inputs))
+                               channel, volume * (1.0 if replaying else row.mix_gain)))
+        independent = frozenset(row.decoder.history for key, row in self.viewer.rows.items()
+                                if key in self.viewer.independent_playback and row.decoder is not None)
+        if independent != self.independent_histories:
+            self.independent_histories = independent
+        snapshot = (rate, tuple(inputs))
+        if snapshot != self.snapshot:
+            self.snapshot = snapshot
 
     def fill(self):
         if self.thread is None:
             self.update_snapshot()
+        started = time.perf_counter()
         with self.lock:
+            self.timings.record('audio_lock_wait', time.perf_counter() - started)
             self._fill()
 
     def _fill(self):
@@ -570,6 +580,7 @@ class AudioPump(QObject):
             clock = self.anchor + self.media_written + self.correction
             inputs = []
             positions = []
+            started = time.perf_counter()
             for history, shift, local_rate, channel, volume in sources:
                 target = clock + shift
                 cursor = self.replay_cursors.get(history) if self.replay_offset is not None or history in self.independent_histories else None
@@ -580,7 +591,13 @@ class AudioPump(QObject):
                 positions.append((history, target, source_frames))
                 pcm = route_pcm_s16_stereo(pcm, channel)
                 inputs.append((resample_pcm(pcm, frames), volume))
-            count = self.device.write(mix_pcm(inputs, frames))
+            self.timings.record('audio_prepare', time.perf_counter() - started)
+            started = time.perf_counter()
+            mixed = mix_pcm(inputs, frames)
+            self.timings.record('audio_mix', time.perf_counter() - started)
+            started = time.perf_counter()
+            count = self.device.write(mixed)
+            self.timings.record('audio_device_write', time.perf_counter() - started)
             if count <= 0:
                 break
             written = count // 4
@@ -905,6 +922,10 @@ class RoomRow(QFrame):
         self.video_text = "未开始"
         self.chat_text = "弹幕未连接"
         self.buffer_text = ""
+        self.buffer_exhaustions = deque(maxlen=3)
+        self.buffer_exhausted = False
+        self.buffer_notice_at = None
+        self.buffer_recovered_since = None
         self.alias = QLineEdit(preferences.get("alias", ""))
         self.alias.setParent(self)
         self.alias.hide()
@@ -944,7 +965,10 @@ class RoomRow(QFrame):
         self.channel = ConsoleChannels()
         self.channel.setAccessibleName('输出声道')
         self.channel.setCurrentIndex(max(0, self.channel.findData(preferences.get("audio_channel", 0))))
-        self.channel.setToolTip("点击 L / R 切换输出声道；两侧点亮为双声道，至少保留一侧输出。")
+        self.channel.setToolTip("点击 L / R 切换输出声道；两侧点亮为双声道，两侧关闭为静音。")
+        self.channel.set_audible(self.audible.isChecked())
+        self.channel.audibleChanged.connect(self.audible.setChecked)
+        self.audible.toggled.connect(self.channel.set_audible)
         self.channel.currentIndexChanged.connect(viewer.changed)
         for signal in (self.channel.currentIndexChanged, self.volume.valueChanged, self.audible.toggled):
             signal.connect(self.refresh_audio_icon)
@@ -1020,6 +1044,13 @@ class RoomRow(QFrame):
         self.name_label = QLabel()
         self.name_label.setMaximumWidth(140)
         self.name_label.setStyleSheet('font-size: 14px; font-weight: 600;')
+        self.buffer_warning = QLabel('!')
+        self.buffer_warning.setFixedSize(18, 18)
+        self.buffer_warning.setAlignment(Qt.AlignCenter)
+        self.buffer_warning.setStyleSheet(f'background: {theme.ERROR}; color: white; border-radius: 9px; font-weight: bold;')
+        self.buffer_warning.setAccessibleName('缓冲反复耗尽')
+        self.buffer_warning.setToolTip('短时间内多次耗尽缓冲。为获得更好的观看体验，建议切换主画面')
+        self.buffer_warning.hide()
         self.status = CompactStatus()
         self.status.setStyleSheet(f'font-size: 12px; color: {theme.TEXT2};')
         identity = QWidget()
@@ -1032,6 +1063,7 @@ class RoomRow(QFrame):
         identity_heading = QHBoxLayout()
         identity_heading.setSpacing(8)
         identity_heading.addWidget(self.name_label)
+        identity_heading.addWidget(self.buffer_warning)
         identity_heading.addWidget(self.main_button)
         identity_heading.addWidget(self.join)
         identity_heading.addStretch()
@@ -1245,8 +1277,17 @@ class RoomRow(QFrame):
             self.viewer._start_chat(self)
         self.viewer.changed()
 
+    def clear_buffer_warning(self):
+        self.buffer_exhaustions.clear()
+        self.buffer_exhausted = False
+        self.buffer_notice_at = None
+        self.buffer_recovered_since = None
+        self.buffer_warning.hide()
+
     def refresh_audio_icon(self, *_args):
-        self.audible.set_state(not self.audible.isChecked(), self.volume.value(), self.channel.currentData())
+        self.audio_controls = (self.audible.isChecked(), self.channel.currentData(), self.volume.value())
+        audible, channel, volume = self.audio_controls
+        self.audible.set_state(not audible, volume, channel)
 
     def _toggle_hint_choices(self, expanded):
         for button in (self.hint_fast, self.hint_slow):
@@ -1438,6 +1479,15 @@ class Viewer(QDialog):
         self.crop_quality.setAccessibleName('画中画画质')
         self.crop_quality.hide()
         self.crop_quality.currentIndexChanged.connect(self._crop_quality_changed)
+        self.replay_preview_ratio = max(.1, min(.6, float(context.setting('replay_preview_ratio',
+            context.setting('replay_preview_width', 280) / 1280))))
+        self.record_format = QComboBox(self)
+        self.record_format.addItem('MKV', 'mkv')
+        self.record_format.addItem('MP4', 'mp4')
+        self.record_format.setCurrentIndex(max(0, self.record_format.findData(context.setting('record_format', 'mkv'))))
+        self.record_format.setAccessibleName('录制格式')
+        self.record_format.hide()
+        self.record_format.currentIndexChanged.connect(self.save)
         self.crop_repaint_regions = {}
         self.crop_repaint_timer = QTimer(self)
         self.crop_repaint_timer.setSingleShot(True)
@@ -1623,6 +1673,16 @@ class Viewer(QDialog):
         footer.setContentsMargins(16, 10, 16, 10)
         footer.setSpacing(16)
         footer.addWidget(self.notice, 1)
+        self.buffer_notice = QLabel()
+        self.buffer_notice.setTextFormat(Qt.PlainText)
+        self.buffer_notice.setWordWrap(True)
+        self.buffer_notice.setStyleSheet(f'color: {theme.ERROR};')
+        self.buffer_notice.hide()
+        footer.addWidget(self.buffer_notice, 1)
+        self.buffer_notice_timer = QTimer(self)
+        self.buffer_notice_timer.setSingleShot(True)
+        self.buffer_notice_timer.setInterval(15000)
+        self.buffer_notice_timer.timeout.connect(self.dismiss_buffer_notice)
         self.audio_status.setWordWrap(True)
         self.audio_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         footer.addWidget(self.audio_status, 1)
@@ -1690,6 +1750,7 @@ class Viewer(QDialog):
         self.render_timer.setInterval(33)
         self.render_timer.timeout.connect(self.render)
         self.playback_probe = PlaybackProbe(self, Path(config_module.REPO) / 'logs' / 'match-playback.jsonl')
+        self.playback_probe.preview = self.replay_bar.preview.metrics
         self.playback_probe.audio = self.audio
         self.canvas.paint_probe = self.playback_probe
         self.match_timer = QTimer(self)
@@ -2329,6 +2390,8 @@ class Viewer(QDialog):
         self.context.set_setting("automatic", self.automatic.isChecked())
         self.context.set_setting('buffer_reserve', self.reserve_seconds)
         self.context.set_setting('crop_quality', self.crop_quality.currentData())
+        self.context.set_setting('record_format', self.record_format.currentData())
+        self.context.set_setting('replay_preview_ratio', self.replay_preview_ratio)
 
     def _crop_source_policy(self, row):
         if row.room_id not in self.floating_crops:
@@ -2484,6 +2547,9 @@ class Viewer(QDialog):
             row.main_button.setText('主画面' if room_id == selected else '设为主画面')
             row.realign.setEnabled(self.automatic.isChecked() and room_id != selected)
         if selected != self.alignment.reference:
+            self.dismiss_buffer_notice()
+            for current in self.rows.values():
+                current.clear_buffer_warning()
             self.late_buffer = LateBuffer(self.reserve_seconds)
             self.late_notice.hide()
             for current in self.rows.values():
@@ -2572,6 +2638,7 @@ class Viewer(QDialog):
         self.stream_info_dialog = None
 
     def sync_picture(self, *_args, refresh_metadata=True):
+        self.replay_bar.preview.sync_source()
         row = self.rows.get(self.main.currentData())
         # Poll twice per source frame: Qt paint/chat work can delay a timer by
         # several milliseconds. The audio clock still owns playback speed.
@@ -2809,13 +2876,14 @@ class Viewer(QDialog):
             if shutil.disk_usage(folder).free < minimum:
                 self.notice.setText('录制未开始：保存目录所在磁盘剩余空间不足')
                 return
-            path = folder / f'match_sync_{time.strftime("%Y%m%d_%H%M%S")}_{time.time_ns() % 1000000000:09d}.mkv'
+            path = folder / f'match_sync_{time.strftime("%Y%m%d_%H%M%S")}_{time.time_ns() % 1000000000:09d}.{self.record_format.currentData()}'
             worker = MultiTrackRecorder(path, history, tracks, self._recording_snapshot(), minimum_free=minimum)
         except (OSError, ValueError) as error:
             self.notice.setText(f'无法开始分音轨录制：{error}')
             return
         self.multi_recorder = worker
         self.record_started = time.monotonic()
+        worker.started.connect(self._recording_started, Qt.QueuedConnection)
         worker.completed.connect(self._recording_finished, Qt.QueuedConnection)
         self.picture.set_recording_state('record')
         self.picture.recording_button.setToolTip('停止录制主画面与所选音轨')
@@ -2833,6 +2901,11 @@ class Viewer(QDialog):
                    for key, shift in shifts.items() if (row := self.rows.get(key)) is not None}
         return clock + main, sources
 
+    @Slot(str)
+    def _recording_started(self, path):
+        if self.multi_recorder is self.sender():
+            self.context.notify(f'二路开始录制：{path}')
+
     @Slot(str, str)
     def _recording_finished(self, path, error):
         worker = self.sender()
@@ -2844,7 +2917,9 @@ class Viewer(QDialog):
             self.picture.set_recording_elapsed('')
             self.picture.recording_button.setEnabled(True)
             self.picture.recording_button.setToolTip('录制主画面与所选音轨；在二路控制台设置中分配音轨')
-            self.notice.setText(f'分音轨录制停止：{error} · 文件：{path}' if error else f'分音轨录制已保存：{path}')
+            message = f'二路录制停止：{error} · 文件：{path}' if error else f'二路录制已保存：{path}'
+            self.notice.setText(message)
+            self.context.notify(message, kind='warning' if error else 'info')
             if self.match_settings is not None:
                 self.match_settings.refresh_recording_routes()
         worker.deleteLater()
@@ -3407,6 +3482,39 @@ class Viewer(QDialog):
             self.late_notice.setText(text)
             self.late_notice.setToolTip(detail)
 
+    def dismiss_buffer_notice(self):
+        self.buffer_notice_timer.stop()
+        self.buffer_notice.hide()
+        self.notice.show()
+
+    def _observe_buffer_exhaustion(self, row, exhausted, eligible, now):
+        if not eligible:
+            row.clear_buffer_warning()
+            return
+        while row.buffer_exhaustions and now - row.buffer_exhaustions[0] > 60:
+            row.buffer_exhaustions.popleft()
+        if exhausted:
+            row.buffer_recovered_since = None
+        if exhausted and not row.buffer_exhausted:
+            row.buffer_exhausted = True
+            row.buffer_exhaustions.append(now)
+            if len(row.buffer_exhaustions) == 3:
+                row.buffer_warning.show()
+                if row.buffer_notice_at is None or now - row.buffer_notice_at >= 120:
+                    row.buffer_notice_at = now
+                    text = f'{row.label()}：为获得更好的观看体验，建议切换主画面'
+                    self.buffer_notice.setText(text)
+                    self.buffer_notice.setToolTip(text)
+                    self.notice.hide()
+                    self.buffer_notice.show()
+                    self.buffer_notice_timer.start()
+        elif not exhausted and row.sync_state == '已同步':
+            row.buffer_exhausted = False
+            if row.buffer_recovered_since is None:
+                row.buffer_recovered_since = now
+            if now - row.buffer_recovered_since >= 60:
+                row.buffer_warning.hide()
+
     def _update_sync_health(self, clock, shifts):
         now = time.monotonic()
         dt = max(0, min(.25, now - self.last_health_update)) if self.last_health_update is not None else 0
@@ -3459,6 +3567,13 @@ class Viewer(QDialog):
                     if key not in self.independent_shifts:
                         self.admitted_rooms.add(key)
                     row.mix_gain = min(1.0, row.mix_gain + dt / .2)
+            eligible = (self.running and not self.replay.active and not row.paused
+                        and not self.offset_repositioning and decoder is not None
+                        and (known or key in self.independent_playback))
+            exhausted = ((before == '已同步' or row.was_isolated)
+                         and (bounds is None or target > bounds[1] - .05
+                              or key == self.alignment.reference and self.sync_waiting))
+            self._observe_buffer_exhaustion(row, exhausted, eligible, now)
             if before != row.sync_state:
                 row.refresh_status()
             if row.sync_state == "已同步" and key == self.alignment.reference:
@@ -3715,6 +3830,7 @@ class Viewer(QDialog):
         self._update_sync_health(clock, shifts)
         if probe is not None:
             probe.mark('chat')
+        chat_deadline = time.perf_counter() + .004
         eligible = []
         chat_budget = min(2 if dragging_crop else 80, max(1, 200 // max(1, len(self.rows))))
         for room_id, row in self.rows.items():
@@ -3741,24 +3857,28 @@ class Viewer(QDialog):
                     row.buffer_text = text
                     row.refresh_status()
             target = clock + shifts[room_id]
-            for _ in range(chat_budget):
-                if not row.pending or row.pending[0][0] > target:
+            for index, (received, event) in enumerate(row.pending):
+                if index >= chat_budget or received > target:
                     break
-                received, event = row.pending.popleft()
-                if clock - received > 120:
-                    continue
-                event["medal"] = {}
-                event["uname"] = f"【{row.label()}】 {event.get('uname') or ''}"
-                event["source_label"] = row.label()
-                event["source_room"] = room_id
-                event["color"] = row.color
-                eligible.append((received - shifts[room_id], event))
-        for _due, event in sorted(eligible, key=lambda item: item[0]):
+                eligible.append((received - shifts[room_id], room_id, row, received, event))
+        processed = 0
+        for _due, room_id, row, received, event in sorted(eligible, key=lambda item: item[0]):
+            # One Qt text insertion cannot be interrupted. Always make progress,
+            # then leave remaining messages in their original queues for the next poll.
+            if processed and not self.replay.active and time.perf_counter() >= chat_deadline:
+                break
+            row.pending.popleft()
+            processed += 1
+            if clock - received > 120:
+                continue
+            event["medal"] = {}
+            event["uname"] = f"【{row.label()}】 {event.get('uname') or ''}"
+            event["source_label"] = row.label()
+            event["source_room"] = room_id
+            event["color"] = row.color
             self.replay.record_message(now, event)
             if not self.replay.active:
                 self.panel.add_event(event)
-            received = _due + shifts[event["source_room"]]
-            if not self.replay.active:
                 self.overlay_pending[event["source_room"]] = (received, event)
         if self.replay.active:
             for event in self.replay.messages_between(self.replay.cursor, shown_clock):
@@ -4273,6 +4393,7 @@ class Viewer(QDialog):
 
     @staticmethod
     def _stop_row(row):
+        row.clear_buffer_warning()
         row.alignment_hint, row.hint_pending, row.hint_searching = None, False, False
         if row.decoder is not None:
             row.decoder.stop()
@@ -4293,6 +4414,8 @@ class Viewer(QDialog):
         row.refresh_status()
 
     def stop(self):
+        self.dismiss_buffer_notice()
+        self.replay_bar.preview.stop()
         self.running = False
         if self.stream_info_dialog is not None:
             self.stream_info_dialog.close()

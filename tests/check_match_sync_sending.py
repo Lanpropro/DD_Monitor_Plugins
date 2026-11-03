@@ -121,7 +121,7 @@ def check(app, host, module, output=None):
     from PySide6.QtCore import QPoint, Qt, QTimer
     from PySide6.QtTest import QTest
     from PySide6.QtGui import QColor, QPixmap
-    from PySide6.QtWidgets import QBoxLayout, QHBoxLayout, QLineEdit, QListView, QPushButton, QWidget
+    from PySide6.QtWidgets import QApplication, QBoxLayout, QHBoxLayout, QLineEdit, QListView, QPushButton, QWidget
     from ddm import plugins
     from ddm.plugin_controls import TileControl
     sent, active = [], []
@@ -605,14 +605,32 @@ def check(app, host, module, output=None):
             menu = console.create_chat_toolbar(event)
             assert not menu.repeat_action.isEnabled(), '+1 must be disabled without selected recipients'
             assert viewer.panel.body.contextMenuPolicy() == Qt.DefaultContextMenu
-            with patch.object(console, 'create_chat_toolbar', return_value=menu), patch.object(menu, 'exec', return_value=menu.save_action):
+            with patch.object(console, 'create_chat_toolbar', return_value=menu), patch.object(
+                    menu, 'exec', side_effect=AssertionError('Comment clicks must not enter a nested modal loop')):
                 viewer.panel.body.messageClicked.emit(0, QPoint(20, 20))
+                assert menu.isVisible(), 'The popup must remain open after the click handler returns'
+                assert 'chat_action_open' in viewer.playback_probe.timings.stats()['stages']
+                assert QApplication.activeModalWidget() is None
+                assert viewer.panel.body._action_block is not None, 'Keep the action highlight until dismissal'
+                ticks = []
+                QTimer.singleShot(0, lambda: ticks.append(True))
+                QTest.qWait(20)
+                assert ticks, 'The normal event loop must continue while the toolbar is open'
+                menu.save_action.trigger()
+                assert viewer.panel.body._action_block is None
             assert viewer.context.setting('saved_send_texts') == ['message to save']
+            count = len(sent)
+            with patch.object(console, 'create_chat_toolbar', return_value=console.create_chat_toolbar(event)):
+                menu = console.show_chat_actions(event, QPoint(20, 20))
+                menu.reject()
+            assert len(sent) == count and viewer.context.setting('saved_send_texts') == ['message to save']
             select({'1'})
+            assert 'send_recipient_selection' in viewer.playback_probe.timings.stats()['stages']
             menu = console.create_chat_toolbar(event)
             count = len(sent)
-            with patch.object(console, 'create_chat_toolbar', return_value=menu), patch.object(menu, 'exec', return_value=menu.repeat_action):
+            with patch.object(console, 'create_chat_toolbar', return_value=menu):
                 console.show_chat_actions(event, QPoint(20, 20))
+                menu.repeat_action.trigger()
             finish_batch()
             assert sent[count:] == [('1', 'message to save')], '+1 must target selected recipients, not the source'
             assert second.text() == 'draft 2'
@@ -620,8 +638,9 @@ def check(app, host, module, output=None):
             select({'1', '2'})
             menu = console.create_chat_toolbar(event)
             count = len(sent)
-            with patch.object(console, 'create_chat_toolbar', return_value=menu), patch.object(menu, 'exec', return_value=menu.repeat_action):
+            with patch.object(console, 'create_chat_toolbar', return_value=menu):
                 console.show_chat_actions(event, QPoint(20, 20))
+                menu.repeat_action.trigger()
             finish_batch()
             assert sent[count:] == [('1', 'message to save'), ('2', 'message to save')]
             assert first.text() == 'draft 1' and second.text() == 'draft 2'
