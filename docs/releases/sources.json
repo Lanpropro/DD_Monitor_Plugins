@@ -1,0 +1,166 @@
+{
+  "schema": 1,
+  "synced_at": "2026-11-03T15:27:05.711083+00:00",
+  "normalization": "CRLF or repeated CR to LF; one final LF for synchronized release bodies",
+  "entries": [
+    {
+      "tag": "bili-live-v1.0",
+      "file": "RELEASE-bili-live-v1.0.md",
+      "status": "online",
+      "source_kind": "github_release",
+      "release_id": 423361108,
+      "release_updated_at": "2026-10-25T11:41:41Z",
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.0",
+      "last_edit_verified": true,
+      "raw_body_sha256": "4ac339ed652d10476567e4b98ee32357af49d90963f23e27959f50236d91a577",
+      "sha256": "695c3dfe993bdaf9fcae5fbdfe5545bd92239321b0cd83f581c1d64e6f38ec35"
+    },
+    {
+      "tag": "domestic-live-v1.2",
+      "file": "RELEASE-domestic-v1.2.md",
+      "status": "deleted_release_backup",
+      "source_kind": "release_backup",
+      "backup_date": "2026-10-25",
+      "release_id": 414049277,
+      "release_updated_at": "2026-10-25T04:47:28Z",
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v1.2",
+      "last_edit_verified": false,
+      "sha256": "ae7a761b998419e35e159a1aebce45825d32f7c9e8019297cb8963d9a37473bc"
+    },
+    {
+      "tag": "domestic-live-v1.3",
+      "file": "RELEASE-domestic-v1.3.md",
+      "status": "repository_archive",
+      "source_kind": "repository_history",
+      "source_commit": "d71cdeab6251472905fe1667db6e8f345cff9f85",
+      "source_path": "docs/releases/RELEASE-domestic-v1.3.md",
+      "last_edit_verified": false,
+      "sha256": "a04abcbd9a91a2ee5f5e119f52c0abd5e23955848432d0d1c8063cad89f84df1"
+    },
+    {
+      "tag": "domestic-live-v1.4",
+      "file": "RELEASE-domestic-live-v1.4.md",
+      "status": "repository_archive",
+      "source_kind": "repository_history",
+      "source_commit": "d71cdeab6251472905fe1667db6e8f345cff9f85",
+      "source_path": "docs/releases/RELEASE-domestic-live-v1.4.md",
+      "last_edit_verified": false,
+      "sha256": "dac8cc81ddea9079bdd78da06ff1428ea7f9e1fd97f087929afb079e5a09031b"
+    },
+    {
+      "tag": "domestic-live-v1.5",
+      "file": "RELEASE-domestic-live-v1.5.md",
+      "status": "online",
+      "source_kind": "github_release",
+      "release_id": 428193547,
+      "release_updated_at": "2026-10-29T17:50:46Z",
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v1.5",
+      "last_edit_verified": true,
+      "raw_body_sha256": "7f848d3f13c822ef6e0c5fb17e48b9d2180ef4c7400c5f088da08a14a50b71b5",
+      "sha256": "b3e50fcbf0e76d2db46acc141236f6767be82bf331370d9cc8af119a8525e51a"
+    },
+    {
+      "tag": "global-live-v1.1",
+      "file": "RELEASE-global-v1.1.md",
+      "status": "repository_archive",
+      "source_kind": "repository_history",
+      "source_commit": "d71cdeab6251472905fe1667db6e8f345cff9f85",
+      "source_path": "docs/releases/RELEASE-global-v1.1.md",
+      "last_edit_verified": false,
+      "sha256": "061273433f0425bbc2946cbd770d84e8568cc31f231121104aec694dcb395930"
+    },
+    {
+      "tag": "global-live-v1.2",
+      "file": "RELEASE-global-live-v1.2.md",
+      "status": "online",
+      "source_kind": "github_release",
+      "release_id": 423429417,
+      "release_updated_at": "2026-10-25T13:51:44Z",
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2",
+      "last_edit_verified": true,
+      "raw_body_sha256": "2f527598dd4727ebb91931f87ad1e968d329151489e519de1c0e3ad1347f9755",
+      "sha256": "a37c5b775bd81c5db893961e892786058bee6a6362ad2b04882ecab6e85d56a2"
+    },
+    {
+      "tag": "match-sync-v1.1",
+      "file": "RELEASE-match-sync-v1.1.md",
+      "status": "repository_archive",
+      "source_kind": "repository_history",
+      "source_commit": "d71cdeab6251472905fe1667db6e8f345cff9f85",
+      "source_path": "docs/releases/RELEASE-match-sync-v1.1.md",
+      "last_edit_verified": false,
+      "sha256": "7fc8bc0e3819f470067a3a32067b970568548fbcc5ac4d79d28d87f1336cd207"
+    },
+    {
+      "tag": "match-sync-v1.3",
+      "file": "RELEASE-match-sync-v1.3.md",
+      "status": "repository_archive",
+      "source_kind": "repository_history",
+      "source_commit": "d71cdeab6251472905fe1667db6e8f345cff9f85",
+      "source_path": "docs/releases/RELEASE-match-sync-v1.3.md",
+      "last_edit_verified": false,
+      "sha256": "df045570c70bc667507284585511a5a43010953fd174279784946beda23ef073"
+    },
+    {
+      "tag": "match-sync-v1.4",
+      "file": "RELEASE-match-sync-v1.4.md",
+      "status": "repository_archive",
+      "source_kind": "repository_history",
+      "source_commit": "d71cdeab6251472905fe1667db6e8f345cff9f85",
+      "source_path": "docs/releases/RELEASE-match-sync-v1.4.md",
+      "last_edit_verified": false,
+      "sha256": "2e0345e2c45839466c056c2e37a99664065224a2b7262cffdcf0d95439c44014"
+    },
+    {
+      "tag": "match-sync-v1.5",
+      "file": "RELEASE-match-sync-v1.5.md",
+      "status": "online",
+      "source_kind": "github_release",
+      "release_id": 431674948,
+      "release_updated_at": "2026-11-03T12:13:29Z",
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.5",
+      "last_edit_verified": true,
+      "raw_body_sha256": "b0c85774c12ef7835ee26bfb27ffbb36562709cd46f64fb64e5150f3cedd72a8",
+      "sha256": "166bd3b2be1d48c76ed8c2494837cb4d8929c85cba7679f2c9eebf376372dc4e"
+    },
+    {
+      "tag": "match-sync-v1.5-pre.1",
+      "file": "RELEASE-match-sync-v1.5-pre.1.md",
+      "status": "repository_archive",
+      "source_kind": "repository_history",
+      "source_commit": "7bbc394c3f534c2d3ff6c5de654646616ce53edd",
+      "source_path": "docs/releases/RELEASE-match-sync-v1.5-pre.1.md",
+      "last_edit_verified": false,
+      "sha256": "d7af83a97c6dfc65f5d5f446159c2cb0d4ccef9c0bc679cd5a96b8de4d65345e"
+    },
+    {
+      "tag": "match-sync-v1.6",
+      "file": "RELEASE-match-sync-v1.6.md",
+      "status": "online",
+      "source_kind": "github_release",
+      "release_id": 432850748,
+      "release_updated_at": "2026-11-03T15:14:35Z",
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.6",
+      "last_edit_verified": true,
+      "raw_body_sha256": "3bb012dd92539355147f31490611eb28fe0e4b5d5c73fec64459e74afd5c0890",
+      "sha256": "508d44cff755ccd0a08aa42755cbac4374f350fc5954451f6aab3e30ec579e2c"
+    },
+    {
+      "tag": "v1.1",
+      "file": "RELEASE-v1.1.md",
+      "status": "deleted_release_backup",
+      "source_kind": "release_backup",
+      "backup_date": "2026-10-25",
+      "release_id": 406993079,
+      "release_updated_at": "2026-10-25T04:52:23Z",
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/v1.1",
+      "last_edit_verified": false,
+      "sha256": "a87bfefd286656b15da6c220f103139da91f6cadf34cacbadee1e3b23f84c8ff"
+    }
+  ],
+  "tags_without_recoverable_body": [
+    "v1.0",
+    "match-sync-v1.2",
+    "plugins-2026.10.03"
+  ]
+}

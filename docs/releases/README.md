@@ -1,44 +1,40 @@
 # 插件发布记录
 
-本目录集中保存插件发布说明。公开版本的正文以 GitHub Releases 为准，保留线上措辞，仅统一换行和文件末尾换行；以下公开版本于 2026-10-31 核对同步。线上正文中的旧日期、依赖及描述也按原文保留。
+发布说明集中保存在本目录。2026-11-03 同步当前 GitHub Release 的最新正文，包括维护者在网页上的修改；正文仅统一换行和文件末尾换行，不改写内容。
 
-开发期间每次单项验收后的变化记录在[插件增量更新](../changes/README.md)，发布时据此汇总，不等发布当天回溯整个开发过程。
+删除 GitHub Release 不会删除已提交的说明。网页后续修改不会自动回写仓库；删除发布页前，应先再次同步并提交。[来源记录](sources.json)保存各文件的来源、网页更新时间及正文校验值。
 
-## 当前公开 Releases
+## 当前在线发布说明
 
-| 插件 | 本地说明 | GitHub 来源 |
+| 插件 | 仓库说明 | GitHub 来源 |
 | --- | --- | --- |
+| 比赛二路同步 | [1.6](RELEASE-match-sync-v1.6.md) | [match-sync-v1.6](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.6) |
+| 比赛二路同步 | [1.5](RELEASE-match-sync-v1.5.md) | [match-sync-v1.5](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.5) |
 | 国内直播平台 | [1.5](RELEASE-domestic-live-v1.5.md) | [domestic-live-v1.5](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v1.5) |
 | 海外直播平台 | [1.2](RELEASE-global-live-v1.2.md) | [global-live-v1.2](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2) |
-| 比赛二路同步 | [1.4](RELEASE-match-sync-v1.4.md) | [match-sync-v1.4](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.4) |
 | B站直播互动 | [1.0](RELEASE-bili-live-v1.0.md) | [bili-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.0) |
 
-发布说明的同步不改变插件源码或版本。此整理分支的国内插件清单仍为 1.4，不能据新增的 1.5 说明将本分支构建视为公开 1.5 安装包；源码版本以各插件 `plugin.json` 为准。
+## 已删除 Release 的可恢复快照
 
-## 待发布候选
+以下正文从 2026-10-25 保存的 Release JSON 备份恢复。保留备份中的网页更新时间，但无法确认删除前是否还有后续编辑；不是对最后编辑版的保证。
 
-- 比赛二路同步：[v1.5 合并更新说明](RELEASE-match-sync-v1.5.md)，包含 pre.1 及后续更新和分音轨录制；等待真实录制验收，尚未正式发布。
+| 原标签 | 仓库说明 | 备份中的更新时间（UTC） |
+| --- | --- | --- |
+| `v1.1`（国内直播平台历史版） | [原始正文](RELEASE-v1.1.md) | 2026-10-25 04:52:23 |
+| `domestic-live-v1.2` | [1.2](RELEASE-domestic-v1.2.md) | 2026-10-25 04:47:28 |
 
-## 预发布
+## 仓库保留的历史说明
 
-- 比赛二路同步：[v1.5-pre.1 说明](RELEASE-match-sync-v1.5-pre.1.md)，测试版安装包见 GitHub Releases。
+以下文件保留已有 Git 历史中的正文，目前没有在线 Release 可复核。来源提交见 [sources.json](sources.json)，无法确认是否包含网页删除前的全部修改。
 
-## 仓库历史记录
-
-以下文件在本次核对时没有对应的公开 Release，保留历史正文与旧文件名，不据此认定线上仍提供这些版本。
-
-| 插件 | 仓库保留的说明 |
+| 插件 | 仓库说明 |
 | --- | --- |
-| 国内直播平台 | [1.4](RELEASE-domestic-live-v1.4.md)、[1.3](RELEASE-domestic-v1.3.md)、[1.2](RELEASE-domestic-v1.2.md) |
+| 国内直播平台 | [1.4](RELEASE-domestic-live-v1.4.md)、[1.3](RELEASE-domestic-v1.3.md) |
 | 海外直播平台 | [1.1](RELEASE-global-v1.1.md) |
-| 比赛二路同步 | [1.3](RELEASE-match-sync-v1.3.md)、[1.1](RELEASE-match-sync-v1.1.md) |
+| 比赛二路同步 | [1.4](RELEASE-match-sync-v1.4.md)、[1.3](RELEASE-match-sync-v1.3.md)、[1.1](RELEASE-match-sync-v1.1.md)、[1.5-pre.1](RELEASE-match-sync-v1.5-pre.1.md) |
 
-未列出的历史版本没有单独的说明文件，不补写未经核对的发布记录。
+`v1.0`、`match-sync-v1.2`、`plugins-2026.10.03` 目前只找到标签，未找到可核对的 Release 正文，未编造说明。
 
-新增说明继续使用 `RELEASE-<插件>-v<版本>.md`，并加入此索引。打包检查从本目录读取对应版本的说明。
+同步说明不修改插件源码、版本、标签或已经发布的安装包。每项功能的开发与验收记录继续保存在[插件增量更新](../changes/README.md)。
 
 返回[仓库目录说明](../repository-layout.md)。
-
-## 本地打包版本
-
-- [比赛二路同步 1.6](RELEASE-match-sync-v1.6.md)：本地安装包，尚未公开发布。
