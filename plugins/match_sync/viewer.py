@@ -531,7 +531,8 @@ class AudioPump(QObject):
             self.replay_offset = None
         inputs = []
         for room_id, row in self.viewer.rows.items():
-            if (row.decoder is not None and row.audible.isChecked() and not row.paused
+            audible, channel, volume = row.audio_controls
+            if (row.decoder is not None and audible and not row.paused
                     and room_id in shown_shifts
                     and (replaying or room_id in self.viewer.independent_playback or not self.viewer.sync_waiting and row.sync_state == "已同步")):
                 if replaying:
@@ -539,12 +540,17 @@ class AudioPump(QObject):
                     local_rate = 1 + change / .05 if abs(change) < .1 else 1.0
                 else:
                     local_rate = 1.0 if room_id in self.viewer.independent_playback else rate + self.viewer.relative_rates.get(room_id, 1.0) - 1.0
-                inputs.append((row.decoder.history, shown_clock + shown_shifts[room_id] - clock,
+                shift = shown_shifts[room_id] + (self.replay_offset if replaying else 0.)
+                inputs.append((row.decoder.history, shift,
                                local_rate,
-                               row.channel.currentData(), row.volume.value() * (1.0 if replaying else row.mix_gain)))
-        self.independent_histories = frozenset(row.decoder.history for key, row in self.viewer.rows.items()
-                                               if key in self.viewer.independent_playback and row.decoder is not None)
-        self.snapshot = (rate, tuple(inputs))
+                               channel, volume * (1.0 if replaying else row.mix_gain)))
+        independent = frozenset(row.decoder.history for key, row in self.viewer.rows.items()
+                                if key in self.viewer.independent_playback and row.decoder is not None)
+        if independent != self.independent_histories:
+            self.independent_histories = independent
+        snapshot = (rate, tuple(inputs))
+        if snapshot != self.snapshot:
+            self.snapshot = snapshot
 
     def fill(self):
         if self.thread is None:
@@ -1257,7 +1263,9 @@ class RoomRow(QFrame):
         self.viewer.changed()
 
     def refresh_audio_icon(self, *_args):
-        self.audible.set_state(not self.audible.isChecked(), self.volume.value(), self.channel.currentData())
+        self.audio_controls = (self.audible.isChecked(), self.channel.currentData(), self.volume.value())
+        audible, channel, volume = self.audio_controls
+        self.audible.set_state(not audible, volume, channel)
 
     def _toggle_hint_choices(self, expanded):
         for button in (self.hint_fast, self.hint_slow):
@@ -3726,6 +3734,7 @@ class Viewer(QDialog):
         self._update_sync_health(clock, shifts)
         if probe is not None:
             probe.mark('chat')
+        chat_deadline = time.perf_counter() + .004
         eligible = []
         chat_budget = min(2 if dragging_crop else 80, max(1, 200 // max(1, len(self.rows))))
         for room_id, row in self.rows.items():
@@ -3752,24 +3761,28 @@ class Viewer(QDialog):
                     row.buffer_text = text
                     row.refresh_status()
             target = clock + shifts[room_id]
-            for _ in range(chat_budget):
-                if not row.pending or row.pending[0][0] > target:
+            for index, (received, event) in enumerate(row.pending):
+                if index >= chat_budget or received > target:
                     break
-                received, event = row.pending.popleft()
-                if clock - received > 120:
-                    continue
-                event["medal"] = {}
-                event["uname"] = f"【{row.label()}】 {event.get('uname') or ''}"
-                event["source_label"] = row.label()
-                event["source_room"] = room_id
-                event["color"] = row.color
-                eligible.append((received - shifts[room_id], event))
-        for _due, event in sorted(eligible, key=lambda item: item[0]):
+                eligible.append((received - shifts[room_id], room_id, row, received, event))
+        processed = 0
+        for _due, room_id, row, received, event in sorted(eligible, key=lambda item: item[0]):
+            # One Qt text insertion cannot be interrupted. Always make progress,
+            # then leave remaining messages in their original queues for the next poll.
+            if processed and not self.replay.active and time.perf_counter() >= chat_deadline:
+                break
+            row.pending.popleft()
+            processed += 1
+            if clock - received > 120:
+                continue
+            event["medal"] = {}
+            event["uname"] = f"【{row.label()}】 {event.get('uname') or ''}"
+            event["source_label"] = row.label()
+            event["source_room"] = room_id
+            event["color"] = row.color
             self.replay.record_message(now, event)
             if not self.replay.active:
                 self.panel.add_event(event)
-            received = _due + shifts[event["source_room"]]
-            if not self.replay.active:
                 self.overlay_pending[event["source_room"]] = (received, event)
         if self.replay.active:
             for event in self.replay.messages_between(self.replay.cursor, shown_clock):
