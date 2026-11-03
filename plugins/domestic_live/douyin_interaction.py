@@ -38,6 +38,11 @@ class BroadcastReceipts:
                 self.condition.wait(min(.1, deadline - now))
         return False
 
+    def sample_count(self, room, since):
+        # Bounded message-ID samples, not a connection-health or delivery verdict.
+        with self.condition:
+            return sum(stamp >= since and rid == room for stamp, rid, _ in self.recent)
+
 
 def playback_cookies(platform):
     jar = requests.cookies.RequestsCookieJar()
@@ -86,6 +91,7 @@ class DouyinAPI:
         canonical = self.platform.normalize(room)
         if not re.fullmatch(r"douyin:[1-9][0-9]{0,19}", canonical):
             raise InteractionError("请先添加抖音直播间再发送弹幕")
+        started = time.monotonic()
         def check():
             if cancelled():
                 raise InteractionError("请求已取消，本次未发送")
@@ -150,8 +156,11 @@ class DouyinAPI:
             if delivery is None or not delivery.wait(canonical, mid, cancelled):
                 flag = receipt.get("content_self_see_status") if isinstance(receipt, dict) else None
                 flag = flag if type(flag) is int else "未提供"
+                samples = delivery.sample_count(canonical, started) if delivery is not None else 0
+                progress(f"delivery_unmatched samples={samples}")
                 raise InteractionError("抖音接口已受理，但未在弹幕连接中观察到该消息。广播投递未确认，草稿已保留；"
                                        "不要立即重复发送，请在官网核对。"
-                                       f"（受理状态：0；content_self_see_status：{flag}，不作为公共投递证明）")
+                                       f"（受理状态：0；content_self_see_status：{flag}，不作为公共投递证明；"
+                                       f"本次期间同房间含消息ID的接收缓存样本：{samples}条，上限512）")
             progress("broadcast")
             return ChatReceipt(str(account["uid"]), account.get("uname") or "我", text.strip())

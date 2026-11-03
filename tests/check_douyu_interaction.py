@@ -1394,7 +1394,7 @@ class DouyinTests(unittest.TestCase):
             account_info=Mock(return_value={"uid":"42","uname":"fixture"}),
             room_data=Mock(return_value={"room":{"id_str":"999999","status":2}}),
             _playback_cookies=lambda:requests.cookies.RequestsCookieJar())
-        self.platform._chat_delivery=SimpleNamespace(wait=Mock(return_value=True),own_uid="")
+        self.platform._chat_delivery=SimpleNamespace(wait=Mock(return_value=True),own_uid="",sample_count=Mock(return_value=0))
         self.client=self.module.DouyinAPI(self.platform,requests.cookies.RequestsCookieJar(),session_factory=lambda:self.session)
 
     def test_internal_room_id_single_write_and_explicit_receipt(self):
@@ -1421,8 +1421,12 @@ class DouyinTests(unittest.TestCase):
 
     def test_http_acceptance_without_broadcast_is_unconfirmed_and_never_retried(self):
         self.platform._chat_delivery.wait.return_value=False
+        self.platform._chat_delivery.sample_count.return_value=3
+        phases=[]
         with self.assertRaisesRegex(api.InteractionError,"广播投递未确认"):
-            self.client.send_text("douyin:123","hello")
+            self.client.send_text("douyin:123","hello",progress=phases.append)
+        self.assertEqual(phases[-1],"delivery_unmatched samples=3")
+        self.assertEqual(self.platform._chat_delivery.sample_count.call_args.args[0],"douyin:123")
         self.session.get.assert_called_once()
 
     def test_unconfirmed_receipt_reports_only_numeric_self_see_flag(self):
@@ -1450,6 +1454,20 @@ class DouyinTests(unittest.TestCase):
         self.assertFalse(tracker.wait("douyin:124","123",lambda:False,timeout=0))
         self.assertFalse(tracker.wait("douyin:123","124",lambda:False,timeout=0))
         self.assertFalse(tracker.wait("douyin:123","123",lambda:True,timeout=0))
+
+    def test_delivery_samples_exclude_other_rooms_old_and_missing_ids(self):
+        tracker=self.module.BroadcastReceipts()
+        with patch.object(self.module.time,"monotonic",return_value=10):
+            tracker.observe("douyin:123",{"message_id":"old"})
+        with patch.object(self.module.time,"monotonic",return_value=12):
+            tracker.observe("douyin:123",{"txt":"PRIVATE"})
+            tracker.observe("douyin:124",{"message_id":"other"})
+            tracker.observe("douyin:123",{"message_id":"new"})
+        self.assertEqual(tracker.sample_count("douyin:123",11),1)
+        self.assertFalse(tracker.wait("douyin:123","missing",lambda:False,timeout=0))
+        for i in range(520):
+            tracker.observe("douyin:123",{"message_id":str(i)})
+        self.assertEqual(tracker.sample_count("douyin:123",0),512)
 
     def test_browser_transport_writes_once_and_has_no_http_fallback(self):
         transport=Mock(return_value={"status_code":0,"data":{"msg_id_str":"12345"}})
@@ -1511,8 +1529,9 @@ class DouyinTests(unittest.TestCase):
         dialog.forget_button=QPushButton(dialog)
         dialog.read_button=QPushButton(dialog)
         dialog.read_button.clicked.connect(lambda:None)
-        dialog.browser=SimpleNamespace(page=lambda:page,load=Mock(),reload=Mock())
-        bridge=browser_module.BrowserChat(self.platform,SimpleNamespace(window=None),parent)
+        dialog.browser=SimpleNamespace(page=lambda:page,load=Mock(),reload=Mock(),loadStarted=Mock(),loadFinished=Mock())
+        log=Mock()
+        bridge=browser_module.BrowserChat(self.platform,SimpleNamespace(window=None,log=log),parent)
         request=dict(room="douyin:123",params={"room_id":"999999","content":"hello"},cancelled=lambda:False,
                      done=threading.Event(),result=None,deadline=time.monotonic()+55)
         try:
@@ -1531,6 +1550,7 @@ class DouyinTests(unittest.TestCase):
             self.assertTrue(dialog.read_button.isEnabled())
             dialog.read_button.click()
             self.assertEqual(dialog.browser.load.call_count,2)
+            self.assertTrue(any("user_reload_before_submit" in call.args[0] for call in log.call_args_list))
             timer.timeout.emit()
             self.assertFalse(dialog.read_button.isEnabled())
             timer.timeout.emit()

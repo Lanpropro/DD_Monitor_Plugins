@@ -95,6 +95,18 @@ class BrowserChat(QObject):
         page.setAudioMuted(True)
         state = {"started": False, "submitted": False, "retry_safe": True, "polling": False, "epoch": 0,
                  "holding": False}
+        opened = time.monotonic()
+        last_stage = None
+        def trace(stage):
+            nonlocal last_stage
+            if stage == last_stage:
+                return
+            last_stage = stage
+            log = getattr(self.context, "log", None)
+            if callable(log):
+                log(f"[douyin官网] 房间={request['room']} 阶段={stage} 耗时={time.monotonic() - opened:.2f}s")
+        dialog.browser.loadStarted.connect(lambda: trace("page_loading"))
+        dialog.browser.loadFinished.connect(lambda ok: trace("page_loaded" if ok else "page_load_failed"))
         prepare = """JSON.stringify((() => {
             if(location.origin!=='https://live.douyin.com'||
                location.pathname.replace(/\/$/,'')!=='/'+%s) return {ready:false,reason:'page'};
@@ -119,11 +131,12 @@ class BrowserChat(QObject):
             (e.message.includes("reading 'call'")?'missing_call':e.message.includes('is not a function')?'not_callable':'other'):'other',
             submitted:!!window.__ddmChatSubmitted}});
         }""" % (json.dumps(task["id"]), json.dumps(task["id"]), SCRIPT, json.dumps(task), CLIENT_SCRIPT)
-        read_state = "JSON.stringify({submitted:!!window.__ddmChatSubmitted,result:window.__ddmChatResult})"
+        read_state = "JSON.stringify({submitted:!!window.__ddmChatSubmitted,result:window.__ddmChatResult,stage:window.__ddmChatStage})"
         def retry():
             if state["submitted"] or not state["retry_safe"] or request["done"].is_set():
                 return
             state.update(started=False, retry_safe=True, polling=False, epoch=state["epoch"] + 1)
+            trace("user_reload_before_submit")
             request["deadline"] = time.monotonic() + 55
             dialog.status.setText("正在重新加载官网环境；本次尚未提交弹幕。")
             dialog.browser.load(QUrl(self.platform.room_url(request["room"])))
@@ -157,17 +170,23 @@ class BrowserChat(QObject):
                     return
                 if not state["started"]:
                     if not result.get("ready"):
+                        reason = result.get("reason")
+                        trace("prepare_" + (reason if reason in ("page", "module", "dependency") else "unknown"))
                         if result.get("reason") == "dependency":
                             dialog.status.setText("官网发送模块的依赖尚未加载；本次尚未提交，可重新加载环境。")
                         else:
                             dialog.status.setText("正在等待官网页面及发送模块；本次尚未提交，可重新加载环境。")
                         return
                     state.update(started=True, retry_safe=False)
+                    trace("client_ready")
                     dialog.read_button.setEnabled(False)
                     dialog.status.setText("正在核对官网账号与直播间，准备发送弹幕。")
                     page.runJavaScript(submit)
                     return
                 state["submitted"] = state["submitted"] or bool(result.get("submitted"))
+                stage = result.get("stage")
+                if stage in ("page", "context", "module", "security", "request", "response"):
+                    trace(stage)
                 outcome = result.get("result")
                 if not isinstance(outcome, dict):
                     return
@@ -181,6 +200,7 @@ class BrowserChat(QObject):
                 state["holding"] = (not outcome.get('error') and type(outcome.get('status_code')) is int
                                     and outcome['status_code'] == 0)
                 request["done"].set()
+                trace("ack" if state["holding"] else "unconfirmed")
                 if state["holding"]:
                     dialog.status.setText("官网已受理，正在核对弹幕投递，请勿重复发送。")
                 else:
@@ -190,6 +210,7 @@ class BrowserChat(QObject):
         timer.setInterval(150)
         timer.timeout.connect(poll)
         def finished(_result):
+            trace("page_closed")
             timer.stop()
             request["done"].set()
             if self.active is dialog:

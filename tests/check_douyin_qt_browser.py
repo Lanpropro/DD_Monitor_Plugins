@@ -41,7 +41,7 @@ class BlockNetwork(QWebEngineUrlRequestInterceptor):
 
 class BrowserTests(unittest.TestCase):
     def exercise(self, behavior, expected_error=None, *, module_error=False, delayed_dependency=False,
-                 security_status="success", room_id="999999", uid="42", hold_ack=False):
+                 security_status="success", room_id="999999", uid="42", hold_ack=False, expected_stages=()):
         dialogs = []
         initialization = "throw new ReferenceError('PRIVATE');" if module_error else ""
         if module_error == "missing_call":
@@ -97,8 +97,9 @@ class BrowserTests(unittest.TestCase):
                 pass  # Keep the completed page alive until its invocation count has been checked.
 
         parent = QWidget()
+        logs = []
         bridge = module.BrowserChat(SimpleNamespace(room_url=lambda _: "https://live.douyin.com/123"),
-                                    SimpleNamespace(window=None), parent)
+                                    SimpleNamespace(window=None, log=logs.append), parent)
         outcome = {}
         accepted, release = threading.Event(), threading.Event()
         cancelled = lambda: False
@@ -153,6 +154,10 @@ class BrowserTests(unittest.TestCase):
                 self.assertNotIn("error", outcome)
                 self.assertEqual(outcome["result"], {"status_code": 0, "data": {
                     "msg_id_str": "7560000000000000001", "content_self_see_status": 0}})
+            for stage in expected_stages:
+                self.assertTrue(any(f"阶段={stage} " in line for line in logs), (stage, logs))
+            self.assertNotIn("PRIVATE", "\n".join(logs))
+            self.assertNotIn("7560000000000000001", "\n".join(logs))
         bridge.shutdown()
         for dialog in dialogs:
             dialog.browser.setPage(QWebEnginePage(dialog.browser))
@@ -205,6 +210,11 @@ class BrowserTests(unittest.TestCase):
     def test_accepted_request_keeps_page_alive_until_caller_finishes(self):
         self.exercise("return {data:{status_code:0,data:{msg_id_str:'7560000000000000001',"
                       "content_self_see_status:0}}};", hold_ack=True)
+
+    def test_browser_stages_separate_page_loading_from_pending_request(self):
+        self.exercise("await new Promise(resolve=>setTimeout(resolve,400));"
+                      "return {data:{status_code:0,data:{msg_id_str:'7560000000000000001',content_self_see_status:0}}};",
+                      expected_stages=("page_loading", "page_loaded", "client_ready", "request", "ack", "page_closed"))
 
 
 if __name__ == "__main__":
