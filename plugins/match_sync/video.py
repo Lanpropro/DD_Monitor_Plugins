@@ -54,9 +54,10 @@ def reformat_frame(frame, **options):
     return converter.reformat(frame, **options)
 
 
-def image_from_frame(frame, timings=None):
+def image_from_frame(frame, timings=None, width=None):
     started = time.perf_counter()
-    rgb = reformat_frame(frame, format="bgra")
+    size = {} if width is None else dict(width=min(width, frame.width), height=max(1, round(frame.height * min(width, frame.width) / frame.width)), threads=1)
+    rgb = reformat_frame(frame, format="bgra", **size)
     if timings is not None:
         timings.record('display_bgra_convert', time.perf_counter() - started)
     started = time.perf_counter()
@@ -268,7 +269,8 @@ class VideoHistory(History):
 class PictureReader:
     """Only requested main/comparison pictures get full resolution RGB conversion."""
 
-    def __init__(self):
+    def __init__(self, thumbnail_width=None):
+        self.thumbnail_width = thumbnail_width
         self.lock = threading.RLock()
         self.wake = threading.Event()
         self.cancelled = threading.Event()
@@ -422,7 +424,8 @@ class PictureReader:
                         if pts + .00001 < max(target, requested_target - .05):
                             continue
                         self.decode_phase = 'convert'
-                        image = image_from_frame(frame, self.timings)
+                        image = (image_from_frame(frame, self.timings) if self.thumbnail_width is None
+                                 else image_from_frame(frame, self.timings, self.thumbnail_width))
                         key = history.origin + pts
                         with self.lock:
                             if not self.active or self.history is not history or self.cancelled.is_set():

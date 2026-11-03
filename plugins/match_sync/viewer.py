@@ -1438,6 +1438,9 @@ class Viewer(QDialog):
         self.crop_quality.setAccessibleName('画中画画质')
         self.crop_quality.hide()
         self.crop_quality.currentIndexChanged.connect(self._crop_quality_changed)
+        self.replay_preview_width = context.setting('replay_preview_width', 280)
+        if self.replay_preview_width not in (200, 280, 360):
+            self.replay_preview_width = 280
         self.record_format = QComboBox(self)
         self.record_format.addItem('MKV', 'mkv')
         self.record_format.addItem('MP4', 'mp4')
@@ -2337,6 +2340,7 @@ class Viewer(QDialog):
         self.context.set_setting('buffer_reserve', self.reserve_seconds)
         self.context.set_setting('crop_quality', self.crop_quality.currentData())
         self.context.set_setting('record_format', self.record_format.currentData())
+        self.context.set_setting('replay_preview_width', self.replay_preview_width)
 
     def _crop_source_policy(self, row):
         if row.room_id not in self.floating_crops:
@@ -4301,6 +4305,7 @@ class Viewer(QDialog):
         row.refresh_status()
 
     def stop(self):
+        self.replay_bar.preview.stop()
         self.running = False
         if self.stream_info_dialog is not None:
             self.stream_info_dialog.close()

@@ -237,3 +237,7 @@ SHA256及实际测量时长，Qt精确定时器不会提前结束测量。
 Qt 6.11.2 上 `selfcheck_match_sync_retry_rows.py` 的离屏全屏窗口退出存在
 原有 access violation（旧提交也可复现）；该专项应另以
 `QT_QPA_PLATFORM=windows` 验证原生窗口路径。其他离屏专项仍正常执行。
+
+### 回看目标缩略图
+
+`python tests/check_match_sync_replay_preview.py --host <宿主目录> --output <证据目录>` 检查本地 H.264 缓存的实际目标图像、历史偏移、悬停不跳转、拖动时基准固定、缩略图尺寸、设置保存及停止清理。使用隔离配置且禁网；结果仅为功能回归，不代表真实直播性能。
