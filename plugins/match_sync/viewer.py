@@ -905,6 +905,10 @@ class RoomRow(QFrame):
         self.video_text = "未开始"
         self.chat_text = "弹幕未连接"
         self.buffer_text = ""
+        self.buffer_exhaustions = deque(maxlen=3)
+        self.buffer_exhausted = False
+        self.buffer_notice_at = None
+        self.buffer_recovered_since = None
         self.alias = QLineEdit(preferences.get("alias", ""))
         self.alias.setParent(self)
         self.alias.hide()
@@ -1023,6 +1027,13 @@ class RoomRow(QFrame):
         self.name_label = QLabel()
         self.name_label.setMaximumWidth(140)
         self.name_label.setStyleSheet('font-size: 14px; font-weight: 600;')
+        self.buffer_warning = QLabel('!')
+        self.buffer_warning.setFixedSize(18, 18)
+        self.buffer_warning.setAlignment(Qt.AlignCenter)
+        self.buffer_warning.setStyleSheet(f'background: {theme.ERROR}; color: white; border-radius: 9px; font-weight: bold;')
+        self.buffer_warning.setAccessibleName('缓冲反复耗尽')
+        self.buffer_warning.setToolTip('短时间内多次耗尽缓冲。为获得更好的观看体验，建议切换主画面')
+        self.buffer_warning.hide()
         self.status = CompactStatus()
         self.status.setStyleSheet(f'font-size: 12px; color: {theme.TEXT2};')
         identity = QWidget()
@@ -1035,6 +1046,7 @@ class RoomRow(QFrame):
         identity_heading = QHBoxLayout()
         identity_heading.setSpacing(8)
         identity_heading.addWidget(self.name_label)
+        identity_heading.addWidget(self.buffer_warning)
         identity_heading.addWidget(self.main_button)
         identity_heading.addWidget(self.join)
         identity_heading.addStretch()
@@ -1247,6 +1259,13 @@ class RoomRow(QFrame):
         if self.viewer.running:
             self.viewer._start_chat(self)
         self.viewer.changed()
+
+    def clear_buffer_warning(self):
+        self.buffer_exhaustions.clear()
+        self.buffer_exhausted = False
+        self.buffer_notice_at = None
+        self.buffer_recovered_since = None
+        self.buffer_warning.hide()
 
     def refresh_audio_icon(self, *_args):
         self.audible.set_state(not self.audible.isChecked(), self.volume.value(), self.channel.currentData())
@@ -1635,6 +1654,16 @@ class Viewer(QDialog):
         footer.setContentsMargins(16, 10, 16, 10)
         footer.setSpacing(16)
         footer.addWidget(self.notice, 1)
+        self.buffer_notice = QLabel()
+        self.buffer_notice.setTextFormat(Qt.PlainText)
+        self.buffer_notice.setWordWrap(True)
+        self.buffer_notice.setStyleSheet(f'color: {theme.ERROR};')
+        self.buffer_notice.hide()
+        footer.addWidget(self.buffer_notice, 1)
+        self.buffer_notice_timer = QTimer(self)
+        self.buffer_notice_timer.setSingleShot(True)
+        self.buffer_notice_timer.setInterval(15000)
+        self.buffer_notice_timer.timeout.connect(self.dismiss_buffer_notice)
         self.audio_status.setWordWrap(True)
         self.audio_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         footer.addWidget(self.audio_status, 1)
@@ -2498,6 +2527,9 @@ class Viewer(QDialog):
             row.main_button.setText('主画面' if room_id == selected else '设为主画面')
             row.realign.setEnabled(self.automatic.isChecked() and room_id != selected)
         if selected != self.alignment.reference:
+            self.dismiss_buffer_notice()
+            for current in self.rows.values():
+                current.clear_buffer_warning()
             self.late_buffer = LateBuffer(self.reserve_seconds)
             self.late_notice.hide()
             for current in self.rows.values():
@@ -3429,6 +3461,39 @@ class Viewer(QDialog):
             self.late_notice.setText(text)
             self.late_notice.setToolTip(detail)
 
+    def dismiss_buffer_notice(self):
+        self.buffer_notice_timer.stop()
+        self.buffer_notice.hide()
+        self.notice.show()
+
+    def _observe_buffer_exhaustion(self, row, exhausted, eligible, now):
+        if not eligible:
+            row.clear_buffer_warning()
+            return
+        while row.buffer_exhaustions and now - row.buffer_exhaustions[0] > 60:
+            row.buffer_exhaustions.popleft()
+        if exhausted:
+            row.buffer_recovered_since = None
+        if exhausted and not row.buffer_exhausted:
+            row.buffer_exhausted = True
+            row.buffer_exhaustions.append(now)
+            if len(row.buffer_exhaustions) == 3:
+                row.buffer_warning.show()
+                if row.buffer_notice_at is None or now - row.buffer_notice_at >= 120:
+                    row.buffer_notice_at = now
+                    text = f'{row.label()}：为获得更好的观看体验，建议切换主画面'
+                    self.buffer_notice.setText(text)
+                    self.buffer_notice.setToolTip(text)
+                    self.notice.hide()
+                    self.buffer_notice.show()
+                    self.buffer_notice_timer.start()
+        elif not exhausted and row.sync_state == '已同步':
+            row.buffer_exhausted = False
+            if row.buffer_recovered_since is None:
+                row.buffer_recovered_since = now
+            if now - row.buffer_recovered_since >= 60:
+                row.buffer_warning.hide()
+
     def _update_sync_health(self, clock, shifts):
         now = time.monotonic()
         dt = max(0, min(.25, now - self.last_health_update)) if self.last_health_update is not None else 0
@@ -3481,6 +3546,13 @@ class Viewer(QDialog):
                     if key not in self.independent_shifts:
                         self.admitted_rooms.add(key)
                     row.mix_gain = min(1.0, row.mix_gain + dt / .2)
+            eligible = (self.running and not self.replay.active and not row.paused
+                        and not self.offset_repositioning and decoder is not None
+                        and (known or key in self.independent_playback))
+            exhausted = ((before == '已同步' or row.was_isolated)
+                         and (bounds is None or target > bounds[1] - .05
+                              or key == self.alignment.reference and self.sync_waiting))
+            self._observe_buffer_exhaustion(row, exhausted, eligible, now)
             if before != row.sync_state:
                 row.refresh_status()
             if row.sync_state == "已同步" and key == self.alignment.reference:
@@ -4295,6 +4367,7 @@ class Viewer(QDialog):
 
     @staticmethod
     def _stop_row(row):
+        row.clear_buffer_warning()
         row.alignment_hint, row.hint_pending, row.hint_searching = None, False, False
         if row.decoder is not None:
             row.decoder.stop()
@@ -4315,6 +4388,7 @@ class Viewer(QDialog):
         row.refresh_status()
 
     def stop(self):
+        self.dismiss_buffer_notice()
         self.replay_bar.preview.stop()
         self.running = False
         if self.stream_info_dialog is not None:
