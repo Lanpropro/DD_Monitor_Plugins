@@ -130,6 +130,10 @@ def check(app, host, module, output=None):
             viewer.open_match_settings()
             app.processEvents()
             dialog = viewer.match_settings
+            assert dialog.width() >= 840 and dialog.height() >= 580
+            assert dialog.preview_sizes.width() >= 500, 'The editable scene must have enough room'
+            assert not any('重放最多回看' in label.text() or '两种模式共用来源' in label.text()
+                           or '每路可选 1～6' in label.text() for label in dialog.findChildren(module.QLabel))
             editor = dialog.preview_sizes
             geometry_for = import_module(module.__package__ + '.replay_preview').preview_geometry
             initial = editor.ratio
