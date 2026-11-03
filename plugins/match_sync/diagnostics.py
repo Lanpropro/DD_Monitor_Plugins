@@ -3,17 +3,132 @@ from collections import deque
 from contextlib import contextmanager
 from datetime import datetime
 import hashlib
+import io
 import json
 from logging.handlers import RotatingFileHandler
 import logging
 import marshal
 import os
+import re
 from pathlib import Path
 import sys
 import threading
 import time
 
 from PySide6.QtCore import QEvent, QObject, QTimer, Qt
+
+
+def stream_error_codes(message):
+    """Classify locally; never retain raw stderr, URLs, headers or exception text."""
+    text = re.sub(r'\b[a-z][a-z0-9+.-]*://\S+', '[address]', message.lower())
+    codes = []
+    status = re.search(r'(?:http(?:/\d(?:\.\d)?| error)?|server returned)\s*[: ]\s*([45]\d{2})\b|\b([45]\d{2}) (?:client|server) error', text)
+    if status:
+        codes.append('http_' + (status[1] or status[2]))
+    for code, pattern in (
+            ('timeout', r'timed? out|timeout'),
+            ('dns', r'failed to resolve|name or service not known|temporary failure in name resolution'),
+            ('connection', r'connection (?:refused|reset)|network is unreachable|broken pipe'),
+            ('tls', r'\b(?:tls|ssl)\b.*(?:failed|error)|certificate verify failed'),
+            ('invalid_data', r'invalid data found|invalid nal|error while decoding'),
+            ('decoder', r'unknown decoder|decoder .*not found|unsupported codec'),
+            ('missing_audio', r'stream map .*0:a:0.*matches no streams'),
+            ('permission', r'permission denied|access is denied'),
+            ('memory', r'cannot allocate memory|out of memory')):
+        if re.search(pattern, text):
+            codes.append(code)
+    return codes
+
+
+class StreamAcquisition:
+    """Small per-attempt startup receipt, exported by the existing background probe."""
+    def __init__(self):
+        self.enabled = os.environ.get('DDM_MATCH_DIAGNOSTICS', '1') != '0'
+        self.lock = threading.Lock()
+        self.started = None
+        self.state = {}
+        self.milestones = {}
+        self.errors = deque(maxlen=8)
+        self.previous = None
+
+    def begin(self, attempt):
+        if not self.enabled:
+            return
+        with self.lock:
+            if self.state:
+                self.previous = self._receipt()
+            self.started = time.perf_counter()
+            self.state = dict(attempt=attempt, phase='resolve')
+            self.milestones = {}
+            self.errors.clear()
+
+    def phase(self, name):
+        if self.enabled:
+            with self.lock:
+                self.state['phase'] = name
+
+    def mark(self, name):
+        if not self.enabled or self.started is None or name in self.milestones:
+            return
+        with self.lock:
+            self.milestones.setdefault(name, round((time.perf_counter() - self.started) * 1000, 3))
+
+    def error(self, error):
+        if not self.enabled:
+            return
+        self.stderr(str(error))
+        kind = type(error).__name__
+        if kind not in ('TimeoutError', 'ConnectionError', 'PermissionError', 'FileNotFoundError',
+                        'OSError', 'HTTPError', 'InvalidDataError', 'FFmpegError', 'ValueError', 'RuntimeError'):
+            kind = 'other'
+        with self.lock:
+            self.state.update(error_phase=self.state.get('phase'), error_kind=kind)
+
+    def stderr(self, text):
+        if self.enabled:
+            codes = stream_error_codes(text)
+            with self.lock:
+                for code in codes:
+                    if code not in self.errors:
+                        self.errors.append(code)
+
+    def read_stderr(self, pipe):
+        try:
+            with io.BufferedReader(pipe, buffer_size=4096) as reader:
+                while chunk := reader.readline(4096):
+                    self.stderr(chunk.decode('utf-8', errors='replace'))
+        except (OSError, ValueError):
+            pass  # The capture worker may close its pipe during cancellation.
+
+    def exited(self, code):
+        if self.enabled:
+            with self.lock:
+                self.state['ffmpeg_exit_code'] = code
+            self.mark('ffmpeg_exited')
+
+    def finish(self, outcome):
+        if self.enabled:
+            self.mark('finished')
+            with self.lock:
+                self.state.update(outcome=outcome, phase='cancelled' if outcome == 'cancelled' else 'retry_wait')
+
+    def _receipt(self):
+        return dict(self.state, milestones_ms=dict(self.milestones), error_codes=list(self.errors))
+
+    def snapshot(self):
+        if not self.enabled:
+            return {}
+        if not self.lock.acquire(blocking=False):
+            return dict(busy=True)
+        try:
+            result = self._receipt()
+            if self.started is not None:
+                result['elapsed_ms'] = round((time.perf_counter() - self.started) * 1000, 3)
+            if self.previous is not None:
+                result['previous_attempt'] = self.previous
+            return result
+        finally:
+            self.lock.release()
 
 
 class FrameCadence:
@@ -75,6 +190,63 @@ class StageTimings:
                                  max_ms=round(durations[-1], 3))
         return dict(window_s=1, capacity_limited=bool(len(samples) == self.samples.maxlen
                     and samples[0][0] >= now - 1), stages=result)
+
+
+class PreviewMetrics:
+    """Numeric preview lifecycle; the background exporter never accesses widgets."""
+    def __init__(self):
+        self.timings = StageTimings()
+        self.frames = None
+        self.requested_at = None
+        self.image_ready = self.image_painted = False
+        self.state = dict(active=False, pending=False, targets=0,
+                          superseded=0, dismissed_pending=0, images_ready=0, images_painted=0, cache_hits=0)
+
+    def request(self):
+        if not self.timings.enabled:
+            return
+        self.requested_at = time.perf_counter()
+        self.image_ready = self.image_painted = False
+        self.state = dict(self.state, active=True, pending=True,
+                          targets=self.state['targets'] + 1,
+                          superseded=self.state['superseded'] + int(self.state['pending']),
+                          request_to_image_ms=None, request_to_paint_ms=None)
+
+    def ready(self, frame_error, cached=False):
+        if self.requested_at is not None and not self.image_ready:
+            self.image_ready = True
+            elapsed = time.perf_counter() - self.requested_at
+            self.timings.record('preview_request_to_image', elapsed)
+            self.state = dict(self.state, pending=False, images_ready=self.state['images_ready'] + 1,
+                              cache_hits=self.state['cache_hits'] + int(cached),
+                              request_to_image_ms=round(elapsed * 1000, 3),
+                              frame_error_ms=round(frame_error * 1000, 3))
+
+    def paint(self):
+        if self.image_ready and not self.image_painted:
+            self.image_painted = True
+            elapsed = time.perf_counter() - self.requested_at
+            self.timings.record('preview_request_to_paint', elapsed)
+            self.state = dict(self.state, images_painted=self.state['images_painted'] + 1,
+                              request_to_paint_ms=round(elapsed * 1000, 3))
+
+    def dismiss(self):
+        if not self.timings.enabled:
+            return
+        self.requested_at = None
+        self.image_ready = self.image_painted = False
+        self.state = dict(self.state, active=False, pending=False,
+                          dismissed_pending=self.state['dismissed_pending'] + int(self.state['pending']))
+
+    def snapshot(self, now):
+        if not self.timings.enabled:
+            return {}
+        result = dict(self.state, gui=self.timings.stats(now))
+        requested_at = self.requested_at
+        result['request_age_ms'] = round(max(0, now - requested_at) * 1000, 3) if requested_at is not None else None
+        if self.frames is not None:
+            result.update(self.frames.snapshot(now))
+        return result
 
 
 class AudioReadMetrics:
@@ -361,6 +533,7 @@ class PlaybackProbe(QObject):
         self.clock_steps = FrameCadence()
         self.surface = {}
         self.pipeline_sources = ()
+        self.preview = None
         self.clock_gaps = deque(maxlen=32)
         self.timings = StageTimings()
         self.cpu_observation = (time.perf_counter(), time.process_time())
@@ -457,13 +630,18 @@ class PlaybackProbe(QObject):
                       painted_cadence=self.painted.stats(now, fps), clock_cadence=self.clock_steps.stats(now))
         result['process_cpu_cores'] = round((cpu - previous_cpu) / max(.001, now - previous_wall), 3)
         result['gui_pipeline'] = self.timings.stats(now)
+        if self.preview is not None:
+            result['replay_preview'] = self.preview.snapshot(now)
         result['clock_gap_recoveries'] = [dict(at=at, before=before, after=after)
             for at, before, after in tuple(self.clock_gaps) if now - 1 <= at <= now]
         if self.audio is not None:
             result['audio_reads'] = self.audio.read_metrics.stats(now)
+            result['audio_pipeline'] = self.audio.timings.stats(now)
         result['source_pipelines'] = [dict(slot=slot, source_fps=decoder.fps,
             analysis_size=decoder.analysis_size, capture=decoder.timings.stats(now),
-            display=decoder.pictures.timings.stats(now)) for slot, decoder in self.pipeline_sources]
+            display=decoder.pictures.timings.stats(now),
+            acquisition=decoder.acquisition.snapshot() if hasattr(decoder, 'acquisition') else {})
+            for slot, decoder in self.pipeline_sources]
         if frame is not None:
             result['picture'] = picture_state(*frame)
         return result
@@ -482,12 +660,16 @@ class PlaybackProbe(QObject):
             write('start', schema=3, picture_code=hashlib.sha256(marshal.dumps(PictureReader.get.__code__)).hexdigest(),
                   capture_code=hashlib.sha256(marshal.dumps(Decoder._capture.__code__)).hexdigest(),
                   analysis_gray_code=hashlib.sha256(marshal.dumps(analysis_gray.__code__)).hexdigest(),
-                  audio_read_metrics=1, pts_gap_recovery=2)
+                  audio_read_metrics=1, pts_gap_recovery=2, stack_budget_window_s=60, stream_acquisition=1,
+                  replay_preview_metrics=1, replay_preview_continuous=1)
             sampled = 0
+            sample_window = time.perf_counter()
             last_stack = last_report = 0.0
             reported_stall = False
             while not self.stopped.wait(.05):
                 now = time.perf_counter()
+                if now - sample_window >= 60:
+                    sampled, sample_window = 0, now
                 # Coalesce rapid oscillations; preserve the transition target and timestamp.
                 if self.transitions:
                     transitions = []

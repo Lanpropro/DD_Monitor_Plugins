@@ -36,7 +36,7 @@ from .panels import ConsoleChannels, ConsoleChoice, ConsoleIconButton, ConsoleMo
 from .replay import ReplayBar, ReplayTimeline
 from .floating import FloatingCrop
 from .regions import match_regions
-from .diagnostics import AudioReadMetrics, PlaybackProbe
+from .diagnostics import AudioReadMetrics, PlaybackProbe, StageTimings
 
 COLORS = ("#38bdf8", "#fb7185", "#a78bfa", "#4ade80", "#fbbf24", "#fb923c")
 ROW_MIME = "application/x-ddm-match-sync-row"
@@ -412,6 +412,7 @@ class AudioPump(QObject):
         self.replay_offset = None
         self.replay_cursors = {}
         self.read_metrics = AudioReadMetrics()
+        self.timings = StageTimings()
         self.independent_histories = frozenset()
         self.timer = QTimer(self)
         self.timer.setInterval(10)
@@ -466,6 +467,7 @@ class AudioPump(QObject):
         self.clock_observation = self.clock_floor = None
         self.snapshot = (1.0, ())
         self.read_metrics.reset()
+        self.timings.samples.clear()
 
     def flush(self, target_clock=None):
         self.replay_offset = None
@@ -529,7 +531,8 @@ class AudioPump(QObject):
             self.replay_offset = None
         inputs = []
         for room_id, row in self.viewer.rows.items():
-            if (row.decoder is not None and row.audible.isChecked() and not row.paused
+            audible, channel, volume = row.audio_controls
+            if (row.decoder is not None and audible and not row.paused
                     and room_id in shown_shifts
                     and (replaying or room_id in self.viewer.independent_playback or not self.viewer.sync_waiting and row.sync_state == "已同步")):
                 if replaying:
@@ -537,17 +540,24 @@ class AudioPump(QObject):
                     local_rate = 1 + change / .05 if abs(change) < .1 else 1.0
                 else:
                     local_rate = 1.0 if room_id in self.viewer.independent_playback else rate + self.viewer.relative_rates.get(room_id, 1.0) - 1.0
-                inputs.append((row.decoder.history, shown_clock + shown_shifts[room_id] - clock,
+                shift = shown_shifts[room_id] + (self.replay_offset if replaying else 0.)
+                inputs.append((row.decoder.history, shift,
                                local_rate,
-                               row.channel.currentData(), row.volume.value() * (1.0 if replaying else row.mix_gain)))
-        self.independent_histories = frozenset(row.decoder.history for key, row in self.viewer.rows.items()
-                                               if key in self.viewer.independent_playback and row.decoder is not None)
-        self.snapshot = (rate, tuple(inputs))
+                               channel, volume * (1.0 if replaying else row.mix_gain)))
+        independent = frozenset(row.decoder.history for key, row in self.viewer.rows.items()
+                                if key in self.viewer.independent_playback and row.decoder is not None)
+        if independent != self.independent_histories:
+            self.independent_histories = independent
+        snapshot = (rate, tuple(inputs))
+        if snapshot != self.snapshot:
+            self.snapshot = snapshot
 
     def fill(self):
         if self.thread is None:
             self.update_snapshot()
+        started = time.perf_counter()
         with self.lock:
+            self.timings.record('audio_lock_wait', time.perf_counter() - started)
             self._fill()
 
     def _fill(self):
@@ -570,6 +580,7 @@ class AudioPump(QObject):
             clock = self.anchor + self.media_written + self.correction
             inputs = []
             positions = []
+            started = time.perf_counter()
             for history, shift, local_rate, channel, volume in sources:
                 target = clock + shift
                 cursor = self.replay_cursors.get(history) if self.replay_offset is not None or history in self.independent_histories else None
@@ -580,7 +591,13 @@ class AudioPump(QObject):
                 positions.append((history, target, source_frames))
                 pcm = route_pcm_s16_stereo(pcm, channel)
                 inputs.append((resample_pcm(pcm, frames), volume))
-            count = self.device.write(mix_pcm(inputs, frames))
+            self.timings.record('audio_prepare', time.perf_counter() - started)
+            started = time.perf_counter()
+            mixed = mix_pcm(inputs, frames)
+            self.timings.record('audio_mix', time.perf_counter() - started)
+            started = time.perf_counter()
+            count = self.device.write(mixed)
+            self.timings.record('audio_device_write', time.perf_counter() - started)
             if count <= 0:
                 break
             written = count // 4
@@ -1268,7 +1285,9 @@ class RoomRow(QFrame):
         self.buffer_warning.hide()
 
     def refresh_audio_icon(self, *_args):
-        self.audible.set_state(not self.audible.isChecked(), self.volume.value(), self.channel.currentData())
+        self.audio_controls = (self.audible.isChecked(), self.channel.currentData(), self.volume.value())
+        audible, channel, volume = self.audio_controls
+        self.audible.set_state(not audible, volume, channel)
 
     def _toggle_hint_choices(self, expanded):
         for button in (self.hint_fast, self.hint_slow):
@@ -1731,6 +1750,7 @@ class Viewer(QDialog):
         self.render_timer.setInterval(33)
         self.render_timer.timeout.connect(self.render)
         self.playback_probe = PlaybackProbe(self, Path(config_module.REPO) / 'logs' / 'match-playback.jsonl')
+        self.playback_probe.preview = self.replay_bar.preview.metrics
         self.playback_probe.audio = self.audio
         self.canvas.paint_probe = self.playback_probe
         self.match_timer = QTimer(self)
@@ -2618,6 +2638,7 @@ class Viewer(QDialog):
         self.stream_info_dialog = None
 
     def sync_picture(self, *_args, refresh_metadata=True):
+        self.replay_bar.preview.sync_source()
         row = self.rows.get(self.main.currentData())
         # Poll twice per source frame: Qt paint/chat work can delay a timer by
         # several milliseconds. The audio clock still owns playback speed.
@@ -3809,6 +3830,7 @@ class Viewer(QDialog):
         self._update_sync_health(clock, shifts)
         if probe is not None:
             probe.mark('chat')
+        chat_deadline = time.perf_counter() + .004
         eligible = []
         chat_budget = min(2 if dragging_crop else 80, max(1, 200 // max(1, len(self.rows))))
         for room_id, row in self.rows.items():
@@ -3835,24 +3857,28 @@ class Viewer(QDialog):
                     row.buffer_text = text
                     row.refresh_status()
             target = clock + shifts[room_id]
-            for _ in range(chat_budget):
-                if not row.pending or row.pending[0][0] > target:
+            for index, (received, event) in enumerate(row.pending):
+                if index >= chat_budget or received > target:
                     break
-                received, event = row.pending.popleft()
-                if clock - received > 120:
-                    continue
-                event["medal"] = {}
-                event["uname"] = f"【{row.label()}】 {event.get('uname') or ''}"
-                event["source_label"] = row.label()
-                event["source_room"] = room_id
-                event["color"] = row.color
-                eligible.append((received - shifts[room_id], event))
-        for _due, event in sorted(eligible, key=lambda item: item[0]):
+                eligible.append((received - shifts[room_id], room_id, row, received, event))
+        processed = 0
+        for _due, room_id, row, received, event in sorted(eligible, key=lambda item: item[0]):
+            # One Qt text insertion cannot be interrupted. Always make progress,
+            # then leave remaining messages in their original queues for the next poll.
+            if processed and not self.replay.active and time.perf_counter() >= chat_deadline:
+                break
+            row.pending.popleft()
+            processed += 1
+            if clock - received > 120:
+                continue
+            event["medal"] = {}
+            event["uname"] = f"【{row.label()}】 {event.get('uname') or ''}"
+            event["source_label"] = row.label()
+            event["source_room"] = room_id
+            event["color"] = row.color
             self.replay.record_message(now, event)
             if not self.replay.active:
                 self.panel.add_event(event)
-            received = _due + shifts[event["source_room"]]
-            if not self.replay.active:
                 self.overlay_pending[event["source_room"]] = (received, event)
         if self.replay.active:
             for event in self.replay.messages_between(self.replay.cursor, shown_clock):

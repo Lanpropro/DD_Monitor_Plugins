@@ -26,11 +26,16 @@ from .diagnostics import FrameCadence, StageTimings
 class StreamInput:
     """Windows subprocess pipes advertise seek() but cannot actually seek."""
 
-    def __init__(self, pipe):
+    def __init__(self, pipe, on_first_read=None):
         self.pipe = pipe
+        self.on_first_read = on_first_read
 
     def read(self, size):
-        return self.pipe.read(size)
+        data = self.pipe.read(size)
+        if data and self.on_first_read is not None:
+            callback, self.on_first_read = self.on_first_read, None
+            callback()
+        return data
 
 
 _conversion = threading.local()
@@ -269,8 +274,7 @@ class VideoHistory(History):
 class PictureReader:
     """Only requested main/comparison pictures get full resolution RGB conversion."""
 
-    def __init__(self, thumbnail_width=None):
-        self.thumbnail_width = thumbnail_width
+    def __init__(self):
         self.lock = threading.RLock()
         self.wake = threading.Event()
         self.cancelled = threading.Event()
@@ -424,8 +428,7 @@ class PictureReader:
                         if pts + .00001 < max(target, requested_target - .05):
                             continue
                         self.decode_phase = 'convert'
-                        image = (image_from_frame(frame, self.timings) if self.thumbnail_width is None
-                                 else image_from_frame(frame, self.timings, self.thumbnail_width))
+                        image = image_from_frame(frame, self.timings)
                         key = history.origin + pts
                         with self.lock:
                             if not self.active or self.history is not history or self.cancelled.is_set():

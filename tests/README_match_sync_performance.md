@@ -245,3 +245,11 @@ Qt 6.11.2 上 `selfcheck_match_sync_retry_rows.py` 的离屏全屏窗口退出�
 ### 控制台缓冲提醒
 
 `python tests/check_match_sync_buffer_notice.py --host <宿主目录> --output <截图路径>` 用缓存范围替身验证耗尽事件、分路计数与时间窗口、提醒冷却及恢复清理，检查暂停／回看／首次缓存／RGB 等待不误计、控制台高度保持及不调用主程序通知。禁网，无真实直播或性能采样，不能作为实播卡顿原因证据。
+
+### 回看预览真实采集
+
+`check_match_sync_preview_frames.py --host <宿主目录>` 检查已解码帧的后台缩图/JPEG往返、单待处理项、非等待提交、来源/重连世代、迟到结果丢弃与字节/时间上限。`check_match_sync_preview_metrics.py` 检查数值导出、非等待快照、隐私和禁用。`check_match_sync_replay_preview.py` 的H.264功能夹具覆盖捕获已解码帧预生成后持续200次拖动立即取图、历史偏移、来源隔离、几何设置、主reader目标不变与停止清理。以上均不是实播性能证据。
+
+重新从根 `run.cmd` 加载，等待主来源播放并积累预览后，按正常观看、缓慢拖动、快速往返、反复回拖各约15秒操作。预览应在持续移动时更新，无需停稳；目标帧率约8fps，不承诺主视频同帧率。新实现只覆盖本次运行已准备到的主来源时间段，32MB压缩预算不足或工作繁忙丢帧时可能存在空缺。正常停止后保留 `logs/match-playback.jsonl` 及轮转。
+
+头标 `replay_preview_continuous=1`；`playback.replay_preview` 与同记录的主画面、音频、进程CPU关联。`gui` 为目标查询、取图和请求到绘图调用的墙钟时间；`worker_pipeline` 为后台缩图/拷贝/JPEG压缩与小图读取，不再包含第二条视频包解码。`prepared_count/bytes/bounds` 为当前压缩小图缓存；`produced/dropped/queued` 为完成、丢弃、单待处理项；`cache_hits` 为直接取得准备图的目标数，`frame_error_ms` 为小图与请求的时间差（最多250ms，超过即视为缺失）。线程累计CPU只覆盖预览处理线程，不等同于进程CPU。导出不保存画面/房间/账号或URL，不访问QWidget、不等待媒体锁。
