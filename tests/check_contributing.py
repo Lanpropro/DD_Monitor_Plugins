@@ -1,5 +1,6 @@
 """Contribution workflow and local documentation links; standard library only."""
 from pathlib import Path
+import hashlib
 import json
 import re
 import unittest
@@ -76,6 +77,27 @@ class ContributionGuideTests(unittest.TestCase):
         for note in notes:
             with self.subTest(note=note.name):
                 self.assertIn(f']({note.name})', index)
+
+    def test_release_archive_sources_match_saved_bodies(self):
+        directory = ROOT / 'docs/releases'
+        sources = json.loads((directory / 'sources.json').read_text(encoding='utf-8'))
+        entries = sources['entries']
+        self.assertEqual(len({entry['tag'] for entry in entries}), len(entries))
+        self.assertEqual({entry['file'] for entry in entries},
+                         {path.name for path in directory.glob('RELEASE-*.md')})
+        for entry in entries:
+            with self.subTest(tag=entry['tag']):
+                data = (directory / entry['file']).read_bytes().replace(b'\r\n', b'\n')
+                self.assertEqual(hashlib.sha256(data).hexdigest(), entry['sha256'])
+                if entry['status'] == 'online':
+                    self.assertTrue(entry['last_edit_verified'])
+                    self.assertEqual(entry['source_kind'], 'github_release')
+                    self.assertIn('release_updated_at', entry)
+                else:
+                    self.assertFalse(entry['last_edit_verified'])
+                    self.assertIn(entry['source_kind'], ('release_backup', 'repository_history'))
+                    if entry['source_kind'] == 'repository_history':
+                        self.assertRegex(entry['source_commit'], r'^[0-9a-f]{40}$')
 
     def test_each_plugin_has_an_incremental_change_log(self):
         directory = ROOT / 'docs/changes'
