@@ -944,7 +944,10 @@ class RoomRow(QFrame):
         self.channel = ConsoleChannels()
         self.channel.setAccessibleName('输出声道')
         self.channel.setCurrentIndex(max(0, self.channel.findData(preferences.get("audio_channel", 0))))
-        self.channel.setToolTip("点击 L / R 切换输出声道；两侧点亮为双声道，至少保留一侧输出。")
+        self.channel.setToolTip("点击 L / R 切换输出声道；两侧点亮为双声道，两侧关闭为静音。")
+        self.channel.set_audible(self.audible.isChecked())
+        self.channel.audibleChanged.connect(self.audible.setChecked)
+        self.audible.toggled.connect(self.channel.set_audible)
         self.channel.currentIndexChanged.connect(viewer.changed)
         for signal in (self.channel.currentIndexChanged, self.volume.valueChanged, self.audible.toggled):
             signal.connect(self.refresh_audio_icon)
@@ -2827,6 +2830,7 @@ class Viewer(QDialog):
             return
         self.multi_recorder = worker
         self.record_started = time.monotonic()
+        worker.started.connect(self._recording_started, Qt.QueuedConnection)
         worker.completed.connect(self._recording_finished, Qt.QueuedConnection)
         self.picture.set_recording_state('record')
         self.picture.recording_button.setToolTip('停止录制主画面与所选音轨')
@@ -2844,6 +2848,11 @@ class Viewer(QDialog):
                    for key, shift in shifts.items() if (row := self.rows.get(key)) is not None}
         return clock + main, sources
 
+    @Slot(str)
+    def _recording_started(self, path):
+        if self.multi_recorder is self.sender():
+            self.context.notify(f'二路开始录制：{path}')
+
     @Slot(str, str)
     def _recording_finished(self, path, error):
         worker = self.sender()
@@ -2855,7 +2864,9 @@ class Viewer(QDialog):
             self.picture.set_recording_elapsed('')
             self.picture.recording_button.setEnabled(True)
             self.picture.recording_button.setToolTip('录制主画面与所选音轨；在二路控制台设置中分配音轨')
-            self.notice.setText(f'分音轨录制停止：{error} · 文件：{path}' if error else f'分音轨录制已保存：{path}')
+            message = f'二路录制停止：{error} · 文件：{path}' if error else f'二路录制已保存：{path}'
+            self.notice.setText(message)
+            self.context.notify(message, kind='warning' if error else 'info')
             if self.match_settings is not None:
                 self.match_settings.refresh_recording_routes()
         worker.deleteLater()

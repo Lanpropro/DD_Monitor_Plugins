@@ -1,7 +1,7 @@
 """Shared appearance of the playback and sending consoles."""
 import ctypes
 import sys
-from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGridLayout, QHBoxLayout, QLabel, QListView, QPushButton, QScrollArea, QStyledItemDelegate, QStyle, QToolTip, QVBoxLayout, QWidget
 
@@ -265,9 +265,12 @@ class ColorSwatchDelegate(QStyledItemDelegate):
 
 
 class ConsoleChannels(QComboBox):
-    """Direct L/R buttons backed by the existing saved channel values and signals."""
+    """Direct L/R buttons backed by the existing saved channel values and mute."""
+    audibleChanged = Signal(bool)
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.audible = True
         self.setFixedSize(62, 32)
         self.setFocusPolicy(Qt.NoFocus)
         for label, value in (('原始声道', 0), ('仅左输出', 3), ('仅右输出', 4)):
@@ -282,21 +285,28 @@ class ConsoleChannels(QComboBox):
             button.setCheckable(True)
             button.setStyleSheet(button.styleSheet() + f'''
                 QPushButton:!checked:hover {{background: {theme.CONTENT_HOVER};}}''')
-            button.clicked.connect(lambda _checked=False, b=button: self._clicked(b))
+            button.clicked.connect(self._clicked)
             layout.addWidget(button)
         use_link_cursor(self)
         self.currentIndexChanged.connect(self._sync_buttons)
         self._sync_buttons()
 
     def _sync_buttons(self, *_args):
-        self.left.setChecked(self.currentData() in (0, 3))
-        self.right.setChecked(self.currentData() in (0, 4))
+        self.left.setChecked(self.audible and self.currentData() in (0, 3))
+        self.right.setChecked(self.audible and self.currentData() in (0, 4))
 
-    def _clicked(self, button):
-        if not self.left.isChecked() and not self.right.isChecked():
-            button.setChecked(True)
-        value = 0 if self.left.isChecked() and self.right.isChecked() else 3 if self.left.isChecked() else 4
-        self.setCurrentIndex(self.findData(value))
+    def set_audible(self, enabled):
+        self.audible = enabled
+        self._sync_buttons()
+
+    def _clicked(self, _checked=False):
+        enabled = self.left.isChecked() or self.right.isChecked()
+        if enabled:
+            value = 0 if self.left.isChecked() and self.right.isChecked() else 3 if self.left.isChecked() else 4
+            self.audible = True
+            self.setCurrentIndex(self.findData(value))
+        self.set_audible(enabled)
+        self.audibleChanged.emit(enabled)
 
     def showPopup(self):
         pass

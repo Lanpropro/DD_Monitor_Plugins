@@ -98,6 +98,7 @@ class CacheMuxer:
 
 
 class MultiTrackRecorder(QObject):
+    started = Signal(str)
     completed = Signal(str, str)
 
     def __init__(self, path, history, tracks, snapshot, parent=None, minimum_free=0):
@@ -125,6 +126,7 @@ class MultiTrackRecorder(QObject):
             target, sources = self.snapshot
             muxer = CacheMuxer(self.path, self.history, target, self.tracks)
             checked = 0
+            started = False
             while True:
                 if time.monotonic() - checked >= 2:
                     checked = time.monotonic()
@@ -132,6 +134,9 @@ class MultiTrackRecorder(QObject):
                         raise OSError('Insufficient disk space; recording stopped')
                 target, sources = self.snapshot
                 muxer.write_until(target, sources)
+                if not started:
+                    self.started.emit(str(self.path))
+                    started = True
                 if self.cancelled.wait(.05):
                     target, sources = self.snapshot
                     muxer.write_until(target, sources)

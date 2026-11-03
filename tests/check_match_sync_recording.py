@@ -92,15 +92,22 @@ def check_mux(output):
                             assert np.max(abs(pcm)) < .001
                 assert abs(onsets[0] - onsets[1]) < .03, 'Remove the 250ms source offset'
                 worker = MultiTrackRecorder(output / (codec + '-stop.' + extension), history, tracks, (1000.4, sources))
+                started_paths = []
+                worker.started.connect(started_paths.append)
                 worker.start()
                 worker.snapshot = (1000.8, sources)
                 worker.stop(wait=True)
                 assert not worker.thread.is_alive()
+                from PySide6.QtCore import QCoreApplication
+                QCoreApplication.processEvents()
+                assert started_paths == [str(worker.path)]
                 with av.open(str(worker.path)) as container:
                     assert len(list(container.decode(video=0))) >= 15, 'Stop must finalize a readable container'
                 with patch('plugins.match_sync.recording.shutil.disk_usage', return_value=SimpleNamespace(free=0)):
                     failed = MultiTrackRecorder(output / (codec + '-low-disk.' + extension), history, tracks, (1000.4, sources), minimum_free=1)
                     errors = []
+                    failed_starts = []
+                    failed.started.connect(failed_starts.append)
                     failed.completed.connect(lambda _path, error: errors.append(error))
                     failed.start()
                     failed.thread.join(5)
@@ -108,6 +115,7 @@ def check_mux(output):
                     from PySide6.QtCore import QCoreApplication
                     QCoreApplication.processEvents()
                     assert errors and 'Insufficient disk space' in errors[0]
+                    assert not failed_starts
                 muxer = CacheMuxer(output / (codec + '-changed.' + extension), history, 1000.2, tracks)
                 history.origin += 1
                 try:
@@ -227,6 +235,7 @@ def check(app, host, module, output=None):
     from ddm import plugins
 
     class StubRecorder(QObject):
+        started = Signal(str)
         completed = Signal(str, str)
 
         def __init__(self, path, history, tracks, snapshot, parent=None, minimum_free=0):
@@ -235,7 +244,7 @@ def check(app, host, module, output=None):
             self.cancelled = threading.Event()
 
         def start(self):
-            pass
+            self.started.emit(str(self.path))
 
         def stop(self, wait=False):
             self.cancelled.set()
@@ -247,6 +256,8 @@ def check(app, host, module, output=None):
             patch.object(module, 'MultiTrackRecorder', StubRecorder):
         host.settings, host.rooms = {}, []
         manager = plugins.PluginManager(window=host, plugins_dir=directory)
+        notices = []
+        host._show_notice = lambda message, **options: notices.append((message, options, threading.get_ident()))
         viewer = module.Viewer(plugins.PluginContext(manager, 'track_matrix_check'), {})
         viewer.setAttribute(Qt.WA_DontShowOnScreen)
         try:
@@ -276,14 +287,33 @@ def check(app, host, module, output=None):
             history.origin, history.codec = time.monotonic() - 2, ('h264', b'')
             viewer._record_picture()
             assert viewer.multi_recorder is None and '选择保存目录' in viewer.notice.text()
+            assert not notices, 'A rejected start must not announce recording'
             host.settings.update(recording_dir=directory, recording_min_free_mb=256)
             peer = viewer.rows['2']
             peer.sync_state = '已同步'
             peer.audible.setChecked(False)
             peer.volume.setValue(1)
             peer.channel.setCurrentIndex(peer.channel.findData(3))
+            assert not peer.channel.left.isChecked() and not peer.channel.right.isChecked()
+            with patch.object(viewer, 'shifts', return_value={'1': 0., '2': 0.}), \
+                    patch.object(viewer, 'sync_waiting', False):
+                peer.channel.right.click()
+                assert peer.audible.isChecked() and peer.channel.currentData() == 4
+                viewer.audio.update_snapshot()
+                assert any(entry[0] is peer.decoder.history and entry[3] == 4 for entry in viewer.audio.snapshot[1])
+                peer.channel.right.click()
+                assert not peer.audible.isChecked()
+                viewer.audio.update_snapshot()
+                assert all(entry[0] is not peer.decoder.history for entry in viewer.audio.snapshot[1]), 'Both channels off removes this source from the listening mix'
+                peer.audible.setChecked(True)
+                assert not peer.channel.left.isChecked() and peer.channel.right.isChecked()
+                peer.audible.setChecked(False)
             viewer._record_picture()
             worker = viewer.multi_recorder
+            QTest.qWait(20)
+            app.processEvents()
+            assert len(notices) == 1 and notices[0][0] == f'二路开始录制：{worker.path}', (notices, viewer.context._active, manager._unloaded, manager._notices)
+            assert notices[0][2] == threading.get_ident(), 'Host notices are delivered on the GUI thread'
             assert worker.path.suffix == '.mp4'
             assert not viewer.record_format.isEnabled()
             assert worker.tracks == ((1, '主播1、主播2', ('1', '2')), (2, '主播1、主播2', ('1', '2')))
@@ -293,7 +323,10 @@ def check(app, host, module, output=None):
 
             def finish():
                 worker.completed.emit(str(worker.path), '')
-                QTest.qWait(10)
+                QTest.qWait(20)
+                app.processEvents()
+                assert notices[-1][0] == f'二路录制已保存：{worker.path}'
+                assert notices[-1][1]['kind'] == 'info'
                 assert viewer.multi_recorder is None and viewer.picture.recording_button.isEnabled()
 
             viewer._record_picture()
@@ -301,6 +334,14 @@ def check(app, host, module, output=None):
             finish()
             assert dialog.recording_routes.isEnabled()
             assert viewer.record_format.isEnabled()
+            with patch.object(StubRecorder, 'start', lambda current: current.completed.emit(str(current.path), 'No cached keyframe')):
+                notices.clear()
+                viewer._record_picture()
+                QTest.qWait(20)
+                app.processEvents()
+                assert viewer.multi_recorder is None and len(notices) == 1
+                assert notices[0][1]['kind'] == 'warning' and 'No cached keyframe' in notices[0][0]
+                assert '开始录制' not in notices[0][0]
             viewer._record_picture()
             worker = viewer.multi_recorder
             viewer.add_room('3')
@@ -348,8 +389,8 @@ def check(app, host, module, output=None):
             viewer.running = False
             viewer.save()
             assert viewer.context.setting('rooms')[0]['record_tracks'] == []
-            return dict(passed=True, matrix=True, persisted=True, monitor_independent=True,
-                        membership_and_main_stop=True, finalized_feedback=True, real_messages=0)
+            return dict(passed=True, matrix=True, persisted=True, monitor_independent=True, muted_source_excluded=True,
+                        membership_and_main_stop=True, finalized_feedback=True, host_notices=True, failed_start_not_announced=True, real_messages=0)
         finally:
             manager.unload()
             viewer.close()
