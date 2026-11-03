@@ -3,7 +3,7 @@ from bisect import bisect_right
 from collections import deque
 import time
 
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFontDatabase, QPainter, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QSlider, QStyle, QToolTip, QVBoxLayout, QWidget
 from ddm import theme
@@ -114,13 +114,7 @@ class ReplayTimeline:
 
 
 class TimelineSlider(QSlider):
-    hovered = Signal(int)
-    departed = Signal()
-
-    def leaveEvent(self, event):
-        if not self.isSliderDown():
-            self.departed.emit()
-        super().leaveEvent(event)
+    dragging = False
 
     def position_value(self, event):
         return QStyle.sliderValueFromPosition(self.minimum(), self.maximum(),
@@ -128,6 +122,8 @@ class TimelineSlider(QSlider):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
+            self.dragging = False
+            self.press_x = event.position().x()
             self.setSliderDown(True)
             self.setValue(self.position_value(event))
             self.sliderMoved.emit(self.value())
@@ -137,17 +133,18 @@ class TimelineSlider(QSlider):
 
     def mouseMoveEvent(self, event):
         if self.isSliderDown():
+            self.dragging |= abs(event.position().x() - self.press_x) >= 3
             self.setValue(self.position_value(event))
             self.sliderMoved.emit(self.value())
             event.accept()
         else:
-            self.hovered.emit(self.position_value(event))
             super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton and self.isSliderDown():
             self.setValue(self.position_value(event))
             self.setSliderDown(False)
+            self.dragging = False
             event.accept()
         else:
             super().mouseReleaseEvent(event)
@@ -257,9 +254,6 @@ class ReplayBar(QWidget):
         track.setContentsMargins(0, 0, 0, 0)
         track.setSpacing(0)
         self.slider = TimelineSlider(Qt.Horizontal)
-        self.slider.setMouseTracking(True)
-        self.slider.hovered.connect(lambda value: self.show_preview(value / 1000))
-        self.slider.departed.connect(self.preview.dismiss)
         self.slider.sliderPressed.connect(self.begin_drag)
         self.slider.setMinimumWidth(0)
         self.slider.setFixedHeight(12)
@@ -342,6 +336,9 @@ class ReplayBar(QWidget):
             self.viewer.seek_replay((self.window_start if origin is None else origin) + seconds)
 
     def show_preview(self, seconds, origin=None):
+        if not self.slider.isSliderDown() or not self.slider.dragging:
+            self.preview.dismiss()
+            return
         stamp = (self.window_start if origin is None else origin) + seconds
         self.preview.show_target(stamp, f'{self.format_time(seconds)} / {self.format_time(self.slider.maximum() / 1000)}')
 

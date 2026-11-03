@@ -365,10 +365,11 @@ class MatchSettingsDialog(QDialog):
         viewer.record_format.show()
         viewer.crop_quality.show()
         from .replay_preview import PreviewSizePicker
-        self.preview_sizes = PreviewSizePicker(viewer.replay_preview_width, self)
+        self.preview_sizes = PreviewSizePicker(viewer, self)
         self.preview_sizes.changed.connect(self._preview_size_changed)
-        form.addRow('回看预览大小', self.preview_sizes)
         layout.addLayout(form)
+        layout.addWidget(QLabel('回看预览大小'))
+        layout.addWidget(self.preview_sizes)
         note = QLabel('自动对齐和对照微调保留在外部控制栏。\n重放最多回看十分钟，实际范围取主画面可用缓存。')
         note.setWordWrap(True)
         layout.addWidget(note)
@@ -405,10 +406,10 @@ class MatchSettingsDialog(QDialog):
         close.rejected.connect(self.close)
         layout.addWidget(close)
 
-    def _preview_size_changed(self, width):
-        self.viewer.replay_preview_width = width
+    def _preview_size_changed(self, ratio):
+        self.viewer.replay_preview_ratio = ratio
         self.viewer.replay_bar.preview.reposition()
-        self.viewer.save()
+        self.viewer.changed()
 
     def refresh_quality_status(self):
         crops = list(self.viewer.floating_crops.values())

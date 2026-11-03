@@ -15,8 +15,9 @@ from unittest.mock import patch
 def check(app, host, module, output=None):
     import av
     import numpy as np
-    from PySide6.QtCore import QEvent, QPoint, Qt
+    from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt
     from PySide6.QtTest import QTest
+    from PySide6.QtGui import QMouseEvent
     from ddm import plugins
     video = import_module(module.__package__ + '.video')
     with tempfile.TemporaryDirectory() as directory:
@@ -74,7 +75,19 @@ def check(app, host, module, output=None):
             delay = viewer.replay.delay
             live_target = decoder.pictures.target
 
+            # Hovering and pressing alone do not allocate a preview reader.
+            QTest.mouseMove(bar.slider, QPoint(10, 4))
+            assert preview.isHidden() and preview.reader is None
+            QTest.mousePress(bar.slider, Qt.LeftButton, pos=QPoint(10, 4))
+            assert preview.isHidden() and preview.reader is None
+            app.sendEvent(bar.slider, QMouseEvent(QEvent.MouseMove, QPointF(30, 4), QPointF(bar.slider.mapToGlobal(QPoint(30, 4))),
+                          Qt.NoButton, Qt.LeftButton, Qt.NoModifier))
+            assert not preview.isHidden(), 'Only a dragging gesture opens the preview'
+
             def wait_image(seconds):
+                if not bar.slider.isSliderDown():
+                    bar.slider.setSliderDown(True)
+                bar.slider.dragging = True
                 bar.show_preview(seconds)
                 deadline = time.monotonic() + 5
                 while preview.image.isNull() and time.monotonic() < deadline:
@@ -89,19 +102,21 @@ def check(app, host, module, output=None):
             assert first.red() > 160 and first.green() < 10
             second = wait_image(5)
             assert second.green() > 160 and second.red() < 10
-            assert bar.slider.value() == 7000 and viewer.replay.delay == delay
+            assert viewer.replay.delay == delay
             assert decoder.pictures.target is live_target, 'Preview must not seek the main reader'
             assert preview.x() < 32 and preview.geometry().bottom() < viewer.picture.video.height()
             if output:
                 output = Path(output)
                 output.mkdir(parents=True, exist_ok=True)
                 viewer.grab().save(str(output / 'preview-medium.png'))
-            bar.slider.hovered.emit(2000)
-            assert not preview.isHidden()
-            bar.slider.departed.emit()
+            with patch.object(viewer, 'seek_replay'):
+                QTest.mouseRelease(bar.slider, Qt.LeftButton, pos=QPoint(30, 4))
+            assert preview.isHidden() and not preview.timer.isActive()
+            QTest.mouseMove(bar.slider, QPoint(80, 4))
             assert preview.isHidden() and not preview.timer.isActive()
             assert not preview.reader.active
             bar.slider.setSliderDown(True)
+            bar.slider.dragging = True
             frozen_origin = bar.drag_origin
             bar.window_start += .4
             bar.preview_elapsed(3)
@@ -115,15 +130,33 @@ def check(app, host, module, output=None):
             viewer.open_match_settings()
             app.processEvents()
             dialog = viewer.match_settings
-            for button in dialog.preview_sizes.group.buttons():
-                assert dialog.preview_sizes.rect().contains(button.geometry()), (dialog.preview_sizes.size(), button.geometry(), button.minimumSize(), dialog.preview_sizes.sizeHint())
-            widths = []
-            for size in (200, 280, 360):
-                dialog.preview_sizes.group.button(size).click()
-                assert context.setting('replay_preview_width') == size
-                wait_image(5)
-                widths.append(preview.width())
-            assert widths[0] < widths[1] < widths[2]
+            editor = dialog.preview_sizes
+            geometry_for = import_module(module.__package__ + '.replay_preview').preview_geometry
+            initial = editor.ratio
+            corner = editor.card_rect().topRight().toPoint()
+            QTest.mousePress(editor, Qt.LeftButton, pos=corner)
+            app.sendEvent(editor, QMouseEvent(QEvent.MouseMove, QPointF(corner + QPoint(25, -14)), QPointF(editor.mapToGlobal(corner + QPoint(25, -14))),
+                          Qt.NoButton, Qt.LeftButton, Qt.NoModifier))
+            QTest.mouseRelease(editor, Qt.LeftButton, pos=corner + QPoint(25, -14))
+            assert editor.ratio > initial
+            viewer.save()
+            assert context.setting('replay_preview_ratio') == editor.ratio
+            viewport = viewer.picture.video.size()
+            stage = editor.stage_rect()
+            factor = stage.width() / viewport.width()
+            rect = editor.card_rect()
+            actual = QRectF(geometry_for(viewport.width(), viewport.height(), editor.ratio)).adjusted(12, 8, -12, -12)
+            assert abs(rect.width() / factor - actual.width()) < .01
+            assert abs(rect.height() / factor - actual.height()) < .01
+            assert abs(stage.width() / stage.height() - viewport.width() / viewport.height()) < .001
+            wait_image(5)
+            assert preview.geometry() == geometry_for(viewport.width(), viewport.height(), editor.ratio)
+            ratio = editor.ratio
+            QTest.mouseDClick(editor, Qt.LeftButton, pos=editor.card_rect().center().toPoint())
+            assert editor.ratio == 280 / 1280
+            editor.ratio = ratio
+            editor.changed.emit(ratio)
+            editor.update()
             if output:
                 dialog.grab().save(str(output / 'settings.png'))
             dialog.hide()
@@ -136,11 +169,11 @@ def check(app, host, module, output=None):
             assert preview.isHidden() and preview.reader is None
             assert reader.cancelled.is_set() and not reader.thread.is_alive()
             restored = module.Viewer(context, {})
-            assert restored.replay_preview_width == 360
+            assert restored.replay_preview_ratio == ratio
             restored.close()
             restored.deleteLater()
             return dict(passed=True, real_cached_h264=True, thumbnail_width=360,
-                        historical_offset=True, hover_without_seek=True, drag_origin_frozen=True,
+                        historical_offset=True, hover_does_not_open=True, drag_only=True, settings_ratio_matches=True, drag_origin_frozen=True,
                         main_reader_untouched=True, sizes_persisted=True, stop_cleanup=True,
                         real_network_requests=0)
         finally:
