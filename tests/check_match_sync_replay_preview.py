@@ -8,6 +8,7 @@ from pathlib import Path
 import socket
 import sys
 import tempfile
+import threading
 import time
 from unittest.mock import patch
 
@@ -83,6 +84,14 @@ def check(app, host, module, output=None):
             app.sendEvent(bar.slider, QMouseEvent(QEvent.MouseMove, QPointF(30, 4), QPointF(bar.slider.mapToGlobal(QPoint(30, 4))),
                           Qt.NoButton, Qt.LeftButton, Qt.NoModifier))
             assert not preview.isHidden(), 'Only a dragging gesture opens the preview'
+            preview_module = import_module(module.__package__ + '.replay_preview')
+            now = time.monotonic()
+            with patch.object(preview_module.time, 'monotonic') as clock:
+                for index in range(200):
+                    clock.return_value = now + index * .01
+                    preview.show_target(base + (2 if index % 2 else 5), 'fixture')
+                    preview.poll()
+                assert preview.reader is None, 'Continuous scrubbing must not start repeated GOP decodes'
 
             def wait_image(seconds):
                 if not bar.slider.isSliderDown():
@@ -90,16 +99,19 @@ def check(app, host, module, output=None):
                 bar.slider.dragging = True
                 bar.show_preview(seconds)
                 deadline = time.monotonic() + 5
-                while preview.image.isNull() and time.monotonic() < deadline:
+                while preview.pending and time.monotonic() < deadline:
                     app.processEvents()
                     preview.poll()
                     time.sleep(.02)
-                assert not preview.image.isNull(), 'Read actual H.264 target from cache'
+                assert not preview.pending and not preview.image.isNull(), 'Read actual H.264 target from cache'
                 assert preview.image.width() == 360, 'Convert only thumbnail RGB pixels'
                 return preview.image.pixelColor(100, 60)
 
             first = wait_image(2)
             assert first.red() > 160 and first.green() < 10
+            previous = preview.image.cacheKey()
+            bar.show_preview(5)
+            assert preview.pending and preview.image.cacheKey() == previous, 'Keep the last image while the new target loads'
             second = wait_image(5)
             assert second.green() > 160 and second.red() < 10
             evidence = viewer.playback_probe.snapshot()['replay_preview']
@@ -108,6 +120,13 @@ def check(app, host, module, output=None):
             assert evidence['codec_creations'] >= 1 and evidence['rgb_count'] > 0
             assert evidence['thread_cpu_total_ms'] >= 0
             assert preview.reader.thread.name == 'match-sync-preview'
+            creates = preview.reader.codec_creations
+            assert wait_image(2).red() > 160
+            assert wait_image(5).green() > 160
+            assert preview.reader.codec_creations == creates, 'Cached backward and forward previews must not decode again'
+            assert preview.metrics.state['cache_hits'] == 2
+            frame = preview.request[2]
+            assert preview.reader.cached(object(), frame) is None, 'Never reuse a thumbnail from a different history'
             assert viewer.replay.delay == delay
             assert decoder.pictures.target is live_target, 'Preview must not seek the main reader'
             assert preview.x() < 32 and preview.geometry().bottom() < viewer.picture.video.height()
@@ -121,6 +140,8 @@ def check(app, host, module, output=None):
             QTest.mouseMove(bar.slider, QPoint(80, 4))
             assert preview.isHidden() and not preview.timer.isActive()
             assert not preview.reader.active
+            QTest.qWait(1100)
+            assert preview.reader.cached(history, frame) is not None, 'Keep bounded thumbnails while the reader is idle'
             bar.slider.setSliderDown(True)
             bar.slider.dragging = True
             frozen_origin = bar.drag_origin
@@ -160,6 +181,7 @@ def check(app, host, module, output=None):
             assert abs(rect.height() / factor - actual.height()) < .01
             assert abs(stage.width() / stage.height() - viewport.width() / viewport.height()) < .001
             wait_image(5)
+            assert preview.reader.codec_creations == creates, 'Reopening the same cached target must not decode again'
             assert preview.geometry() == geometry_for(viewport.width(), viewport.height(), editor.ratio)
             ratio = editor.ratio
             QTest.mouseDClick(editor, Qt.LeftButton, pos=editor.card_rect().center().toPoint())
@@ -175,9 +197,44 @@ def check(app, host, module, output=None):
             preview.reposition()
             assert preview.width() < 240 and preview.height() < 160
             reader = preview.reader
+            for seconds in (1, 2, 3, 4, 5, 6, 7):
+                wait_image(seconds)
+            with reader.lock:
+                assert sum(image.sizeInBytes() for image in reader.images.values()) <= 2 * 1024 * 1024
+            # Cancel while a real decoded frame is being converted. Its late
+            # result must not reappear after a newer gesture or close.
+            entered, released = threading.Event(), threading.Event()
+            convert = video.image_from_frame
+            def hold(frame, *args):
+                image = convert(frame, *args)
+                entered.set()
+                assert released.wait(3), 'Release the controlled conversion'
+                return image
+            with patch.object(video, 'image_from_frame', side_effect=hold):
+                try:
+                    bar.show_preview(3.45)
+                    stale = preview.request[2]
+                    assert reader.cached(history, stale) is None
+                    deadline = time.monotonic() + 3
+                    while not entered.is_set() and time.monotonic() < deadline:
+                        app.processEvents()
+                        preview.poll()
+                        time.sleep(.01)
+                    assert entered.is_set()
+                    bar.show_preview(6.45)
+                    assert not reader.active and reader.target is None
+                    preview.dismiss()
+                finally:
+                    released.set()
+                deadline = time.monotonic() + 3
+                while reader.decode_phase != 'idle' and time.monotonic() < deadline:
+                    time.sleep(.01)
+                assert reader.decode_phase == 'idle'
+                assert reader.cached(history, stale) is None, 'Discard a result completed after cancellation'
             viewer.stop()
             assert preview.isHidden() and preview.reader is None
             assert reader.cancelled.is_set() and not reader.thread.is_alive()
+            assert not reader.images
             restored = module.Viewer(context, {})
             assert restored.replay_preview_ratio == ratio
             restored.close()
@@ -185,7 +242,8 @@ def check(app, host, module, output=None):
             return dict(passed=True, real_cached_h264=True, thumbnail_width=360,
                         historical_offset=True, hover_does_not_open=True, drag_only=True, settings_ratio_matches=True, drag_origin_frozen=True,
                         main_reader_untouched=True, sizes_persisted=True, stop_cleanup=True,
-                        real_network_requests=0, preview_metrics=True)
+                        real_network_requests=0, preview_metrics=True, coalesced_targets=True,
+                        cached_revisits=True, bounded_idle_cache=True, cancelled_result_discarded=True)
         finally:
             viewer.close()
             decoder.stop()

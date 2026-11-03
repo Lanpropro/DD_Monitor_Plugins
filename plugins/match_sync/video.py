@@ -310,7 +310,8 @@ class PictureReader:
                 if previous_active:
                     self.reset_reason = 'inactive'
                 self.target = None
-                self.images.clear()
+                if self.thumbnail_width is None:
+                    self.images.clear()
             if (self.byte_limit, self.fps, self.lead, self.max_frames) == (byte_limit, max(1, fps), lead, 24):
                 return
             self.byte_limit = byte_limit
@@ -319,6 +320,16 @@ class PictureReader:
             self.lead = lead
             while len(self.images) > 1 and sum(image.sizeInBytes() for image in self.images.values()) > byte_limit:
                 self.images.pop(next(iter(self.images)))
+
+    def cached(self, history, frame):
+        with self.lock:
+            image = self.images.get(frame[0]) if self.history is history else None
+            if image is not None:
+                # Keep recently revisited thumbnails inside the existing budget.
+                self.images.pop(frame[0])
+                self.images[frame[0]] = image
+                return frame[0], image
+        return None
 
     def get(self, history, frame, exact=False):
         with self.lock:
@@ -330,6 +341,10 @@ class PictureReader:
                 self.images.clear()
                 self.history = history
                 self.reset_reason = 'source_changed'
+            if self.thumbnail_width is not None:
+                result = self.cached(history, frame)
+                if result is not None:
+                    return result
             now = time.monotonic()
             elapsed = max(0, now - self.requested)
             self.requested = now
@@ -369,7 +384,8 @@ class PictureReader:
                 if not self.wake.wait(1):
                     with self.lock:
                         if self.target is None or not self.active:
-                            self.images.clear()
+                            if self.thumbnail_width is None:
+                                self.images.clear()
                             codec = owner = sequence = decoded_until = None
                     continue
                 self.wake.clear()
@@ -390,7 +406,8 @@ class PictureReader:
                 if owner is not history:
                     codec = sequence = decoded_until = None
                     with self.lock:
-                        self.images.clear()
+                        if self.thumbnail_width is None:
+                            self.images.clear()
                 horizon = target + min(self.lead, max(1, capacity * 3 // 4) / self.fps)
                 if decoded_until is not None and decoded_until >= horizon:
                     continue
@@ -443,7 +460,8 @@ class PictureReader:
                                  else image_from_frame(frame, self.timings, self.thumbnail_width))
                         key = history.origin + pts
                         with self.lock:
-                            if not self.active or self.history is not history or self.cancelled.is_set():
+                            if (not self.active or self.history is not history or self.cancelled.is_set()
+                                    or self.thumbnail_width is not None and self.reset_requested):
                                 break
                             self.images[key] = image
                             capacity = max(1, min(self.max_frames, self.byte_limit // image.sizeInBytes()))

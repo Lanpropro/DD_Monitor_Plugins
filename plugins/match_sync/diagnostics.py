@@ -200,7 +200,7 @@ class PreviewMetrics:
         self.requested_at = None
         self.submitted = self.image_ready = self.image_painted = False
         self.state = dict(active=False, pending=False, targets=0, submissions=0,
-                          superseded=0, dismissed_pending=0, images_ready=0, images_painted=0)
+                          superseded=0, dismissed_pending=0, images_ready=0, images_painted=0, cache_hits=0)
 
     def request(self):
         if not self.timings.enabled:
@@ -218,12 +218,13 @@ class PreviewMetrics:
             self.timings.record('preview_request_to_submit', time.perf_counter() - self.requested_at)
             self.state = dict(self.state, submissions=self.state['submissions'] + 1)
 
-    def ready(self, frame_error):
+    def ready(self, frame_error, cached=False):
         if self.requested_at is not None and not self.image_ready:
             self.image_ready = True
             elapsed = time.perf_counter() - self.requested_at
             self.timings.record('preview_request_to_image', elapsed)
             self.state = dict(self.state, pending=False, images_ready=self.state['images_ready'] + 1,
+                              cache_hits=self.state['cache_hits'] + int(cached),
                               request_to_image_ms=round(elapsed * 1000, 3),
                               frame_error_ms=round(frame_error * 1000, 3))
 
@@ -678,7 +679,7 @@ class PlaybackProbe(QObject):
                   capture_code=hashlib.sha256(marshal.dumps(Decoder._capture.__code__)).hexdigest(),
                   analysis_gray_code=hashlib.sha256(marshal.dumps(analysis_gray.__code__)).hexdigest(),
                   audio_read_metrics=1, pts_gap_recovery=2, stack_budget_window_s=60, stream_acquisition=1,
-                  replay_preview_metrics=1)
+                  replay_preview_metrics=1, replay_preview_coalescing=1)
             sampled = 0
             sample_window = time.perf_counter()
             last_stack = last_report = 0.0

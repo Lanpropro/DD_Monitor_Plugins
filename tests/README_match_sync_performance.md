@@ -244,6 +244,8 @@ Qt 6.11.2 上 `selfcheck_match_sync_retry_rows.py` 的离屏全屏窗口退出�
 
 ### 回看预览真实采集
 
+`check_match_sync_replay_preview.py` 另覆盖连续200次目标变化的合并、停稳后准确取图、同来源保留旧图、缓存回拖及重新打开不创建解码器、空闲后保留但停止释放的2MB缓存、历史隔离，以及转换中取消后不发布旧结果。这些仅为调度及缓存功能回归。候选头标 `replay_preview_coalescing=1`，`cache_hits` 统计没有提交新解码就复用的请求；持续快速移动时等待目标停稳约120ms，最后一张图显示“更新中”，不承诺连续拖动时逐帧解码。
+
 `check_match_sync_preview_metrics.py --host <宿主目录>` 仅检查预览数值生命周期、非等待快照、导出隐私与禁用，不播放媒体。`check_match_sync_replay_preview.py` 的H.264夹具仅验证功能，不能作为真实性能结论。
 
 重新从根 `run.cmd` 加载后，在原直播场景依次观察不拖动、缓慢拖动、快速往返拖动及反复返回相同位置；各阶段约15秒。正常停止后保留 `logs/match-playback.jsonl` 及轮转。日志头 `replay_preview_metrics=1` 表示新采集有效；`playback.replay_preview` 与同记录的主画面、音频和进程CPU对应。

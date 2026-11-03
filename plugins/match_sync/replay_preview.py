@@ -145,6 +145,8 @@ class ReplayPreview(QWidget):
         self.image = QImage()
         self.caption = ''
         self.request = None
+        self.pending = False
+        self.decode_due = 0.
         self.reader = None
         self.metrics = PreviewMetrics()
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
@@ -177,15 +179,21 @@ class ReplayPreview(QWidget):
         self.metrics.timings.record('preview_lookup', time.perf_counter() - started)
         request = (key, history, frame)
         if request != self.request:
+            if self.request is None or self.request[:2] != request[:2]:
+                self.image = QImage()
+            if self.reader is not None and self.pending:
+                self.reader.configure(2 * 1024 * 1024, 1, lead=0, active=False)
             self.metrics.request()
             self.request = request
-            self.image = QImage()
+            self.pending = True
+            self.decode_due = time.monotonic() + .12
         self.caption = caption
         self.reposition()
         self.show()
         self.raise_()
         if not self.timer.isActive():
             self.timer.start()
+        self.poll()
         self.update()
 
     def poll(self):
@@ -197,6 +205,14 @@ class ReplayPreview(QWidget):
         if not self.viewer.running or key != current or row is None or row.decoder is None:
             self.dismiss()
             return
+        if not self.pending:
+            return
+        result = self.reader.cached(history, frame) if self.reader is not None else None
+        if result is not None:
+            self._accept(result, frame, cached=not self.metrics.submitted)
+            return
+        if time.monotonic() < self.decode_due:
+            return
         if self.reader is None:
             self.reader = PictureReader(thumbnail_width=360)
             self.metrics.reader = self.reader
@@ -205,9 +221,14 @@ class ReplayPreview(QWidget):
         result = self.reader.get(history, frame)
         self.metrics.timings.record('preview_get', time.perf_counter() - started)
         self.metrics.submit()
-        if result is not None and self.image.cacheKey() != result[1].cacheKey():
-            self.metrics.ready(frame[0] - result[0])
+        if result is not None:
+            self._accept(result, frame)
+
+    def _accept(self, result, frame, cached=False):
+        if self.pending or self.image.cacheKey() != result[1].cacheKey():
+            self.metrics.ready(frame[0] - result[0], cached=cached)
             self.image = result[1]
+            self.pending = False
             self.update()
 
     def dismiss(self):
@@ -215,6 +236,7 @@ class ReplayPreview(QWidget):
         self.hide()
         self.timer.stop()
         self.request = None
+        self.pending = False
         self.image = QImage()
         if self.reader is not None:
             self.reader.configure(2 * 1024 * 1024, 1, lead=0, active=False)
@@ -235,8 +257,9 @@ class ReplayPreview(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        paint_preview(painter, self.rect(), self.image, self.caption)
-        if not self.image.isNull():
+        caption = self.caption + (' · 更新中' if self.pending and not self.image.isNull() else '')
+        paint_preview(painter, self.rect(), self.image, caption)
+        if not self.image.isNull() and not self.pending:
             self.metrics.paint()
 
 

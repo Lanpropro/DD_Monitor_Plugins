@@ -44,6 +44,10 @@ def check(app, host, module):
         metrics.dismiss()
         assert metrics.state['dismissed_pending'] == 1
         assert metrics.state['images_ready'] == 1
+        metrics.request()
+        metrics.ready(0., cached=True)
+        assert metrics.state['cache_hits'] == 1
+        assert metrics.state['images_ready'] == 2
     reader = SimpleNamespace(timings=diagnostic.StageTimings(), thread_cpu_s=.012,
         lock=threading.Lock(), active=True, decode_phase='decode', codec_creations=2,
         reset_reason='seek_backward', images={}, private_url='https://private.invalid/DO_NOT_LOG')
