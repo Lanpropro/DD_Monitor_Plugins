@@ -166,7 +166,22 @@ class BrowserChat(QObject):
             dialog.status.setText("正在重新加载官网环境；本次尚未提交弹幕。")
             dialog.browser.load(QUrl(self.platform.room_url(request["room"])))
         dialog.read_button.clicked.connect(retry)
+        review_state = {"since": None, "text": ""}
+        review_timer = QTimer(dialog)
+        review_timer.setObjectName("ddm-review-receiver")
+        review_timer.setInterval(500)
+        def observe_review():
+            receipt = request.get("result", {}).get("data", {})
+            original_mid = receipt.get("msg_id_str", "")
+            if self.platform._chat_delivery.has_own_since(request["room"], task["senderUid"],
+                                                         review_state["since"], original_mid):
+                review_timer.stop()
+                dialog.status.setText(review_state["text"] + "\n软件独立接收：已收到本人新增弹幕（至少1条）；原软件请求仍未确认。")
+                trace("review_self_broadcast")
+        review_timer.timeout.connect(observe_review)
         def retain_for_review(reason):
+            if review_state["since"] is not None:
+                return
             request["manual_review"] = True
             state["holding"] = True
             timer.stop()
@@ -176,8 +191,12 @@ class BrowserChat(QObject):
             dialog.read_button.setText("自动发送已停止")
             dialog.status.setWordWrap(True)
             prefix = ("接口已受理，但弹幕投递未确认" if reason == "delivery_unconfirmed" else "本次发送返回 HTTP 403")
-            dialog.status.setText(prefix + "，自动发送已停止，草稿保留。请先核对原消息；"
-                                  "若未出现，可在下方官网输入一条不同的短文本手动发送作对照。")
+            review_state["text"] = (prefix + "，自动发送已停止，草稿保留。请先核对原消息；"
+                                    "若未出现，可在下方官网输入一条不同的短文本手动发送作对照。")
+            review_state["since"] = time.monotonic()
+            dialog.status.setText(review_state["text"] + "\n软件独立接收：尚未观察到本人新增弹幕（0条）。")
+            trace("review_self_wait")
+            review_timer.start()
         request["retain_for_review"] = retain_for_review
         def poll():
             if request["cancelled"]() or self.closed:
@@ -251,11 +270,13 @@ class BrowserChat(QObject):
                     dialog.accept()
             page.runJavaScript(read_state if state["started"] else prepare, received)
         timer = QTimer(dialog)
+        timer.setObjectName("ddm-chat-poll")
         timer.setInterval(150)
         timer.timeout.connect(poll)
         def finished(_result):
             trace("page_closed")
             timer.stop()
+            review_timer.stop()
             request["done"].set()
             if self.active is dialog:
                 self.active = None

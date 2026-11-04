@@ -1469,6 +1469,20 @@ class DouyinTests(unittest.TestCase):
             tracker.observe("douyin:123",{"message_id":str(i)})
         self.assertEqual(tracker.sample_count("douyin:123",0),512)
 
+    def test_review_observer_requires_new_own_broadcast_and_excludes_original_receipt(self):
+        tracker=self.module.BroadcastReceipts()
+        with patch.object(self.module.time,"monotonic",return_value=10):
+            tracker.observe("douyin:123",{"message_id":"old","uid":"42"})
+        with patch.object(self.module.time,"monotonic",return_value=12):
+            tracker.observe("douyin:123",{"message_id":"original","uid":"42"})
+            tracker.observe("douyin:123",{"message_id":"other","uid":"24"})
+            tracker.observe("douyin:124",{"message_id":"other-room","uid":"42"})
+            tracker.observe("douyin:123",{"message_id":"no-user"})
+        self.assertFalse(tracker.has_own_since("douyin:123","42",11,"original"))
+        tracker.observe("douyin:123",{"message_id":"new","uid":"42"})
+        self.assertTrue(tracker.has_own_since("douyin:123","42",11,"original"))
+        self.assertFalse(tracker.has_own_since("douyin:123","",11,"original"))
+
     def test_browser_transport_writes_once_and_has_no_http_fallback(self):
         transport=Mock(return_value={"status_code":0,"data":{"msg_id_str":"12345"}})
         self.client.transport=transport
@@ -1536,7 +1550,7 @@ class DouyinTests(unittest.TestCase):
                      done=threading.Event(),result=None,deadline=time.monotonic()+55)
         try:
             with patch("ddm.platform_login.PlatformFollowDialog",return_value=dialog):bridge.open(request)
-            timer=dialog.findChild(QTimer)
+            timer=dialog.findChild(QTimer,"ddm-chat-poll")
             self.assertTrue(dialog.read_button.isEnabled())
             timer.timeout.emit()
             self.assertTrue(dialog.read_button.isEnabled())

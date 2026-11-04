@@ -24,7 +24,7 @@ class BroadcastReceipts:
         if not mid:
             return
         with self.condition:
-            self.recent.append((time.monotonic(), room, str(mid)))
+            self.recent.append((time.monotonic(), room, str(mid), event.get("uid", "")))
             self.condition.notify_all()
         if self.own_uid and event.get("uid") == self.own_uid:
             event["self_sent"] = True
@@ -35,7 +35,7 @@ class BroadcastReceipts:
             while not cancelled():
                 now = time.monotonic()
                 if any(now - stamp < 30 and rid == room and message == mid
-                       for stamp, rid, message in self.recent):
+                       for stamp, rid, message, _ in self.recent):
                     return True
                 if now >= deadline:
                     return False
@@ -45,7 +45,14 @@ class BroadcastReceipts:
     def sample_count(self, room, since):
         # Bounded message-ID samples, not a connection-health or delivery verdict.
         with self.condition:
-            return sum(stamp >= since and rid == room for stamp, rid, _ in self.recent)
+            return sum(stamp >= since and rid == room for stamp, rid, _, _ in self.recent)
+
+    def has_own_since(self, room, uid, since, exclude_mid):
+        if not uid:
+            return False
+        with self.condition:
+            return any(stamp >= since and rid == room and sender == uid and mid != exclude_mid
+                       for stamp, rid, mid, sender in self.recent)
 
 
 def playback_cookies(platform):

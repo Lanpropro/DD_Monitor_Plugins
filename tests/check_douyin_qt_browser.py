@@ -32,6 +32,7 @@ MANAGER = PluginManager(plugins_dir=str(args.plugins_dir or Path(__file__).resol
                         enabled=["domestic_live"])
 MANAGER.load()
 module = importlib.import_module("ddm_plugin_domestic_live.douyin_browser")
+delivery_module = importlib.import_module("ddm_plugin_domestic_live.douyin_interaction")
 
 
 class BlockNetwork(QWebEngineUrlRequestInterceptor):
@@ -43,7 +44,7 @@ class BrowserTests(unittest.TestCase):
     def exercise(self, behavior, expected_error=None, *, module_error=False, delayed_dependency=False,
                  security_status="success", room_id="999999", uid="42", hold_ack=False, expected_stages=(),
                  late_security=False, invalid_security=False, review_403=False, review_shutdown=False,
-                 review_delivery=False, cancelled_delivery=False):
+                 review_delivery=False, cancelled_delivery=False, observe_own=False):
         dialogs = []
         initialization = "throw new ReferenceError('PRIVATE');" if module_error else ""
         if module_error == "missing_call":
@@ -114,7 +115,8 @@ class BrowserTests(unittest.TestCase):
 
         parent = QWidget()
         logs = []
-        bridge = module.BrowserChat(SimpleNamespace(room_url=lambda _: "https://live.douyin.com/123"),
+        tracker = delivery_module.BroadcastReceipts()
+        bridge = module.BrowserChat(SimpleNamespace(room_url=lambda _: "https://live.douyin.com/123", _chat_delivery=tracker),
                                     SimpleNamespace(window=None, log=logs.append), parent)
         outcome = {}
         accepted, release = threading.Event(), threading.Event()
@@ -153,6 +155,7 @@ class BrowserTests(unittest.TestCase):
                 self.assertIs(bridge.active, dialogs[0])
                 self.assertTrue(dialogs[0].isVisible(), 'Keep the unconfirmed page available for a manual official-page comparison')
                 self.assertFalse(dialogs[0].read_button.isEnabled())
+                self.assertIn("0条", dialogs[0].status.text())
                 dialogs[0].read_button.click()
                 QTest.qWait(250)
                 blocked=dict(room="douyin:123", params={"room_id":"999999","content":"another fixture"},
@@ -161,6 +164,17 @@ class BrowserTests(unittest.TestCase):
                 self.assertTrue(blocked['done'].is_set())
                 self.assertEqual(blocked['result']['error'], 'review_open')
                 self.assertEqual(len(dialogs), 1)
+                if observe_own:
+                    tracker.observe("douyin:123", {"message_id":"7560000000000000001", "uid":"42"})
+                    tracker.observe("douyin:123", {"message_id":"other", "uid":"24"})
+                    tracker.observe("douyin:124", {"message_id":"other-room", "uid":"42"})
+                    QTest.qWait(600)
+                    self.assertIn("0条", dialogs[0].status.text())
+                    tracker.observe("douyin:123", {"message_id":"new-own", "uid":"42", "text":"PRIVATE"})
+                    QTest.qWait(600)
+                    self.assertIn("至少1条", dialogs[0].status.text())
+                    self.assertIn("原软件请求仍未确认", dialogs[0].status.text())
+                    self.assertTrue(any("阶段=review_self_broadcast " in line for line in logs))
             snapshot = []
             dialogs[0].browser.page().runJavaScript(
                 "JSON.stringify({calls:window.calls,params:window.params,loaderCaptures:window.loaderCaptures})", snapshot.append)
@@ -245,6 +259,10 @@ class BrowserTests(unittest.TestCase):
     def test_cancelled_unmatched_delivery_does_not_retain_page(self):
         self.exercise("return {data:{status_code:0,data:{msg_id_str:'7560000000000000001',content_self_see_status:0}}};",
                       review_delivery=True, cancelled_delivery=True)
+
+    def test_retained_page_observes_own_broadcast_without_accepting_original_send(self):
+        self.exercise("return {data:{status_code:0,data:{msg_id_str:'7560000000000000001',content_self_see_status:0}}};",
+                      review_delivery=True, observe_own=True)
 
     def test_invalid_response_has_distinct_stage(self):
         self.exercise("return {data:{cookie:'PRIVATE'}};",
