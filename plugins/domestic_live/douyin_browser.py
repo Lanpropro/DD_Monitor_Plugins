@@ -13,7 +13,7 @@ CLIENT_SCRIPT = (Path(__file__).parent / "douyin_client.js").read_text(encoding=
 
 class BrowserChat(QObject):
     requested = Signal(object)
-    completed = Signal(object)
+    completed = Signal(object, bool)
 
     def __init__(self, platform, context, parent):
         super().__init__(parent)
@@ -24,14 +24,16 @@ class BrowserChat(QObject):
         self.requested.connect(self.open)
         self.completed.connect(self.close_request)
 
-    def finish(self, cancelled):
+    def finish(self, cancelled, *, delivery_unconfirmed=False):
         if not self.closed:
-            self.completed.emit(cancelled)
+            self.completed.emit(cancelled, delivery_unconfirmed)
 
-    def close_request(self, cancelled):
+    def close_request(self, cancelled, delivery_unconfirmed=False):
         if self._active_request is not None and self._active_request['cancelled'] is cancelled:
             self.active.browser.page().runJavaScript("window.__ddmChatCancelled=true")
-            if not self._active_request.get("manual_review"):
+            if delivery_unconfirmed and not cancelled():
+                self._active_request["retain_for_review"]("delivery_unconfirmed")
+            if not self._active_request.get("manual_review") or cancelled():
                 self.active.accept()
 
     def request(self, room, params, cancelled):
@@ -164,6 +166,19 @@ class BrowserChat(QObject):
             dialog.status.setText("正在重新加载官网环境；本次尚未提交弹幕。")
             dialog.browser.load(QUrl(self.platform.room_url(request["room"])))
         dialog.read_button.clicked.connect(retry)
+        def retain_for_review(reason):
+            request["manual_review"] = True
+            state["holding"] = True
+            timer.stop()
+            trace(reason + "_review")
+            dialog.setWindowTitle("抖音 · 官网发送核对")
+            dialog.read_button.setEnabled(False)
+            dialog.read_button.setText("自动发送已停止")
+            dialog.status.setWordWrap(True)
+            prefix = ("接口已受理，但弹幕投递未确认" if reason == "delivery_unconfirmed" else "本次发送返回 HTTP 403")
+            dialog.status.setText(prefix + "，自动发送已停止，草稿保留。请先核对原消息；"
+                                  "若未出现，可在下方官网输入一条不同的短文本手动发送作对照。")
+        request["retain_for_review"] = retain_for_review
         def poll():
             if request["cancelled"]() or self.closed:
                 page.runJavaScript("window.__ddmChatCancelled=true")
@@ -229,14 +244,7 @@ class BrowserChat(QObject):
                 request["done"].set()
                 trace("ack" if accepted else "unconfirmed")
                 if review:
-                    timer.stop()
-                    trace("http_403_review")
-                    dialog.setWindowTitle("抖音 · 官网发送核对")
-                    dialog.read_button.setEnabled(False)
-                    dialog.read_button.setText("自动发送已停止")
-                    dialog.status.setWordWrap(True)
-                    dialog.status.setText("本次发送返回 HTTP 403，自动发送已停止，草稿保留。请先核对原消息；"
-                                          "若未出现，可在下方官网输入一条不同的短文本手动发送作对照。")
+                    retain_for_review("http_403")
                 elif accepted:
                     dialog.status.setText("官网已受理，正在核对弹幕投递，请勿重复发送。")
                 else:

@@ -733,7 +733,7 @@ class DouyinComposer(HuyaComposer):
         self.edit.setToolTip(message)
 
     def send_text(self):
-        from .douyin_interaction import DouyinAPI
+        from .douyin_interaction import DouyinAPI, DeliveryUnconfirmed
         text = self.edit.text().strip()
         if not text:
             return
@@ -745,10 +745,14 @@ class DouyinComposer(HuyaComposer):
                            transport=self.browser_chat.request)
         bridge = self.browser_chat
         def send(cancelled, progress):
+            unconfirmed = False
             try:
                 return client.send_text(key[0], text, cancelled, progress=progress)
+            except DeliveryUnconfirmed:
+                unconfirmed = True
+                raise
             finally:
-                bridge.finish(cancelled)
+                bridge.finish(cancelled, delivery_unconfirmed=unconfirmed)
         self.start("text", send, key=key)
 
 

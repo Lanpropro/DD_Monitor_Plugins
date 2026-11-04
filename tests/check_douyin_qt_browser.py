@@ -42,7 +42,8 @@ class BlockNetwork(QWebEngineUrlRequestInterceptor):
 class BrowserTests(unittest.TestCase):
     def exercise(self, behavior, expected_error=None, *, module_error=False, delayed_dependency=False,
                  security_status="success", room_id="999999", uid="42", hold_ack=False, expected_stages=(),
-                 late_security=False, invalid_security=False, review_403=False, review_shutdown=False):
+                 late_security=False, invalid_security=False, review_403=False, review_shutdown=False,
+                 review_delivery=False, cancelled_delivery=False):
         dialogs = []
         initialization = "throw new ReferenceError('PRIVATE');" if module_error else ""
         if module_error == "missing_call":
@@ -117,7 +118,7 @@ class BrowserTests(unittest.TestCase):
                                     SimpleNamespace(window=None, log=logs.append), parent)
         outcome = {}
         accepted, release = threading.Event(), threading.Event()
-        cancelled = lambda: False
+        cancelled = lambda: cancelled_delivery and bool(outcome)
 
         def request():
             try:
@@ -128,7 +129,7 @@ class BrowserTests(unittest.TestCase):
             except Exception as error:
                 outcome["error"] = error
             finally:
-                bridge.finish(cancelled)
+                bridge.finish(cancelled, delivery_unconfirmed=review_delivery)
 
         with patch("ddm.platform_login.PlatformFollowDialog", Dialog):
             worker = threading.Thread(target=request)
@@ -147,10 +148,10 @@ class BrowserTests(unittest.TestCase):
             self.assertEqual(len(dialogs), 1)
             if hold_ack:
                 self.assertTrue(outcome.get('held_open'), 'Accepted response must not destroy the page before delivery confirmation')
-            if review_403:
+            if review_403 or review_delivery and not cancelled_delivery:
                 QTest.qWait(100)
                 self.assertIs(bridge.active, dialogs[0])
-                self.assertTrue(dialogs[0].isVisible(), 'Keep the 403 page available for a manual official-page comparison')
+                self.assertTrue(dialogs[0].isVisible(), 'Keep the unconfirmed page available for a manual official-page comparison')
                 self.assertFalse(dialogs[0].read_button.isEnabled())
                 dialogs[0].read_button.click()
                 QTest.qWait(250)
@@ -187,7 +188,10 @@ class BrowserTests(unittest.TestCase):
                 self.assertTrue(any(f"阶段={stage} " in line for line in logs), (stage, logs))
             self.assertNotIn("PRIVATE", "\n".join(logs))
             self.assertNotIn("7560000000000000001", "\n".join(logs))
-            if review_403:
+            if cancelled_delivery:
+                self.assertIsNone(bridge.active)
+                self.assertFalse(dialogs[0].isVisible())
+            if review_403 or review_delivery and not cancelled_delivery:
                 if review_shutdown:
                     bridge.shutdown()
                 else:
@@ -233,6 +237,14 @@ class BrowserTests(unittest.TestCase):
     def test_shutdown_closes_retained_http_403_page(self):
         self.exercise("throw Object.assign(new Error('PRIVATE'),{response:{status:403}});",
                       ["HTTP：403"], review_403=True, review_shutdown=True)
+
+    def test_unmatched_delivery_keeps_accepted_page_until_user_closes(self):
+        self.exercise("return {data:{status_code:0,data:{msg_id_str:'7560000000000000001',content_self_see_status:0}}};",
+                      review_delivery=True, expected_stages=("ack", "delivery_unconfirmed_review"))
+
+    def test_cancelled_unmatched_delivery_does_not_retain_page(self):
+        self.exercise("return {data:{status_code:0,data:{msg_id_str:'7560000000000000001',content_self_see_status:0}}};",
+                      review_delivery=True, cancelled_delivery=True)
 
     def test_invalid_response_has_distinct_stage(self):
         self.exercise("return {data:{cookie:'PRIVATE'}};",

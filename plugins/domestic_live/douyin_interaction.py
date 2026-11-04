@@ -9,6 +9,10 @@ import requests
 from .douyu_interaction import ChatReceipt, InteractionError, LoginRequired
 
 
+class DeliveryUnconfirmed(InteractionError):
+    """The accepted message was not matched on the independent receiver."""
+
+
 class BroadcastReceipts:
     def __init__(self):
         self.condition = threading.Condition()
@@ -158,7 +162,7 @@ class DouyinAPI:
                 flag = flag if type(flag) is int else "未提供"
                 samples = delivery.sample_count(canonical, started) if delivery is not None else 0
                 progress(f"delivery_unmatched samples={samples}")
-                raise InteractionError("抖音接口已受理，但未在弹幕连接中观察到该消息。广播投递未确认，草稿已保留；"
+                raise DeliveryUnconfirmed("抖音接口已受理，但未在弹幕连接中观察到该消息。广播投递未确认，草稿已保留；"
                                        "不要立即重复发送，请在官网核对。"
                                        f"（受理状态：0；content_self_see_status：{flag}，不作为公共投递证明；"
                                        f"本次期间同房间含消息ID的接收缓存样本：{samples}条，上限512）")

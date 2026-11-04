@@ -1423,7 +1423,7 @@ class DouyinTests(unittest.TestCase):
         self.platform._chat_delivery.wait.return_value=False
         self.platform._chat_delivery.sample_count.return_value=3
         phases=[]
-        with self.assertRaisesRegex(api.InteractionError,"广播投递未确认"):
+        with self.assertRaisesRegex(self.module.DeliveryUnconfirmed,"广播投递未确认"):
             self.client.send_text("douyin:123","hello",progress=phases.append)
         self.assertEqual(phases[-1],"delivery_unmatched samples=3")
         self.assertEqual(self.platform._chat_delivery.sample_count.call_args.args[0],"douyin:123")
@@ -1645,7 +1645,7 @@ class DouyinTests(unittest.TestCase):
         try:
             widget.set_room({'platform':'douyin','room_id':'douyin:123'})
             widget.edit.setText('hello')
-            for failure in (None,api.InteractionError('broadcast unconfirmed')):
+            for failure in (None,api.InteractionError('other failure'),self.module.DeliveryUnconfirmed('broadcast unconfirmed')):
                 with self.subTest(failure=failure), patch.object(widget,'start') as start, \
                         patch.object(self.module,'DouyinAPI') as client:
                     client.return_value.send_text.side_effect=failure
@@ -1655,7 +1655,8 @@ class DouyinTests(unittest.TestCase):
                     if failure:
                         with self.assertRaises(api.InteractionError):operation(cancelled,progress)
                     else:operation(cancelled,progress)
-                    widget.browser_chat.finish.assert_called_once_with(cancelled)
+                    widget.browser_chat.finish.assert_called_once_with(cancelled,
+                        delivery_unconfirmed=isinstance(failure,self.module.DeliveryUnconfirmed))
         finally:widget.shutdown();parent.close();parent.deleteLater();APP.processEvents()
 
 
