@@ -35,7 +35,7 @@
 
 ## 开发与验证
 
-[架构、页面与边界方案](DESIGN.md) · [参考项目完整功能对照](FEATURES.md) · [增量与待验收记录](../../docs/changes/ddcut_replay.md) · [贡献流程](../../CONTRIBUTING.md)
+[架构、页面与边界方案](DESIGN.md) · [参考项目完整功能对照](FEATURES.md) · [完整对齐计划](PARITY.md) · [增量与待验收记录](../../docs/changes/ddcut_replay.md) · [贡献流程](../../CONTRIBUTING.md)
 
 ```powershell
 python tests/check_ddcut_replay.py --host ../DD_Monitor_CE
