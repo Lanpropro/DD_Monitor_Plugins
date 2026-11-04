@@ -1,26 +1,28 @@
-"""Plugin recording backend: durable segments and an immediately readable index.
+"""Local HLS recording archives; the host retains FFmpeg/control ownership.
 
-The host still owns capture controls, source renewal, FFmpeg and shutdown. No Qt
-or plugin-context reference is retained by a session, so unloading the UI does
-not interrupt a recording already in progress.
+Architecture follows BiliBili ShadowReplay's EVENT -> VOD archive model.
+Implementation uses the bundled FFmpeg CLI, libmpv and a loopback archive
+reader. Existing EDL archives remain readable through their metadata.
 """
-import csv
 from datetime import datetime
 import json
-import math
 from pathlib import Path
 
 from ddm.recording import RecordingSession, safe_name
+from .hls import input_options, read_segments, write_playlist
 
 
 class ReplayRecordingSession(RecordingSession):
     def __init__(self, tile, settings, recording, folder, video_codec=''):
-        super().__init__(tile, settings, recording, folder, video_codec)
+        # HLS storage follows the source codec. AVC/HEVC use TS; the host's
+        # existing AV1 compatibility rule selects MP4, emitted here as fMP4.
+        super().__init__(tile, {**settings, 'recording_format': 'ts'}, recording, folder, video_codec)
         self.segment_seconds = 2
         self._archive = None
         self._lists = []
         self._stamp = None
         self._info = None
+        self._segments = []
         self._saved = False
         self.review_error = ''
 
@@ -31,17 +33,22 @@ class ReplayRecordingSession(RecordingSession):
             self._lists = []
             self._stamp = None
             self._info = None
+            self._segments = []
             self._saved = False
         return self._archive
 
     def segment_options(self, pattern):
-        listing = pattern.with_suffix('.csv')
+        listing = pattern.parent / f'chunk-{self.chunk}.m3u8'
         self._lists.append(listing)
         args = super().segment_options(pattern)
-        # CSV rows are emitted only after a segment is closed. The final row is
-        # also available after FFmpeg exits, including a short last segment.
-        return args[:-1] + ['-segment_list', str(listing), '-segment_list_type', 'csv',
-                           '-segment_list_size', '0', '-flush_packets', '1', args[-1]]
+        args = args[:args.index('-f')]
+        args += ['-f', 'hls', '-hls_time', str(self.segment_seconds), '-hls_list_size', '0',
+                 '-hls_playlist_type', 'event', '-hls_flags', 'temp_file',
+                 '-hls_segment_type', 'fmp4' if self.extension == 'mp4' else 'mpegts',
+                 '-hls_segment_filename', str(pattern.parent / f'part-{self.chunk}-%05d.{self.extension}')]
+        if self.extension == 'mp4':
+            args += ['-hls_fmp4_init_filename', str(pattern.parent / f'init-{self.chunk}.mp4')]
+        return args + [str(listing)]
 
     def update_review(self):
         if not self._archive or self._saved:
@@ -55,48 +62,46 @@ class ReplayRecordingSession(RecordingSession):
             for listing in self._lists:
                 if not listing.exists():
                     continue
-                with listing.open(encoding='utf-8', newline='') as handle:
-                    for row in csv.reader(handle):
-                        if len(row) != 3:
-                            continue
-                        try:
-                            duration = float(row[2]) - float(row[1])
-                        except ValueError:
-                            continue
-                        part = listing.parent / Path(row[0]).name
-                        if part.is_file() and math.isfinite(duration) and duration > 0:
-                            segments.append((part, duration))
+                chunk = read_segments(listing)
+                if chunk and segments:
+                    chunk[0]['discontinuity'] = True
+                segments.extend(chunk)
             if not segments:
                 return
-            # mpv's built-in EDL presents separate local files as one virtual
-            # timeline. This also works for AV1/MP4/MKV, without transcoding.
-            lines = ['# mpv EDL v0', '!no_chapters']
-            for part, duration in segments:
-                name = part.name
-                lines.append(f'%{len(name.encode("utf-8"))}%{name},0,{duration:.6f}')
-            playlist = self._archive / 'review.edl'
-            text = '\n'.join(lines) + '\n'
-            self._atomic_text(playlist, text)
+            self._segments = segments
+            playlist = self._archive / 'playlist.m3u8'
+            write_playlist(playlist, segments, complete=False)
             self._info = {'path': str(playlist), 'title': self.name, 'room': dict(self.room),
                 'session_id': self.session_id, 'created_at': self.created_at,
-                'source_created_at': self.created_at, 'kind': 'recording',
-                'duration': sum(duration for _, duration in segments),
-                'segments': [{'path': str(part.resolve()), 'duration': duration} for part, duration in segments],
-                'format': self.extension, 'video_codec': self.video_codec}
-            self._atomic_text(self._archive / 'recording.json', json.dumps(
-                {**self._info, 'recording': self.recording}, ensure_ascii=False))
+                'source_created_at': self.created_at, 'kind': 'recording', 'index_format': 'hls',
+                'duration': sum(s['duration'] for s in segments), 'segments': segments,
+                'format': 'fmp4' if self.extension == 'mp4' else 'ts', 'video_codec': self.video_codec}
+            self._write_metadata(complete=False)
             self._stamp = stamp
             self.review_error = ''
-        except OSError as error:
-            # Keep every media file even if an index cannot be written (e.g. disk
-            # full). Host disk-space handling remains responsible for stopping.
+        except (OSError, ValueError) as error:
+            # Raw media survives a failed index write; host disk-space handling
+            # is still responsible for stopping and reporting the recording.
             self.review_error = str(error)
 
-    @staticmethod
-    def _atomic_text(path, text):
-        partial = path.with_suffix(path.suffix + '.tmp')
-        partial.write_text(text, encoding='utf-8', newline='\n')
-        partial.replace(path)
+    def _write_metadata(self, *, complete):
+        path = self._archive / 'recording.json'
+        temporary = path.with_suffix('.json.tmp')
+        temporary.write_text(json.dumps({**self._info, 'recording': self.recording,
+            'complete': complete}, ensure_ascii=False), encoding='utf-8')
+        temporary.replace(path)
+
+    def finished_parts(self):
+        self.update_review()
+        return [Path(s['path']) for s in self._segments if Path(s['path']).is_file()]
+
+    def close_chunk(self):
+        self.update_review()
+        self.parts = [Path(s['path']) for s in self._segments if Path(s['path']).is_file()]
+        self.active_pattern = None
+        if self.process and self.process.stdin:
+            self.process.stdin.close()
+        self.process = None
 
     def review_info(self):
         self.update_review()
@@ -108,7 +113,25 @@ class ReplayRecordingSession(RecordingSession):
         self.update_review()
         if self.review_error or not self._info:
             raise OSError('录制分段已保留，回看索引保存失败：' + (self.review_error or '尚无完整索引'))
-        self._atomic_text(self._archive / 'recording.json', json.dumps(
-            {**self._info, 'recording': True, 'complete': True}, ensure_ascii=False))
+        write_playlist(Path(self._info['path']), self._segments, complete=True)
+        self._write_metadata(complete=True)
         self._saved = True
         return Path(self._info['path'])
+
+    def snapshot_info(self, parts):
+        selected = set(map(Path, parts))
+        segments = []
+        # A recent replay can cross a rotation; read each archive's persisted
+        # init-map/discontinuity information instead of concatenating fMP4 bytes.
+        for folder in dict.fromkeys(part.parent for part in parts):
+            metadata = json.loads((folder / 'recording.json').read_text(encoding='utf-8'))
+            batch = [s for s in metadata['segments'] if Path(s['path']) in selected]
+            if segments and batch:
+                batch[0]['discontinuity'] = True
+            segments.extend(batch)
+        return {'index_format': 'hls', 'segments': segments}
+
+    def export_input(self, parts, playlist):
+        segments = self.snapshot_info(parts)['segments']
+        write_playlist(playlist, segments, complete=True)
+        return input_options(playlist)

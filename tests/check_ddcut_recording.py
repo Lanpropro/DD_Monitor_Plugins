@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--host', type=Path, required=True)
-parser.add_argument('--format', choices=('ts', 'mp4', 'mkv'))
+parser.add_argument('--format', choices=('ts', 'mp4', 'mkv', 'av1'))
 args, remainder = parser.parse_known_args()
 sys.path.insert(0, str(args.host.resolve()))
 os.environ['DDM_NO_SAVE'] = '1'
@@ -76,12 +76,20 @@ class RecordingTests(unittest.TestCase):
             subprocess.run([FFMPEG, '-y', '-hide_banner', '-loglevel', 'error', '-i', str(source),
                 '-c:v', 'copy', '-an', str(video_only)], check=True,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
-            for fmt in ([args.format] if args.format else ('ts', 'mp4', 'mkv')):
+            av1 = root / 'av1.mp4'
+            if args.format in (None, 'av1'):
+                subprocess.run([FFMPEG, '-y', '-hide_banner', '-loglevel', 'error',
+                    '-f', 'lavfi', '-i', 'testsrc2=size=160x90:rate=10', '-t', '18',
+                    '-c:v', 'libaom-av1', '-cpu-used', '8', '-threads', '2', '-g', '10', str(av1)],
+                    check=True, creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            for fmt in ([args.format] if args.format else ('ts', 'mp4', 'mkv', 'av1')):
                 with self.subTest(format=fmt):
-                    tile = Tile(video_only if fmt == 'ts' else source)
+                    tile = Tile(av1 if fmt == 'av1' else video_only if fmt == 'ts' else source)
+                    if fmt == 'av1':
+                        tile.stream_codec = 'av1'
                     host = QMainWindow()
                     host.show()
-                    host.settings = {'recording_dir': str(root / fmt), 'recording_format': fmt,
+                    host.settings = {'recording_dir': str(root / fmt), 'recording_format': 'mp4' if fmt == 'av1' else fmt,
                                      'recording_codec': 'copy', 'recording_lock_quality': False,
                                      'recording_replay_enabled': False, 'ffmpeg_path': FFMPEG}
                     host.wall = SimpleNamespace(tiles=[tile])
@@ -105,30 +113,39 @@ class RecordingTests(unittest.TestCase):
                             self.assertIsInstance(session, module.ReplayRecordingSession)
                             wait_for(lambda: (session.update_review() or session.review_info()) is not None)
                             first = context.recording.live_recording(str(id(tile)), session.session_id)
-                            self.assertEqual(first['format'], fmt)
+                            self.assertEqual(first['format'], 'fmp4' if fmt == 'av1' else 'ts')
+                            self.assertEqual(first['index_format'], 'hls')
+                            self.assertEqual(session.settings['recording_codec'], 'copy')
+                            live_text = Path(first['path']).read_text(encoding='utf-8')
+                            self.assertIn('#EXT-X-PLAYLIST-TYPE:EVENT', live_text)
+                            self.assertNotIn('#EXT-X-ENDLIST', live_text)
                             self.assertIsNone(session.process.poll())
-                            self.assertTrue(all(Path(p['path']).suffix == '.' + fmt for p in first['segments']))
-                            self.assertLess(len(first['segments']), len(list(session.active_pattern.parent.glob('*.' + fmt))))
+                            self.assertTrue(all(Path(p['path']).is_file() and not p['path'].endswith('.tmp') for p in first['segments']))
+                            if fmt == 'av1':
+                                self.assertIn('#EXT-X-MAP:', live_text)
+                                self.assertTrue(all(Path(p['init']).is_file() for p in first['segments']))
 
                             def null_preview(view, path):
                                 view.stop()
                                 import mpv
-                                view.core = mpv.MPV(vo='null', ao='null', mute=True, keep_open=True,
+                                view.core = mpv.MPV(vo='null', ao='null', mute=True, keep_open=True, **ui.preview_options(path),
                                     log_handler=lambda level, prefix, text: print(prefix, text) if level in ('error', 'fatal', 'warn') else None)
-                                view.core.play(str(path))
+                                view.core.play(view.source_url(path))
 
                             with patch.object(ui.Preview, 'load', null_preview):
                                 view = plugin.workspace = ui.Workspace(plugin)
                                 view.show()
                                 view.open_current_recording()
                                 wait_for(lambda: view.preview.position() > .1)
+                                original_core = view.preview.core
                                 self.assertTrue(view.preview.core.mute)
                                 view.preview.core.pause = True
                                 wait_for(lambda: (session.update_review() or session.review_info())['duration'] > first['duration'] + 1)
                                 view.refresh_live()
                                 self.assertGreater(view.slider.maximum(), int(first['duration'] * 1000))
                                 view.seek_live_edge()
-                                wait_for(lambda: view.resume_position is None)
+                                wait_for(lambda: view.preview.position() > first['duration'] - .5)
+                                self.assertIs(view.preview.core, original_core)
                                 self.assertGreater(view.preview.position(), first['duration'] - .5)
                                 self.assertTrue(view.preview.core.pause)
                                 self.assertTrue(view.preview.core.mute)
@@ -148,9 +165,22 @@ class RecordingTests(unittest.TestCase):
                                     self.assertEqual(first_clip.state, 'done', first_clip.message)
                                     self.assertAlmostEqual(first_clip.result['actual_duration'], 1.5, delta=.1)
                                 self.assertIsNone(session.process.poll())
+                                host.settings['recording_replay_enabled'] = True
+                                self.assertTrue(host.recorder.save_replay(tile))
+                                wait_for(lambda: not host.recorder.exports)
+                                replays = list((root / fmt / 'replays').glob('*.' + session.extension))
+                                self.assertTrue(replays)
+                                self.assertGreater(media.probe(media.Job('probe', 'test'), FFMPEG, replays[0], root / 'work')['duration'], 1)
+                                if fmt == 'av1':
+                                    snapshot = context.recording.snapshot(str(id(tile)), session.session_id)
+                                    snap_job = plugin.hub.submit('HLS snapshot', 'snapshot', media.prepare_snapshot,
+                                        FFMPEG, snapshot, root / 'snapshot', root / 'work')
+                                    wait_for(lambda: snap_job.future.done())
+                                    self.assertEqual(snap_job.state, 'done', snap_job.message)
+                                    context.recording.release(snapshot['lease'])
                                 view.close()
                                 self.assertFalse(session.stopping)
-                                if fmt == 'ts':
+                                if fmt in ('ts', 'av1'):
                                     old_path = view.current['path']
                                     session.settings['recording_segment_minutes'] = 1
                                     session.output_started_at = time.monotonic() - 61
@@ -162,6 +192,11 @@ class RecordingTests(unittest.TestCase):
                                     self.assertIsNone(view.live_source)
                                     self.assertEqual(view.current['path'], old_path)
                                     self.assertTrue(json.loads(Path(old_path).with_name('recording.json').read_text(encoding='utf-8'))['complete'])
+                                    replay_before = set((root / fmt / 'replays').glob('*.' + session.extension))
+                                    self.assertTrue(host.recorder.save_replay(tile))
+                                    wait_for(lambda: not host.recorder.exports)
+                                    combined = (set((root / fmt / 'replays').glob('*.' + session.extension)) - replay_before).pop()
+                                    self.assertGreater(media.probe(media.Job('probe', 'test'), FFMPEG, combined, root / 'work')['duration'], first['duration'] + 1)
                             plugin.on_unload()
                             self.assertIs(host.recorder.session_factory, RecordingSession)
                             self.assertFalse(session.stopping)
@@ -169,6 +204,9 @@ class RecordingTests(unittest.TestCase):
                             wait_for(lambda: tile not in host.recorder.sessions)
                             saved = json.loads(Path(first['path']).with_name('recording.json').read_text(encoding='utf-8'))
                             self.assertTrue(saved['complete'])
+                            vod_text = Path(first['path']).read_text(encoding='utf-8')
+                            self.assertIn('#EXT-X-PLAYLIST-TYPE:VOD', vod_text)
+                            self.assertIn('#EXT-X-ENDLIST', vod_text)
                             self.assertGreater(saved['duration'], first['duration'])
                             self.assertTrue(all(Path(p['path']).is_file() for p in saved['segments']))
                             self.assertTrue(media.scan_directory(media.Job('scan', 'scan'), root / fmt))

@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDoubleSpinBox,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from .media import ACTIVE, probe, scan_directory, prepare_snapshot, export_clip
+from .hls import preview_options
 
 STATES = {'idle': '未录制', 'recording': '录制中', 'buffering': '缓存中',
           'stopping': '收尾中', 'reconnecting': '等待重连', 'queued': '等待中',
@@ -43,8 +44,9 @@ def table(headers):
 
 
 class Preview(QWidget):
-    def __init__(self):
+    def __init__(self, source_url):
         super().__init__()
+        self.source_url = source_url
         self.setMinimumSize(320, 180)
         from PySide6.QtGui import QColor, QPalette
         palette = self.palette()
@@ -60,8 +62,8 @@ class Preview(QWidget):
         from ddm.player import EMBEDDED_OPTIONS
         import mpv
         self.core = mpv.MPV(wid=str(int(self.winId())), mute=True, volume=50,
-                            keep_open=True, **EMBEDDED_OPTIONS)
-        self.core.play(str(path))
+                            keep_open=True, **EMBEDDED_OPTIONS, **preview_options(path))
+        self.core.play(self.source_url(path))
 
     def stop(self):
         if self.core is not None:
@@ -135,7 +137,7 @@ class Workspace(QWidget):
 
     def build_sources(self):
         _, layout = self.page('正在录制')
-        help_text = QLabel('在画面墙使用原来的录制按钮开始或停止录制。这里选择录制中的房间，即可回看和切片。')
+        help_text = QLabel('在画面墙使用原来的录制按钮。插件以 HLS 保存录播，沿用本体目录、编码和画质设置；这里用于回看和切片。')
         help_text.setWordWrap(True)
         layout.addWidget(help_text)
         self.sources = table(['房间', '状态', '开始时间'])
@@ -188,7 +190,7 @@ class Workspace(QWidget):
         split.addWidget(left)
         middle = QWidget()
         middle_box = QVBoxLayout(middle)
-        self.preview = Preview()
+        self.preview = Preview(self.owner.preview_server.source_url)
         middle_box.addWidget(self.preview, 1)
         self.position_label = QLabel('00:00:00.000 / 00:00:00.000')
         middle_box.addWidget(self.position_label)
@@ -393,7 +395,11 @@ class Workspace(QWidget):
             self.hub.save()
             self.refresh_library()
         core = self.preview.core
-        if core is not None and core.eof_reached and self.current['duration'] > self.loaded_duration + .05:
+        if self.current.get('index_format') == 'hls':
+            # EVENT playlists grow inside the demuxer. Playback and seeking use
+            # the same instance, rather than restarting it on every new range.
+            self.loaded_duration = self.current['duration']
+        elif core is not None and core.eof_reached and self.current['duration'] > self.loaded_duration + .05:
             self.reload_preview(self.preview.position(), bool(core.pause))
 
     def reload_preview(self, position, paused):

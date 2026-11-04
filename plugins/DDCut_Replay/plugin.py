@@ -13,6 +13,7 @@ __path__ = [os.path.dirname(__file__)]
 __package__ = __name__
 
 from .media import TaskHub
+from .preview_server import ArchiveServer
 from .recorder import ReplayRecordingSession
 from .workspace import Workspace
 
@@ -25,6 +26,7 @@ class DDCutReplay(api.Plugin):
         super().__init__()
         self.service = self.hub = self.workspace = self.toolbar = self.timer = None
         self.entry = self.action = None
+        self.preview_server = None
         self._ticks = 0
 
     def on_load(self, context):
@@ -70,6 +72,7 @@ class DDCutReplay(api.Plugin):
             self.toolbar.addAction(action)
             context.window.addToolBar(self.toolbar)
         if self.service is not None:
+            self.preview_server = ArchiveServer()
             self.hub = TaskHub(Path(config.data_root()) / 'ddcut_replay')
             self.timer = QTimer(action)
             self.timer.setInterval(250)
@@ -171,6 +174,9 @@ class DDCutReplay(api.Plugin):
             self.workspace = None
         if self.hub:
             self.hub.close()
+        if self.preview_server:
+            self.preview_server.close()
+            self.preview_server = None
         if self.service:
             self.service.close()
         if self.entry is not None:

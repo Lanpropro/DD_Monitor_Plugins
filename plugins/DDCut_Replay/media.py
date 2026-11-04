@@ -11,6 +11,8 @@ import threading
 import time
 import uuid
 
+from .hls import input_options, write_playlist
+
 MEDIA_SUFFIXES = {'.mp4', '.mkv', '.mov', '.ts', '.flv', '.webm'}
 ACTIVE = {'queued', 'running', 'cancelling'}
 
@@ -145,6 +147,17 @@ def scan_directory(job, directory):
 def prepare_snapshot(job, ffmpeg, snapshot, destination, work):
     folder = Path(destination)
     folder.mkdir(parents=True, exist_ok=True)
+    if snapshot.get('index_format') == 'hls':
+        segments = snapshot['segments']
+        source = {**snapshot, 'path': str(Path(segments[0]['path']).with_name('playlist.m3u8')),
+                  'duration': sum(segment['duration'] for segment in segments)}
+        result = folder / f'review-{job.id}.mkv'
+        export_clip(job, ffmpeg, source, 0, source['duration'], 'copy', result, work)
+        return {'path': str(result), 'title': snapshot['room'].get('uname') or '录制快照',
+                'room': snapshot['room'], 'session_id': snapshot['session_id'],
+                'created_at': time.time(), 'source_created_at': snapshot['created_at'],
+                'snapshot_at': snapshot['snapshot_at'], 'kind': 'snapshot',
+                **probe(job, ffmpeg, result, work)}
     parts = [Path(part) for part in snapshot['parts']]
     needed = sum(path.stat().st_size for path in parts)
     if shutil.disk_usage(folder).free < needed + 256 * 1024 * 1024:
@@ -207,11 +220,19 @@ def export_clip(job, ffmpeg, source, start, end, mode, target, work):
                         local_start = start - offset
                     selected.append(segment)
                 offset = next_offset
-            for segment in selected:
-                escaped = str(Path(segment['path']).resolve()).replace('\\', '/').replace("'", "'\\''")
-                lines += [f"file '{escaped}'", f"duration {segment['duration']:.6f}"]
-            playlist.write_text('\n'.join(lines) + '\n', encoding='utf-8')
-            input_args = ['-f', 'concat', '-safe', '0', '-i', str(playlist)]
+            if source.get('index_format') == 'hls':
+                # Keep relative media/init URIs next to their recording. Only
+                # this tiny VOD input is temporary; no recording is copied.
+                playlist = Path(source['path']).with_name(f'.clip-{job.id}.m3u8')
+                write_playlist(playlist, selected, complete=True)
+                input_args = input_options(playlist)
+            else:
+                # Read-only compatibility with the preceding EDL archives.
+                for segment in selected:
+                    escaped = str(Path(segment['path']).resolve()).replace('\\', '/').replace("'", "'\\''")
+                    lines += [f"file '{escaped}'", f"duration {segment['duration']:.6f}"]
+                playlist.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+                input_args = ['-f', 'concat', '-safe', '0', '-i', str(playlist)]
         # Input seeking with copy is intentionally keyframe-based; precise decodes to the requested point.
         command = [ffmpeg, '-y', '-hide_banner', '-loglevel', 'error']
         if source.get('segments') and mode == 'precise':
