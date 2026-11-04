@@ -167,6 +167,13 @@ class DDCutReplayTests(unittest.TestCase):
             plugin.hub.add_entry(self.entry)
             view.show()
             view.review(plugin.hub.entries[0])
+            view.sources.setCurrentItem(view.sources.topLevelItem(0))
+            with patch.object(service, 'control', create=True, side_effect=RuntimeError('录制会话已变化，请刷新后重试')):
+                view.control('stop')
+            self.assertIn('录制会话已变化', view.status.text())
+            with patch.object(ui.Preview, 'load', side_effect=RuntimeError('无法初始化本地播放器')):
+                view.review(plugin.hub.entries[0])
+            self.assertEqual(view.status.text(), '无法初始化本地播放器')
             view.inpoint.setValue(1)
             view.outpoint.setValue(2.5)
             self.assertTrue(view.export_button.isEnabled())
