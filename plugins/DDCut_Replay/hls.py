@@ -1,6 +1,7 @@
 """Local archive playlists shared by recording, playback and frozen clip inputs."""
 import math
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 import re
 
@@ -11,6 +12,7 @@ def read_segments(playlist):
     duration = None
     init = None
     discontinuity = False
+    wall_start = None
     result = []
     for line in playlist.read_text(encoding='utf-8').splitlines():
         if line.startswith('#EXTINF:'):
@@ -21,11 +23,16 @@ def read_segments(playlist):
                 init = str((playlist.parent / match[1]).resolve())
         elif line == '#EXT-X-DISCONTINUITY':
             discontinuity = True
+        elif line.startswith('#EXT-X-PROGRAM-DATE-TIME:'):
+            wall_start = datetime.fromisoformat(line.split(':', 1)[1]).timestamp()
         elif line and not line.startswith('#') and duration is not None:
             part = playlist.parent / line
             if part.is_file() and math.isfinite(duration) and duration > 0 and (not init or Path(init).is_file()):
                 result.append({'path': str(part.resolve()), 'duration': duration,
-                               'init': init, 'discontinuity': discontinuity})
+                               'init': init, 'discontinuity': discontinuity,
+                               **({'wall_start': wall_start} if wall_start is not None else {})})
+            if wall_start is not None:
+                wall_start += duration
             duration = None
             discontinuity = False
     return result
@@ -48,6 +55,9 @@ def write_playlist(path, segments, *, complete):
             lines.append(f'#EXT-X-MAP:URI="{uri}"')
         previous_init = init
         uri = os.path.relpath(segment['path'], path.parent).replace('\\', '/')
+        if segment.get('wall_start') is not None:
+            stamp = datetime.fromtimestamp(segment['wall_start'], timezone.utc).isoformat(timespec='milliseconds')
+            lines.append('#EXT-X-PROGRAM-DATE-TIME:' + stamp)
         lines += [f"#EXTINF:{segment['duration']:.6f},", uri]
     if complete:
         lines.append('#EXT-X-ENDLIST')

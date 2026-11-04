@@ -95,6 +95,16 @@ class DDCutReplay(api.Plugin):
         self.hub.preferences['capture_mode'] = mode
         self.hub.save()
 
+    def on_event(self, event, payload):
+        if event != api.EVENT_DANMAKU or self.hub is None or self.hub.closed:
+            return
+        recorder = getattr(self.context.window, 'recorder', None)
+        if recorder is None:
+            return
+        for session in tuple(recorder.sessions.values()):
+            if isinstance(session, ReplayRecordingSession) and session.room_id == str(payload.get('room_id') or ''):
+                session.record_danmaku(payload.get('message') or {})
+
     def open(self, *_):
         if self.service is None:
             self.action.setChecked(False)

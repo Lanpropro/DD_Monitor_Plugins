@@ -19,6 +19,7 @@
 5. **回看与切片**：默认静音，可开启声音；拖动入出点或输入 `HH:mm:ss.mmm`，点击时间轴定位、缩放/滚动，用 `I`/`O` 标记当前点、`M` 添加标记、Space 播放暂停。标记和选区保存在本地，预览选区到出点暂停。封面优先使用本体缓存与归档图片；本地导入视频生成缩略图，没有来源信息时明确标注本地视频。
 6. **导出选区**：快速复制保留原编码、输出 MKV，边界可能按关键帧扩展；精确剪辑重编码 H.264/AAC、输出 MP4，耗时及画质有所变化。可先填写成品文件名，确认保存位置；必须使用新文件名，不覆盖已有成品。成功结果自动进入“已生成切片”。
 7. **后台任务**：从顶部打开共用右侧面板，录像与回看过程中均可查看进度、取消或打开成品。关闭面板不会取消任务；窄窗口打开任务时暂时收起选区工具，关闭任务即可恢复。返回画面墙仅停止预览，任务继续；退出/禁用插件会取消插件任务并回收进程，原录像和已有成品保留。重启后未完成任务标为中断，需要重新提交。
+8. **弹幕亮点**：新切片素材随录制保存本体收到的普通弹幕。打开回看后点“弹幕亮点”，满30秒可读内容后显示30秒窗口/5秒步长的热度；默认阈值80%，支持50%～100%及逗号分隔关键词，回车或移开焦点应用关键词。点击推荐设为当前单选区并定位，确认后从“选区”导出。阈值是相对数量，不是内容精彩程度的概率；旧录像和原版单文件没有记录时无法补回弹幕。当前不包含多选区、弹幕画面回放或压制。
 
 切片素材模式采用与 [BiliBili ShadowReplay](https://github.com/Xinrea/bili-shadowreplay) 相同的核心链路：本地 HLS 分段归档 → 活动 EVENT 播放列表 → 内部本地读取服务 → 结束转 VOD → 从归档选区生成切片。普通 AVC/HEVC 使用 TS；AV1 使用 fMP4 初始化段和媒体分段，保持原编码。无需用户固定选择 TS，也不为满足 TS 容器而自动转码。本体单文件格式选项用于默认录制后端；插件接管后的内部存储由 HLS 归档管理，导出成品仍按快速 MKV / 精确 MP4 选择。
 
@@ -34,12 +35,13 @@
 
 ## 开发与验证
 
-[架构、页面与边界方案](DESIGN.md) · [增量与待验收记录](../../docs/changes/ddcut_replay.md) · [贡献流程](../../CONTRIBUTING.md)
+[架构、页面与边界方案](DESIGN.md) · [参考项目完整功能对照](FEATURES.md) · [增量与待验收记录](../../docs/changes/ddcut_replay.md) · [贡献流程](../../CONTRIBUTING.md)
 
 ```powershell
 python tests/check_ddcut_replay.py --host ../DD_Monitor_CE
 python tests/check_ddcut_recording.py --host ../DD_Monitor_CE
 python tests/check_ddcut_modes.py --host ../DD_Monitor_CE
+python tests/check_ddcut_highlights.py --host ../DD_Monitor_CE --native
 python tests/check_ddcut_hls.py
 python tests/check_ddcut_replay_native.py --host ../DD_Monitor_CE --package dist/ddcut_replay-0.1.3.zip
 python tests/check_contributing.py

@@ -60,6 +60,8 @@ class Timeline(QWidget):
         self.zoom = 1.0
         self.markers = []
         self.segments = []
+        self.heat_points = []
+        self.heat_threshold = 0
         self.dragging = None
         self.setMinimumHeight(115)
         self.setMinimumWidth(220)
@@ -129,6 +131,20 @@ class Timeline(QWidget):
             painter.drawText(QRectF(x, 3, width + 1, 23), Qt.AlignCenter, text)
         painter.save()
         painter.setClipRect(track)
+        maximum = max((point['count'] for point in self.heat_points), default=0)
+        if maximum:
+            for point in self.heat_points:
+                x = self.x_for(point['time'] - 2.5)
+                width = max(1, self.x_for(point['time'] + 2.5) - x)
+                if x + width < track.left() or x > track.right():
+                    continue
+                color = QColor(accent)
+                color.setAlpha(180 if point['level'] == 'core' else 100 if point['level'] == 'extension' else 45)
+                height = point['count'] / maximum * track.height()
+                painter.fillRect(QRectF(x, track.bottom() - height, width, height), color)
+            y = track.bottom() - self.heat_threshold / maximum * track.height()
+            painter.setPen(QPen(muted, 1, Qt.DashLine))
+            painter.drawLine(int(track.left()), int(y), int(track.right()), int(y))
         # Actual completed segment boundaries; no fabricated audio waveform.
         painter.setPen(QPen(palette.color(QPalette.Mid), 1))
         elapsed = 0

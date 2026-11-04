@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFrame, QLineEdit,
     QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
-    QListWidget, QListWidgetItem, QPushButton, QScrollArea, QScrollBar, QSizePolicy, QSplitter, QStackedWidget, QTabWidget,
+    QListWidget, QListWidgetItem, QPushButton, QScrollArea, QScrollBar, QSizePolicy, QSlider, QSplitter, QStackedWidget, QTabWidget,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from ddm import theme
@@ -16,6 +16,7 @@ from .media import ACTIVE, probe, scan_directory, prepare_snapshot, export_clip,
 from .hls import preview_options
 from .timeline import Timeline, TimeInput, timecode
 from .library_widgets import MediaCard, MediaGrid, media_type
+from .highlights import HighlightReader
 
 STATES = {'idle': '未录制', 'recording': '录制中', 'buffering': '缓存中',
           'stopping': '收尾中', 'reconnecting': '等待重连', 'queued': '等待中',
@@ -104,6 +105,10 @@ class Workspace(QWidget):
         self.pending_live = None
         self.loaded_duration = 0
         self.resume_position = None
+        self.heat_future = None
+        self.heat_reader = None
+        self.heat_signature = None
+        self.heat_next_check = 0
         self.setWindowTitle('DDCut Replay · 录制与切片')
         self.selection_playing = False
         self.task_signature = None
@@ -298,6 +303,7 @@ class Workspace(QWidget):
         button('录像列表', self.show_library, row)
         self.edit_button = button('制作切片', self.toggle_editor, row)
         self.edit_button.setCheckable(True)
+        button('弹幕亮点', self.show_highlights, row)
         layout.addLayout(row)
         split = QSplitter(Qt.Horizontal)
         layout.addWidget(split, 1)
@@ -319,6 +325,10 @@ class Workspace(QWidget):
         self.timeline = Timeline()
         self.timeline.seekRequested.connect(self.seek_position)
         self.timeline.selectionChanged.connect(self.set_selection)
+        self.heat_status = QLabel('弹幕热度：尚未打开录像')
+        self.heat_status.setObjectName('SettingsHint')
+        self.heat_status.setWordWrap(True)
+        middle_box.addWidget(self.heat_status)
         middle_box.addWidget(self.timeline)
         row = QHBoxLayout()
         row.addWidget(self.position_label)
@@ -395,6 +405,35 @@ class Workspace(QWidget):
         button('添加标记 M', self.add_marker, markers_box)
         button('移除所选标记', self.remove_marker, markers_box)
         tools.addTab(markers_page, '标记')
+        heat_page = QWidget()
+        heat_box = QVBoxLayout(heat_page)
+        hint = QLabel('根据弹幕数量推荐候选片段，请回看确认。每5秒统计30秒窗口；颜色越深热度越高，虚线为阈值。')
+        hint.setObjectName('SettingsHint')
+        hint.setWordWrap(True)
+        heat_box.addWidget(hint)
+        self.heat_keywords = QLineEdit()
+        self.heat_keywords.setPlaceholderText('关键词，逗号分隔；留空统计全部弹幕')
+        self.heat_keywords.setAccessibleName('亮点关键词过滤')
+        self.heat_keywords.editingFinished.connect(self.save_heat_options)
+        heat_box.addWidget(self.heat_keywords)
+        self.heat_threshold_label = QLabel('峰值阈值 80%')
+        heat_box.addWidget(self.heat_threshold_label)
+        self.heat_threshold = QSlider(Qt.Horizontal)
+        self.heat_threshold.setRange(50, 100)
+        self.heat_threshold.setValue(80)
+        self.heat_threshold.setAccessibleName('弹幕峰值阈值百分比')
+        self.heat_threshold.valueChanged.connect(self.save_heat_options)
+        heat_box.addWidget(self.heat_threshold)
+        self.heat_results = QListWidget()
+        self.heat_results.setObjectName('FollowList')
+        self.heat_results.setAccessibleName('弹幕亮点推荐区间')
+        self.heat_results.setWordWrap(True)
+        self.heat_results.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.heat_results.itemClicked.connect(lambda *_: self.apply_highlight())
+        self.heat_results.itemActivated.connect(lambda *_: self.apply_highlight())
+        heat_box.addWidget(self.heat_results, 1)
+        button('应用所选亮点为选区', self.apply_highlight, heat_box)
+        tools.addTab(heat_page, '亮点')
         split.addWidget(tools)
         split.setSizes([680, 300])
         split.setStretchFactor(0, 1)
@@ -468,6 +507,85 @@ class Workspace(QWidget):
     def toggle_editor(self, checked):
         self.tools.setVisible(checked and self.task_panel.isHidden())
         self.listing.setVisible(not checked or self.width() >= 1400)
+
+    def show_highlights(self):
+        self.edit_button.setChecked(True)
+        self.toggle_tasks(False)
+        self.toggle_editor(True)
+        self.tools.setCurrentIndex(2)
+        self.heat_next_check = 0
+        self.refresh_highlights()
+
+    def save_heat_options(self, *_):
+        self.heat_threshold_label.setText(f'峰值阈值 {self.heat_threshold.value()}%')
+        if self.current:
+            self.current['heat_threshold'] = self.heat_threshold.value()
+            self.current['heat_keywords'] = self.heat_keywords.text()
+            self.hub.save()
+            self.heat_next_check = 0
+
+    def refresh_highlights(self):
+        if not self.current:
+            return
+        if self.current.get('danmaku_error'):
+            self.heat_status.setText('弹幕记录未完整保存：' + self.current['danmaku_error'])
+            return
+        if self.heat_future is not None:
+            if not self.heat_future.done():
+                return
+            future, reader = self.heat_future, self.heat_requested_reader
+            self.heat_future = None
+            try:
+                result = future.result()
+            except Exception as error:
+                self.heat_status.setText('弹幕分析失败：' + str(error))
+                return
+            options = (self.heat_threshold.value(), self.heat_keywords.text())
+            if reader is self.heat_reader and options == self.heat_requested_options:
+                self.timeline.heat_points = result['points']
+                self.timeline.heat_threshold = result['threshold']
+                self.timeline.update()
+                self.heat_results.clear()
+                for peak in result['peaks']:
+                    item = QListWidgetItem(f"{timecode(peak['start'])} → {timecode(peak['end'])}\n峰值 {peak['count']} 条 / 30秒 · 点击设为选区")
+                    item.setData(Qt.UserRole, peak)
+                    self.heat_results.addItem(item)
+                status = (f"弹幕热度：{result['total']}条，匹配{result['matched']}条 · {len(result['peaks'])}个候选亮点"
+                          if result['total'] else '暂无弹幕数据；请确认本体已连接该直播间弹幕。')
+                if self.current['duration'] < 30:
+                    status += ' · 可读录像满30秒后生成推荐。'
+                self.heat_status.setText(status)
+        if time.monotonic() < self.heat_next_check:
+            return
+        self.heat_next_check = time.monotonic() + 2
+        path = self.current.get('danmaku_path')
+        if not path:
+            self.heat_status.setText('此录像没有弹幕记录。仅新录制的切片素材支持热度分析；旧录像和原版录制无法补回。')
+            return
+        try:
+            info = Path(path).stat()
+        except OSError as error:
+            self.heat_status.setText('无法读取弹幕记录：' + str(error))
+            return
+        options = (self.heat_threshold.value(), self.heat_keywords.text())
+        signature = (path, info.st_size, info.st_mtime_ns, self.current['duration'], options)
+        if signature == self.heat_signature:
+            return
+        self.heat_signature = signature
+        self.heat_requested_reader = self.heat_reader
+        self.heat_requested_options = options
+        keywords = options[1].replace('，', ',').split(',')
+        self.heat_future = self.hub.pool.submit(self.heat_reader.analyze, path,
+            list(self.current.get('segments', [])), self.current['duration'], options[0],
+            [word.strip() for word in keywords if word.strip()])
+
+    def apply_highlight(self):
+        item = self.heat_results.currentItem()
+        if self.current and item is not None:
+            peak = item.data(Qt.UserRole)
+            self.set_selection(peak['start'], min(self.current['duration'], peak['end']))
+            self.seek_position(peak['start'])
+            self.report('已将推荐亮点设为选区；可调整入出点，再生成切片。')
 
     def fill_identity(self, grid, item, entry):
         room = entry.get('room') or {}
@@ -836,6 +954,22 @@ class Workspace(QWidget):
         self.timeline.set_duration(duration, reset=True)
         self.timeline.set_position(0)
         self.current = entry
+        if self.heat_future is not None:
+            self.heat_future.cancel()
+        self.heat_future = None
+        self.heat_reader = HighlightReader()
+        self.heat_signature = None
+        self.heat_next_check = 0
+        self.heat_results.clear()
+        self.timeline.heat_points = []
+        self.timeline.heat_threshold = 0
+        self.heat_keywords.setText(entry.get('heat_keywords', ''))
+        self.heat_threshold.blockSignals(True)
+        self.heat_threshold.setValue(entry.get('heat_threshold', 80))
+        self.heat_threshold.blockSignals(False)
+        self.heat_threshold_label.setText(f'峰值阈值 {self.heat_threshold.value()}%')
+        self.heat_status.setText('正在读取弹幕热度…')
+        self.refresh_highlights()
         self.loaded_duration = duration
         self.position_label.setText(clock(0) + ' / ' + clock(duration))
         self.refresh_markers()
@@ -929,6 +1063,7 @@ class Workspace(QWidget):
     def tick_preview(self):
         if not self.isVisible() or not self.current:
             return
+        self.refresh_highlights()
         try:
             if self.resume_position is not None and self.preview.core is not None and self.preview.core.time_pos is not None:
                 position, paused = self.resume_position

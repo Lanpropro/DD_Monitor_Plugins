@@ -159,6 +159,14 @@ with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_
             first_duration = view.current['duration']
             wait_for(lambda: (plugin.poll() or True) and view.current['duration'] > first_duration + 1)
             assert session.process.poll() is None and view.preview.core.mute
+            manager.emit('danmaku.message', room_id='offline', message={'kind': 'danmaku', 'text': 'local highlight check'})
+            session.update_review()
+            chat = Path(session.review_info()['danmaku_path'])
+            assert 'local highlight check' in chat.read_text(encoding='utf-8')
+            assert all('wall_start' in part for part in session.review_info()['segments'])
+            view.show_highlights()
+            assert view.tools.currentIndex() == 2 and view.tools.isVisible()
+            view.edit_button.click()
             original_core = view.preview.core
             view.tabs.setCurrentWidget(view.library_page)
             view.category.setCurrentIndex(0)
