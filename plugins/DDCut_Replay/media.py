@@ -129,7 +129,8 @@ def scan_directory(job, directory):
             check_cancel(job)
             if path.is_file() and path.suffix.lower() in MEDIA_SUFFIXES and '.partial.' not in path.name:
                 info = path.stat()
-                entry = {'path': str(path.resolve()), 'title': path.stem, 'created_at': info.st_mtime, 'size': info.st_size}
+                entry = {'path': str(path.resolve()), 'title': path.stem, 'created_at': info.st_mtime, 'size': info.st_size,
+                         'kind': 'replay' if folder == root / 'replays' else 'recording'}
                 metadata = path.with_suffix(path.suffix + '.recording.json')
                 if metadata.is_file():
                     try:

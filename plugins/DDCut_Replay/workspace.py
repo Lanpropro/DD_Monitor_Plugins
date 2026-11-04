@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFrame, QLineEdit,
     QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
-    QListWidget, QPushButton, QScrollArea, QScrollBar, QSizePolicy, QSplitter, QStackedWidget, QTabWidget,
+    QListWidget, QListWidgetItem, QPushButton, QScrollArea, QScrollBar, QSizePolicy, QSplitter, QStackedWidget, QTabWidget,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from ddm import theme
@@ -15,7 +15,7 @@ from ddm import theme
 from .media import ACTIVE, probe, scan_directory, prepare_snapshot, export_clip, thumbnail
 from .hls import preview_options
 from .timeline import Timeline, TimeInput, timecode
-from .library_widgets import IdentityCell, date_range
+from .library_widgets import MediaCard, MediaGrid, media_type
 
 STATES = {'idle': '未录制', 'recording': '录制中', 'buffering': '缓存中',
           'stopping': '收尾中', 'reconnecting': '等待重连', 'queued': '等待中',
@@ -153,7 +153,7 @@ class Workspace(QWidget):
 
     def apply_theme(self, *_):
         # Buttons, tabs, hints, inputs and marker lists use the host's components.
-        # Only the media table and time input need styles absent from host QSS.
+        # Media cards, the task table and time input need styles absent from host QSS.
         self.setStyleSheet(f'''
             #replayWorkspace QTreeWidget {{
                 background: {theme.CONTENT}; color: {theme.TEXT1};
@@ -164,7 +164,18 @@ class Workspace(QWidget):
                 height: 44px; padding: 0 12px; color: {theme.TEXT2};
                 border-bottom: 1px solid {theme.BORDER};
             }}
-            #replayWorkspace QTreeWidget#replayMediaList::item {{height: 96px;}}
+            #replayWorkspace QListWidget#replayMediaGrid {{
+                background: transparent; border: none; outline: none;
+                font-size: {theme.FONT_BODY}px;
+            }}
+            #replayWorkspace QListWidget#replayMediaGrid::item {{
+                background: {theme.CONTENT}; border: 1px solid {theme.BORDER};
+                border-radius: {theme.RADIUS_MD}px; padding: 0;
+            }}
+            #replayWorkspace QListWidget#replayMediaGrid::item:hover {{background: {theme.CONTENT_HOVER};}}
+            #replayWorkspace QListWidget#replayMediaGrid::item:selected {{
+                background: {theme.ACCENT_SOFT}; border-color: {theme.ACCENT};
+            }}
             #replayWorkspace QTreeWidget::item:hover {{background: {theme.CONTENT_HOVER}; color: {theme.TEXT1};}}
             #replayWorkspace QTreeWidget::item:selected {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}
             #replayWorkspace QHeaderView::section {{
@@ -226,21 +237,15 @@ class Workspace(QWidget):
         self.library_review.addWidget(self.listing)
         self.library_stack = QStackedWidget()
         list_box.addWidget(self.library_stack, 1)
-        self.sources = table(['直播内容', '平台 / 主播', '状态', '录制时间', '可读时长'])
+        self.sources = MediaGrid()
         self.sources.setAccessibleName('正在录制的房间')
-        self.sources.itemDoubleClicked.connect(lambda *_: self.prepare_review())
+        self.sources.itemClicked.connect(lambda *_: self.prepare_review())
+        self.sources.itemActivated.connect(lambda *_: self.prepare_review())
         self.library_stack.addWidget(self.sources)
-        self.library = table(['录像内容', '平台 / 主播', '类型', '录制时间', '时长'])
+        self.library = MediaGrid()
         self.library.setAccessibleName('本地录像与切片')
-        for tree in (self.sources, self.library):
-            tree.setObjectName('replayMediaList')
-            tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
-            tree.setColumnWidth(0, 400)
-            tree.setColumnWidth(1, 230)
-            tree.setColumnWidth(2, 110)
-            tree.setColumnWidth(3, 200)
-            tree.setColumnWidth(4, 120)
-        self.library.itemDoubleClicked.connect(lambda *_: self.open_selected())
+        self.library.itemClicked.connect(lambda *_: self.open_selected())
+        self.library.itemActivated.connect(lambda *_: self.open_selected())
         self.library_stack.addWidget(self.library)
         empty = QWidget()
         empty_layout = QVBoxLayout(empty)
@@ -464,28 +469,18 @@ class Workspace(QWidget):
         self.tools.setVisible(checked and self.task_panel.isHidden())
         self.listing.setVisible(not checked or self.width() >= 1400)
 
-    def fill_identity(self, tree, item, entry):
-        item.setData(0, Qt.UserRole + 1, item.text(0) + ' ' + item.text(1))
-        item.setData(0, Qt.UserRole + 2, entry)
-        item.setText(0, '')
-        item.setText(1, '')
-        compact = getattr(self, '_media_compact', False)
-        tree.setItemWidget(item, 0, IdentityCell(entry, compact=compact))
-        tree.setItemWidget(item, 1, IdentityCell(entry, author=True))
+    def fill_identity(self, grid, item, entry):
+        room = entry.get('room') or {}
+        search = ' '.join(str(value) for value in (entry.get('title', ''), entry.get('path', ''),
+                          media_type(entry), *[room.get(key, '') for key in ('platform', 'uname', 'title', 'room_id')]))
+        item.setData(Qt.UserRole + 1, search)
+        card = MediaCard(entry)
+        item.setToolTip(card.toolTip())
+        grid.setItemWidget(item, card)
 
     def update_media_layout(self):
-        compact = not self.review_panel.isHidden() and self.listing.width() < 850
-        if getattr(self, '_media_compact', None) == compact:
-            return
-        self._media_compact = compact
-        for tree in (self.sources, self.library):
-            for column in range(1, tree.columnCount()):
-                tree.setColumnHidden(column, compact)
-            for index in range(tree.topLevelItemCount()):
-                item = tree.topLevelItem(index)
-                entry = item.data(0, Qt.UserRole + 2)
-                if entry:
-                    tree.setItemWidget(item, 0, IdentityCell(entry, compact=compact))
+        for grid in (self.sources, self.library):
+            grid.reflow()
 
     def refresh_all(self):
         self.refresh_sources()
@@ -496,9 +491,9 @@ class Workspace(QWidget):
         query = self.search.text().strip().casefold()
         tree = self.sources if self.category.currentData() == 'live' else self.library
         visible = 0
-        for index in range(tree.topLevelItemCount()):
-            item = tree.topLevelItem(index)
-            content = str(item.data(0, Qt.UserRole + 1) or '') + ' ' + ' '.join(item.text(col) for col in range(tree.columnCount()))
+        for index in range(tree.count()):
+            item = tree.item(index)
+            content = str(item.data(Qt.UserRole + 1) or '')
             match = query in content.casefold()
             item.setHidden(not match)
             visible += match
@@ -570,8 +565,9 @@ class Workspace(QWidget):
 
     def refresh_sources(self):
         def refresh():
+            scroll = self.sources.verticalScrollBar().value()
             selected = self.sources.currentItem()
-            selected_id = selected.data(0, Qt.UserRole) if selected else ''
+            selected_id = selected.data(Qt.UserRole) if selected else ''
             data = self.service.sources()
             self.sources_data = {item['source_id']: item for item in data}
             self.capture_switch.setEnabled(not any(item['state'] != 'idle' for item in data))
@@ -595,16 +591,18 @@ class Workspace(QWidget):
                         pass  # The first segment may still be sealing.
                 room = entry['room']
                 identity = {**info, 'room': room, 'title': room.get('title') or room.get('uname') or '直播', 'created_at': entry['created_at']}
-                search = ' '.join(str(room.get(key) or '') for key in ('platform', 'uname', 'title', 'room_id'))
-                item = QTreeWidgetItem([search, str(room.get('uname') or ''), STATES[entry['state']],
-                                       date_range(identity), clock(info['duration']) if info else '等待首段'])
-                item.setData(0, Qt.UserRole, entry['source_id'])
-                self.sources.addTopLevelItem(item)
+                identity['state_label'] = STATES[entry['state']]
+                item = QListWidgetItem()
+                item.setData(Qt.UserRole, entry['source_id'])
+                self.sources.addItem(item)
                 self.fill_identity(self.sources, item, identity)
                 if entry['source_id'] == selected_id:
                     self.sources.setCurrentItem(item)
-            if self.sources.currentItem() is None and self.sources.topLevelItemCount():
-                self.sources.setCurrentItem(self.sources.topLevelItem(0))
+            if self.sources.currentItem() is None and self.sources.count():
+                self.sources.setCurrentItem(self.sources.item(0))
+            self.sources.reflow()
+            self.sources.doItemsLayout()
+            self.sources.verticalScrollBar().setValue(scroll)
             self.refresh_library()
         self.guard(refresh)
 
@@ -613,7 +611,7 @@ class Workspace(QWidget):
         if item is None:
             self.report('请先选择一路房间。')
             return None
-        return self.sources_data.get(item.data(0, Qt.UserRole))
+        return self.sources_data.get(item.data(Qt.UserRole))
 
     def control(self, action):
         entry = self.source()
@@ -652,7 +650,7 @@ class Workspace(QWidget):
             self.report(error)
 
     def open_current_recording(self):
-        entry = self.source() if self.sources.topLevelItemCount() else None
+        entry = self.source() if self.sources.count() else None
         if entry is not None and getattr(self.owner, 'capture_mode', 'clip') == 'original':
             self.report('原版录制中；停止后可在本页回看完整录像。')
             return
@@ -762,31 +760,30 @@ class Workspace(QWidget):
         kind = self.category.currentData()
         self.library_stack.setCurrentIndex(0 if kind == 'live' else 1)
         self.folder_button.setEnabled(kind != 'live')
+        scroll = self.library.verticalScrollBar().value()
         selected = self.library.currentItem()
-        selected_path = selected.data(0, Qt.UserRole) if selected else ''
+        selected_path = selected.data(Qt.UserRole) if selected else ''
         self.library.clear()
         for entry in self.hub.entries:
             if (entry.get('kind') == 'clip') != (kind == 'clip') or entry['path'] in getattr(self, 'active_paths', set()):
                 continue
-            room = entry.get('room') or {}
-            title = entry['title'] + ' ' + ' '.join(str(room.get(key) or '') for key in ('platform', 'uname', 'title', 'room_id'))
-            item = QTreeWidgetItem([title, str(room.get('uname') or '本地视频'),
-                '切片' if entry.get('kind') == 'clip' else '录像', date_range(entry),
-                clock(entry['duration']) if entry.get('duration') else '待探测'])
-            item.setToolTip(0, entry['path'])
-            item.setData(0, Qt.UserRole, entry['path'])
-            self.library.addTopLevelItem(item)
+            item = QListWidgetItem()
+            item.setData(Qt.UserRole, entry['path'])
+            self.library.addItem(item)
             self.fill_identity(self.library, item, entry)
             if entry['path'] == selected_path:
                 self.library.setCurrentItem(item)
+        self.library.reflow()
         self.filter_library()
+        self.library.doItemsLayout()
+        self.library.verticalScrollBar().setValue(scroll)
 
     def selected_entry(self):
         item = self.library.currentItem()
         if item is None:
             self.report('请先选择一份录像。')
             return None
-        return next((entry for entry in self.hub.entries if entry['path'] == item.data(0, Qt.UserRole)), None)
+        return next((entry for entry in self.hub.entries if entry['path'] == item.data(Qt.UserRole)), None)
 
     def import_media(self):
         path, _ = QFileDialog.getOpenFileName(self, '导入本地录像', '', '视频 (*.mp4 *.mkv *.mov *.ts *.flv *.webm)')
@@ -827,7 +824,7 @@ class Workspace(QWidget):
         self.selection_playing = False
         self.review_title.setText(entry['title'])
         self.review_title.setToolTip(entry['path'])
-        self.review_state.setText('本地切片' if entry.get('kind') == 'clip' else '本地录像')
+        self.review_state.setText(media_type(entry))
         self.filename.setText(Path(entry['path']).stem + '-clip-' + datetime.now().strftime('%H%M%S'))
         duration = entry['duration']
         for spin in (self.inpoint, self.outpoint):

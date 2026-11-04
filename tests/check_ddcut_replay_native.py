@@ -20,6 +20,7 @@ os.environ['DDM_NO_SAVE'] = '1'
 os.environ['PATH'] = str(args.host.resolve()) + os.pathsep + os.environ['PATH']
 
 from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
 from ddm.app import MainWindow
@@ -86,6 +87,18 @@ with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_
         image = QImage(str(picture))
         assert image.width() == 320 and image.height() == 180
         assert image.pixelColor(20, 20) != image.pixelColor(280, 20)
+        view.show_library()
+        view.category.setCurrentIndex(1)
+        app.processEvents()
+        old_core = view.preview.core
+        card = view.library.visualItemRect(view.library.item(0))
+        QTest.mouseClick(view.library.viewport(), Qt.LeftButton, pos=card.center())
+        wait_for(lambda: (plugin.poll() or True) and view.preview.core is not old_core)
+        wait_for(lambda: view.preview.position() > .1)
+        card_core = view.preview.core
+        view.refresh_library()
+        app.processEvents()
+        assert view.preview.core is card_core and view.review_panel.isVisible()
         view.inpoint.setValue(.5)
         view.outpoint.setValue(2)
         assert view.export_button.isEnabled()
@@ -140,8 +153,8 @@ with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_
         with patch('ddm.recording.input_args', side_effect=lambda url, headers: ['-re', *input_args(url, headers)]):
             tile.recording_button.click()
             session = window.recorder.sessions[tile]
-            plugin.open()
-            wait_for(lambda: (plugin.poll() or True) and view.current and view.current.get('kind') == 'recording')
+            plugin.open_for(tile)
+            wait_for(lambda: (plugin.poll() or True) and view.live_source is not None and view.current and view.current['path'] != str(source))
             wait_for(lambda: view.preview.position() > .1)
             first_duration = view.current['duration']
             wait_for(lambda: (plugin.poll() or True) and view.current['duration'] > first_duration + 1)
@@ -150,7 +163,7 @@ with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_
             view.tabs.setCurrentWidget(view.library_page)
             view.category.setCurrentIndex(0)
             app.processEvents()
-            row = view.sources.visualItemRect(view.sources.topLevelItem(0))
+            row = view.sources.visualItemRect(view.sources.item(0))
             assert row.height() >= 40
             assert view.sources.font().pixelSize() == ui.theme.FONT_BODY
             if args.screenshots:

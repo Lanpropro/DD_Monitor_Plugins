@@ -128,8 +128,8 @@ with tempfile.TemporaryDirectory(prefix='ddcut-modes-') as directory:
             plugin.workspace = view
             plugin.hub.entries = entries
             view.category.setCurrentIndex(1)
-            assert view.library.topLevelItemCount() == 3
-            card = view.library.itemWidget(view.library.topLevelItem(0), 0)
+            assert view.library.count() == 3
+            card = view.library.itemWidget(view.library.item(0))
             assert card.image.pixmap() is not None and not card.image.pixmap().isNull()
             with patch.object(ui.Preview, 'load'):
                 view.review({**entries[0], **media.probe(media.Job('probe', 'test'), ffmpeg, entries[0]['path'], data / 'work')})

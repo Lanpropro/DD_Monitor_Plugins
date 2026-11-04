@@ -183,24 +183,23 @@ class DDCutReplayTests(unittest.TestCase):
                 ui.theme.apply(mode)
                 host.setStyleSheet(ui.theme.qss())
                 APP.processEvents()
-                first = view.sources.topLevelItem(0)
+                first = view.sources.item(0)
                 row = view.sources.visualItemRect(first)
                 self.assertGreaterEqual(row.height(), 40)
                 self.assertEqual(view.sources.font().pixelSize(), ui.theme.FONT_BODY)
                 self.assertEqual(view.back_button.font().pixelSize(), reference.font().pixelSize())
-                self.assertIsNotNone(view.sources.itemWidget(first, 0))
-                self.assertIsNotNone(view.sources.itemWidget(first, 1))
+                self.assertIsNotNone(view.sources.itemWidget(first))
                 self.assertGreaterEqual(view.back_button.height(), ui.theme.CONTROL_HEIGHT)
-                QTest.mouseClick(view.sources.viewport(), Qt.LeftButton, pos=QPoint(20, row.center().y()))
+                QTest.mouseClick(view.sources.viewport(), Qt.LeftButton, pos=row.center())
                 self.assertTrue(first.isSelected())
                 pixel = view.sources.viewport().grab().toImage().pixelColor(
-                    view.sources.columnWidth(0) - 20, row.center().y())
+                    row.right() - 4, row.center().y())
                 self.assertNotEqual(pixel, ui.theme.qcolor(ui.theme.ACCENT), 'Selection must use the soft host color')
                 actual = view.back_button.grab().toImage()
                 expected = reference.grab().toImage()
                 self.assertEqual(actual.pixelColor(actual.width() // 2, 3),
                                  expected.pixelColor(expected.width() // 2, 3))
-                self.assertEqual(view.sources.currentItem().data(0, Qt.UserRole), '0')
+                self.assertEqual(view.sources.currentItem().data(Qt.UserRole), '0')
                 if args.screenshots:
                     args.screenshots.mkdir(parents=True, exist_ok=True)
                     host.grab().save(str(args.screenshots / f'ddcut-live-list-{mode}.png'))
@@ -229,6 +228,96 @@ class DDCutReplayTests(unittest.TestCase):
             host.deleteLater()
             APP.processEvents()
 
+    def test_grid_reflows_and_click_opens_inline_without_refresh_reload(self):
+        host = QMainWindow()
+        host.setAttribute(Qt.WA_DontShowOnScreen)
+        cover = media.thumbnail(media.Job('cover', 'test'), FFMPEG, self.source, self.root / 'covers')
+        for index in range(6):
+            path = self.root / f'local-{index}.mp4'
+            shutil.copy2(self.source, path)
+            self.hub.add_entry({**self.entry, 'path': str(path), 'cover_path': cover,
+                'avatar_path': cover, 'kind': 'recording', 'title': f'本地录像 {index + 1}',
+                'room': {'platform': 'bilibili', 'room_id': 'offline', 'uname': '测试主播',
+                         'title': f'直播标题 {index + 1}'}})
+        owner = SimpleNamespace(context=SimpleNamespace(window=host), hub=self.hub,
+            service=SimpleNamespace(sources=lambda: [], options=lambda: {'ffmpeg': FFMPEG}),
+            preview_server=SimpleNamespace(source_url=lambda path: path))
+        view = ui.Workspace(owner)
+        host.setCentralWidget(view)
+        host.resize(1500, 900)
+        view.category.setCurrentIndex(1)
+        host.show()
+        try:
+            for mode in ('dark', 'light'):
+                ui.theme.apply(mode)
+                host.setStyleSheet(ui.theme.qss())
+                APP.processEvents()
+                rectangles = [view.library.visualItemRect(view.library.item(i)) for i in range(6)]
+                self.assertGreaterEqual(len({r.x() for r in rectangles}), 3)
+                self.assertLessEqual(max(r.right() for r in rectangles), view.library.viewport().width())
+                card = view.library.itemWidget(view.library.item(0))
+                self.assertFalse(card.image.pixmap().isNull())
+                self.assertEqual(card.type_label.text(), '完整录像')
+                if args.screenshots:
+                    host.grab().save(str(args.screenshots / f'ddcut-grid-{mode}.png'))
+            with patch.object(ui.Preview, 'load') as load:
+                QTest.mouseClick(view.library.viewport(), Qt.LeftButton, pos=rectangles[0].center())
+                wait_job(self.hub.jobs[-1])
+                info = self.hub.jobs[-1].result
+                self.hub.add_entry(info)
+                view.review(info)
+                APP.processEvents()
+                self.assertFalse(view.review_panel.isHidden())
+                self.assertEqual(load.call_count, 1)
+                view.refresh_library()
+                APP.processEvents()
+                self.assertEqual(load.call_count, 1)
+                self.assertEqual(len({view.library.visualItemRect(view.library.item(i)).x() for i in range(6)}), 1)
+                if args.screenshots:
+                    host.grab().save(str(args.screenshots / 'ddcut-grid-inline.png'))
+            view.show_library()
+            host.resize(920, 600)
+            APP.processEvents()
+            self.assertLessEqual(view.minimumSizeHint().width(), 920)
+            self.assertEqual(view.library.horizontalScrollBar().maximum(), 0)
+            scroll = view.library.verticalScrollBar()
+            scroll.setValue(scroll.maximum())
+            previous = scroll.value()
+            self.assertGreater(previous, 0)
+            view.refresh_library()
+            APP.processEvents()
+            self.assertEqual(scroll.value(), previous)
+            view.search.setText('直播标题 4')
+            APP.processEvents()
+            visible = [view.library.item(i) for i in range(6) if not view.library.item(i).isHidden()]
+            self.assertEqual(len(visible), 1)
+        finally:
+            view.close()
+            host.close()
+            host.deleteLater()
+            APP.processEvents()
+
+    def test_scan_classifies_legacy_files_without_treating_hls_segments_as_recordings(self):
+        replays = self.root / 'replays'
+        replays.mkdir()
+        shutil.copy2(self.source, replays / 'legacy.ts')
+        archive = self.root / 'DDCut_Replay' / 'archive'
+        archive.mkdir(parents=True)
+        (archive / 'part-00001.ts').write_bytes(b'internal segment')
+        playlist = archive / 'playlist.m3u8'
+        playlist.write_text('#EXTM3U', encoding='utf-8')
+        (archive / 'recording.json').write_text(json.dumps({'path': str(playlist),
+            'title': 'archive', 'created_at': 1, 'recording': True, 'kind': 'recording',
+            'index_format': 'hls'}), encoding='utf-8')
+        entries = media.scan_directory(media.Job('scan', 'test'), self.root)
+        labels = {Path(entry['path']).name: ui.media_type(entry) for entry in entries}
+        self.assertEqual(labels[self.source.name], '完整录像')
+        self.assertEqual(labels['legacy.ts'], '即时重放')
+        self.assertEqual(labels['playlist.m3u8'], '切片素材')
+        self.assertNotIn('part-00001.ts', labels)
+        self.assertEqual(ui.media_type({'path': str(replays / 'old.ts')}), '即时重放')
+        self.assertEqual(ui.media_type({'path': 'import.ts'}), '本地视频')
+
     def test_workspace_layout_close_reopen_and_unload(self):
         host = QMainWindow()
         host.recorder = SimpleNamespace(exports=[])
@@ -254,17 +343,17 @@ class DDCutReplayTests(unittest.TestCase):
             self.assertEqual(view.tabs.count(), 1)
             self.assertEqual(view.tabs.currentWidget(), view.library_page)
             self.assertEqual(view.category.currentData(), 'live')
-            self.assertEqual(view.sources.topLevelItemCount(), 1)
+            self.assertEqual(view.sources.count(), 1)
             view.category.setCurrentIndex(1)
-            self.assertEqual(view.library.topLevelItemCount(), 1)
+            self.assertEqual(view.library.count(), 1)
             view.search.setText('不存在的录像')
-            self.assertTrue(view.library.topLevelItem(0).isHidden())
+            self.assertTrue(view.library.item(0).isHidden())
             view.search.clear()
-            self.assertFalse(view.library.topLevelItem(0).isHidden())
+            self.assertFalse(view.library.item(0).isHidden())
             view.category.setCurrentIndex(2)
-            self.assertEqual(view.library.topLevelItemCount(), 0)
+            self.assertEqual(view.library.count(), 0)
             view.review(plugin.hub.entries[0])
-            view.sources.setCurrentItem(view.sources.topLevelItem(0))
+            view.sources.setCurrentItem(view.sources.item(0))
             with patch.object(service, 'control', create=True, side_effect=RuntimeError('录制会话已变化，请刷新后重试')):
                 view.control('stop')
             self.assertIn('录制会话已变化', view.status.text())
@@ -304,8 +393,8 @@ class DDCutReplayTests(unittest.TestCase):
             self.assertTrue(target.is_file())
             self.assertAlmostEqual(plugin.hub.jobs[-1].result['actual_duration'], 1.5, delta=.1)
             view.category.setCurrentIndex(2)
-            self.assertEqual(view.library.topLevelItemCount(), 1)
-            self.assertEqual(view.library.topLevelItem(0).data(0, Qt.UserRole), str(target))
+            self.assertEqual(view.library.count(), 1)
+            self.assertEqual(view.library.item(0).data(Qt.UserRole), str(target))
             view.tabs.setCurrentWidget(view.library_page)
             self.assertFalse(view.task_panel.isHidden())
             view.toggle_tasks(False)

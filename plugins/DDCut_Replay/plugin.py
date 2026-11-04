@@ -134,9 +134,9 @@ class DDCutReplay(api.Plugin):
         self.open()
         if self.workspace:
             self.workspace.refresh_sources()
-            for index in range(self.workspace.sources.topLevelItemCount()):
-                item = self.workspace.sources.topLevelItem(index)
-                if item.data(0, Qt.UserRole) == str(id(tile)):
+            for index in range(self.workspace.sources.count()):
+                item = self.workspace.sources.item(index)
+                if item.data(Qt.UserRole) == str(id(tile)):
                     self.workspace.sources.setCurrentItem(item)
                     self.workspace.prepare_review()
                     break

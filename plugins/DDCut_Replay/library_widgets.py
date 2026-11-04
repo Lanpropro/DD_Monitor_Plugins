@@ -1,10 +1,10 @@
-"""Recording identity cells using the host artwork cache and platform assets."""
+"""Responsive media cards using the host artwork cache and platform assets."""
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QAbstractItemView, QHBoxLayout, QLabel, QListWidget, QSizePolicy, QVBoxLayout, QWidget
 
 from ddm import images
 from ddm.follow_folders import PLATFORM_NAMES
@@ -24,65 +24,107 @@ def picture(entry, key, room):
     return images.load_cached_avatar(room.get('face', '')) or images.load_room_avatar(room_id)
 
 
-class IdentityCell(QWidget):
-    def __init__(self, entry, *, author=False, compact=False):
+def media_type(entry):
+    if entry.get('kind') == 'clip':
+        return '已生成切片'
+    path = Path(entry.get('path', ''))
+    if entry.get('index_format') == 'hls' or path.suffix.lower() in {'.m3u8', '.edl'}:
+        return '切片素材'
+    if entry.get('kind') == 'replay' or path.parent.name.casefold() == 'replays':
+        return '即时重放'
+    return '完整录像' if entry.get('kind') == 'recording' else '本地视频'
+
+
+class MediaCard(QWidget):
+    def __init__(self, entry):
         super().__init__()
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         room = entry.get('room') or {}
-        row = QHBoxLayout(self)
-        row.setContentsMargins(12, 10, 12, 10)
-        row.setSpacing(12)
-        self.image = QLabel()
-        self.image.setFixedSize(36, 36) if author else self.image.setFixedSize(128, 72)
+        box = QVBoxLayout(self)
+        box.setContentsMargins(10, 10, 10, 10)
+        box.setSpacing(6)
+        self.image = QLabel('暂无封面')
+        self.image.setObjectName('SettingsHint')
         self.image.setAlignment(Qt.AlignCenter)
-        pixmap = picture(entry, 'avatar_path' if author else 'cover_path', room)
-        if pixmap is not None:
-            self.image.setPixmap(pixmap.scaled(self.image.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        else:
-            self.image.setText('头像' if author else '暂无封面')
-            self.image.setObjectName('SettingsHint')
-        row.addWidget(self.image)
-        text = QVBoxLayout()
-        text.setSpacing(5)
-        platform = room_platform(room) if room else ''
-        name = str(room.get('uname') or '本地视频') if author else str(room.get('title') or entry.get('title') or '未命名录像')
-        self.title = QLabel(name)
+        self.image.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.cover = picture(entry, 'cover_path', room)
+        if self.cover is not None:
+            self.image.setPixmap(self.cover.scaled(320, 180, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        box.addWidget(self.image)
+        self.title = QLabel(str(room.get('title') or entry.get('title') or '未命名录像'))
         self.title.setObjectName('PluginName')
-        self.title.setToolTip(name)
-        self.title.setMinimumWidth(0)
-        from PySide6.QtWidgets import QSizePolicy
         self.title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        text.addWidget(self.title)
+        box.addWidget(self.title)
+        author = QHBoxLayout()
+        avatar = QLabel()
+        avatar.setFixedSize(22, 22)
+        face = picture(entry, 'avatar_path', room)
+        if face is not None:
+            avatar.setPixmap(face.scaled(22, 22, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        author.addWidget(avatar)
+        if room:
+            add_platform_logos(author, [room], self)
+        platform = room_platform(room) if room else ''
+        name = ' · '.join(filter(None, [PLATFORM_NAMES.get(platform, platform), str(room.get('uname') or '本地视频')]))
+        label = QLabel(name)
+        label.setObjectName('SettingsHint')
+        label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        author.addWidget(label, 1)
+        self.type_label = QLabel(entry.get('state_label') or media_type(entry))
+        self.type_label.setObjectName('SettingsHint')
+        author.addWidget(self.type_label)
+        box.addLayout(author)
         details = QHBoxLayout()
-        if author and platform:
-            add_platform_logos(details, [room], self)
-        if compact and not author:
-            avatar = QLabel()
-            avatar.setFixedSize(18, 18)
-            face = picture(entry, 'avatar_path', room)
-            if face is not None:
-                avatar.setPixmap(face.scaled(18, 18, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            details.addWidget(avatar)
-            if platform:
-                add_platform_logos(details, [room], self)
-        subtitle = (PLATFORM_NAMES.get(platform, platform) + ' · ' + str(room.get('room_id') or '')) if author and platform else ('本地导入' if author else (Path(entry['path']).name if entry.get('path') else '直播录制'))
-        if compact and not author:
-            subtitle = PLATFORM_NAMES.get(platform, platform or '本地视频') + ' · ' + str(room.get('uname') or '本地导入')
-        hint = QLabel(subtitle)
-        hint.setObjectName('SettingsHint')
-        hint.setToolTip(subtitle)
-        hint.setMinimumWidth(0)
-        hint.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        details.addWidget(hint, 1)
-        text.addLayout(details)
-        if compact and not author:
-            stamp = QLabel(date_range(entry).split('\n')[0] + (' · ' + timecode(entry['duration']) if entry.get('duration') else ''))
-            stamp.setObjectName('SettingsHint')
-            stamp.setMinimumWidth(0)
-            stamp.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-            stamp.setToolTip(date_range(entry))
-            text.addWidget(stamp)
-        row.addLayout(text, 1)
+        stamp = date_range(entry).split('\n')[0]
+        date = QLabel(stamp)
+        date.setObjectName('SettingsHint')
+        date.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        details.addWidget(date, 1)
+        duration = QLabel(timecode(entry['duration']) if entry.get('duration') else '待探测')
+        duration.setObjectName('SettingsHint')
+        details.addWidget(duration)
+        box.addLayout(details)
+        extension = Path(entry.get('path', '')).suffix.upper().lstrip('.')
+        self.setToolTip('\n'.join([self.title.text(), name, media_type(entry) + (' · ' + extension if extension else ''),
+                                  date_range(entry), str(entry.get('path') or '')]))
+        self.setAccessibleName(self.title.text() + ' · ' + name + ' · ' + self.type_label.text())
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        width = max(1, self.width() - 20)
+        height = round(width * 9 / 16)
+        self.image.setFixedHeight(height)
+        if self.cover is not None:
+            scaled = self.cover.scaled(width, height, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            self.image.setPixmap(scaled.copy((scaled.width() - width) // 2, (scaled.height() - height) // 2, width, height))
+
+
+class MediaGrid(QListWidget):
+    def __init__(self):
+        super().__init__()
+        self.setObjectName('replayMediaGrid')
+        self.setViewMode(QListWidget.IconMode)
+        self.setResizeMode(QListWidget.Adjust)
+        self.setMovement(QListWidget.Static)
+        self.setWrapping(True)
+        self.setSpacing(6)
+        self.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.reflow()
+
+    def reflow(self):
+        available = max(1, self.viewport().width() - 12)
+        columns = max(1, available // 288)
+        width = min(360, max(240, available // columns - 12))
+        size = QSize(width, round((width - 20) * 9 / 16) + 112)
+        if self.gridSize() != size + QSize(12, 12):
+            self.setGridSize(size + QSize(12, 12))
+        for index in range(self.count()):
+            self.item(index).setSizeHint(size)
 
 
 def date_range(entry):
