@@ -56,12 +56,13 @@ class ContributionGuideTests(unittest.TestCase):
             'global_live': {'twitch', 'youtube'},
             'match_sync': {'bilibili', 'huya', 'douyu', 'douyin', 'twitch', 'youtube'},
             'bili_live': {'bilibili'},
+            'ddcut_replay': set(),
         }
         for path in manifests:
             manifest = json.loads(path.read_text(encoding='utf-8'))
             with self.subTest(plugin=manifest['id']):
                 matches = [card for card in cards
-                           if f'href="plugins/{manifest["id"]}/README.md"' in card]
+                           if f'href="{path.parent.relative_to(ROOT).as_posix()}/README.md"' in card]
                 self.assertEqual(len(matches), 1)
                 author = manifest.get('author', 'Lanpropro')
                 self.assertIn(f'href="https://github.com/{author}"', matches[0])
@@ -104,14 +105,17 @@ class ContributionGuideTests(unittest.TestCase):
         directory = ROOT / 'docs/changes'
         index = (directory / 'README.md').read_text(encoding='utf-8')
         for manifest in (ROOT / 'plugins').glob('*/plugin.json'):
-            plugin_id = manifest.parent.name
+            plugin_id = json.loads(manifest.read_text(encoding='utf-8'))['id']
             with self.subTest(plugin=plugin_id):
                 note = directory / f'{plugin_id}.md'
                 source = note.read_text(encoding='utf-8')
                 self.assertIn(f']({note.name})', index)
                 self.assertIn(f'`{plugin_id}`', source)
                 self.assertIn('## 待发布', source)
-                self.assertRegex(source, r'https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/')
+                if plugin_id == 'ddcut_replay':
+                    self.assertIn('尚无公开发布基线', source)
+                else:
+                    self.assertRegex(source, r'https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/')
         self.assertIn('(docs/changes/README.md)', (ROOT / 'README.md').read_text(encoding='utf-8'))
         self.assertIn('(docs/changes/README.md)', (ROOT / 'CONTRIBUTING.md').read_text(encoding='utf-8'))
 

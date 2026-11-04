@@ -10,6 +10,7 @@
 | 海外直播平台 | [global_live](global_live.md) | [global-live-v1.2](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2) |
 | 比赛二路同步 | [match_sync](match_sync.md) | [match-sync-v1.4](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.4) |
 | B站直播互动 | [bili_live](bili_live.md) | [bili-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.0) |
+| DDCut Replay（开发候选） | [ddcut_replay](ddcut_replay.md) | 尚无公开发布基线 |
 
 基线于 2026-10-31 按 GitHub Releases 核对，使用公开发布版本，不以开发分支的清单版本替代。该机制从本日起启用；此前的开发增量尚未逐项回溯，文件没有条目不代表发布后没有改动。
 
