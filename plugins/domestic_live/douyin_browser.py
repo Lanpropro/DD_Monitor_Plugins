@@ -48,7 +48,8 @@ class BrowserChat(QObject):
             labels = {"wrong_room_page": "官网页面与目标直播间不匹配",
                       "cancelled_before_send": "提交前已取消", "official_client_changed": "官网发送模块结构已变化",
                       "official_client_not_ready": "官网发送模块未就绪", "invalid_response": "官网未返回有效回执",
-                      "official_security_changed": "官网安全环境模块结构已变化",
+                      "official_security_not_ready": "官网安全环境模块在准备期限内未加载，本次未提交",
+                      "official_security_export_missing": "官网安全环境模块已找到，但初始化导出不可用，本次未提交",
                       "official_security_timeout": "官网安全环境初始化超时，本次未提交",
                       "official_security_failed": "官网安全环境初始化失败，本次未提交",
                       "official_context_not_ready": "官网登录与直播间信息尚未就绪，本次未提交",
@@ -69,6 +70,15 @@ class BrowserChat(QObject):
                 causes = {"missing_call": "模块调用目标缺失", "not_callable": "模块依赖不可调用"}
                 if result.get("cause") in causes:
                     reason += "；分类：" + causes[result["cause"]]
+                status = result.get("http_status")
+                if type(status) is int and 100 <= status <= 599:
+                    reason += f"；HTTP：{status}"
+                status = result.get("api_status")
+                if type(status) is int:
+                    reason += f"；接口状态：{status}"
+                code = result.get("request_code")
+                if code in ("ERR_NETWORK", "ECONNABORTED", "ETIMEDOUT", "ERR_CANCELED"):
+                    reason += "；请求代码：" + code
             raise InteractionError(f"抖音官网发送未确认（阶段：官方客户端；原因：{reason}），请先核对直播间内是否出现该条消息。")
         return result
 
@@ -122,7 +132,8 @@ class BrowserChat(QObject):
             window.__ddmChatStage='page';
             Promise.resolve().then(()=> (%s)(%s, (%s))).then(data=>{window.__ddmChatResult=data})
             .catch(e=>{const allowed=['wrong_room_page','cancelled_before_send','official_client_changed',
-            'official_client_not_ready','invalid_response','official_security_changed',
+            'official_client_not_ready','invalid_response',
+            'official_security_not_ready','official_security_export_missing',
             'official_security_timeout','official_security_failed','official_context_not_ready',
             'wrong_room_session','account_mismatch'];window.__ddmChatResult={error:
             allowed.includes(e?.message)?e.message:'official_request_failed',
@@ -131,6 +142,9 @@ class BrowserChat(QObject):
             'NotAllowedError','AbortError','TimeoutError','NetworkError','AxiosError'].includes(e?.name)?e.name:'Other',
             cause:window.__ddmChatStage==='module'&&e?.name==='TypeError'&&typeof e.message==='string'?
             (e.message.includes("reading 'call'")?'missing_call':e.message.includes('is not a function')?'not_callable':'other'):'other',
+            http_status:Number.isInteger(e?.response?.status)&&e.response.status>=100&&e.response.status<=599?e.response.status:null,
+            api_status:Number.isSafeInteger(e?.response?.data?.status_code)?e.response.data.status_code:null,
+            request_code:['ERR_NETWORK','ECONNABORTED','ETIMEDOUT','ERR_CANCELED'].includes(e?.code)?e.code:null,
             submitted:!!window.__ddmChatSubmitted}});
         }""" % (json.dumps(task["id"]), json.dumps(task["id"]), SCRIPT, json.dumps(task), CLIENT_SCRIPT)
         read_state = "JSON.stringify({submitted:!!window.__ddmChatSubmitted,result:window.__ddmChatResult,stage:window.__ddmChatStage})"

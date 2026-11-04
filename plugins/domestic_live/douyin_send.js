@@ -36,13 +36,19 @@ async (task, inspectClient) => {
             const send = exports?.W;
             if (typeof send !== 'function') throw new Error('official_client_changed');
             window.__ddmChatStage = 'security';
-            const securityEntry = Object.entries(require.m).find(([, factory]) => {
-                const code = factory.toString();
-                return code.includes('getSecuritySdkInitWebStatus:function') && code.includes('securitySdkInitWeb:function');
-            });
-            if (!securityEntry) throw new Error('official_security_changed');
+            let securityEntry;
+            while (Date.now() < deadline) {
+                if (window.__ddmChatCancelled) throw new Error('cancelled_before_send');
+                securityEntry = Object.entries(require.m).find(([, factory]) => {
+                    const code = factory.toString();
+                    return code.includes('getSecuritySdkInitWebStatus:function') && code.includes('securitySdkInitWeb:function');
+                });
+                if (securityEntry) break;
+                await new Promise(resolve => setTimeout(resolve, 150));
+            }
+            if (!securityEntry) throw new Error('official_security_not_ready');
             const security = require(securityEntry[0]);
-            if (typeof security?.getSecuritySdkInitWebStatus !== 'function') throw new Error('official_security_changed');
+            if (typeof security?.getSecuritySdkInitWebStatus !== 'function') throw new Error('official_security_export_missing');
             const status = await security.getSecuritySdkInitWebStatus();
             if (status === 'timeout') throw new Error('official_security_timeout');
             if (status !== 'success' && status !== 'skip_by_client_version') throw new Error('official_security_failed');

@@ -41,7 +41,8 @@ class BlockNetwork(QWebEngineUrlRequestInterceptor):
 
 class BrowserTests(unittest.TestCase):
     def exercise(self, behavior, expected_error=None, *, module_error=False, delayed_dependency=False,
-                 security_status="success", room_id="999999", uid="42", hold_ack=False, expected_stages=()):
+                 security_status="success", room_id="999999", uid="42", hold_ack=False, expected_stages=(),
+                 late_security=False, invalid_security=False):
         dialogs = []
         initialization = "throw new ReferenceError('PRIVATE');" if module_error else ""
         if module_error == "missing_call":
@@ -65,6 +66,13 @@ class BrowserTests(unittest.TestCase):
                 entry[0].forEach(id=>loadedChunks.add(id));
             };
             </script></body></html>""" % (json.dumps(room_id), json.dumps(uid), json.dumps(security_status), initialization, behavior)
+        if invalid_security:
+            html=html.replace("const security={getSecuritySdkInitWebStatus:async()=>", "const security={unused:async()=>")
+        if late_security:
+            html=html.replace("const loadedChunks=new Set();", """
+                delete requireModule.m[789];
+                setTimeout(()=>{requireModule.m[789]=securityFactory;},800);
+                const loadedChunks=new Set();""")
         if delayed_dependency:
             html = html.replace("requireModule.m={123:function(){return '/webcast/room/chat/ paste_edit_method';},789:securityFactory};", """
                 const cache={};
@@ -148,7 +156,7 @@ class BrowserTests(unittest.TestCase):
             self.assertTrue(snapshot)
             state = json.loads(snapshot[0])
             self.assertEqual(state["loaderCaptures"], 1, "Reuse the document's captured loader, not a consumed chunk ID")
-            self.assertEqual(state["calls"], 0 if module_error or security_status != "success" or room_id != "999999" or uid != "42" else 1)
+            self.assertEqual(state["calls"], 0 if module_error or invalid_security or security_status != "success" or room_id != "999999" or uid != "42" else 1)
             if state["calls"]:
                 self.assertEqual(state["params"]["room_id_str"], "999999")
             if expected_error:
@@ -189,6 +197,15 @@ class BrowserTests(unittest.TestCase):
         self.exercise("throw Object.assign(new Error('PRIVATE'),{name:'AxiosError'});",
                       ["官网请求", "AxiosError", "已调用发送：是"])
 
+    def test_request_failure_preserves_numeric_status_and_fixed_code_only(self):
+        self.exercise("throw Object.assign(new Error('PRIVATE'),{code:'ERR_NETWORK',response:{status:403,"
+                      "data:{status_code:10003,content:'PRIVATE',cookie:'PRIVATE'}}});",
+                      ["HTTP：403", "接口状态：10003", "请求代码：ERR_NETWORK", "已调用发送：是"])
+
+    def test_request_failure_excludes_arbitrary_status_and_code(self):
+        self.exercise("throw Object.assign(new Error('PRIVATE'),{code:'PRIVATE',response:{status:'PRIVATE',"
+                      "data:{status_code:{cookie:'PRIVATE'}}}});", ["官网请求", "已调用发送：是"])
+
     def test_invalid_response_has_distinct_stage(self):
         self.exercise("return {data:{cookie:'PRIVATE'}};",
                       ["官网未返回有效回执", "回执解析", "已调用发送：是"])
@@ -208,6 +225,13 @@ class BrowserTests(unittest.TestCase):
 
     def test_security_failure_does_not_submit(self):
         self.exercise("return {};", ["安全环境初始化失败", "已调用发送：否"], security_status="fail")
+
+    def test_late_security_module_is_waited_for_before_single_submission(self):
+        self.exercise("return {data:{status_code:0,data:{msg_id_str:'7560000000000000001',"
+                      "content_self_see_status:0}}};", late_security=True)
+
+    def test_missing_security_export_is_distinct_and_never_submits(self):
+        self.exercise("return {};", ["模块已找到", "初始化导出不可用", "已调用发送：否"], invalid_security=True)
 
     def test_wrong_live_session_never_submits(self):
         self.exercise("return {};", ["官网当前直播与目标直播不一致", "已调用发送：否"], room_id="888888")

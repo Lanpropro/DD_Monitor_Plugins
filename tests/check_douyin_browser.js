@@ -15,7 +15,7 @@ function checkDependencies() {
 }
 async function fixture({cancelled=false, host='https://live.douyin.com', selfSee=0, securityStatus='success',
     cancelDuringSecurity=false, roomId='999999', uid='42', lateContext=false, switchAccountDuringSecurity=false,
-    lateModule=false}={}) {
+    lateModule=false, lateSecurity=false, missingSecurity=false, invalidSecurity=false}={}) {
     let calls = 0, received, securityReady=false, captures=0;
     const client = {W: async params => {
         assert(securityReady,'Send must wait for security initialization');
@@ -33,6 +33,12 @@ async function fixture({cancelled=false, host='https://live.douyin.com', selfSee
     const requireModule = id => id==='789'?security:client;
     requireModule.m = {123:function(){return '/webcast/room/chat/ paste_edit_method';},
         789:function(){return 'getSecuritySdkInitWebStatus:function securitySdkInitWeb:function';}};
+    if(invalidSecurity)delete security.getSecuritySdkInitWebStatus;
+    if(lateSecurity || missingSecurity){
+        const factory=requireModule.m[789];
+        delete requireModule.m[789];
+        if(lateSecurity)setTimeout(()=>{requireModule.m[789]=factory;},30);
+    }
     if(lateModule){
         const factory=requireModule.m[123];
         delete requireModule.m[123];
@@ -51,11 +57,17 @@ async function fixture({cancelled=false, host='https://live.douyin.com', selfSee
         setTimeout(()=>{window.__STORE__=context;},30);
     }
     else window.__STORE__=context;
-    const fn = vm.runInNewContext('('+source+')', {window,location:{origin:host,pathname:'/123'},setTimeout});
+    let virtualTime=0;
+    const fastTimeout=(callback,delay)=>{virtualTime+=delay;return setTimeout(callback,0);};
+    const fn = vm.runInNewContext('('+source+')', {window,location:{origin:host,pathname:'/123'},
+        setTimeout:missingSecurity?fastTimeout:setTimeout,Date:missingSecurity?{now:()=>virtualTime}:Date});
     const task={id:'synthetic',webRid:'123',roomId:'999999',senderUid:'42',text:'hello'};
     if(cancelled || host!=='https://live.douyin.com' || !['success','skip_by_client_version'].includes(securityStatus)
-        || cancelDuringSecurity || roomId!==task.roomId || uid!==task.senderUid || switchAccountDuringSecurity) {
-        await assert.rejects(fn(task,inspectClient));assert.strictEqual(calls,0);return;
+        || cancelDuringSecurity || roomId!==task.roomId || uid!==task.senderUid || switchAccountDuringSecurity
+        || missingSecurity || invalidSecurity) {
+        await assert.rejects(fn(task,inspectClient),missingSecurity?/official_security_not_ready/:
+            invalidSecurity?/official_security_export_missing/:undefined);
+        assert.strictEqual(calls,0);return;
     }
     const result=await fn(task,inspectClient);
     assert.strictEqual(calls,1);
@@ -76,5 +88,6 @@ await fixture({cancelDuringSecurity:true});
 await fixture({roomId:'888888'});await fixture({uid:'43'});await fixture({lateContext:true});
 await fixture({switchAccountDuringSecurity:true});
 await fixture({lateModule:true});
+await fixture({lateSecurity:true});await fixture({missingSecurity:true});await fixture({invalidSecurity:true});
 console.log('PASS: official helper called once, internal room, cancellation, origin guard, sanitized receipt');
 })().catch(error=>{console.error(error);process.exit(1)});
