@@ -64,7 +64,8 @@ with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_
         plugin.workspace = view
         view.setAttribute(Qt.WA_ShowWithoutActivating)
         view.move(-30000, -30000)
-        view.show()
+        assert context.show_workspace(view)
+        assert not view.isWindow()
         view.load_entry({'path': str(source), 'title': '本地静音验证', 'created_at': time.time()})
         wait_for(lambda: (plugin.poll() or True) and view.preview.core is not None)
         wait_for(lambda: view.preview.position() > .1)
@@ -83,7 +84,7 @@ with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_
         assert view.export_button.isEnabled()
         view.close()
         assert view.preview.core is None and not plugin.hub.closed
-        view.show()
+        assert context.show_workspace(view)
         manager.unload()
         assert plugin.hub.closed and not window.recorder._part_leases
     window.close()

@@ -356,7 +356,12 @@ class MatchSyncPlugin(api.Plugin):
             self.viewer.add_room(str(room["room_id"]), {"alias": room.get("uname") or ""})
         self.switch_probe.watch_target(self.viewer)
         with self.switch_probe.span('show_viewer'):
-            self.viewer.show()
+            show = getattr(self.context, 'show_workspace', None)
+            if show is not None and self.button is not None:
+                if not show(self.viewer, manages_content=True):
+                    return
+            else:
+                self.viewer.show()
             self.viewer.raise_()
         if self.entry is not None:
             self.entry.set_mode(True)

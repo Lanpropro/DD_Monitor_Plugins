@@ -18,7 +18,7 @@ from .workspace import Workspace
 
 class DDCutReplay(api.Plugin):
     name = '录制与切片'
-    version = '0.1.1'
+    version = '0.1.2'
 
     def __init__(self):
         super().__init__()
@@ -34,6 +34,7 @@ class DDCutReplay(api.Plugin):
         if self.service is not None and self.service.api_version != 1:
             self.service = None
         action = self.action = QAction('录制切片', context.window)
+        action.setCheckable(True)
         action.setToolTip('录制切片：录制管理、回看与导出（Ctrl+Shift+R）')
         glyph = QPixmap(36, 36)
         glyph.setDevicePixelRatio(2)
@@ -49,7 +50,7 @@ class DDCutReplay(api.Plugin):
         action.setIcon(QIcon(glyph))
         action.setShortcut(QKeySequence('Ctrl+Shift+R'))
         action.setShortcutContext(Qt.ApplicationShortcut)
-        action.triggered.connect(self.open)
+        action.triggered.connect(self.toggle)
         context.window.addAction(action)
         entry = QToolButton(context.window)
         entry.setDefaultAction(action)
@@ -74,15 +75,32 @@ class DDCutReplay(api.Plugin):
 
     def open(self, *_):
         if self.service is None:
+            self.action.setChecked(False)
             QMessageBox.information(self.context.window, '需要配套开发版本',
                 '本体缺少录制服务接口 v1。请使用 DDCut Replay 配套本体源码；仅安装插件不会增加宿主接口。')
             return
+        show = getattr(self.context, 'show_workspace', None)
+        if show is None:
+            self.action.setChecked(False)
+            QMessageBox.information(self.context.window, '需要配套开发版本', '本体缺少嵌入式工作区接口，请更新配套本体。')
+            return
         if self.workspace is None:
             self.workspace = Workspace(self)
-        self.workspace.show()
-        # User-triggered action only; background jobs never raise or activate it.
-        self.workspace.raise_()
-        self.workspace.activateWindow()
+            self.workspace.closed.connect(self._workspace_closed)
+        if show(self.workspace):
+            self.action.setChecked(True)
+        else:
+            self.action.setChecked(False)
+
+    def toggle(self, checked):
+        if checked:
+            self.open()
+        elif self.workspace is not None:
+            self.workspace.close()
+
+    def _workspace_closed(self):
+        if self.action is not None:
+            self.action.setChecked(False)
 
     def tile_actions(self, tile):
         return [('录制与切片…', lambda: self.open_for(tile))]

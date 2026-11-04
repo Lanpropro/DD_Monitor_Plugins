@@ -103,7 +103,7 @@ ZIP 内只有插件 ID 对应的顶层文件夹。GitHub 自动生成的 **Sourc
 | 插件 | ID | 源码版本 |
 | --- | --- | --- |
 | 国内直播平台 | `domestic_live` | 1.4 |
-| 录制与切片（开发候选） | `ddcut_replay` | 0.1.1 |
+| 录制与切片（开发候选） | `ddcut_replay` | 0.1.2 |
 | 海外直播平台 | `global_live` | 1.2 |
 | 比赛二路同步 | `match_sync` | 1.6 |
 | B站直播互动 | `bili_live` | 1.0 |

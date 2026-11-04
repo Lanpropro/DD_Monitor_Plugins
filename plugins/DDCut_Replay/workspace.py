@@ -3,7 +3,7 @@ from datetime import datetime
 from pathlib import Path
 import time
 
-from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDoubleSpinBox,
     QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
@@ -77,8 +77,10 @@ class Preview(QWidget):
 
 
 class Workspace(QWidget):
+    closed = Signal()
+
     def __init__(self, owner):
-        super().__init__(owner.context.window, Qt.Window)
+        super().__init__(owner.context.window)
         self.owner = owner
         self.service = owner.service
         self.hub = owner.hub
@@ -86,8 +88,6 @@ class Workspace(QWidget):
         self.pending_review = ''
         self.sources_data = {}
         self.setWindowTitle('DDCut Replay · 录制与切片')
-        self.setMinimumSize(920, 600)
-        self.resize(1180, 760)
         root = QVBoxLayout(self)
         root.setContentsMargins(20, 18, 20, 18)
         header = QHBoxLayout()
@@ -99,6 +99,7 @@ class Workspace(QWidget):
         header.addWidget(title)
         header.addWidget(QLabel('录制 · 回看 · 切片'))
         header.addStretch()
+        self.back_button = button('返回画面墙', self.close, header)
         button('导入录像', self.import_media, header)
         button('录制设置', self.settings, header)
         root.addLayout(header)
@@ -108,7 +109,7 @@ class Workspace(QWidget):
         self.build_library()
         self.build_review()
         self.build_tasks()
-        self.status = QLabel('关闭此窗口后，后台任务仍会继续；退出本体时收尾。')
+        self.status = QLabel('返回画面墙后，后台任务仍会继续；退出本体时收尾。')
         self.status.setWordWrap(True)
         self.status.setTextInteractionFlags(Qt.TextSelectableByMouse)
         root.addWidget(self.status)
@@ -517,6 +518,7 @@ class Workspace(QWidget):
     def closeEvent(self, event):
         self.preview.stop()
         super().closeEvent(event)
+        self.closed.emit()
 
     def showEvent(self, event):
         super().showEvent(event)

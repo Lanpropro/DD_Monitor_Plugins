@@ -41,9 +41,26 @@ class EmptyViewer(QDialog):
         super().__init__(context.window)
         self.rows = {}
         self.running = False
+        self.context = context
+        self.previous = {}
 
     def embed(self, parent):
         self.setParent(parent, Qt.Widget)
+
+    def showEvent(self, event):
+        layout = self.parentWidget().layout()
+        for index in range(layout.count()):
+            widget = layout.itemAt(index).widget()
+            if widget is not None:
+                self.previous[widget] = not widget.isHidden()
+                widget.hide()
+        super().showEvent(event)
+
+    def closeEvent(self, event):
+        for widget, visible in self.previous.items():
+            widget.setVisible(visible)
+        self.previous.clear()
+        super().closeEvent(event)
 
 
 record_module = importlib.import_module('plugins.DDCut_Replay.plugin')
@@ -64,9 +81,11 @@ with tempfile.TemporaryDirectory(prefix='ddm-workspace-ui-') as directory, \
     box.addWidget(sidebar)
     content = host._content = QWidget(central)
     QVBoxLayout(content).addWidget(QLabel('画面墙 · 本地布局示例', alignment=Qt.AlignCenter))
+    original_wall = content.layout().itemAt(0).widget()
     box.addWidget(content, 1)
     host.settings = {'recording_dir': directory}
-    host.wall = SimpleNamespace(tiles=[])
+    host.wall = original_wall
+    host.wall.tiles = []
     host.recorder = SimpleNamespace(exports=[])
     host.capture_control = Mock()
     manager = PluginManager(window=host, plugins_dir=str(Path(directory) / 'plugins'), enabled=[])
@@ -85,7 +104,11 @@ with tempfile.TemporaryDirectory(prefix='ddm-workspace-ui-') as directory, \
     record.entry.click()
     settle()
     assert record.workspace is not None and record.workspace.isVisible()
-    record.workspace.close()
+    assert not record.workspace.isWindow() and record.workspace.parentWidget() is content
+    assert original_wall.isHidden() and record.action.isChecked()
+    record.workspace.back_button.click()
+    settle()
+    assert original_wall.isVisible() and not record.action.isChecked()
     assert not record.hub.closed
     match.button.trigger()
     deadline = time.monotonic() + 2
@@ -97,6 +120,34 @@ with tempfile.TemporaryDirectory(prefix='ddm-workspace-ui-') as directory, \
     match.viewer.close()
     settle()
     assert not match.button.isChecked()
+    # A delayed match request must not replace a recording page clicked afterward.
+    match.button.trigger()
+    record.open()
+    deadline = time.monotonic() + .08
+    while time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(.005)
+    assert record.workspace.isVisible() and not match.viewer.isVisible()
+    assert record.action.isChecked() and not match.button.isChecked()
+    record.workspace.back_button.click()
+    settle()
+    for _ in range(2):
+        record.open()
+        assert record.workspace.isVisible()
+        match.button.trigger()
+        deadline = time.monotonic() + 2
+        while not match.viewer.isVisible() and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(.01)
+        assert match.viewer.isVisible() and record.workspace.isHidden()
+        assert not record.action.isChecked()
+        record.open()
+        settle()
+        assert record.workspace.isVisible() and match.viewer.isHidden()
+        assert not match.button.isChecked()
+        record.workspace.back_button.click()
+        settle()
+        assert original_wall.isVisible()
     if args.screenshots:
         args.screenshots.mkdir(parents=True, exist_ok=True)
         for mode in ('dark', 'light'):
@@ -105,11 +156,18 @@ with tempfile.TemporaryDirectory(prefix='ddm-workspace-ui-') as directory, \
             settle()
             sidebar.grab().save(str(args.screenshots / f'workspace-sidebar-{mode}.png'))
             host.grab().save(str(args.screenshots / f'workspace-window-{mode}.png'))
+            record.open()
+            settle()
+            host.grab().save(str(args.screenshots / f'ddcut-embedded-{mode}.png'))
+            record.workspace.back_button.click()
+            settle()
         theme.apply('dark')
         host.setStyleSheet(theme.qss())
         sidebar.footer.set_minimized(True, animate=False)
         settle()
         assert sidebar.footer.body.isHidden() and sidebar.footer.restore_button.isVisible()
+        assert all(widget.isVisible() for widget in (sidebar.account_row, sidebar.layout_button,
+            sidebar.settings_button, sidebar.import_button, sidebar.add_button))
         host.grab().save(str(args.screenshots / 'workspace-window-minimized.png'))
         sidebar.footer.restore_button.click()
         sidebar.footer.animation.setCurrentTime(sidebar.footer.animation.duration())

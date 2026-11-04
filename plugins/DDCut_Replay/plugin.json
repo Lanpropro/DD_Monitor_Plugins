@@ -2,6 +2,6 @@
   "id": "ddcut_replay",
   "name": "录制与切片",
   "description": "集中管理本体录制与回放，独立回看、标记、单选区和后台导出。需要配套录制服务接口 v1。",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "min_app_version": "0.7.1"
 }
