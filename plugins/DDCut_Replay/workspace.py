@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFrame, QLineEdit,
     QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
-    QListWidget, QPushButton, QScrollBar, QSizePolicy, QSplitter, QStackedWidget, QTabWidget,
+    QListWidget, QPushButton, QScrollArea, QScrollBar, QSizePolicy, QSplitter, QStackedWidget, QTabWidget,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from ddm import theme
@@ -28,7 +28,8 @@ def clock(seconds):
 
 def button(text, callback, box):
     widget = QPushButton(text)
-    widget.setMinimumHeight(30)
+    widget.setObjectName('IconButton')
+    widget.setMinimumHeight(theme.CONTROL_HEIGHT)
     widget.clicked.connect(callback)
     box.addWidget(widget)
     return widget
@@ -38,10 +39,17 @@ def table(headers):
     tree = QTreeWidget()
     tree.setHeaderLabels(headers)
     tree.setRootIsDecorated(False)
-    tree.setAlternatingRowColors(True)
+    tree.setAlternatingRowColors(False)
+    tree.setUniformRowHeights(True)
+    tree.setMouseTracking(True)
+    tree.setTextElideMode(Qt.ElideRight)
+    tree.setSelectionBehavior(QAbstractItemView.SelectRows)
     tree.setSelectionMode(QAbstractItemView.SingleSelection)
-    tree.header().setSectionResizeMode(QHeaderView.ResizeToContents)
-    tree.header().setStretchLastSection(True)
+    tree.header().setSectionResizeMode(QHeaderView.Interactive)
+    tree.header().setDefaultSectionSize(160)
+    tree.header().setMinimumSectionSize(110)
+    tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
+    tree.header().setStretchLastSection(False)
     return tree
 
 
@@ -104,10 +112,7 @@ class Workspace(QWidget):
         root.setSpacing(10)
         header = QHBoxLayout()
         title = QLabel('录制与切片')
-        font = title.font()
-        font.setPointSize(font.pointSize() + 3)
-        font.setBold(True)
-        title.setFont(font)
+        title.setObjectName('SettingsTitle')
         header.addWidget(title)
         header.addStretch()
         self.back_button = button('返回画面墙', self.close, header)
@@ -118,16 +123,18 @@ class Workspace(QWidget):
         self.content = QSplitter(Qt.Horizontal)
         root.addWidget(self.content, 1)
         self.tabs = QTabWidget()
+        self.tabs.setObjectName('PluginTabs')
         self.content.addWidget(self.tabs)
         self.build_library()
         self.build_review()
         self.build_tasks()
         self.content.setStretchFactor(0, 1)
-        self.status = QLabel('在画面墙使用原来的录制按钮；这里用于回看和制作切片。')
+        self.status = QLabel()
         self.status.setObjectName('replayStatus')
         self.status.setWordWrap(True)
         self.status.setTextInteractionFlags(Qt.TextSelectableByMouse)
         root.addWidget(self.status)
+        self.status.hide()
         self.preview_timer = QTimer(self)
         self.preview_timer.setInterval(200)
         self.preview_timer.timeout.connect(self.tick_preview)
@@ -138,35 +145,41 @@ class Workspace(QWidget):
         theme.signals().changed.connect(self.apply_theme)
 
     def apply_theme(self, *_):
+        # Buttons, tabs, hints, inputs and marker lists use the host's components.
+        # Only the media table and time input need styles absent from host QSS.
         self.setStyleSheet(f'''
-            #replayWorkspace QPushButton {{
-                background: {theme.CONTENT_HOVER}; color: {theme.TEXT1};
-                border: 1px solid {theme.BORDER_STRONG}; border-radius: 5px; padding: 0 8px;
+            #replayWorkspace QTreeWidget {{
+                background: {theme.CONTENT}; color: {theme.TEXT1};
+                border: 1px solid {theme.BORDER}; border-radius: {theme.RADIUS_MD}px;
+                font-size: {theme.FONT_BODY}px; outline: none;
             }}
-            #replayWorkspace QPushButton:hover {{background: {theme.ELEVATED}; border-color: {theme.ACCENT};}}
-            #replayWorkspace QPushButton:checked {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}
-            #replayWorkspace QPushButton:focus {{border-color: {theme.ACCENT};}}
-            #replayWorkspace QPushButton:disabled {{color: {theme.TEXT4}; background: {theme.CONTENT};}}
-            #replayWorkspace #replayExport {{background: {theme.ACCENT}; color: #ffffff; border-color: {theme.ACCENT};}}
-            #replayWorkspace #replayExport:disabled {{background: {theme.CONTENT}; color: {theme.TEXT4}; border-color: {theme.BORDER};}}
-            #replayWorkspace QDoubleSpinBox {{
-                background: {theme.BG}; color: {theme.TEXT1}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 4px;
+            #replayWorkspace QTreeWidget::item {{
+                height: 44px; padding: 0 12px; color: {theme.TEXT2};
+                border-bottom: 1px solid {theme.BORDER};
             }}
-            #replayWorkspace QTabWidget::pane {{border: 1px solid {theme.BORDER}; background: {theme.CONTENT};}}
-            #replayWorkspace QTabBar::tab {{
-                background: transparent; color: {theme.TEXT2}; padding: 5px 12px; border-bottom: 2px solid transparent;
-            }}
-            #replayWorkspace QTabBar::tab:selected {{color: {theme.ACCENT}; border-bottom-color: {theme.ACCENT};}}
-            #replayWorkspace QTreeWidget, #replayWorkspace QListWidget {{
-                background: {theme.BG}; alternate-background-color: {theme.CONTENT}; color: {theme.TEXT1};
-                border: 1px solid {theme.BORDER};
-            }}
+            #replayWorkspace QTreeWidget::item:hover {{background: {theme.CONTENT_HOVER}; color: {theme.TEXT1};}}
+            #replayWorkspace QTreeWidget::item:selected {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}
             #replayWorkspace QHeaderView::section {{
-                background: {theme.CONTENT}; color: {theme.TEXT2}; border: none; padding: 6px;
+                background: {theme.CONTENT}; color: {theme.TEXT3};
+                border: none; border-bottom: 1px solid {theme.BORDER}; padding: 10px 12px;
+                font-size: {theme.FONT_CONTROL}px; font-weight: 600;
             }}
-            #replayWorkspace #replayStatus {{color: {theme.TEXT3};}}
-            #replayWorkspace #replayTasks {{background: {theme.CONTENT}; border: 1px solid {theme.BORDER};}}
+            #replayWorkspace QDoubleSpinBox {{
+                background: {theme.CONTENT}; color: {theme.TEXT1};
+                border: 1px solid {theme.BORDER}; border-radius: {theme.RADIUS_MD}px; padding: 5px 8px;
+            }}
+            #replayWorkspace QDoubleSpinBox:focus {{border-color: {theme.ACCENT}; background: {theme.CONTENT_HOVER};}}
+            #replayWorkspace QDoubleSpinBox::up-button, #replayWorkspace QDoubleSpinBox::down-button {{
+                width: 18px; border: none; background: transparent;
+            }}
+            #replayWorkspace #replayStatus {{color: {theme.TEXT3}; font-size: {theme.FONT_CAPTION}px;}}
+            #replayWorkspace #replayTasks {{background: {theme.CONTENT}; border: 1px solid {theme.BORDER}; border-radius: {theme.RADIUS_MD}px;}}
         ''')
+
+        # The host's light-mode primary-button rule otherwise makes disabled
+        # labels white on the disabled white background.
+        for primary in (self.open_button, self.export_button):
+            primary.setStyleSheet(f'QPushButton#PrimaryButton[updateAction="true"]:disabled {{color: {theme.TEXT3};}}')
 
     def page(self, name):
         page = QWidget()
@@ -178,7 +191,10 @@ class Workspace(QWidget):
 
     def build_library(self):
         self.library_page, layout = self.page('录像库')
-        row = QHBoxLayout()
+        filters = QFrame()
+        filters.setObjectName('NotificationSettingsGroup')
+        row = QHBoxLayout(filters)
+        row.setContentsMargins(12, 10, 12, 10)
         self.category = QComboBox()
         for title, kind in [('正在录制', 'live'), ('历史录播', 'archive'), ('已生成切片', 'clip')]:
             self.category.addItem(title, kind)
@@ -192,23 +208,50 @@ class Workspace(QWidget):
         row.addWidget(self.search, 1)
         button('导入录像', self.import_media, row)
         button('刷新', self.refresh_all, row)
-        layout.addLayout(row)
+        layout.addWidget(filters)
         self.library_stack = QStackedWidget()
         layout.addWidget(self.library_stack, 1)
         self.sources = table(['房间', '状态', '开始时间'])
+        self.sources.setAccessibleName('正在录制的房间')
         self.sources.itemDoubleClicked.connect(lambda *_: self.prepare_review())
         self.library_stack.addWidget(self.sources)
         self.library = table(['录像', '日期', '时长', '位置'])
+        self.library.setAccessibleName('本地录像与切片')
         self.library.itemDoubleClicked.connect(lambda *_: self.open_selected())
         self.library_stack.addWidget(self.library)
+        empty = QWidget()
+        empty_layout = QVBoxLayout(empty)
+        empty_layout.setContentsMargins(0, 0, 0, 0)
+        empty_card = QFrame()
+        empty_card.setObjectName('NotificationSettingsGroup')
+        empty_card.setFixedHeight(240)
+        empty_box = QVBoxLayout(empty_card)
+        empty_box.setContentsMargins(24, 24, 24, 24)
+        empty_box.setSpacing(12)
+        empty_box.addStretch()
         self.library_empty = QLabel()
+        self.library_empty.setObjectName('SettingsTitle')
         self.library_empty.setWordWrap(True)
-        layout.addWidget(self.library_empty)
+        self.library_empty.setAlignment(Qt.AlignCenter)
+        empty_box.addWidget(self.library_empty)
+        self.library_empty_hint = QLabel()
+        self.library_empty_hint.setObjectName('SettingsHint')
+        self.library_empty_hint.setWordWrap(True)
+        self.library_empty_hint.setAlignment(Qt.AlignCenter)
+        empty_box.addWidget(self.library_empty_hint)
+        empty_box.addStretch()
+        empty_layout.addWidget(empty_card)
+        empty_layout.addStretch()
+        self.library_stack.addWidget(empty)
         row = QHBoxLayout()
-        button('回看并切片', self.open_library_selection, row)
+        self.open_button = button('回看并切片', self.open_library_selection, row)
+        self.open_button.setObjectName('PrimaryButton')
+        self.open_button.setProperty('updateAction', True)
         self.folder_button = button('打开所在目录', self.open_library_folder, row)
         row.addStretch()
         layout.addLayout(row)
+        self.sources.itemSelectionChanged.connect(self.update_library_actions)
+        self.library.itemSelectionChanged.connect(self.update_library_actions)
 
     def build_review(self):
         self.review_page, layout = self.page('回看与切片')
@@ -231,24 +274,23 @@ class Workspace(QWidget):
         middle_box.addWidget(self.preview, 1)
         row = QHBoxLayout()
         self.play_button = button('播放 / 暂停', self.toggle_play, row)
-        button('−5秒', lambda: self.seek_position(self.preview.position() - 5), row).setFixedWidth(52)
-        button('+5秒', lambda: self.seek_position(self.preview.position() + 5), row).setFixedWidth(52)
+        button('−5秒', lambda: self.seek_position(self.preview.position() - 5), row).setFixedWidth(64)
+        button('+5秒', lambda: self.seek_position(self.preview.position() + 5), row).setFixedWidth(64)
         self.mute_button = button('开启声音', self.toggle_mute, row)
         row.addStretch()
         self.live_button = button('跳到最新', self.seek_live_edge, row)
         middle_box.addLayout(row)
         self.position_label = QLabel('00:00:00.000 / 00:00:00.000')
-        middle_box.addWidget(self.position_label)
         self.timeline = Timeline()
         self.timeline.seekRequested.connect(self.seek_position)
         self.timeline.selectionChanged.connect(self.set_selection)
         middle_box.addWidget(self.timeline)
         row = QHBoxLayout()
-        row.addWidget(QLabel('时间轴'))
-        button('−', lambda: self.timeline.set_zoom(self.timeline.zoom / 2), row).setFixedWidth(30)
+        row.addWidget(self.position_label)
+        button('−', lambda: self.timeline.set_zoom(self.timeline.zoom / 2), row).setFixedWidth(40)
         self.zoom_label = QLabel('1×')
         row.addWidget(self.zoom_label)
-        button('+', lambda: self.timeline.set_zoom(self.timeline.zoom * 2), row).setFixedWidth(30)
+        button('+', lambda: self.timeline.set_zoom(self.timeline.zoom * 2), row).setFixedWidth(40)
         button('完整范围', lambda: self.timeline.set_zoom(1), row)
         row.addStretch()
         button('添加标记 M', self.add_marker, row)
@@ -260,7 +302,8 @@ class Workspace(QWidget):
         middle_box.addWidget(self.timeline_scroll)
         split.addWidget(middle)
         self.tools = tools = QTabWidget()
-        tools.setMinimumWidth(255)
+        tools.setObjectName('PluginTabs')
+        tools.setMinimumWidth(300)
         inspector = QWidget()
         inspector_box = QVBoxLayout(inspector)
         inspector_box.setSpacing(6)
@@ -287,6 +330,7 @@ class Workspace(QWidget):
         self.mode.currentIndexChanged.connect(self.mode_changed)
         inspector_box.addWidget(self.mode)
         self.mode_help = QLabel()
+        self.mode_help.setObjectName('SettingsHint')
         self.mode_help.setWordWrap(True)
         inspector_box.addWidget(self.mode_help)
         inspector_box.addWidget(QLabel('成品文件名'))
@@ -295,20 +339,28 @@ class Workspace(QWidget):
         self.filename.setAccessibleName('成品文件名')
         inspector_box.addWidget(self.filename)
         self.export_button = button('生成切片', self.export, inspector_box)
-        self.export_button.setObjectName('replayExport')
+        self.export_button.setObjectName('PrimaryButton')
+        self.export_button.setProperty('updateAction', True)
         self.export_button.setEnabled(False)
         inspector_box.addStretch()
-        tools.addTab(inspector, '选区')
+        inspector_scroll = QScrollArea()
+        inspector_scroll.setObjectName('PluginScroll')
+        inspector_scroll.setWidgetResizable(True)
+        inspector_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        inspector_scroll.setFrameShape(QFrame.NoFrame)
+        inspector_scroll.setWidget(inspector)
+        tools.addTab(inspector_scroll, '选区')
         markers_page = QWidget()
         markers_box = QVBoxLayout(markers_page)
         self.markers = QListWidget()
+        self.markers.setObjectName('FollowList')
         self.markers.itemDoubleClicked.connect(self.seek_marker)
         markers_box.addWidget(self.markers, 1)
         button('添加标记 M', self.add_marker, markers_box)
         button('移除所选标记', self.remove_marker, markers_box)
         tools.addTab(markers_page, '标记')
         split.addWidget(tools)
-        split.setSizes([680, 270])
+        split.setSizes([680, 300])
         split.setStretchFactor(0, 1)
         self.mode_changed()
         for key, callback in [('Space', self.toggle_play), ('I', lambda: self.inpoint.setValue(self.preview.position())),
@@ -330,6 +382,7 @@ class Workspace(QWidget):
         button('关闭', lambda: self.toggle_tasks(False), row)
         layout.addLayout(row)
         note = QLabel('关闭面板或返回画面墙，任务仍会继续。')
+        note.setObjectName('SettingsHint')
         note.setWordWrap(True)
         layout.addWidget(note)
         self.tasks = table(['任务', '状态', '进度', '结果/说明'])
@@ -368,9 +421,25 @@ class Workspace(QWidget):
             match = query in ' '.join(item.text(col) for col in range(tree.columnCount())).casefold()
             item.setHidden(not match)
             visible += match
-        self.library_empty.setText('没有匹配的录像。可切换分类、刷新目录或导入本地录像。' if query else
-            '暂无内容。请在画面墙开始录制，或导入、刷新本地录制目录。')
-        self.library_empty.setVisible(not visible)
+        kind = self.category.currentData()
+        title, hint = {
+            'live': ('暂无正在录制的房间', '在画面墙点击录制按钮，开始后可在这里回看。'),
+            'archive': ('暂无历史录播', '导入本地录像，或刷新录制目录。'),
+            'clip': ('暂无已生成切片', '打开录像并选择时间范围，生成的切片会显示在这里。'),
+        }[kind]
+        self.library_empty.setText('没有找到匹配的录像' if query else title)
+        self.library_empty_hint.setText('试试其他关键词，或切换录像分类。' if query else hint)
+        self.library_stack.setCurrentIndex((0 if kind == 'live' else 1) if visible else 2)
+        self.update_library_actions()
+
+    def update_library_actions(self):
+        if not hasattr(self, 'open_button'):
+            return
+        live = self.category.currentData() == 'live'
+        item = (self.sources if live else self.library).currentItem()
+        selected = item is not None and not item.isHidden()
+        self.open_button.setEnabled(selected)
+        self.folder_button.setEnabled(selected and not live)
 
     def open_library_selection(self):
         if self.category.currentData() == 'live':
@@ -406,6 +475,7 @@ class Workspace(QWidget):
 
     def report(self, message):
         self.status.setText(str(message))
+        self.status.setVisible(bool(message))
 
     def settings(self):
         self.guard(self.service.open_settings)

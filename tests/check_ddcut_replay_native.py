@@ -63,7 +63,8 @@ with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_
     with patch.object(config, 'data_root', return_value=str(root)):
         plugin.on_load(context)
         manager.plugins.append(plugin)
-        Workspace = sys.modules[type(plugin).__module__ + '.workspace'].Workspace
+        ui = sys.modules[type(plugin).__module__ + '.workspace']
+        Workspace = ui.Workspace
         view = Workspace(plugin)
         plugin.workspace = view
         view.setAttribute(Qt.WA_ShowWithoutActivating)
@@ -135,6 +136,22 @@ with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_
             first_duration = view.current['duration']
             wait_for(lambda: (plugin.poll() or True) and view.current['duration'] > first_duration + 1)
             assert session.process.poll() is None and view.preview.core.mute
+            original_core = view.preview.core
+            view.tabs.setCurrentWidget(view.library_page)
+            view.category.setCurrentIndex(0)
+            app.processEvents()
+            row = view.sources.visualItemRect(view.sources.topLevelItem(0))
+            assert row.height() >= 40
+            assert view.sources.font().pixelSize() == ui.theme.FONT_BODY
+            if args.screenshots:
+                from ddm import theme
+                for mode in ('dark', 'light'):
+                    theme.apply(mode)
+                    window.setStyleSheet(theme.qss())
+                    app.processEvents()
+                    window.grab().save(str(args.screenshots / f'ddcut-software-recording-list-{mode}.png'))
+            view.tabs.setCurrentWidget(view.review_page)
+            assert view.preview.core is original_core
             view.preview.core.pause = True
             view.seek_live_edge()
             wait_for(lambda: view.resume_position is None)

@@ -24,8 +24,8 @@ os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 os.environ['DDM_NO_SAVE'] = '1'
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QFont, QFontDatabase
-from PySide6.QtWidgets import QApplication, QMainWindow
+from PySide6.QtGui import QFont, QFontDatabase, QPalette
+from PySide6.QtWidgets import QApplication, QMainWindow, QPushButton
 from PySide6.QtTest import QTest
 from ddm.plugins import PluginContext, PluginManager
 
@@ -156,9 +156,82 @@ class DDCutReplayTests(unittest.TestCase):
         self.assertIn('编码', job.message)
         self.assertFalse(list((self.root / 'review').glob('*.mkv')))
 
+    def test_workspace_uses_host_components_and_readable_rows(self):
+        host = QMainWindow()
+        host.setAttribute(Qt.WA_DontShowOnScreen)
+        data = [{'source_id': str(i), 'session_id': 'local',
+                 'room': {'uname': title, 'room_id': str(i)},
+                 'state': 'recording', 'created_at': time.time() - 120}
+                for i, title in enumerate(('本地测试房间甲', '本地测试房间乙'))]
+        owner = SimpleNamespace(context=SimpleNamespace(window=host), hub=self.hub,
+            service=SimpleNamespace(sources=lambda: data),
+            preview_server=SimpleNamespace(source_url=lambda path: path))
+        view = ui.Workspace(owner)
+        host.setCentralWidget(view)
+        host.resize(1180, 760)
+        reference = QPushButton('本体按钮', host)
+        reference.setObjectName('IconButton')
+        reference.resize(100, ui.theme.CONTROL_HEIGHT)
+        reference.hide()
+        self.assertEqual(view.back_button.objectName(), reference.objectName())
+        self.assertEqual(view.export_button.objectName(), 'PrimaryButton')
+        self.assertEqual(view.tabs.objectName(), 'PluginTabs')
+        self.assertEqual(view.markers.objectName(), 'FollowList')
+        try:
+            host.show()
+            for mode in ('dark', 'light'):
+                ui.theme.apply(mode)
+                host.setStyleSheet(ui.theme.qss())
+                APP.processEvents()
+                first = view.sources.topLevelItem(0)
+                row = view.sources.visualItemRect(first)
+                self.assertGreaterEqual(row.height(), 40)
+                self.assertEqual(view.sources.font().pixelSize(), ui.theme.FONT_BODY)
+                self.assertEqual(view.back_button.font().pixelSize(), reference.font().pixelSize())
+                self.assertGreater(view.sources.columnWidth(0), view.sources.columnWidth(1))
+                self.assertGreaterEqual(view.back_button.height(), ui.theme.CONTROL_HEIGHT)
+                QTest.mouseClick(view.sources.viewport(), Qt.LeftButton, pos=QPoint(20, row.center().y()))
+                self.assertTrue(first.isSelected())
+                pixel = view.sources.viewport().grab().toImage().pixelColor(
+                    view.sources.columnWidth(0) - 20, row.center().y())
+                self.assertNotEqual(pixel, ui.theme.qcolor(ui.theme.ACCENT), 'Selection must use the soft host color')
+                actual = view.back_button.grab().toImage()
+                expected = reference.grab().toImage()
+                self.assertEqual(actual.pixelColor(actual.width() // 2, 3),
+                                 expected.pixelColor(expected.width() // 2, 3))
+                self.assertEqual(view.sources.currentItem().data(0, Qt.UserRole), '0')
+                if args.screenshots:
+                    args.screenshots.mkdir(parents=True, exist_ok=True)
+                    host.grab().save(str(args.screenshots / f'ddcut-live-list-{mode}.png'))
+                view.search.setText('没有匹配')
+                self.assertEqual(view.library_stack.currentIndex(), 2)
+                self.assertIn('没有找到', view.library_empty.text())
+                self.assertFalse(view.open_button.isEnabled())
+                view.search.clear()
+                self.assertEqual(view.library_stack.currentIndex(), 0)
+                view.category.setCurrentIndex(1)
+                self.assertEqual(view.library_stack.currentIndex(), 2)
+                self.assertEqual(view.library_empty.text(), '暂无历史录播')
+                self.assertFalse(view.folder_button.isEnabled())
+                self.assertNotEqual(view.open_button.palette().color(QPalette.Disabled, QPalette.ButtonText),
+                                    view.open_button.palette().color(QPalette.Disabled, QPalette.Button))
+                if args.screenshots:
+                    host.grab().save(str(args.screenshots / f'ddcut-empty-{mode}.png'))
+                view.category.setCurrentIndex(0)
+            view.resize(920, 600)
+            APP.processEvents()
+            self.assertLessEqual(view.minimumSizeHint().width(), 920)
+            self.assertLessEqual(view.minimumSizeHint().height(), 600)
+        finally:
+            view.close()
+            host.close()
+            host.deleteLater()
+            APP.processEvents()
+
     def test_workspace_layout_close_reopen_and_unload(self):
         host = QMainWindow()
         host.recorder = SimpleNamespace(exports=[])
+        host.setStyleSheet(ui.theme.qss())
         data = {'source_id': '1', 'session_id': 'offline',
                 'room': {'uname': '本地测试房间', 'room_id': 'offline'},
                 'state': 'recording', 'created_at': time.time() - 120}
@@ -266,6 +339,7 @@ class DDCutReplayTests(unittest.TestCase):
                 view.setWindowTitle('DDCut Replay · 原生界面（本地测试数据）')
                 for dark in (False, True):
                     ui.theme.apply('dark' if dark else 'light')
+                    host.setStyleSheet(ui.theme.qss())
                     APP.processEvents()
                     theme = 'dark' if dark else 'light'
                     view.grab().save(str(args.screenshots / f'ddcut-review-{theme}.png'))

@@ -2,6 +2,14 @@
 
 状态：2026-11-04 开发方案；流程和范围为本任务的实施选择，尚未经过用户人工验收。
 
+## 原生组件与实际页面参考（2026-11-04）
+
+用户提供了 ShadowReplay 2.25.1 主页面、空状态、录播列表及实际回看截图。参考其“顶部标题/操作、筛选条、内容卡片”的层级、表格留白，以及视频下方播放控制/时间轴、右侧检查器的分工。继续保留两页工作区与本体原录制入口；本轮不增加总览、投稿、AI或多轨编辑等独立功能。
+
+实际样式优先复用 DD监控室CE：普通/主要操作使用 `IconButton` / `PrimaryButton`，主页面及检查器标签使用 `PluginTabs`，标题/提示使用 `SettingsTitle` / `SettingsHint`，标记使用 `FollowList`，筛选/空状态复用 `NotificationSettingsGroup` 卡片。录像表格为宿主尚无通用样式的控件，按宿主 `FONT_BODY`、颜色与圆角补齐44px行高、列间距、浅色选中态；时间码输入匹配宿主SpinBox。深浅主题沿用宿主；预览视频仍使用深色底板。没有复制对方图标、截图或品牌资源进入插件。
+
+参考的固定源码：[ArchiveList](https://github.com/Xinrea/bili-shadowreplay/blob/e340951fa500d3977f5b9981329a1939650da82f/src/lib/components/ArchiveList.svelte)、[AppLive](https://github.com/Xinrea/bili-shadowreplay/blob/e340951fa500d3977f5b9981329a1939650da82f/src/AppLive.svelte)。截图为用户提供的运行证据，不将源码阅读当作运行了对方软件。
+
 ## 当前原生页面分类（2026-11-04）
 
 - 顶层仅“录像库”和“回看与切片”。录像库内筛选正在录制、历史录播、已生成切片，共用搜索、刷新和打开操作；当前活动归档不混入历史，同会话已经轮转的旧归档仍可查看。
