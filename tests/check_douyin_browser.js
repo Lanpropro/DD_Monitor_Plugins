@@ -14,8 +14,9 @@ function checkDependencies() {
     assert.strictEqual(inspectClient(requireModule).id,'123');
 }
 async function fixture({cancelled=false, host='https://live.douyin.com', selfSee=0, securityStatus='success',
-    cancelDuringSecurity=false, roomId='999999', uid='42', lateContext=false, switchAccountDuringSecurity=false}={}) {
-    let calls = 0, received, securityReady=false;
+    cancelDuringSecurity=false, roomId='999999', uid='42', lateContext=false, switchAccountDuringSecurity=false,
+    lateModule=false}={}) {
+    let calls = 0, received, securityReady=false, captures=0;
     const client = {W: async params => {
         assert(securityReady,'Send must wait for security initialization');
         calls++; received=params;
@@ -32,8 +33,17 @@ async function fixture({cancelled=false, host='https://live.douyin.com', selfSee
     const requireModule = id => id==='789'?security:client;
     requireModule.m = {123:function(){return '/webcast/room/chat/ paste_edit_method';},
         789:function(){return 'getSecuritySdkInitWebStatus:function securitySdkInitWeb:function';}};
+    if(lateModule){
+        const factory=requireModule.m[123];
+        delete requireModule.m[123];
+        setTimeout(()=>{requireModule.m[123]=factory;},30);
+    }
     const chunks=[];
-    chunks.push = function(entry){entry[2](requireModule);};
+    const loadedChunks=new Set();
+    chunks.push = function(entry){
+        if(entry[0].some(id=>!loadedChunks.has(id))){captures++;entry[2](requireModule);}
+        entry[0].forEach(id=>loadedChunks.add(id));
+    };
     const window={webpackChunkdouyin_live_v2:chunks,__ddmChatCancelled:cancelled};
     const context={roomStore:{roomInfo:{roomId}},userStore:{userInfo:{id_str:uid}}};
     if(lateContext){
@@ -49,6 +59,7 @@ async function fixture({cancelled=false, host='https://live.douyin.com', selfSee
     }
     const result=await fn(task,inspectClient);
     assert.strictEqual(calls,1);
+    assert.strictEqual(captures,1);
     assert.strictEqual(received.room_id_str,'999999');
     assert.strictEqual(received.content,'hello');
     assert.strictEqual(received.paste_edit_method,'non_paste');
@@ -64,5 +75,6 @@ await fixture({securityStatus:'skip_by_client_version'});await fixture({security
 await fixture({cancelDuringSecurity:true});
 await fixture({roomId:'888888'});await fixture({uid:'43'});await fixture({lateContext:true});
 await fixture({switchAccountDuringSecurity:true});
+await fixture({lateModule:true});
 console.log('PASS: official helper called once, internal room, cancellation, origin guard, sanitized receipt');
 })().catch(error=>{console.error(error);process.exit(1)});

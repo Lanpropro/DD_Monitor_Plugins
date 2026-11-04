@@ -110,8 +110,10 @@ class BrowserChat(QObject):
         prepare = """JSON.stringify((() => {
             if(location.origin!=='https://live.douyin.com'||
                location.pathname.replace(/\/$/,'')!=='/'+%s) return {ready:false,reason:'page'};
-            let require; const chunks=window.webpackChunkdouyin_live_v2;
-            if(Array.isArray(chunks)) chunks.push([['ddm-prepare-'+%s],{},r=>{require=r}]);
+            let require=window.__ddmChatRequire; const chunks=window.webpackChunkdouyin_live_v2;
+            if(!require&&Array.isArray(chunks)) chunks.push([['ddm-prepare-'+%s],{},r=>{
+                require=r;window.__ddmChatRequire=r;
+            }]);
             return (%s)(require);
         })())""" % (json.dumps(task["webRid"]), json.dumps(task["id"]), CLIENT_SCRIPT)
         submit = """if(window.__ddmChatTaskId!==%s){

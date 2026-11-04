@@ -23,9 +23,12 @@ async (task, inspectClient) => {
         }
         contextSeen = true;
         window.__ddmChatStage = 'module';
-        let require;
+        // The runtime consumes each chunk callback once. Keep its loader for this document.
+        let require = window.__ddmChatRequire;
         const chunks = window.webpackChunkdouyin_live_v2;
-        if (Array.isArray(chunks)) chunks.push([['ddm-chat-' + task.id], {}, r => { require = r; }]);
+        if (!require && Array.isArray(chunks)) chunks.push([['ddm-chat-' + task.id], {}, r => {
+            require = r; window.__ddmChatRequire = r;
+        }]);
         const client = inspectClient(require);
         if (client.ready) {
             window.__ddmChatStage = 'module';

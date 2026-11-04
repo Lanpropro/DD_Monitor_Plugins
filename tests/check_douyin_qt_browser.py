@@ -56,7 +56,14 @@ class BrowserTests(unittest.TestCase):
                 %s
             }};};
             requireModule.m={123:function(){return '/webcast/room/chat/ paste_edit_method';},789:securityFactory};
-            window.webpackChunkdouyin_live_v2.push=entry=>entry[2](requireModule);
+            const loadedChunks=new Set(); window.loaderCaptures=0;
+            window.webpackChunkdouyin_live_v2.push=entry=>{
+                // The official runtime executes a callback only for a new chunk ID.
+                if(entry[0].some(id=>!loadedChunks.has(id)) && entry[2]){
+                    window.loaderCaptures++; entry[2](requireModule);
+                }
+                entry[0].forEach(id=>loadedChunks.add(id));
+            };
             </script></body></html>""" % (json.dumps(room_id), json.dumps(uid), json.dumps(security_status), initialization, behavior)
         if delayed_dependency:
             html = html.replace("requireModule.m={123:function(){return '/webcast/room/chat/ paste_edit_method';},789:securityFactory};", """
@@ -75,7 +82,7 @@ class BrowserTests(unittest.TestCase):
                 webpackRequire.m=factories;
                 setTimeout(()=>{factories[456]=function(module){module.exports=requireModule();};},800);
             """)
-            html = html.replace("entry=>entry[2](requireModule)", "entry=>entry[2](webpackRequire)")
+            html = html.replace("entry[2](requireModule)", "entry[2](webpackRequire)")
 
         class Dialog(QDialog):
             def __init__(self, *a, **kw):
@@ -134,12 +141,13 @@ class BrowserTests(unittest.TestCase):
                 self.assertTrue(outcome.get('held_open'), 'Accepted response must not destroy the page before delivery confirmation')
             snapshot = []
             dialogs[0].browser.page().runJavaScript(
-                "JSON.stringify({calls:window.calls,params:window.params})", snapshot.append)
+                "JSON.stringify({calls:window.calls,params:window.params,loaderCaptures:window.loaderCaptures})", snapshot.append)
             deadline = time.monotonic() + 3
             while not snapshot and time.monotonic() < deadline:
                 QTest.qWait(20)
             self.assertTrue(snapshot)
             state = json.loads(snapshot[0])
+            self.assertEqual(state["loaderCaptures"], 1, "Reuse the document's captured loader, not a consumed chunk ID")
             self.assertEqual(state["calls"], 0 if module_error or security_status != "success" or room_id != "999999" or uid != "42" else 1)
             if state["calls"]:
                 self.assertEqual(state["params"]["room_id_str"], "999999")
