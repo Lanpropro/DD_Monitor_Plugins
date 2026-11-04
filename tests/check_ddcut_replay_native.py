@@ -1,5 +1,6 @@
 """Screen-off Windows host/package/libmpv integration using silent local media."""
 import argparse
+from contextlib import ExitStack
 import os
 from pathlib import Path
 import shutil
@@ -26,6 +27,7 @@ from ddm.plugins import PluginContext, PluginManager
 from selfcheck_recording import isolated_window_tasks
 from unittest.mock import patch
 from ddm import config
+from ddm.recording import input_args
 
 app = QApplication.instance() or QApplication([])
 
@@ -40,15 +42,16 @@ def wait_for(predicate, timeout=12):
     raise AssertionError('Native integration timed out')
 
 
-with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_window_tasks():
+with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_window_tasks(), ExitStack() as cleanup:
     root = Path(directory)
     source = root / 'local.mp4'
     subprocess.run([shutil.which('ffmpeg'), '-y', '-hide_banner', '-loglevel', 'error',
-        '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30', '-t', '5',
+        '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30', '-t', '18',
         '-c:v', 'libx264', '-threads', '1', '-g', '30', str(source)], check=True,
         creationflags=subprocess.CREATE_NO_WINDOW)
     window = MainWindow([], [], layout_id='1x1', state={'settings': {
         **DEFAULT_SETTINGS, 'close_behavior': 'exit', 'recording_dir': directory}})
+    cleanup.callback(window.close)
     window.setAttribute(Qt.WA_ShowWithoutActivating)
     window.move(-30000, -30000)
     window.show()
@@ -84,9 +87,35 @@ with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_
         assert view.export_button.isEnabled()
         view.close()
         assert view.preview.core is None and not plugin.hub.closed
+        tile = window.wall.tiles[0]
+        tile.set_room({'uname': '本地录制', 'room_id': 'offline', 'live': False})
+        tile.room['live'] = True
+        tile.stream_url, tile.stream_headers, tile.stream_codec = str(source), {}, 'avc'
+        window.settings.update(recording_lock_quality=False, recording_format='ts', recording_replay_enabled=False)
+        with patch('ddm.recording.input_args', side_effect=lambda url, headers: ['-re', *input_args(url, headers)]):
+            tile.recording_button.click()
+            session = window.recorder.sessions[tile]
+            plugin.open()
+            wait_for(lambda: (plugin.poll() or True) and view.current and view.current.get('kind') == 'recording')
+            wait_for(lambda: view.preview.position() > .1)
+            first_duration = view.current['duration']
+            wait_for(lambda: (plugin.poll() or True) and view.current['duration'] > first_duration + 1)
+            assert session.process.poll() is None and view.preview.core.mute
+            view.preview.core.pause = True
+            view.seek_live_edge()
+            wait_for(lambda: view.resume_position is None)
+            wait_for(lambda: view.preview.position() > first_duration - .5)
+            view.preview.core.command('screenshot-to-file', str(picture), 'video')
+            image = QImage(str(picture))
+            assert image.width() == 320 and image.height() == 180
+            assert image.pixelColor(20, 20) != image.pixelColor(280, 20)
+            view.close()
+            assert not session.stopping and session.process.poll() is None
+            tile.recording_button.click()
+            wait_for(lambda: tile not in window.recorder.sessions)
         assert context.show_workspace(view)
         manager.unload()
         assert plugin.hub.closed and not window.recorder._part_leases
     window.close()
     app.processEvents()
-print('PASS: installed ZIP, real host, native libmpv picture/seek/pause/mute, close/reopen/unload; no foreground activation')
+print('PASS: installed ZIP, original recording button, growing timeline, native libmpv picture/seek/pause/mute, close/reopen/unload; no foreground activation')

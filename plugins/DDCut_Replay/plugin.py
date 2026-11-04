@@ -13,12 +13,13 @@ __path__ = [os.path.dirname(__file__)]
 __package__ = __name__
 
 from .media import TaskHub
+from .recorder import ReplayRecordingSession
 from .workspace import Workspace
 
 
 class DDCutReplay(api.Plugin):
     name = '录制与切片'
-    version = '0.1.2'
+    version = '0.1.3'
 
     def __init__(self):
         super().__init__()
@@ -33,9 +34,11 @@ class DDCutReplay(api.Plugin):
         self.service = getattr(context, 'recording', None)
         if self.service is not None and self.service.api_version != 1:
             self.service = None
+        if self.service is not None and hasattr(self.service, 'register_backend'):
+            self.service.register_backend(ReplayRecordingSession)
         action = self.action = QAction('录制切片', context.window)
         action.setCheckable(True)
-        action.setToolTip('录制切片：录制管理、回看与导出（Ctrl+Shift+R）')
+        action.setToolTip('录制切片：回看正在录制的内容、时间轴与快速切片（Ctrl+Shift+R）')
         glyph = QPixmap(36, 36)
         glyph.setDevicePixelRatio(2)
         glyph.fill(Qt.transparent)
@@ -89,6 +92,8 @@ class DDCutReplay(api.Plugin):
             self.workspace.closed.connect(self._workspace_closed)
         if show(self.workspace):
             self.action.setChecked(True)
+            self.workspace.refresh_sources()
+            self.workspace.open_current_recording()
         else:
             self.action.setChecked(False)
 
@@ -113,7 +118,7 @@ class DDCutReplay(api.Plugin):
                 item = self.workspace.sources.topLevelItem(index)
                 if item.data(0, Qt.UserRole) == str(id(tile)):
                     self.workspace.sources.setCurrentItem(item)
-                    self.workspace.tabs.setCurrentIndex(0)
+                    self.workspace.prepare_review()
                     break
 
     def poll(self):
@@ -155,6 +160,7 @@ class DDCutReplay(api.Plugin):
             self.workspace.refresh_tasks()
             if self._ticks % 8 == 0:
                 self.workspace.refresh_sources()
+                self.workspace.refresh_live()
 
     def on_unload(self):
         if self.timer:

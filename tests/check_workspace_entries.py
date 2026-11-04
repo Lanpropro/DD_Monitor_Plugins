@@ -22,6 +22,7 @@ from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication, QDialog, QHBoxLayout, QLabel, QMainWindow, QVBoxLayout, QWidget
 from ddm import config, theme
 from ddm.plugins import PluginContext, PluginManager
+from ddm.recording import RecordingManager
 from ddm.widgets import Sidebar
 
 app = QApplication.instance() or QApplication([])
@@ -86,7 +87,7 @@ with tempfile.TemporaryDirectory(prefix='ddm-workspace-ui-') as directory, \
     host.settings = {'recording_dir': directory}
     host.wall = original_wall
     host.wall.tiles = []
-    host.recorder = SimpleNamespace(exports=[])
+    host.recorder = RecordingManager(host.settings, host)
     host.capture_control = Mock()
     manager = PluginManager(window=host, plugins_dir=str(Path(directory) / 'plugins'), enabled=[])
     record = record_module.DDCutReplay()

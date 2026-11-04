@@ -129,6 +129,16 @@ def scan_directory(job, directory):
                 info = path.stat()
                 result.append({'path': str(path.resolve()), 'title': path.stem,
                                'created_at': info.st_mtime, 'size': info.st_size})
+    archives = root / 'DDCut_Replay'
+    if archives.is_dir():
+        for metadata in archives.glob('*/recording.json'):
+            check_cancel(job)
+            try:
+                entry = json.loads(metadata.read_text(encoding='utf-8'))
+                if entry.get('recording') and Path(entry['path']).is_file():
+                    result.append(entry)
+            except (OSError, ValueError, KeyError):
+                continue
     return sorted(result, key=lambda entry: entry['created_at'], reverse=True)
 
 
@@ -179,10 +189,39 @@ def export_clip(job, ffmpeg, source, start, end, mode, target, work):
     if mode == 'precise' and target.suffix.lower() != '.mp4':
         raise ValueError('精确剪辑使用 MP4 容器')
     partial = target.with_name(f'.{target.stem}.{job.id}.partial{target.suffix}')
+    playlist = Path(work) / f'{job.id}.ffconcat'
     try:
+        input_args = ['-i', source['path']]
+        local_start = start
+        if source.get('segments'):
+            # Freeze the readable range at submission; a growing recording must
+            # neither extend this export nor pull in its still-open last file.
+            playlist.parent.mkdir(parents=True, exist_ok=True)
+            lines = ['ffconcat version 1.0']
+            offset = 0
+            selected = []
+            for segment in source['segments']:
+                next_offset = offset + segment['duration']
+                if next_offset > start and offset < end:
+                    if not selected:
+                        local_start = start - offset
+                    selected.append(segment)
+                offset = next_offset
+            for segment in selected:
+                escaped = str(Path(segment['path']).resolve()).replace('\\', '/').replace("'", "'\\''")
+                lines += [f"file '{escaped}'", f"duration {segment['duration']:.6f}"]
+            playlist.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+            input_args = ['-f', 'concat', '-safe', '0', '-i', str(playlist)]
         # Input seeking with copy is intentionally keyframe-based; precise decodes to the requested point.
-        command = [ffmpeg, '-y', '-hide_banner', '-loglevel', 'error', '-ss', f'{start:.6f}',
-                   '-i', source['path'], '-t', f'{end-start:.6f}', '-map', '0:v:0', '-map', '0:a?']
+        command = [ffmpeg, '-y', '-hide_banner', '-loglevel', 'error']
+        if source.get('segments') and mode == 'precise':
+            # Decode only the intersecting segments, then trim. Input seeking
+            # through concat can retain a TS timestamp offset on video-only
+            # material and silently shorten the requested range.
+            command += [*input_args, '-ss', f'{local_start:.6f}']
+        else:
+            command += ['-ss', f'{local_start:.6f}', *input_args]
+        command += ['-t', f'{end-start:.6f}', '-map', '0:v:0', '-map', '0:a?']
         command += (['-c', 'copy', '-avoid_negative_ts', 'make_zero'] if mode == 'copy' else
                     ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-c:a', 'aac', '-movflags', '+faststart'])
         command += [str(partial)]
@@ -205,6 +244,7 @@ def export_clip(job, ffmpeg, source, start, end, mode, target, work):
                 'source': source['path'], 'output': str(target)}
     finally:
         partial.unlink(missing_ok=True)
+        playlist.unlink(missing_ok=True)
 
 
 class TaskHub:

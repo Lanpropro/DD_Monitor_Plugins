@@ -87,6 +87,10 @@ class Workspace(QWidget):
         self.current = None
         self.pending_review = ''
         self.sources_data = {}
+        self.live_source = None
+        self.pending_live = None
+        self.loaded_duration = 0
+        self.resume_position = None
         self.setWindowTitle('DDCut Replay · 录制与切片')
         root = QVBoxLayout(self)
         root.setContentsMargins(20, 18, 20, 18)
@@ -97,7 +101,7 @@ class Workspace(QWidget):
         font.setBold(True)
         title.setFont(font)
         header.addWidget(title)
-        header.addWidget(QLabel('录制 · 回看 · 切片'))
+        header.addWidget(QLabel('回看 · 时间轴 · 快速切片'))
         header.addStretch()
         self.back_button = button('返回画面墙', self.close, header)
         button('导入录像', self.import_media, header)
@@ -109,6 +113,7 @@ class Workspace(QWidget):
         self.build_library()
         self.build_review()
         self.build_tasks()
+        self.tabs.setCurrentWidget(self.review_page)
         self.status = QLabel('返回画面墙后，后台任务仍会继续；退出本体时收尾。')
         self.status.setWordWrap(True)
         self.status.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -129,20 +134,14 @@ class Workspace(QWidget):
         return page, layout
 
     def build_sources(self):
-        _, layout = self.page('录制中心')
-        help_text = QLabel('沿用本体录制设置。回看只使用已封口分段；生成副本期间录制继续。')
+        _, layout = self.page('正在录制')
+        help_text = QLabel('在画面墙使用原来的录制按钮开始或停止录制。这里选择录制中的房间，即可回看和切片。')
         help_text.setWordWrap(True)
         layout.addWidget(help_text)
         self.sources = table(['房间', '状态', '开始时间'])
         layout.addWidget(self.sources, 1)
         row = QHBoxLayout()
-        for text, action in [('开始录制', 'record'), ('停止录制/收尾', 'stop'),
-                             ('开启缓存', 'buffer'), ('停止缓存', 'stop_buffer'),
-                             ('快速保存', 'save_replay')]:
-            button(text, lambda _checked=False, key=action: self.control(key), row)
-        layout.addLayout(row)
-        row = QHBoxLayout()
-        button('生成回看副本', self.prepare_review, row)
+        button('回看并切片', self.prepare_review, row)
         button('刷新状态', self.refresh_sources, row)
         row.addStretch()
         layout.addLayout(row)
@@ -165,9 +164,17 @@ class Workspace(QWidget):
 
     def build_review(self):
         self.review_page, layout = self.page('回看与选区')
-        self.review_title = QLabel('从录制中心生成回看副本，或在录播档案选择录像。')
+        self.review_title = QLabel('在画面墙点击录制后，从这里直接回看、定位时间轴并制作切片。也可导入本地录像。')
         self.review_title.setWordWrap(True)
         layout.addWidget(self.review_title)
+        row = QHBoxLayout()
+        self.recordings = QComboBox()
+        self.recordings.setMinimumWidth(160)
+        self.recordings.setAccessibleName('正在录制的房间')
+        row.addWidget(self.recordings, 1)
+        button('打开录制', self.open_current_recording, row)
+        button('跳到可读末尾', self.seek_live_edge, row)
+        layout.addLayout(row)
         split = QSplitter()
         layout.addWidget(split, 1)
         left = QWidget()
@@ -268,6 +275,16 @@ class Workspace(QWidget):
             selected_id = selected.data(0, Qt.UserRole) if selected else ''
             data = self.service.sources()
             self.sources_data = {item['source_id']: item for item in data}
+            selected_recording = self.recordings.currentData()
+            self.recordings.clear()
+            for entry in data:
+                if entry['state'] in ('recording', 'reconnecting', 'stopping'):
+                    self.recordings.addItem(str(entry['room'].get('uname') or entry['room'].get('room_id')), entry['source_id'])
+            index = self.recordings.findData(selected_recording)
+            if index >= 0:
+                self.recordings.setCurrentIndex(index)
+            if not self.recordings.count():
+                self.recordings.addItem('尚无录制；请在画面墙点击录制', None)
             self.sources.clear()
             for entry in data:
                 room = entry['room']
@@ -278,6 +295,8 @@ class Workspace(QWidget):
                 self.sources.addTopLevelItem(item)
                 if entry['source_id'] == selected_id:
                     self.sources.setCurrentItem(item)
+            if self.sources.currentItem() is None and self.sources.topLevelItemCount():
+                self.sources.setCurrentItem(self.sources.topLevelItem(0))
             if not data:
                 self.report('画面墙尚无房间，请先加入要录制的直播间。')
         self.guard(refresh)
@@ -304,6 +323,9 @@ class Workspace(QWidget):
         entry = self.source()
         if not entry:
             return
+        if hasattr(self.service, 'live_recording'):
+            self.open_recording(entry)
+            return
         snapshot = self.guard(lambda: self.service.snapshot(entry['source_id'], entry['session_id']))
         if snapshot is None:
             return
@@ -318,6 +340,80 @@ class Workspace(QWidget):
         except Exception as error:
             self.service.release(snapshot['lease'])
             self.report(error)
+
+    def open_current_recording(self):
+        entry = self.sources_data.get(self.recordings.currentData())
+        if entry is not None:
+            if self.live_source != (entry['source_id'], entry['session_id']):
+                self.open_recording(entry)
+
+    def open_recording(self, entry):
+        info = self.guard(lambda: self.service.live_recording(entry['source_id'], entry['session_id']))
+        if info is None:
+            self.pending_live = (entry['source_id'], entry['session_id'])
+            return
+        self.hub.add_entry(info)
+        info = next(item for item in self.hub.entries if item['path'] == info['path'])
+        self.review(info)
+        self.live_source = (entry['source_id'], entry['session_id'])
+        self.report(f"录制正在继续（{info.get('format', '').upper()}）；时间轴随可读分段增长，未封口尾段暂不显示。")
+
+    def refresh_live(self):
+        if self.pending_live is not None:
+            source_id, session_id = self.pending_live
+            entry = self.sources_data.get(source_id)
+            if entry and entry['session_id'] == session_id:
+                self.open_recording(entry)
+            else:
+                self.pending_live = None
+            return
+        if self.live_source is None or self.current is None:
+            return
+        try:
+            info = self.service.live_recording(*self.live_source)
+        except RuntimeError:
+            # Stop/rotation closes an archive. Pick up its final short segment
+            # without silently switching the user's selection to a new archive.
+            metadata = Path(self.current['path']).with_name('recording.json')
+            if metadata.is_file():
+                import json
+                info = json.loads(metadata.read_text(encoding='utf-8'))
+            else:
+                return
+            self.live_source = None
+        if info['path'] != self.current['path']:
+            self.live_source = None
+            self.report('本段录制已保存。可从上方重新打开正在录制的新分段。')
+            return
+        if info['duration'] > self.current['duration']:
+            self.current.update(info)
+            for spin in (self.inpoint, self.outpoint):
+                spin.setMaximum(info['duration'])
+            self.slider.setMaximum(int(info['duration'] * 1000))
+            self.hub.save()
+            self.refresh_library()
+        core = self.preview.core
+        if core is not None and core.eof_reached and self.current['duration'] > self.loaded_duration + .05:
+            self.reload_preview(self.preview.position(), bool(core.pause))
+
+    def reload_preview(self, position, paused):
+        muted = bool(self.preview.core.mute) if self.preview.core else True
+        self.preview.load(self.current['path'])
+        self.loaded_duration = self.current['duration']
+        self.preview.core.mute = muted
+        self.preview.core.pause = True
+        self.resume_position = (position, paused)
+
+    def seek_live_edge(self):
+        if self.current:
+            self.refresh_live()
+            self.seek_position(max(0, self.current['duration'] - 1))
+
+    def seek_position(self, position):
+        if self.current and self.current['duration'] > self.loaded_duration + .05:
+            self.guard(lambda: self.reload_preview(position, bool(self.preview.core.pause) if self.preview.core else False))
+        else:
+            self.guard(lambda: self.preview.seek(position))
 
     def scan(self):
         def submit():
@@ -359,6 +455,9 @@ class Workspace(QWidget):
             self.load_entry(entry)
 
     def load_entry(self, entry):
+        if entry.get('segments'):
+            self.review(entry)
+            return
         def submit():
             if not Path(entry['path']).is_file():
                 raise FileNotFoundError('原录像已移动或删除，请重新导入')
@@ -373,6 +472,9 @@ class Workspace(QWidget):
         self.guard(submit)
 
     def review(self, entry):
+        self.live_source = None
+        self.pending_live = None
+        self.resume_position = None
         self.current = None
         self.preview.stop()
         self.review_title.setText(entry['title'] + ' · ' + entry['path'])
@@ -384,12 +486,13 @@ class Workspace(QWidget):
         self.outpoint.setValue(min(duration, saved[1]))
         self.slider.setRange(0, int(duration * 1000))
         self.current = entry
+        self.loaded_duration = duration
         self.position_label.setText(clock(0) + ' / ' + clock(duration))
         self.refresh_markers()
         self.save_selection()
         self.tabs.setCurrentIndex(2)
         self.preview.show()
-        self.report('已打开回看；默认静音。时间轴使用副本内媒体时间，断流间隔不计入时长。')
+        self.report('已打开回看；默认静音。时间轴使用媒体时间，断流间隔不计入时长。')
         self.guard(lambda: self.preview.load(entry['path']))
         self.mute_button.setText('开启声音')
 
@@ -446,7 +549,7 @@ class Workspace(QWidget):
     def seek_marker(self, _item):
         if self.current:
             marker = self.current.get('markers', [])[self.markers.currentRow()]
-            self.guard(lambda: self.preview.seek(marker['time']))
+            self.seek_position(marker['time'])
 
     def remove_marker(self):
         index = self.markers.currentRow()
@@ -466,12 +569,17 @@ class Workspace(QWidget):
             self.mute_button.setText('开启声音' if muted else '静音')
 
     def seek_slider(self):
-        self.guard(lambda: self.preview.seek(self.slider.value() / 1000))
+        self.seek_position(self.slider.value() / 1000)
 
     def tick_preview(self):
         if not self.isVisible() or not self.current:
             return
         try:
+            if self.resume_position is not None and self.preview.core is not None and self.preview.core.time_pos is not None:
+                position, paused = self.resume_position
+                self.preview.seek(position)
+                self.preview.core.pause = paused
+                self.resume_position = None
             position = self.preview.position()
             if not self.slider.isSliderDown():
                 self.slider.setValue(int(position * 1000))
