@@ -32,7 +32,8 @@ class ContributionGuideTests(unittest.TestCase):
         readme = (ROOT / 'README.md').read_text(encoding='utf-8')
         self.assertIn('(CONTRIBUTING.md)', readme)
         documents = ['README.md', 'CONTRIBUTING.md', 'docs/repository-layout.md',
-                     'docs/releases/README.md', 'docs/archive/README.md']
+                     'docs/releases/README.md', 'docs/archive/README.md',
+                     'plugins/DDCut_Replay/README.md']
         documents += [str(path.relative_to(ROOT)) for path in (ROOT / 'docs/changes').glob('*.md')]
         for relative in documents:
             document = ROOT / relative
