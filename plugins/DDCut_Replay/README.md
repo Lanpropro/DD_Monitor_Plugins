@@ -2,6 +2,8 @@
 
 专门用于 DD监控室CE 的录制与切片插件。保留原录制按钮，通过“仅录制切片素材”在原版录制与切片格式之间互斥切换；录像页直接提供回看、时间轴、标记、选区及后台导出。尚未公开发布，真实直播与人工界面验收待完成。
 
+后续对齐范围已按用户要求暂缓AI、自动化与内置素材库；素材管理准备交给其他软件。录像库保留，剪辑工程计划直接引用外部视频文件；先使用文件导入/导出，具体软件的接口待选定后确定。字幕先覆盖手动编辑、SRT与压制，自动识别暂缓。当前实现与计划分别见[功能对照](FEATURES.md)和[对齐计划](PARITY.md)。
+
 ## 安装与兼容
 
 候选包为 `ddcut_replay-0.1.3.zip`，ZIP 顶层和安装目录均为小写 `ddcut_replay/`。源码按维护者要求保留 `plugins/DDCut_Replay/`，由构建器映射，禁止将源码目录直接改名安装。
@@ -35,7 +37,7 @@
 
 ## 开发与验证
 
-[架构、页面与边界方案](DESIGN.md) · [参考项目完整功能对照](FEATURES.md) · [完整对齐计划](PARITY.md) · [增量与待验收记录](../../docs/changes/ddcut_replay.md) · [贡献流程](../../CONTRIBUTING.md)
+[架构、页面与边界方案](DESIGN.md) · [参考项目完整功能对照](FEATURES.md) · [对齐计划](PARITY.md) · [增量与待验收记录](../../docs/changes/ddcut_replay.md) · [贡献流程](../../CONTRIBUTING.md)
 
 ```powershell
 python tests/check_ddcut_replay.py --host ../DD_Monitor_CE
