@@ -291,7 +291,11 @@ class Workspace(QWidget):
     def control(self, action):
         entry = self.source()
         if entry:
-            result = self.guard(lambda: self.service.control(entry['source_id'], action, session_id=entry['session_id']))
+            try:
+                result = self.service.control(entry['source_id'], action, session_id=entry['session_id'])
+            except Exception as error:
+                self.report(error)
+                return
             self.report('操作已提交；录制/快速保存结果请查看本体通知。' if result else '未启动操作，请检查本体通知与录制设置。')
             self.refresh_sources()
 
@@ -379,13 +383,14 @@ class Workspace(QWidget):
         self.outpoint.setValue(min(duration, saved[1]))
         self.slider.setRange(0, int(duration * 1000))
         self.current = entry
+        self.position_label.setText(clock(0) + ' / ' + clock(duration))
         self.refresh_markers()
         self.save_selection()
         self.tabs.setCurrentIndex(2)
         self.preview.show()
+        self.report('已打开回看；默认静音。时间轴使用副本内媒体时间，断流间隔不计入时长。')
         self.guard(lambda: self.preview.load(entry['path']))
         self.mute_button.setText('开启声音')
-        self.report('已打开回看；默认静音。时间轴使用副本内媒体时间，断流间隔不计入时长。')
 
     def save_selection(self, *_):
         if not self.current:
