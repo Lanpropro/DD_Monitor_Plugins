@@ -23,9 +23,10 @@ sys.path.insert(0, str(args.host.resolve()))
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 os.environ['DDM_NO_SAVE'] = '1'
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPalette, QFont, QFontDatabase
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication, QMainWindow
+from PySide6.QtTest import QTest
 from ddm.plugins import PluginContext, PluginManager
 
 spec = importlib.util.spec_from_file_location('ddcut_test_plugin', ROOT / 'plugins/DDCut_Replay/plugin.py')
@@ -77,6 +78,16 @@ class DDCutReplayTests(unittest.TestCase):
             if mode == 'precise':
                 self.assertAlmostEqual(info['duration'], 1.5, delta=.15)
             self.assertFalse(list(self.root.glob('*.partial.*')))
+        # Results completed just before shutdown are indexed, and old persisted
+        # successful jobs also recover into the new clip category on restart.
+        self.hub.close()
+        self.assertEqual(len([e for e in self.hub.entries if e.get('kind') == 'clip']), 2)
+        saved = json.loads(self.hub.state_file.read_text(encoding='utf-8'))
+        saved['entries'] = []
+        self.hub.state_file.write_text(json.dumps(saved), encoding='utf-8')
+        reopened = media.TaskHub(self.hub.root)
+        self.assertEqual(len(reopened.entries), 2)
+        reopened.close()
 
     def test_existing_output_is_untouched_and_invalid_bounds_fail(self):
         target = self.root / 'existing.mp4'
@@ -166,6 +177,18 @@ class DDCutReplayTests(unittest.TestCase):
             plugin.workspace = view
             plugin.hub.add_entry(self.entry)
             view.show()
+            self.assertEqual(view.tabs.count(), 2)
+            self.assertEqual(view.tabs.currentWidget(), view.library_page)
+            self.assertEqual(view.category.currentData(), 'live')
+            self.assertEqual(view.sources.topLevelItemCount(), 1)
+            view.category.setCurrentIndex(1)
+            self.assertEqual(view.library.topLevelItemCount(), 1)
+            view.search.setText('不存在的录像')
+            self.assertTrue(view.library.topLevelItem(0).isHidden())
+            view.search.clear()
+            self.assertFalse(view.library.topLevelItem(0).isHidden())
+            view.category.setCurrentIndex(2)
+            self.assertEqual(view.library.topLevelItemCount(), 0)
             view.review(plugin.hub.entries[0])
             view.sources.setCurrentItem(view.sources.topLevelItem(0))
             with patch.object(service, 'control', create=True, side_effect=RuntimeError('录制会话已变化，请刷新后重试')):
@@ -179,10 +202,41 @@ class DDCutReplayTests(unittest.TestCase):
             self.assertTrue(view.export_button.isEnabled())
             view.inpoint.setValue(3)
             self.assertFalse(view.export_button.isEnabled())
-            view.inpoint.setValue(1)
+            view.set_selection(1, 2.5)
+            self.assertEqual((view.timeline.start, view.timeline.end), (1, 2.5))
+            view.inpoint.lineEdit().setText('00:00:00.500')
+            view.inpoint.interpretText()
+            self.assertEqual(view.inpoint.value(), .5)
+            view.timeline.set_zoom(2)
+            self.assertGreater(view.timeline_scroll.maximum(), 0)
+            view.timeline_scroll.setValue(500)
+            self.assertEqual(view.timeline.view_start, .5)
+            view.timeline.set_zoom(1)
             with patch.object(ui.QInputDialog, 'getText', return_value=('精彩点', True)):
                 view.add_marker()
             self.assertEqual(view.current['markers'][0]['title'], '精彩点')
+            self.assertEqual(view.timeline.markers[0]['title'], '精彩点')
+            # The actual export action opens the shared pane, keeps the review
+            # page, and delivers a real decodable result into the clip library.
+            target = self.root / 'ui-export.mp4'
+            view.mode.setCurrentIndex(1)
+            view.set_selection(.5, 2)
+            with patch.object(ui.QFileDialog, 'getSaveFileName', return_value=(str(target), '')):
+                view.export_button.click()
+            self.assertFalse(view.task_panel.isHidden())
+            self.assertEqual(view.tabs.currentWidget(), view.review_page)
+            wait_job(plugin.hub.jobs[-1])
+            plugin.poll()
+            self.assertTrue(target.is_file())
+            self.assertAlmostEqual(plugin.hub.jobs[-1].result['actual_duration'], 1.5, delta=.1)
+            view.category.setCurrentIndex(2)
+            self.assertEqual(view.library.topLevelItemCount(), 1)
+            self.assertEqual(view.library.topLevelItem(0).data(0, Qt.UserRole), str(target))
+            view.tabs.setCurrentWidget(view.library_page)
+            self.assertFalse(view.task_panel.isHidden())
+            view.toggle_tasks(False)
+            self.assertTrue(view.task_panel.isHidden())
+            view.tabs.setCurrentWidget(view.review_page)
             gate = threading.Event()
             background = plugin.hub.submit('窗口关闭后继续', 'test', lambda job: gate.wait(3))
             for size in [(1180, 760), (920, 600)]:
@@ -190,23 +244,39 @@ class DDCutReplayTests(unittest.TestCase):
                 APP.processEvents()
                 self.assertLessEqual(view.minimumSizeHint().width(), size[0])
                 self.assertLessEqual(view.minimumSizeHint().height(), size[1])
+                view.toggle_tasks(True)
+                APP.processEvents()
+                self.assertLessEqual(view.minimumSizeHint().width(), size[0])
+                view.toggle_tasks(False)
+                self.assertFalse(view.tools.isHidden())
+            # Selection handles must update the time inputs using mouse drags.
+            view.set_selection(.5, 2)
+            timeline = view.timeline
+            QTest.mousePress(timeline, Qt.LeftButton, pos=QPoint(round(timeline.x_for(.5)), 50))
+            QTest.mouseMove(timeline, QPoint(round(timeline.x_for(1)), 50))
+            QTest.mouseRelease(timeline, Qt.LeftButton, pos=QPoint(round(timeline.x_for(1)), 50))
+            self.assertAlmostEqual(view.inpoint.value(), 1, delta=.03)
+            seeks = []
+            timeline.seekRequested.connect(seeks.append)
+            QTest.mouseClick(timeline, Qt.LeftButton, pos=QPoint(round(timeline.x_for(3)), 50))
+            self.assertAlmostEqual(seeks[-1], 3, delta=.03)
             if args.screenshots:
                 args.screenshots.mkdir(parents=True, exist_ok=True)
                 view.resize(1180, 760)
-                view.setWindowTitle('DDCut Replay · 布局草案（本地测试数据）')
+                view.setWindowTitle('DDCut Replay · 原生界面（本地测试数据）')
                 for dark in (False, True):
-                    palette = QPalette(APP.palette())
-                    if dark:
-                        palette.setColor(QPalette.Window, QColor('#1c2028'))
-                        palette.setColor(QPalette.WindowText, QColor('#e6eaf0'))
-                        palette.setColor(QPalette.Base, QColor('#141820'))
-                        palette.setColor(QPalette.AlternateBase, QColor('#252a34'))
-                        palette.setColor(QPalette.Text, QColor('#e6eaf0'))
-                        palette.setColor(QPalette.Button, QColor('#303744'))
-                        palette.setColor(QPalette.ButtonText, QColor('#e6eaf0'))
-                    view.setPalette(palette)
+                    ui.theme.apply('dark' if dark else 'light')
                     APP.processEvents()
-                    view.grab().save(str(args.screenshots / ('ddcut-review-dark.png' if dark else 'ddcut-review-light.png')))
+                    theme = 'dark' if dark else 'light'
+                    view.grab().save(str(args.screenshots / f'ddcut-review-{theme}.png'))
+                    view.toggle_tasks(True)
+                    APP.processEvents()
+                    view.grab().save(str(args.screenshots / f'ddcut-tasks-{theme}.png'))
+                    view.toggle_tasks(False)
+                    view.tabs.setCurrentWidget(view.library_page)
+                    APP.processEvents()
+                    view.grab().save(str(args.screenshots / f'ddcut-library-{theme}.png'))
+                    view.tabs.setCurrentWidget(view.review_page)
             view.close()
             APP.processEvents()
             self.assertIsNone(view.preview.core)

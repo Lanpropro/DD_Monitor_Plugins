@@ -291,6 +291,9 @@ class TaskHub:
                 job.state, job.message = 'interrupted', '上次运行已中断，请重新提交'
             job.delivered = True
             self.jobs.append(job)
+        for job in self.jobs:
+            if job.kind == 'export' and job.state == 'done':
+                self.add_export(job)
 
     def save(self):
         data = {'entries': self.entries, 'jobs': [job.record() for job in self.jobs[-100:]]}
@@ -305,6 +308,13 @@ class TaskHub:
         else:
             existing.update(entry)
         self.save()
+
+    def add_export(self, job):
+        path = Path(job.output)
+        if job.output and job.result and path.is_file():
+            self.add_entry({'path': str(path), 'title': path.stem, 'kind': 'clip',
+                'duration': job.result['actual_duration'], 'created_at': path.stat().st_mtime,
+                'source': job.result['source']})
 
     def submit(self, title, kind, function, *args, lease=''):
         if self.closed:
@@ -342,4 +352,6 @@ class TaskHub:
         for job in self.jobs:
             if job.state == 'done' and not job.delivered and job.kind in {'snapshot', 'import'}:
                 self.add_entry(job.result)
+            elif job.state == 'done' and not job.delivered and job.kind == 'export':
+                self.add_export(job)
         self.save()

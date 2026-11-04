@@ -12,6 +12,7 @@ import time
 parser = argparse.ArgumentParser()
 parser.add_argument('--host', type=Path, required=True)
 parser.add_argument('--package', type=Path, required=True)
+parser.add_argument('--screenshots', type=Path)
 args = parser.parse_args()
 sys.path[:0] = [str(args.host.resolve()), str(args.host.resolve() / 'dev')]
 os.environ['QT_QPA_PLATFORM'] = 'windows'
@@ -85,6 +86,39 @@ with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_
         view.inpoint.setValue(.5)
         view.outpoint.setValue(2)
         assert view.export_button.isEnabled()
+        assert view.tabs.count() == 2 and view.tabs.currentWidget() is view.review_page
+        view.play_selection()
+        wait_for(lambda: not view.selection_playing and view.preview.core.pause)
+        assert abs(view.preview.position() - 2) < .12
+        original_core = view.preview.core
+        view.toggle_tasks(True)
+        app.processEvents()
+        assert view.task_panel.isVisible() and view.preview.core is original_core
+        view.tabs.setCurrentWidget(view.library_page)
+        app.processEvents()
+        assert view.task_panel.isVisible()
+        view.toggle_tasks(False)
+        view.tabs.setCurrentWidget(view.review_page)
+        app.processEvents()
+        assert view.task_panel.isHidden() and view.tools.isVisible()
+        assert view.tabs.width() >= view.content.width() - 8, (view.tabs.geometry(), view.content.geometry())
+        if args.screenshots:
+            from ddm import theme
+            args.screenshots.mkdir(parents=True, exist_ok=True)
+            window.resize(1440, 900)
+            for mode in ('dark', 'light'):
+                theme.apply(mode)
+                window.setStyleSheet(theme.qss())
+                app.processEvents()
+                window.grab().save(str(args.screenshots / f'ddcut-software-{mode}.png'))
+                view.toggle_tasks(True)
+                app.processEvents()
+                window.grab().save(str(args.screenshots / f'ddcut-software-tasks-{mode}.png'))
+                view.toggle_tasks(False)
+                view.tabs.setCurrentWidget(view.library_page)
+                app.processEvents()
+                window.grab().save(str(args.screenshots / f'ddcut-software-library-{mode}.png'))
+                view.tabs.setCurrentWidget(view.review_page)
         view.close()
         assert view.preview.core is None and not plugin.hub.closed
         tile = window.wall.tiles[0]

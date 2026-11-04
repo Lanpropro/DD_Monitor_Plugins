@@ -5,13 +5,16 @@ import time
 
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
-from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDoubleSpinBox,
+from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFrame, QLineEdit,
     QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
-    QListWidget, QMessageBox, QPushButton, QSlider, QSplitter, QTabWidget,
+    QListWidget, QPushButton, QScrollBar, QSizePolicy, QSplitter, QStackedWidget, QTabWidget,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+
+from ddm import theme
 
 from .media import ACTIVE, probe, scan_directory, prepare_snapshot, export_clip
 from .hls import preview_options
+from .timeline import Timeline, TimeInput, timecode
 
 STATES = {'idle': '未录制', 'recording': '录制中', 'buffering': '缓存中',
           'stopping': '收尾中', 'reconnecting': '等待重连', 'queued': '等待中',
@@ -20,8 +23,7 @@ STATES = {'idle': '未录制', 'recording': '录制中', 'buffering': '缓存中
 
 
 def clock(seconds):
-    seconds = max(0, float(seconds or 0))
-    return f'{int(seconds)//3600:02}:{int(seconds)%3600//60:02}:{seconds%60:06.3f}'
+    return timecode(seconds, milliseconds=True)
 
 
 def button(text, callback, box):
@@ -94,29 +96,35 @@ class Workspace(QWidget):
         self.loaded_duration = 0
         self.resume_position = None
         self.setWindowTitle('DDCut Replay · 录制与切片')
+        self.selection_playing = False
+        self.task_signature = None
+        self.setObjectName('replayWorkspace')
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 18, 20, 18)
+        root.setContentsMargins(16, 12, 16, 10)
+        root.setSpacing(10)
         header = QHBoxLayout()
-        title = QLabel('DDCut Replay')
+        title = QLabel('录制与切片')
         font = title.font()
-        font.setPointSize(font.pointSize() + 7)
+        font.setPointSize(font.pointSize() + 3)
         font.setBold(True)
         title.setFont(font)
         header.addWidget(title)
-        header.addWidget(QLabel('回看 · 时间轴 · 快速切片'))
         header.addStretch()
         self.back_button = button('返回画面墙', self.close, header)
-        button('导入录像', self.import_media, header)
         button('录制设置', self.settings, header)
+        self.task_button = button('后台任务', self.toggle_tasks, header)
+        self.task_button.setCheckable(True)
         root.addLayout(header)
+        self.content = QSplitter(Qt.Horizontal)
+        root.addWidget(self.content, 1)
         self.tabs = QTabWidget()
-        root.addWidget(self.tabs, 1)
-        self.build_sources()
+        self.content.addWidget(self.tabs)
         self.build_library()
         self.build_review()
         self.build_tasks()
-        self.tabs.setCurrentWidget(self.review_page)
-        self.status = QLabel('返回画面墙后，后台任务仍会继续；退出本体时收尾。')
+        self.content.setStretchFactor(0, 1)
+        self.status = QLabel('在画面墙使用原来的录制按钮；这里用于回看和制作切片。')
+        self.status.setObjectName('replayStatus')
         self.status.setWordWrap(True)
         self.status.setTextInteractionFlags(Qt.TextSelectableByMouse)
         root.addWidget(self.status)
@@ -126,120 +134,183 @@ class Workspace(QWidget):
         self.preview_timer.start()
         self.refresh_sources()
         self.refresh_library()
+        self.apply_theme()
+        theme.signals().changed.connect(self.apply_theme)
+
+    def apply_theme(self, *_):
+        self.setStyleSheet(f'''
+            #replayWorkspace QPushButton {{
+                background: {theme.CONTENT_HOVER}; color: {theme.TEXT1};
+                border: 1px solid {theme.BORDER_STRONG}; border-radius: 5px; padding: 0 8px;
+            }}
+            #replayWorkspace QPushButton:hover {{background: {theme.ELEVATED}; border-color: {theme.ACCENT};}}
+            #replayWorkspace QPushButton:checked {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}
+            #replayWorkspace QPushButton:focus {{border-color: {theme.ACCENT};}}
+            #replayWorkspace QPushButton:disabled {{color: {theme.TEXT4}; background: {theme.CONTENT};}}
+            #replayWorkspace #replayExport {{background: {theme.ACCENT}; color: #ffffff; border-color: {theme.ACCENT};}}
+            #replayWorkspace #replayExport:disabled {{background: {theme.CONTENT}; color: {theme.TEXT4}; border-color: {theme.BORDER};}}
+            #replayWorkspace QDoubleSpinBox {{
+                background: {theme.BG}; color: {theme.TEXT1}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 4px;
+            }}
+            #replayWorkspace QTabWidget::pane {{border: 1px solid {theme.BORDER}; background: {theme.CONTENT};}}
+            #replayWorkspace QTabBar::tab {{
+                background: transparent; color: {theme.TEXT2}; padding: 5px 12px; border-bottom: 2px solid transparent;
+            }}
+            #replayWorkspace QTabBar::tab:selected {{color: {theme.ACCENT}; border-bottom-color: {theme.ACCENT};}}
+            #replayWorkspace QTreeWidget, #replayWorkspace QListWidget {{
+                background: {theme.BG}; alternate-background-color: {theme.CONTENT}; color: {theme.TEXT1};
+                border: 1px solid {theme.BORDER};
+            }}
+            #replayWorkspace QHeaderView::section {{
+                background: {theme.CONTENT}; color: {theme.TEXT2}; border: none; padding: 6px;
+            }}
+            #replayWorkspace #replayStatus {{color: {theme.TEXT3};}}
+            #replayWorkspace #replayTasks {{background: {theme.CONTENT}; border: 1px solid {theme.BORDER};}}
+        ''')
 
     def page(self, name):
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
         self.tabs.addTab(page, name)
         return page, layout
 
-    def build_sources(self):
-        _, layout = self.page('正在录制')
-        help_text = QLabel('在画面墙使用原来的录制按钮。插件以 HLS 保存录播，沿用本体目录、编码和画质设置；这里用于回看和切片。')
-        help_text.setWordWrap(True)
-        layout.addWidget(help_text)
-        self.sources = table(['房间', '状态', '开始时间'])
-        layout.addWidget(self.sources, 1)
-        row = QHBoxLayout()
-        button('回看并切片', self.prepare_review, row)
-        button('刷新状态', self.refresh_sources, row)
-        row.addStretch()
-        layout.addLayout(row)
-
     def build_library(self):
-        _, layout = self.page('录播档案')
+        self.library_page, layout = self.page('录像库')
         row = QHBoxLayout()
-        row.addWidget(QLabel('本体成品、回看副本和手动导入的本地录像'))
-        row.addStretch()
-        button('扫描录制目录', self.scan, row)
-        button('回看所选', self.open_selected, row)
+        self.category = QComboBox()
+        for title, kind in [('正在录制', 'live'), ('历史录播', 'archive'), ('已生成切片', 'clip')]:
+            self.category.addItem(title, kind)
+        self.category.setAccessibleName('录像分类')
+        self.category.currentIndexChanged.connect(self.refresh_library)
+        row.addWidget(self.category)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText('搜索房间、录像或文件名')
+        self.search.setClearButtonEnabled(True)
+        self.search.textChanged.connect(self.filter_library)
+        row.addWidget(self.search, 1)
+        button('导入录像', self.import_media, row)
+        button('刷新', self.refresh_all, row)
         layout.addLayout(row)
+        self.library_stack = QStackedWidget()
+        layout.addWidget(self.library_stack, 1)
+        self.sources = table(['房间', '状态', '开始时间'])
+        self.sources.itemDoubleClicked.connect(lambda *_: self.prepare_review())
+        self.library_stack.addWidget(self.sources)
         self.library = table(['录像', '日期', '时长', '位置'])
         self.library.itemDoubleClicked.connect(lambda *_: self.open_selected())
-        layout.addWidget(self.library, 1)
+        self.library_stack.addWidget(self.library)
+        self.library_empty = QLabel()
+        self.library_empty.setWordWrap(True)
+        layout.addWidget(self.library_empty)
         row = QHBoxLayout()
-        button('打开所在目录', self.open_library_folder, row)
+        button('回看并切片', self.open_library_selection, row)
+        self.folder_button = button('打开所在目录', self.open_library_folder, row)
         row.addStretch()
         layout.addLayout(row)
 
     def build_review(self):
-        self.review_page, layout = self.page('回看与选区')
-        self.review_title = QLabel('在画面墙点击录制后，从这里直接回看、定位时间轴并制作切片。也可导入本地录像。')
-        self.review_title.setWordWrap(True)
-        layout.addWidget(self.review_title)
+        self.review_page, layout = self.page('回看与切片')
         row = QHBoxLayout()
-        self.recordings = QComboBox()
-        self.recordings.setMinimumWidth(160)
-        self.recordings.setAccessibleName('正在录制的房间')
-        row.addWidget(self.recordings, 1)
-        button('打开录制', self.open_current_recording, row)
-        button('跳到可读末尾', self.seek_live_edge, row)
+        self.review_title = QLabel('尚未打开录像')
+        self.review_title.setMinimumWidth(0)
+        self.review_title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        row.addWidget(self.review_title, 1)
+        self.review_state = QLabel('请先从录像库选择素材')
+        row.addWidget(self.review_state)
+        button('切换录像', lambda: self.tabs.setCurrentWidget(self.library_page), row)
         layout.addLayout(row)
-        split = QSplitter()
+        split = QSplitter(Qt.Horizontal)
         layout.addWidget(split, 1)
-        left = QWidget()
-        left_box = QVBoxLayout(left)
-        left_box.addWidget(QLabel('素材标记'))
-        self.markers = QListWidget()
-        self.markers.itemDoubleClicked.connect(self.seek_marker)
-        left_box.addWidget(self.markers, 1)
-        button('添加标记 M', self.add_marker, left_box)
-        button('移除所选标记', self.remove_marker, left_box)
-        split.addWidget(left)
         middle = QWidget()
         middle_box = QVBoxLayout(middle)
+        middle_box.setContentsMargins(0, 0, 8, 0)
+        middle_box.setSpacing(5)
         self.preview = Preview(self.owner.preview_server.source_url)
         middle_box.addWidget(self.preview, 1)
+        row = QHBoxLayout()
+        self.play_button = button('播放 / 暂停', self.toggle_play, row)
+        button('−5秒', lambda: self.seek_position(self.preview.position() - 5), row).setFixedWidth(52)
+        button('+5秒', lambda: self.seek_position(self.preview.position() + 5), row).setFixedWidth(52)
+        self.mute_button = button('开启声音', self.toggle_mute, row)
+        row.addStretch()
+        self.live_button = button('跳到最新', self.seek_live_edge, row)
+        middle_box.addLayout(row)
         self.position_label = QLabel('00:00:00.000 / 00:00:00.000')
         middle_box.addWidget(self.position_label)
-        self.slider = QSlider(Qt.Horizontal)
-        self.slider.setAccessibleName('回看位置')
-        self.slider.setRange(0, 0)
-        self.slider.sliderReleased.connect(self.seek_slider)
-        middle_box.addWidget(self.slider)
+        self.timeline = Timeline()
+        self.timeline.seekRequested.connect(self.seek_position)
+        self.timeline.selectionChanged.connect(self.set_selection)
+        middle_box.addWidget(self.timeline)
         row = QHBoxLayout()
-        button('播放/暂停 Space', self.toggle_play, row)
-        self.mute_button = button('开启声音', self.toggle_mute, row)
+        row.addWidget(QLabel('时间轴'))
+        button('−', lambda: self.timeline.set_zoom(self.timeline.zoom / 2), row).setFixedWidth(30)
+        self.zoom_label = QLabel('1×')
+        row.addWidget(self.zoom_label)
+        button('+', lambda: self.timeline.set_zoom(self.timeline.zoom * 2), row).setFixedWidth(30)
+        button('完整范围', lambda: self.timeline.set_zoom(1), row)
+        row.addStretch()
+        button('添加标记 M', self.add_marker, row)
         middle_box.addLayout(row)
+        self.timeline_scroll = QScrollBar(Qt.Horizontal)
+        self.timeline_scroll.setAccessibleName('时间轴可见范围')
+        self.timeline_scroll.valueChanged.connect(self.timeline.set_view_start)
+        self.timeline.viewChanged.connect(self.update_timeline_view)
+        middle_box.addWidget(self.timeline_scroll)
         split.addWidget(middle)
+        self.tools = tools = QTabWidget()
+        tools.setMinimumWidth(255)
         inspector = QWidget()
-        inspector.setMinimumWidth(215)
         inspector_box = QVBoxLayout(inspector)
-        inspector_box.addWidget(QLabel('导出选区'))
+        inspector_box.setSpacing(6)
         form = QFormLayout()
-        self.inpoint, self.outpoint = QDoubleSpinBox(), QDoubleSpinBox()
+        self.inpoint, self.outpoint = TimeInput(), TimeInput()
         for spin in (self.inpoint, self.outpoint):
-            spin.setDecimals(3)
-            spin.setSuffix(' 秒')
             spin.setRange(0, 0)
-            spin.setMinimumHeight(30)
             spin.valueChanged.connect(self.save_selection)
         form.addRow('入点', self.inpoint)
         form.addRow('出点', self.outpoint)
         inspector_box.addLayout(form)
-        button('当前播放位置设为入点 I', lambda: self.inpoint.setValue(self.preview.position()), inspector_box)
-        button('当前播放位置设为出点 O', lambda: self.outpoint.setValue(self.preview.position()), inspector_box)
+        row = QHBoxLayout()
+        button('设为入点 I', lambda: self.inpoint.setValue(self.preview.position()), row)
+        button('设为出点 O', lambda: self.outpoint.setValue(self.preview.position()), row)
+        inspector_box.addLayout(row)
         self.selection_label = QLabel('尚未选择素材')
         self.selection_label.setWordWrap(True)
         inspector_box.addWidget(self.selection_label)
+        self.selection_button = button('预览选区', self.play_selection, inspector_box)
+        self.selection_button.setEnabled(False)
         self.mode = QComboBox()
         self.mode.addItem('快速复制 · 保留原编码', 'copy')
-        self.mode.addItem('精确剪辑 · H.264 / AAC', 'precise')
+        self.mode.addItem('精确切片 · H.264 / AAC', 'precise')
         self.mode.currentIndexChanged.connect(self.mode_changed)
         inspector_box.addWidget(self.mode)
         self.mode_help = QLabel()
         self.mode_help.setWordWrap(True)
         inspector_box.addWidget(self.mode_help)
-        self.export_button = button('导出选区', self.export, inspector_box)
+        inspector_box.addWidget(QLabel('成品文件名'))
+        self.filename = QLineEdit()
+        self.filename.setPlaceholderText('打开录像后自动填写')
+        self.filename.setAccessibleName('成品文件名')
+        inspector_box.addWidget(self.filename)
+        self.export_button = button('生成切片', self.export, inspector_box)
+        self.export_button.setObjectName('replayExport')
         self.export_button.setEnabled(False)
         inspector_box.addStretch()
-        split.addWidget(inspector)
-        split.setSizes([170, 570, 250])
-        split.setStretchFactor(1, 1)
+        tools.addTab(inspector, '选区')
+        markers_page = QWidget()
+        markers_box = QVBoxLayout(markers_page)
+        self.markers = QListWidget()
+        self.markers.itemDoubleClicked.connect(self.seek_marker)
+        markers_box.addWidget(self.markers, 1)
+        button('添加标记 M', self.add_marker, markers_box)
+        button('移除所选标记', self.remove_marker, markers_box)
+        tools.addTab(markers_page, '标记')
+        split.addWidget(tools)
+        split.setSizes([680, 270])
+        split.setStretchFactor(0, 1)
         self.mode_changed()
-        # Review shortcuts do not consume keys in other pages.
         for key, callback in [('Space', self.toggle_play), ('I', lambda: self.inpoint.setValue(self.preview.position())),
                               ('O', lambda: self.outpoint.setValue(self.preview.position())), ('M', self.add_marker)]:
             shortcut = QShortcut(QKeySequence(key), middle)
@@ -248,15 +319,90 @@ class Workspace(QWidget):
         middle.setFocusPolicy(Qt.StrongFocus)
 
     def build_tasks(self):
-        _, layout = self.page('任务中心')
-        layout.addWidget(QLabel('关闭工作区后任务继续。取消不删除原录像或已有成品。'))
+        # A shared side pane resizes the native video surface instead of covering it.
+        self.task_panel = QFrame()
+        self.task_panel.setObjectName('replayTasks')
+        self.task_panel.setMinimumWidth(270)
+        self.task_panel.setFrameShape(QFrame.StyledPanel)
+        layout = QVBoxLayout(self.task_panel)
+        row = QHBoxLayout()
+        row.addWidget(QLabel('后台任务'), 1)
+        button('关闭', lambda: self.toggle_tasks(False), row)
+        layout.addLayout(row)
+        note = QLabel('关闭面板或返回画面墙，任务仍会继续。')
+        note.setWordWrap(True)
+        layout.addWidget(note)
         self.tasks = table(['任务', '状态', '进度', '结果/说明'])
         layout.addWidget(self.tasks, 1)
-        row = QHBoxLayout()
-        button('取消所选任务', self.cancel_task, row)
-        button('打开成品', self.open_result, row)
-        row.addStretch()
-        layout.addLayout(row)
+        button('取消所选任务', self.cancel_task, layout)
+        button('打开成品', self.open_result, layout)
+        self.content.addWidget(self.task_panel)
+        self.task_panel.hide()
+
+    def toggle_tasks(self, checked=None):
+        if checked is None:
+            checked = self.task_panel.isHidden()
+        self.task_panel.setVisible(checked)
+        self.task_button.setChecked(checked)
+        self.tools.setVisible(not checked or self.width() >= 1100)
+        if checked:
+            self.refresh_tasks()
+            self.content.setSizes([max(480, self.width() - 350), 320])
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, 'task_panel'):
+            self.tools.setVisible(self.task_panel.isHidden() or self.width() >= 1100)
+
+    def refresh_all(self):
+        self.refresh_sources()
+        self.refresh_library()
+        self.scan()
+
+    def filter_library(self, *_):
+        query = self.search.text().strip().casefold()
+        tree = self.sources if self.category.currentData() == 'live' else self.library
+        visible = 0
+        for index in range(tree.topLevelItemCount()):
+            item = tree.topLevelItem(index)
+            match = query in ' '.join(item.text(col) for col in range(tree.columnCount())).casefold()
+            item.setHidden(not match)
+            visible += match
+        self.library_empty.setText('没有匹配的录像。可切换分类、刷新目录或导入本地录像。' if query else
+            '暂无内容。请在画面墙开始录制，或导入、刷新本地录制目录。')
+        self.library_empty.setVisible(not visible)
+
+    def open_library_selection(self):
+        if self.category.currentData() == 'live':
+            self.prepare_review()
+        else:
+            self.open_selected()
+
+    def set_selection(self, start, end):
+        self.inpoint.blockSignals(True)
+        self.outpoint.blockSignals(True)
+        self.inpoint.setValue(start)
+        self.outpoint.setValue(end)
+        self.inpoint.blockSignals(False)
+        self.outpoint.blockSignals(False)
+        self.save_selection()
+
+    def update_timeline_view(self):
+        self.timeline_scroll.blockSignals(True)
+        self.timeline_scroll.setRange(0, round(max(0, self.timeline.duration - self.timeline.span) * 1000))
+        self.timeline_scroll.setPageStep(round(self.timeline.span * 1000))
+        self.timeline_scroll.setValue(round(self.timeline.view_start * 1000))
+        self.timeline_scroll.blockSignals(False)
+        self.zoom_label.setText(f'{self.timeline.zoom:g}×')
+
+    def play_selection(self):
+        if self.current and self.outpoint.value() > self.inpoint.value():
+            self.seek_position(self.inpoint.value())
+            if self.preview.core:
+                self.preview.core.pause = False
+                if self.resume_position is not None:
+                    self.resume_position = (self.inpoint.value(), False)
+                self.selection_playing = True
 
     def report(self, message):
         self.status.setText(str(message))
@@ -277,18 +423,16 @@ class Workspace(QWidget):
             selected_id = selected.data(0, Qt.UserRole) if selected else ''
             data = self.service.sources()
             self.sources_data = {item['source_id']: item for item in data}
-            selected_recording = self.recordings.currentData()
-            self.recordings.clear()
-            for entry in data:
-                if entry['state'] in ('recording', 'reconnecting', 'stopping'):
-                    self.recordings.addItem(str(entry['room'].get('uname') or entry['room'].get('room_id')), entry['source_id'])
-            index = self.recordings.findData(selected_recording)
-            if index >= 0:
-                self.recordings.setCurrentIndex(index)
-            if not self.recordings.count():
-                self.recordings.addItem('尚无录制；请在画面墙点击录制', None)
+            self.active_paths = set()
             self.sources.clear()
             for entry in data:
+                if entry['state'] not in ('recording', 'reconnecting', 'stopping'):
+                    continue
+                if hasattr(self.service, 'live_recording'):
+                    try:
+                        self.active_paths.add(self.service.live_recording(entry['source_id'], entry['session_id'])['path'])
+                    except RuntimeError:
+                        pass  # The first segment may still be sealing.
                 room = entry['room']
                 started = datetime.fromtimestamp(entry['created_at']).strftime('%H:%M:%S') if entry['created_at'] else '—'
                 item = QTreeWidgetItem([str(room.get('uname') or room.get('room_id')),
@@ -299,8 +443,7 @@ class Workspace(QWidget):
                     self.sources.setCurrentItem(item)
             if self.sources.currentItem() is None and self.sources.topLevelItemCount():
                 self.sources.setCurrentItem(self.sources.topLevelItem(0))
-            if not data:
-                self.report('画面墙尚无房间，请先加入要录制的直播间。')
+            self.refresh_library()
         self.guard(refresh)
 
     def source(self):
@@ -337,17 +480,21 @@ class Workspace(QWidget):
             job = self.hub.submit('生成回看副本', 'snapshot', prepare_snapshot,
                 options['ffmpeg'], snapshot, destination, self.hub.root / 'work', lease=snapshot['lease'])
             self.pending_review = job.id
-            self.tabs.setCurrentIndex(3)
+            self.toggle_tasks(True)
             self.report('正在生成已封口分段的稳定副本；尾部未封口内容不在本次范围内。')
         except Exception as error:
             self.service.release(snapshot['lease'])
             self.report(error)
 
     def open_current_recording(self):
-        entry = self.sources_data.get(self.recordings.currentData())
+        entry = self.source() if self.sources.topLevelItemCount() else None
         if entry is not None:
             if self.live_source != (entry['source_id'], entry['session_id']):
                 self.open_recording(entry)
+            else:
+                self.tabs.setCurrentWidget(self.review_page)
+        elif self.current is None:
+            self.tabs.setCurrentWidget(self.library_page)
 
     def open_recording(self, entry):
         info = self.guard(lambda: self.service.live_recording(entry['source_id'], entry['session_id']))
@@ -358,6 +505,7 @@ class Workspace(QWidget):
         info = next(item for item in self.hub.entries if item['path'] == info['path'])
         self.review(info)
         self.live_source = (entry['source_id'], entry['session_id'])
+        self.review_state.setText('● 录制中 · 时间轴持续增长')
         self.report(f"录制正在继续（{info.get('format', '').upper()}）；时间轴随可读分段增长，未封口尾段暂不显示。")
 
     def refresh_live(self):
@@ -383,15 +531,18 @@ class Workspace(QWidget):
             else:
                 return
             self.live_source = None
+            self.review_state.setText('录制已结束 · 本地录像')
         if info['path'] != self.current['path']:
             self.live_source = None
-            self.report('本段录制已保存。可从上方重新打开正在录制的新分段。')
+            self.review_state.setText('本段录制已保存')
+            self.report('本段录制已保存。可从录像库打开正在录制的新分段。')
             return
         if info['duration'] > self.current['duration']:
             self.current.update(info)
             for spin in (self.inpoint, self.outpoint):
                 spin.setMaximum(info['duration'])
-            self.slider.setMaximum(int(info['duration'] * 1000))
+            self.timeline.segments = info.get('segments', [])
+            self.timeline.set_duration(info['duration'])
             self.hub.save()
             self.refresh_library()
         core = self.preview.core
@@ -416,7 +567,11 @@ class Workspace(QWidget):
             self.seek_position(max(0, self.current['duration'] - 1))
 
     def seek_position(self, position):
-        if self.current and self.current['duration'] > self.loaded_duration + .05:
+        if not self.current:
+            return
+        self.selection_playing = False
+        position = max(0, min(self.current['duration'], position))
+        if self.current.get('index_format') != 'hls' and self.current['duration'] > self.loaded_duration + .05:
             self.guard(lambda: self.reload_preview(position, bool(self.preview.core.pause) if self.preview.core else False))
         else:
             self.guard(lambda: self.preview.seek(position))
@@ -430,11 +585,18 @@ class Workspace(QWidget):
             self.hub.submit('扫描录制目录', 'scan', scan_directory, options['directory'])
         self.guard(submit)
 
-    def refresh_library(self):
+    def refresh_library(self, *_):
+        if not hasattr(self, 'library'):
+            return
+        kind = self.category.currentData()
+        self.library_stack.setCurrentIndex(0 if kind == 'live' else 1)
+        self.folder_button.setEnabled(kind != 'live')
         selected = self.library.currentItem()
         selected_path = selected.data(0, Qt.UserRole) if selected else ''
         self.library.clear()
         for entry in self.hub.entries:
+            if (entry.get('kind') == 'clip') != (kind == 'clip') or entry['path'] in getattr(self, 'active_paths', set()):
+                continue
             date = datetime.fromtimestamp(entry.get('created_at', 0)).strftime('%m-%d %H:%M')
             item = QTreeWidgetItem([entry['title'], date,
                                    clock(entry['duration']) if entry.get('duration') else '待探测', entry['path']])
@@ -442,6 +604,7 @@ class Workspace(QWidget):
             self.library.addTopLevelItem(item)
             if entry['path'] == selected_path:
                 self.library.setCurrentItem(item)
+        self.filter_library()
 
     def selected_entry(self):
         item = self.library.currentItem()
@@ -483,20 +646,26 @@ class Workspace(QWidget):
         self.resume_position = None
         self.current = None
         self.preview.stop()
-        self.review_title.setText(entry['title'] + ' · ' + entry['path'])
+        self.selection_playing = False
+        self.review_title.setText(entry['title'])
+        self.review_title.setToolTip(entry['path'])
+        self.review_state.setText('本地切片' if entry.get('kind') == 'clip' else '本地录像')
+        self.filename.setText(Path(entry['path']).stem + '-clip-' + datetime.now().strftime('%H%M%S'))
         duration = entry['duration']
         for spin in (self.inpoint, self.outpoint):
             spin.setRange(0, duration)
         saved = entry.get('selection', [0, duration])
         self.inpoint.setValue(min(duration, saved[0]))
         self.outpoint.setValue(min(duration, saved[1]))
-        self.slider.setRange(0, int(duration * 1000))
+        self.timeline.segments = entry.get('segments', [])
+        self.timeline.set_duration(duration, reset=True)
+        self.timeline.set_position(0)
         self.current = entry
         self.loaded_duration = duration
         self.position_label.setText(clock(0) + ' / ' + clock(duration))
         self.refresh_markers()
         self.save_selection()
-        self.tabs.setCurrentIndex(2)
+        self.tabs.setCurrentWidget(self.review_page)
         self.preview.show()
         self.report('已打开回看；默认静音。时间轴使用媒体时间，断流间隔不计入时长。')
         self.guard(lambda: self.preview.load(entry['path']))
@@ -507,9 +676,11 @@ class Workspace(QWidget):
             return
         start, end = self.inpoint.value(), self.outpoint.value()
         self.current['selection'] = [start, end]
+        self.timeline.set_selection(start, end)
         valid = end > start
         self.selection_label.setText(f'{clock(start)} → {clock(end)}\n选区 {max(0, end-start):.3f} 秒' if valid else '出点必须晚于入点')
         self.export_button.setEnabled(valid)
+        self.selection_button.setEnabled(valid)
         self.hub.save()
 
     def mode_changed(self, *_):
@@ -521,7 +692,7 @@ class Workspace(QWidget):
             return
         mode = self.mode.currentData()
         suffix = '.mkv' if mode == 'copy' else '.mp4'
-        name = Path(self.current['path']).stem + '-clip-' + datetime.now().strftime('%H%M%S') + suffix
+        name = Path(self.filename.text().strip() or 'clip').stem + suffix
         folder = Path(self.current['path']).parent
         target, _ = QFileDialog.getSaveFileName(self, '导出选区（使用新文件名）', str(folder / name), f'视频 (*{suffix})')
         if not target:
@@ -532,7 +703,7 @@ class Workspace(QWidget):
             job = self.hub.submit('导出：' + self.current['title'], 'export', export_clip,
                 self.service.options()['ffmpeg'], dict(self.current), self.inpoint.value(),
                 self.outpoint.value(), mode, target, self.hub.root / 'work')
-            self.tabs.setCurrentIndex(3)
+            self.toggle_tasks(True)
             self.report('导出已排队：' + job.title)
         self.guard(submit)
 
@@ -548,6 +719,8 @@ class Workspace(QWidget):
 
     def refresh_markers(self):
         self.markers.clear()
+        self.timeline.markers = self.current.get('markers', []) if self.current else []
+        self.timeline.update()
         if self.current:
             for marker in self.current.get('markers', []):
                 self.markers.addItem(clock(marker['time']) + '  ' + marker['title'])
@@ -574,9 +747,6 @@ class Workspace(QWidget):
             self.preview.core.mute = muted
             self.mute_button.setText('开启声音' if muted else '静音')
 
-    def seek_slider(self):
-        self.seek_position(self.slider.value() / 1000)
-
     def tick_preview(self):
         if not self.isVisible() or not self.current:
             return
@@ -587,13 +757,24 @@ class Workspace(QWidget):
                 self.preview.core.pause = paused
                 self.resume_position = None
             position = self.preview.position()
-            if not self.slider.isSliderDown():
-                self.slider.setValue(int(position * 1000))
+            if self.selection_playing and position >= self.outpoint.value() and self.preview.core:
+                self.preview.core.pause = True
+                self.preview.seek(self.outpoint.value())
+                self.selection_playing = False
+            self.timeline.set_position(position)
+            if self.preview.core:
+                self.play_button.setText('播放' if self.preview.core.pause else '暂停')
             self.position_label.setText(clock(position) + ' / ' + clock(self.current['duration']))
         except Exception as error:
             self.report('播放器：' + str(error))
 
     def refresh_tasks(self):
+        active = sum(job.state in ACTIVE for job in self.hub.jobs)
+        self.task_button.setText(f'后台任务 ({active})' if active else '后台任务')
+        signature = [(job.id, job.state, job.progress, job.output, job.message) for job in self.hub.jobs]
+        if signature == self.task_signature:
+            return
+        self.task_signature = signature
         scroll = self.tasks.verticalScrollBar().value()
         selected = self.tasks.currentItem()
         selected_id = selected.data(0, Qt.UserRole) if selected else ''
@@ -607,8 +788,6 @@ class Workspace(QWidget):
             if job.id == selected_id:
                 self.tasks.setCurrentItem(item)
         self.tasks.verticalScrollBar().setValue(scroll)
-        active = sum(job.state in ACTIVE for job in self.hub.jobs)
-        self.tabs.setTabText(3, f'任务中心 ({active})' if active else '任务中心')
 
     def selected_job(self):
         item = self.tasks.currentItem()

@@ -142,7 +142,7 @@ class RecordingTests(unittest.TestCase):
                                 view.preview.core.pause = True
                                 wait_for(lambda: (session.update_review() or session.review_info())['duration'] > first['duration'] + 1)
                                 view.refresh_live()
-                                self.assertGreater(view.slider.maximum(), int(first['duration'] * 1000))
+                                self.assertGreater(view.timeline.duration, first['duration'])
                                 view.seek_live_edge()
                                 wait_for(lambda: view.preview.position() > first['duration'] - .5)
                                 self.assertIs(view.preview.core, original_core)

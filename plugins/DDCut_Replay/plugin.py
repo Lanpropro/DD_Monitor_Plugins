@@ -151,6 +151,7 @@ class DDCutReplay(api.Plugin):
                         self.workspace.review(entry)
                 elif job.kind == 'export':
                     actual = job.result['actual_duration']
+                    self.hub.add_export(job)
                     job.message = f"成品时长 {actual:.3f} 秒；方式 {job.result['mode']}；源 {job.result['source']}"
                     self.context.notify('切片已导出：' + job.output, on_click=self.open)
             elif job.state == 'failed':
