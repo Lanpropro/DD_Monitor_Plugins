@@ -1,10 +1,10 @@
-# DDCut Replay v0.1.0（开发候选）
+# DDCut Replay v0.1.1（开发候选）
 
 专门用于 DD监控室CE 的录制与切片插件。提供录制中心、录播档案、独立回看、标记、单个起止选区及后台导出。尚未公开发布，真实直播与人工界面验收待完成。
 
 ## 安装与兼容
 
-候选包为 `ddcut_replay-0.1.0.zip`，ZIP 顶层和安装目录均为小写 `ddcut_replay/`。源码按维护者要求保留 `plugins/DDCut_Replay/`，由构建器映射，禁止将源码目录直接改名安装。
+候选包为 `ddcut_replay-0.1.1.zip`，ZIP 顶层和安装目录均为小写 `ddcut_replay/`。源码按维护者要求保留 `plugins/DDCut_Replay/`，由构建器映射，禁止将源码目录直接改名安装。
 
 **需要配套本体录制服务 v1**（`context.recording.api_version == 1`），宿主分支 `function/ddcut-replay-host`，接口提交 `3421ccb`。已发布的 0.7.1 仅满足清单最低版本，不保证包含该开发接口；旧本体点击入口会说明缺少配套接口。需要 FFmpeg 与同目录或 PATH 中的 ffprobe，预览使用本体自带 libmpv。
 
@@ -12,7 +12,7 @@
 
 ## 操作流程
 
-1. 工具栏“录制与切片”或 `Ctrl+Shift+R` 打开工作区；格子右键也可进入并定位当前房间。
+1. 左侧底部统一操作区中的“录制切片”或 `Ctrl+Shift+R` 打开工作区；格子右键也可进入并定位当前房间。账号、布局/设置、导入关注/添加直播间保持原顺序。旧本体未提供工作区入口时沿用顶部工具栏。
 2. **录制中心**：选择一路，开始/停止录制、启停缓存或快速保存；沿用本体录制设置、画质锁定和退出收尾。
 3. **生成回看副本**：只取已封口分段，后台复制到录制目录 `ddcut_replay/`；原录制继续。未封口尾部不在本次范围，稍后重新生成可扩展范围。副本占用磁盘，不自动删除原片或副本。
 4. **录播档案**：扫描指定录制目录及 `replays/` 成品，或手动导入本地视频；双击进入回看。没有账号数据扫描，不迁移原录像。
@@ -28,7 +28,7 @@
 
 ```powershell
 python tests/check_ddcut_replay.py --host ../DD_Monitor_CE
-python tests/check_ddcut_replay_native.py --host ../DD_Monitor_CE --package dist/ddcut_replay-0.1.0.zip
+python tests/check_ddcut_replay_native.py --host ../DD_Monitor_CE --package dist/ddcut_replay-0.1.1.zip
 python tests/check_contributing.py
 python tests/check_packages.py --host ../DD_Monitor_CE
 ```
@@ -36,3 +36,6 @@ python tests/check_packages.py --host ../DD_Monitor_CE
 测试使用隔离配置、临时插件目录和本地静音媒体，不使用真实账号或自动发送弹幕。真实直播性能、听感、深浅主题与高 DPI 由人工单独验收。首版不包含多轨、AI、字幕或投稿。
 
 2026-11-04 自动验证：7 项本地媒体/离屏界面检查、3 项宿主桥接检查、插件安装包源码一致性、原生 libmpv 出图/定位/暂停/默认静音，以及本体原录制与退出回归通过。宿主根目录集成提交 `870b93b`；普通 `run.cmd` 在临时配置/专用插件目录/离屏条件下通过本地回看与 1.5 秒精确导出检查。此处没有把隔离功能验证记为真实直播或人工验收。
+
+
+底部操作区右上角的向下箭头可将整块区域滑动收起，底边“展开操作区”可重新打开。收起仅隐藏入口，后台录制与导出继续；鼠标触发 200ms 动画，可中途反向，键盘和系统关闭动画时立即切换。该位置依赖宿主工作区接口提交 `7d2722f`。

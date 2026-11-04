@@ -3,8 +3,8 @@ import os
 from pathlib import Path
 
 from PySide6.QtCore import QTimer, Qt
-from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import QMessageBox, QToolBar
+from PySide6.QtGui import QAction, QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap
+from PySide6.QtWidgets import QMessageBox, QStyle, QToolBar, QToolButton
 
 from ddm import config
 from ddm import plugins as api
@@ -18,11 +18,12 @@ from .workspace import Workspace
 
 class DDCutReplay(api.Plugin):
     name = '录制与切片'
-    version = '0.1.0'
+    version = '0.1.1'
 
     def __init__(self):
         super().__init__()
         self.service = self.hub = self.workspace = self.toolbar = self.timer = None
+        self.entry = self.action = None
         self._ticks = 0
 
     def on_load(self, context):
@@ -32,18 +33,41 @@ class DDCutReplay(api.Plugin):
         self.service = getattr(context, 'recording', None)
         if self.service is not None and self.service.api_version != 1:
             self.service = None
-        self.toolbar = QToolBar('录制与切片', context.window)
-        self.toolbar.setObjectName('DDCutReplayToolbar')
-        self.toolbar.setMovable(False)
-        action = QAction('录制与切片', self.toolbar)
+        action = self.action = QAction('录制切片', context.window)
+        action.setToolTip('录制切片：录制管理、回看与导出（Ctrl+Shift+R）')
+        glyph = QPixmap(36, 36)
+        glyph.setDevicePixelRatio(2)
+        glyph.fill(Qt.transparent)
+        painter = QPainter(glyph)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(QColor('#dde3eb'), 1.5))
+        painter.drawEllipse(2, 11, 4, 4)
+        painter.drawEllipse(11, 11, 4, 4)
+        painter.drawLine(5, 12, 13, 3)
+        painter.drawLine(12, 12, 4, 3)
+        painter.end()
+        action.setIcon(QIcon(glyph))
         action.setShortcut(QKeySequence('Ctrl+Shift+R'))
         action.setShortcutContext(Qt.ApplicationShortcut)
         action.triggered.connect(self.open)
-        self.toolbar.addAction(action)
-        context.window.addToolBar(self.toolbar)
+        context.window.addAction(action)
+        entry = QToolButton(context.window)
+        entry.setDefaultAction(action)
+        entry.setAccessibleName('录制切片')
+        register = getattr(context, 'register_workspace_control', None)
+        if register is not None and register('entry', entry, priority=10):
+            self.entry = entry
+        else:
+            entry.deleteLater()
+            action.setIcon(context.window.style().standardIcon(QStyle.SP_DialogSaveButton))
+            self.toolbar = QToolBar('录制与切片', context.window)
+            self.toolbar.setObjectName('DDCutReplayToolbar')
+            self.toolbar.setMovable(False)
+            self.toolbar.addAction(action)
+            context.window.addToolBar(self.toolbar)
         if self.service is not None:
             self.hub = TaskHub(Path(config.data_root()) / 'ddcut_replay')
-            self.timer = QTimer(self.toolbar)
+            self.timer = QTimer(action)
             self.timer.setInterval(250)
             self.timer.timeout.connect(self.poll)
             self.timer.start()
@@ -125,10 +149,17 @@ class DDCutReplay(api.Plugin):
             self.hub.close()
         if self.service:
             self.service.close()
+        if self.entry is not None:
+            self.context.unregister_workspace_control('entry')
+            self.entry = None
         if self.toolbar:
             self.context.window.removeToolBar(self.toolbar)
             self.toolbar.deleteLater()
             self.toolbar = None
+        if self.action is not None:
+            self.context.window.removeAction(self.action)
+            self.action.deleteLater()
+            self.action = None
 
 
 plugin = DDCutReplay()

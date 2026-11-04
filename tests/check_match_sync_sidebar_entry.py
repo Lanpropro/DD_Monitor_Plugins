@@ -28,6 +28,9 @@ def main():
     host.resize(900, 700)
     action = QAction('比赛二路', host)
     entry = EntryButton(sidebar, action)
+    workspace = getattr(sidebar, 'workspace_controls', None)
+    if workspace is not None:
+        workspace.add('sidebar-test', 'entry', entry, 20)
     frames = []
 
     class PaintRecorder(QObject):
@@ -52,7 +55,8 @@ def main():
         sidebar.layout_button.hide()
         sidebar.settings_button.hide()
         sidebar.tool_row.layout().activate()
-        assert entry.width() <= normal_width, ('Inactive entry stretched', entry.width(), normal_width)
+        if workspace is None:
+            assert entry.width() <= normal_width, ('Inactive entry stretched', entry.width(), normal_width)
         sidebar.layout_button.show()
         sidebar.settings_button.show()
         settle()
@@ -63,24 +67,27 @@ def main():
             for _ in range(3):
                 sidebar.set_collapsed(True)
                 settle()
-                assert not entry.isVisible()
+                assert entry.isVisible() == (workspace is not None)
                 frames.clear()
                 sidebar.set_collapsed(False)
                 assert frames, 'The host must still paint the sidebar synchronously'
                 first = frames[0]
-                assert first[:2] == (True, not active), ('Incomplete first frame', active, first)
-                if not active:
+                assert first[:2] == (True, workspace is not None or not active), ('Incomplete first frame', active, first)
+                if not active and workspace is None:
                     assert not QRect(*first[2]).intersects(QRect(*first[3])), ('Overlapping first frame', first)
                 settle()
-                assert entry.geometry().getRect() == first[2], 'Entry geometry changed after first paint'
+                assert entry.geometry().getRect() == first[2], ('Entry geometry changed after first paint', active, first[2], entry.geometry().getRect())
         sidebar.set_side('top')
         settle()
         for collapsed in (True, False):
             sidebar.set_collapsed(collapsed)
             settle()
-            assert entry.isVisible() and entry.parentWidget() is sidebar._bar_row
+            expected_parent = workspace.row if workspace is not None else sidebar._bar_row
+            assert entry.isVisible() and entry.parentWidget() is expected_parent
         sidebar.set_side('left')
         settle()
+        if workspace is not None:
+            workspace.remove('sidebar-test', 'entry')
         entry.detach()
         settle()
         assert sidebar.layout_button.isVisible()
