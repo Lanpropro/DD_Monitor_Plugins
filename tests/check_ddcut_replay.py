@@ -19,6 +19,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--host', type=Path, required=True)
 parser.add_argument('--screenshots', type=Path)
 args, remainder = parser.parse_known_args()
+if args.screenshots:
+    args.screenshots.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(args.host.resolve()))
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 os.environ['DDM_NO_SAVE'] = '1'
@@ -272,7 +274,19 @@ class DDCutReplayTests(unittest.TestCase):
                 view.refresh_library()
                 APP.processEvents()
                 self.assertEqual(load.call_count, 1)
-                self.assertEqual(len({view.library.visualItemRect(view.library.item(i)).x() for i in range(6)}), 1)
+                self.assertTrue(view.listing.isHidden())
+                self.assertTrue(view.filters.isHidden())
+                self.assertTrue(view.inspector.isVisible())
+                self.assertGreater(view.preview.width(), view.review_panel.width() * .5)
+                self.assertLess(view.timeline.heat_track().bottom(), view.timeline.track().top())
+                self.assertTrue(view.rect().contains(view.export_button.mapTo(view, view.export_button.rect().bottomRight())))
+                width = view.preview.width()
+                view.edit_button.click()
+                APP.processEvents()
+                self.assertGreater(view.preview.width(), width)
+                view.edit_button.click()
+                APP.processEvents()
+                self.assertEqual(load.call_count, 1)
                 if args.screenshots:
                     host.grab().save(str(args.screenshots / 'ddcut-grid-inline.png'))
             view.show_library()
@@ -339,6 +353,10 @@ class DDCutReplayTests(unittest.TestCase):
             view = ui.Workspace(plugin)
             plugin.workspace = view
             plugin.hub.add_entry(self.entry)
+            host.setAttribute(Qt.WA_DontShowOnScreen)
+            host.resize(1180, 760)
+            host.setCentralWidget(view)
+            host.show()
             view.show()
             self.assertEqual(view.tabs.count(), 1)
             self.assertEqual(view.tabs.currentWidget(), view.library_page)
@@ -403,8 +421,9 @@ class DDCutReplayTests(unittest.TestCase):
             gate = threading.Event()
             background = plugin.hub.submit('窗口关闭后继续', 'test', lambda job: gate.wait(3))
             for size in [(1180, 760), (920, 600)]:
-                view.resize(*size)
+                host.resize(*size)
                 APP.processEvents()
+                self.assertLessEqual(view.width(), size[0])
                 self.assertLessEqual(view.minimumSizeHint().width(), size[0])
                 self.assertLessEqual(view.minimumSizeHint().height(), size[1])
                 view.toggle_tasks(True)
@@ -412,16 +431,19 @@ class DDCutReplayTests(unittest.TestCase):
                 self.assertLessEqual(view.minimumSizeHint().width(), size[0])
                 view.toggle_tasks(False)
                 self.assertEqual(view.tools.isHidden(), not view.edit_button.isChecked())
+                if view.edit_button.isChecked():
+                    self.assertTrue(view.export_button.isVisible())
+                    self.assertTrue(view.rect().contains(view.export_button.mapTo(view, view.export_button.rect().bottomRight())))
             # Selection handles must update the time inputs using mouse drags.
             view.set_selection(.5, 2)
             timeline = view.timeline
-            QTest.mousePress(timeline, Qt.LeftButton, pos=QPoint(round(timeline.x_for(.5)), 50))
-            QTest.mouseMove(timeline, QPoint(round(timeline.x_for(1)), 50))
-            QTest.mouseRelease(timeline, Qt.LeftButton, pos=QPoint(round(timeline.x_for(1)), 50))
+            QTest.mousePress(timeline, Qt.LeftButton, pos=QPoint(round(timeline.x_for(.5)), round(timeline.track().center().y())))
+            QTest.mouseMove(timeline, QPoint(round(timeline.x_for(1)), round(timeline.track().center().y())))
+            QTest.mouseRelease(timeline, Qt.LeftButton, pos=QPoint(round(timeline.x_for(1)), round(timeline.track().center().y())))
             self.assertAlmostEqual(view.inpoint.value(), 1, delta=.03)
             seeks = []
             timeline.seekRequested.connect(seeks.append)
-            QTest.mouseClick(timeline, Qt.LeftButton, pos=QPoint(round(timeline.x_for(3)), 50))
+            QTest.mouseClick(timeline, Qt.LeftButton, pos=QPoint(round(timeline.x_for(3)), round(timeline.track().center().y())))
             self.assertAlmostEqual(seeks[-1], 3, delta=.03)
             if args.screenshots:
                 args.screenshots.mkdir(parents=True, exist_ok=True)

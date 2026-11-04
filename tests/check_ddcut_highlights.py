@@ -203,7 +203,7 @@ class HighlightTests(unittest.TestCase):
                         original_core = view.preview.core
                     view.show_highlights()
                     until(lambda: view.heat_results.count() > 0)
-                    self.assertEqual(view.tools.currentIndex(), 2)
+                    self.assertEqual(view.tools.currentIndex(), 0)
                     self.assertEqual(len(view.timeline.heat_points), 13)
                     rect = view.heat_results.visualItemRect(view.heat_results.item(0))
                     QTest.mouseClick(view.heat_results.viewport(), Qt.LeftButton, pos=rect.center())

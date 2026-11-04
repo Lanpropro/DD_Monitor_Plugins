@@ -103,11 +103,12 @@ with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_
         view.outpoint.setValue(2)
         assert view.export_button.isEnabled()
         assert view.tabs.count() == 1 and view.review_page is view.library_page
+        assert view.tools.isVisible() and view.listing.isHidden() and view.filters.isHidden()
         view.edit_button.click()
         app.processEvents()
-        assert view.tools.isVisible()
-        view.edit_button.click()
         assert view.tools.isHidden()
+        view.edit_button.click()
+        assert view.tools.isVisible()
         view.play_selection()
         wait_for(lambda: not view.selection_playing and view.preview.core.pause)
         assert abs(view.preview.position() - 2) < .12
@@ -165,7 +166,7 @@ with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_
             assert 'local highlight check' in chat.read_text(encoding='utf-8')
             assert all('wall_start' in part for part in session.review_info()['segments'])
             view.show_highlights()
-            assert view.tools.currentIndex() == 2 and view.tools.isVisible()
+            assert view.tools.currentIndex() == 0 and view.tools.isVisible()
             view.edit_button.click()
             original_core = view.preview.core
             view.tabs.setCurrentWidget(view.library_page)

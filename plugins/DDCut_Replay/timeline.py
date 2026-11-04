@@ -63,7 +63,7 @@ class Timeline(QWidget):
         self.heat_points = []
         self.heat_threshold = 0
         self.dragging = None
-        self.setMinimumHeight(115)
+        self.setMinimumHeight(140)
         self.setMinimumWidth(220)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
@@ -74,7 +74,10 @@ class Timeline(QWidget):
         return max(.001, self.duration / self.zoom)
 
     def track(self):
-        return QRectF(8, 30, max(1, self.width() - 16), 48)
+        return QRectF(8, 62, max(1, self.width() - 16), 42)
+
+    def heat_track(self):
+        return QRectF(8, 5, max(1, self.width() - 16), 22)
 
     def x_for(self, seconds):
         return self.track().left() + (seconds - self.view_start) / self.span * self.track().width()
@@ -128,9 +131,11 @@ class Timeline(QWidget):
             text = timecode(value, milliseconds=self.span < 30)
             width = painter.fontMetrics().horizontalAdvance(text)
             x = min(self.width() - width - 4, max(4, self.x_for(value) - width / 2))
-            painter.drawText(QRectF(x, 3, width + 1, 23), Qt.AlignCenter, text)
+            painter.drawText(QRectF(x, 31, width + 1, 23), Qt.AlignCenter, text)
         painter.save()
-        painter.setClipRect(track)
+        heat = self.heat_track()
+        painter.fillRect(heat, palette.brush(QPalette.AlternateBase))
+        painter.setClipRect(heat)
         maximum = max((point['count'] for point in self.heat_points), default=0)
         if maximum:
             for point in self.heat_points:
@@ -140,11 +145,12 @@ class Timeline(QWidget):
                     continue
                 color = QColor(accent)
                 color.setAlpha(180 if point['level'] == 'core' else 100 if point['level'] == 'extension' else 45)
-                height = point['count'] / maximum * track.height()
-                painter.fillRect(QRectF(x, track.bottom() - height, width, height), color)
-            y = track.bottom() - self.heat_threshold / maximum * track.height()
+                height = point['count'] / maximum * heat.height()
+                painter.fillRect(QRectF(x, heat.bottom() - height, width, height), color)
+            y = heat.bottom() - self.heat_threshold / maximum * heat.height()
             painter.setPen(QPen(muted, 1, Qt.DashLine))
             painter.drawLine(int(track.left()), int(y), int(track.right()), int(y))
+        painter.setClipRect(track)
         # Actual completed segment boundaries; no fabricated audio waveform.
         painter.setPen(QPen(palette.color(QPalette.Mid), 1))
         elapsed = 0
@@ -167,18 +173,18 @@ class Timeline(QWidget):
                 painter.fillRect(QRectF(x - 4, track.top() - 3, 8, track.height() + 6), accent)
         x = self.x_for(self.position)
         if track.left() <= x <= track.right():
-            painter.setPen(QPen(ink, 2))
-            painter.drawLine(int(x), 25, int(x), 83)
+            painter.setPen(QPen(QColor('#fb7185'), 2))
+            painter.drawLine(int(x), int(heat.top()), int(x), int(track.bottom() + 6))
         last_label = -100
         for marker in self.markers:
             x = self.x_for(marker['time'])
             if track.left() <= x <= track.right():
-                painter.fillRect(QRectF(x - 2, 87, 4, 7), accent)
+                painter.fillRect(QRectF(x - 2, track.bottom() + 9, 4, 7), accent)
                 if x - last_label >= 90:
                     painter.setPen(muted)
                     text = painter.fontMetrics().elidedText(marker['title'], Qt.ElideRight, 85)
                     left = max(4, min(x - 15, self.width() - 90))
-                    painter.drawText(QRectF(left, 96, 86, 18), Qt.AlignLeft, text)
+                    painter.drawText(QRectF(left, track.bottom() + 18, 86, 18), Qt.AlignLeft, text)
                     last_label = x
 
     def mousePressEvent(self, event):
@@ -186,9 +192,9 @@ class Timeline(QWidget):
             return super().mousePressEvent(event)
         x, y = event.position().x(), event.position().y()
         self.setFocus(Qt.MouseFocusReason)
-        if 26 <= y <= 83 and abs(x - self.x_for(self.start)) <= 9:
+        if self.track().top() - 4 <= y <= self.track().bottom() + 6 and abs(x - self.x_for(self.start)) <= 9:
             self.dragging = 'start'
-        elif 26 <= y <= 83 and abs(x - self.x_for(self.end)) <= 9:
+        elif self.track().top() - 4 <= y <= self.track().bottom() + 6 and abs(x - self.x_for(self.end)) <= 9:
             self.dragging = 'end'
         else:
             self.dragging = 'seek'
