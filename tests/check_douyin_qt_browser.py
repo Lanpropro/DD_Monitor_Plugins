@@ -42,7 +42,7 @@ class BlockNetwork(QWebEngineUrlRequestInterceptor):
 class BrowserTests(unittest.TestCase):
     def exercise(self, behavior, expected_error=None, *, module_error=False, delayed_dependency=False,
                  security_status="success", room_id="999999", uid="42", hold_ack=False, expected_stages=(),
-                 late_security=False, invalid_security=False):
+                 late_security=False, invalid_security=False, review_403=False, review_shutdown=False):
         dialogs = []
         initialization = "throw new ReferenceError('PRIVATE');" if module_error else ""
         if module_error == "missing_call":
@@ -147,6 +147,19 @@ class BrowserTests(unittest.TestCase):
             self.assertEqual(len(dialogs), 1)
             if hold_ack:
                 self.assertTrue(outcome.get('held_open'), 'Accepted response must not destroy the page before delivery confirmation')
+            if review_403:
+                QTest.qWait(100)
+                self.assertIs(bridge.active, dialogs[0])
+                self.assertTrue(dialogs[0].isVisible(), 'Keep the 403 page available for a manual official-page comparison')
+                self.assertFalse(dialogs[0].read_button.isEnabled())
+                dialogs[0].read_button.click()
+                QTest.qWait(250)
+                blocked=dict(room="douyin:123", params={"room_id":"999999","content":"another fixture"},
+                             cancelled=lambda:False, done=threading.Event())
+                bridge.open(blocked)
+                self.assertTrue(blocked['done'].is_set())
+                self.assertEqual(blocked['result']['error'], 'review_open')
+                self.assertEqual(len(dialogs), 1)
             snapshot = []
             dialogs[0].browser.page().runJavaScript(
                 "JSON.stringify({calls:window.calls,params:window.params,loaderCaptures:window.loaderCaptures})", snapshot.append)
@@ -174,6 +187,13 @@ class BrowserTests(unittest.TestCase):
                 self.assertTrue(any(f"阶段={stage} " in line for line in logs), (stage, logs))
             self.assertNotIn("PRIVATE", "\n".join(logs))
             self.assertNotIn("7560000000000000001", "\n".join(logs))
+            if review_403:
+                if review_shutdown:
+                    bridge.shutdown()
+                else:
+                    dialogs[0].reject()
+                self.assertFalse(dialogs[0].isVisible())
+                self.assertIsNone(bridge.active)
         bridge.shutdown()
         for dialog in dialogs:
             dialog.browser.setPage(QWebEnginePage(dialog.browser))
@@ -205,6 +225,14 @@ class BrowserTests(unittest.TestCase):
     def test_request_failure_excludes_arbitrary_status_and_code(self):
         self.exercise("throw Object.assign(new Error('PRIVATE'),{code:'PRIVATE',response:{status:'PRIVATE',"
                       "data:{status_code:{cookie:'PRIVATE'}}}});", ["官网请求", "已调用发送：是"])
+
+    def test_http_403_keeps_page_for_review_without_retry_until_user_closes(self):
+        self.exercise("throw Object.assign(new Error('PRIVATE'),{response:{status:403}});",
+                      ["HTTP：403", "已调用发送：是"], review_403=True)
+
+    def test_shutdown_closes_retained_http_403_page(self):
+        self.exercise("throw Object.assign(new Error('PRIVATE'),{response:{status:403}});",
+                      ["HTTP：403"], review_403=True, review_shutdown=True)
 
     def test_invalid_response_has_distinct_stage(self):
         self.exercise("return {data:{cookie:'PRIVATE'}};",

@@ -31,7 +31,8 @@ class BrowserChat(QObject):
     def close_request(self, cancelled):
         if self._active_request is not None and self._active_request['cancelled'] is cancelled:
             self.active.browser.page().runJavaScript("window.__ddmChatCancelled=true")
-            self.active.accept()
+            if not self._active_request.get("manual_review"):
+                self.active.accept()
 
     def request(self, room, params, cancelled):
         request = dict(room=room, params=dict(params), cancelled=cancelled,
@@ -44,6 +45,8 @@ class BrowserChat(QObject):
         result = request["result"]
         if not isinstance(result, dict) or result.get("error"):
             code = result.get("error", "cancelled") if isinstance(result, dict) else "cancelled"
+            if code == "review_open":
+                raise InteractionError("请先关闭已保留的抖音官网核对窗口，再从软件发送；本次未提交")
             # Only fixed error categories leave the browser; never arbitrary exception messages.
             labels = {"wrong_room_page": "官网页面与目标直播间不匹配",
                       "cancelled_before_send": "提交前已取消", "official_client_changed": "官网发送模块结构已变化",
@@ -84,6 +87,10 @@ class BrowserChat(QObject):
 
     def open(self, request):
         if self.closed or request["done"].is_set() or request["cancelled"]():
+            request["done"].set()
+            return
+        if self._active_request is not None and self._active_request.get("manual_review"):
+            request["result"] = {"error": "review_open"}
             request["done"].set()
             return
         from ddm.platform_login import PlatformFollowDialog
@@ -213,11 +220,24 @@ class BrowserChat(QObject):
                     dialog.status.setText("官网发送模块未就绪，本次尚未提交。可重新加载环境再试。")
                     return
                 request["result"] = outcome
-                state["holding"] = (not outcome.get('error') and type(outcome.get('status_code')) is int
-                                    and outcome['status_code'] == 0)
+                accepted = (not outcome.get('error') and type(outcome.get('status_code')) is int
+                            and outcome['status_code'] == 0)
+                review = bool(outcome.get('error') and type(outcome.get('http_status')) is int
+                              and outcome['http_status'] == 403)
+                request["manual_review"] = review
+                state["holding"] = accepted or review
                 request["done"].set()
-                trace("ack" if state["holding"] else "unconfirmed")
-                if state["holding"]:
+                trace("ack" if accepted else "unconfirmed")
+                if review:
+                    timer.stop()
+                    trace("http_403_review")
+                    dialog.setWindowTitle("抖音 · 官网发送核对")
+                    dialog.read_button.setEnabled(False)
+                    dialog.read_button.setText("自动发送已停止")
+                    dialog.status.setWordWrap(True)
+                    dialog.status.setText("本次发送返回 HTTP 403，自动发送已停止，草稿保留。请先核对原消息；"
+                                          "若未出现，可在下方官网输入一条不同的短文本手动发送作对照。")
+                elif accepted:
                     dialog.status.setText("官网已受理，正在核对弹幕投递，请勿重复发送。")
                 else:
                     dialog.accept()
