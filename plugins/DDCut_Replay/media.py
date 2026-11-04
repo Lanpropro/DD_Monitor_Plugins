@@ -10,8 +10,10 @@ import subprocess
 import threading
 import time
 import uuid
+import tempfile
 
 from .hls import input_options, write_playlist
+from .chat import load_events, trim_events, write_json
 
 MEDIA_SUFFIXES = {'.mp4', '.mkv', '.mov', '.ts', '.flv', '.webm'}
 ACTIVE = {'queued', 'running', 'cancelling'}
@@ -39,7 +41,7 @@ class Job:
     def record(self):
         data = {key: getattr(self, key) for key in
                 ('id', 'title', 'kind', 'state', 'progress', 'message', 'output')}
-        if self.kind == 'export' and self.state == 'done':
+        if self.kind == 'export' and self.result:
             data['result'] = self.result
         return data
 
@@ -210,7 +212,8 @@ def export_clip(job, ffmpeg, source, start, end, mode, target, work):
     if mode not in {'copy', 'precise'}:
         raise ValueError('Unknown export mode')
     target = Path(target)
-    if target.exists():
+    chat_target = target.with_suffix('.danmaku.json')
+    if target.exists() or chat_target.exists():
         raise FileExistsError('目标已存在，请使用新文件名')
     target.parent.mkdir(parents=True, exist_ok=True)
     if mode == 'copy' and target.suffix.lower() != '.mkv':
@@ -219,6 +222,7 @@ def export_clip(job, ffmpeg, source, start, end, mode, target, work):
         raise ValueError('精确剪辑使用 MP4 容器')
     partial = target.with_name(f'.{target.stem}.{job.id}.partial{target.suffix}')
     playlist = Path(work) / f'{job.id}.ffconcat'
+    chat_written = published = False
     try:
         input_args = ['-i', source['path']]
         local_start = start
@@ -265,6 +269,11 @@ def export_clip(job, ffmpeg, source, start, end, mode, target, work):
         run_process(job, command, work, duration=end-start)
         actual = probe(job, ffmpeg, partial, work)
         check_cancel(job)
+        chat = {}
+        if source.get('danmaku_path'):
+            write_json(chat_target, trim_events(load_events(source), start, end, shift=source.get('danmaku_offset', 0)))
+            chat_written = True
+            chat = {'danmaku_path': str(chat_target)}
         if target.exists():
             raise FileExistsError('目标已存在，请使用新文件名')
         # Windows rename is atomic and refuses existing targets, including on exFAT.
@@ -272,8 +281,9 @@ def export_clip(job, ffmpeg, source, start, end, mode, target, work):
             partial.rename(target)
         else:
             os.link(partial, target)
+        published = True
         job.output = str(target)
-        return {'requested_start': start, 'requested_end': end,
+        return {'requested_start': start, 'requested_end': end, **chat,
                 'actual_duration': actual['duration'], 'mode': mode,
                 'actual_start': start if mode == 'precise' else None,
                 **{key: source[key] for key in ('cover_path', 'avatar_path') if source.get(key)},
@@ -281,8 +291,80 @@ def export_clip(job, ffmpeg, source, start, end, mode, target, work):
                 'snapshot_at': source.get('snapshot_at'),
                 'source': source['path'], 'output': str(target)}
     finally:
+        if chat_written and not published:
+            chat_target.unlink(missing_ok=True)
         partial.unlink(missing_ok=True)
         playlist.unlink(missing_ok=True)
+
+
+def export_ranges(job, ffmpeg, source, ranges, mode, targets, work, merge=False):
+    """Keep completed separate outputs on cancel; commit a merge only when complete."""
+    targets = list(map(Path, targets))
+    if not ranges or len(targets) != (1 if merge else len(ranges)):
+        raise ValueError('选区与目标文件数量不匹配')
+    if merge and (mode != 'precise' or targets[0].suffix.lower() != '.mp4'):
+        raise ValueError('合并选区使用精确切片模式')
+    for item in ranges:
+        if not 0 <= item['start'] < item['end'] <= source['duration'] + .001:
+            raise ValueError('所有启用选区都必须在可读范围内，且出点晚于入点')
+    if len(set(targets)) != len(targets) or any(path.exists() or path.with_suffix('.danmaku.json').exists() for path in targets):
+        raise FileExistsError('目标已存在或文件名重复，请使用新文件名')
+    Path(work).mkdir(parents=True, exist_ok=True)
+    job.result = {'outputs': []}
+    with tempfile.TemporaryDirectory(prefix='ranges-', dir=work) as temporary:
+        folder = Path(temporary)
+        completed = []
+        for index, item in enumerate(ranges):
+            check_cancel(job)
+            job.message = f'正在导出 {index + 1}/{len(ranges)}'
+            child = Job(job.title, 'export', cancel=job.cancel)
+            destination = folder / f'{index}.mp4' if merge else targets[index]
+            result = export_clip(child, ffmpeg, source, item['start'], item['end'], mode, destination, folder)
+            completed.append(result)
+            if not merge:
+                job.result['outputs'].append(result)
+                job.output = result['output']
+            job.progress = (index + 1) / (len(ranges) + (1 if merge else 0))
+        if merge:
+            target = targets[0]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            partial = target.with_name(f'.{target.stem}.{job.id}.partial.mp4')
+            chat_target = target.with_suffix('.danmaku.json')
+            chat_written = published = False
+            listing = folder / 'merge.ffconcat'
+            listing.write_text('ffconcat version 1.0\n' + ''.join(f"file '{i}.mp4'\n" for i in range(len(completed))), encoding='utf-8')
+            try:
+                duration = sum(result['actual_duration'] for result in completed)
+                run_process(job, [ffmpeg, '-y', '-hide_banner', '-loglevel', 'error', '-f', 'concat',
+                    '-safe', '0', '-i', str(listing), '-c', 'copy', '-movflags', '+faststart', str(partial)], folder, duration=duration)
+                actual = probe(job, ffmpeg, partial, folder)
+                check_cancel(job)
+                result = {**completed[0], 'output': str(target), 'actual_duration': actual['duration'],
+                          'ranges': ranges, 'mode': 'precise-merge'}
+                result.pop('danmaku_path', None)
+                if source.get('danmaku_path'):
+                    events, offset = [], 0
+                    for part in completed:
+                        events.extend(dict(row, time=row['time'] + offset) for row in load_events(part))
+                        offset += part['actual_duration']
+                    write_json(chat_target, events)
+                    chat_written = True
+                    result['danmaku_path'] = str(chat_target)
+                check_cancel(job)
+                if target.exists():
+                    raise FileExistsError('目标已存在，请使用新文件名')
+                if os.name == 'nt':
+                    partial.rename(target)
+                else:
+                    os.link(partial, target)
+                published = True
+                job.result['outputs'].append(result)
+                job.output = str(target)
+            finally:
+                if chat_written and not published:
+                    chat_target.unlink(missing_ok=True)
+                partial.unlink(missing_ok=True)
+    return job.result
 
 
 class TaskHub:
@@ -310,7 +392,7 @@ class TaskHub:
             job.delivered = True
             self.jobs.append(job)
         for job in self.jobs:
-            if job.kind == 'export' and job.state == 'done':
+            if job.kind == 'export' and job.result:
                 self.add_export(job)
 
     def save(self):
@@ -328,12 +410,15 @@ class TaskHub:
         self.save()
 
     def add_export(self, job):
-        path = Path(job.output)
-        if job.output and job.result and path.is_file():
-            self.add_entry({'path': str(path), 'title': path.stem, 'kind': 'clip',
-                'duration': job.result['actual_duration'], 'created_at': path.stat().st_mtime,
-                'source': job.result['source'], 'room': job.result.get('room') or {},
-                **{key: job.result[key] for key in ('cover_path', 'avatar_path') if job.result.get(key)}})
+        if not job.result:
+            return
+        for result in job.result.get('outputs', [job.result]):
+            path = Path(result.get('output') or job.output)
+            if path.is_file():
+                self.add_entry({'path': str(path), 'title': path.stem, 'kind': 'clip',
+                    'duration': result['actual_duration'], 'created_at': path.stat().st_mtime,
+                    'source': result['source'], 'room': result.get('room') or {},
+                    **{key: result[key] for key in ('cover_path', 'avatar_path', 'danmaku_path') if result.get(key)}})
 
     def submit(self, title, kind, function, *args, lease=''):
         if self.closed:
@@ -371,6 +456,6 @@ class TaskHub:
         for job in self.jobs:
             if job.state == 'done' and not job.delivered and job.kind in {'snapshot', 'import'}:
                 self.add_entry(job.result)
-            elif job.state == 'done' and not job.delivered and job.kind == 'export':
+            elif job.result and not job.delivered and job.kind == 'export':
                 self.add_export(job)
         self.save()

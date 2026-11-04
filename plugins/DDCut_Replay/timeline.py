@@ -52,6 +52,7 @@ class Timeline(QWidget):
     seekRequested = Signal(float)
     selectionChanged = Signal(float, float)
     viewChanged = Signal()
+    rangeRequested = Signal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -62,6 +63,8 @@ class Timeline(QWidget):
         self.segments = []
         self.heat_points = []
         self.heat_threshold = 0
+        self.ranges = []
+        self.selected_range = -1
         self.dragging = None
         self.setMinimumHeight(140)
         self.setMinimumWidth(220)
@@ -161,6 +164,18 @@ class Timeline(QWidget):
                 painter.drawLine(int(x), int(track.top()), int(x), int(track.bottom()))
         fill = QColor(accent)
         fill.setAlpha(65)
+        for index, item in enumerate(self.ranges):
+            if index == self.selected_range:
+                continue
+            rect = QRectF(self.x_for(item['start']), track.top(),
+                          max(0, self.x_for(item['end']) - self.x_for(item['start'])), track.height())
+            color = QColor(accent if item.get('enabled', True) else palette.color(QPalette.Mid))
+            color.setAlpha(45)
+            painter.fillRect(rect, color)
+            painter.setPen(QPen(color.darker(140), 1))
+            painter.drawRect(rect)
+            painter.setPen(muted)
+            painter.drawText(rect.adjusted(4, 0, -4, 0), Qt.AlignVCenter | Qt.AlignLeft, str(index + 1))
         selected = QRectF(self.x_for(self.start), track.top(),
                          max(0, self.x_for(self.end) - self.x_for(self.start)), track.height())
         painter.fillRect(selected, fill)
@@ -197,8 +212,14 @@ class Timeline(QWidget):
         elif self.track().top() - 4 <= y <= self.track().bottom() + 6 and abs(x - self.x_for(self.end)) <= 9:
             self.dragging = 'end'
         else:
+            value = self.seconds_at(x)
+            if self.track().contains(event.position()):
+                for index, item in enumerate(self.ranges):
+                    if item['start'] <= value <= item['end'] and index != self.selected_range:
+                        self.rangeRequested.emit(index)
+                        break
             self.dragging = 'seek'
-            self.seekRequested.emit(self.seconds_at(x))
+            self.seekRequested.emit(value)
 
     def mouseMoveEvent(self, event):
         x = event.position().x()

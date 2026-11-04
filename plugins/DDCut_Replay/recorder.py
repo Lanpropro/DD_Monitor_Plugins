@@ -7,13 +7,16 @@ reader. Existing EDL archives remain readable through their metadata.
 from datetime import datetime
 import time
 import json
+import hashlib
 from pathlib import Path
+from PySide6.QtWidgets import QApplication
 
 from ddm.recording import RecordingSession, safe_name
 from ddm import images
 from ddm.room_artwork import room_platform
 from ddm.follow_folders import PLATFORM_NAMES
 from .hls import input_options, read_segments, write_playlist
+from ddm.danmaku_content import content_runs
 
 
 class ReplayRecordingSession(RecordingSession):
@@ -33,14 +36,43 @@ class ReplayRecordingSession(RecordingSession):
         self._artwork = {}
         self._danmaku_pending = []
         self.danmaku_error = ''
+        self._emoticon_loaders = {}
 
     def record_danmaku(self, message):
+        kind = message.get('kind') or 'danmaku'
         if (not self._archive or self._saved or self.stopping or not self.process
-                or self.process.poll() is not None or message.get('kind', 'danmaku') != 'danmaku'):
+                or self.process.poll() is not None or kind not in ('danmaku', 'super_chat', 'super_chat_delete')):
             return
-        text = str(message.get('text') or '')
-        if text:
-            self._danmaku_pending.append({'received_at': time.time(), 'text': text})
+        row = {key: message[key] for key in ('text', 'uname', 'color', 'emoticon', 'emoticons',
+               'id', 'ids', 'price', 'face', 'start_time', 'end_time') if key in message}
+        row.update(kind=kind, received_at=time.time(), text=str(message.get('text') or message.get('message') or ''))
+        if kind == 'super_chat':
+            row['duration'] = (max(0, float(message['end_time']) - row['received_at'])
+                               if message.get('end_time') else max(0, float(message.get('time', 60))))
+        paths = {}
+        for _text, url in content_runs(message):
+            if url:
+                folder = self._archive / 'emoticons'
+                folder.mkdir(exist_ok=True)
+                target = folder / (hashlib.sha256(url.encode()).hexdigest() + '.png')
+                paths[url] = str(target)
+                if target.is_file():
+                    continue
+                cached = images.load_cached_emoticon(url)
+                if cached is not None:
+                    cached.save(str(target))
+                elif str(target) not in self._emoticon_loaders and len(self._emoticon_loaders) < 16:
+                    loader = images.AvatarLoader({str(target): url}, QApplication.instance(), subdir='emoticons')
+                    self._emoticon_loaders[str(target)] = loader
+                    loader.loaded.connect(lambda name, picture: picture.save(name) if not picture.isNull() else None)
+                    loader.finished.connect(lambda name=str(target): self._emoticon_loaders.pop(name, None))
+                    loader.finished.connect(loader.deleteLater)
+                    QApplication.instance().aboutToQuit.connect(loader.wait)
+                    loader.start()
+        if paths:
+            row['image_paths'] = paths
+        if row['text'] or kind == 'super_chat_delete' or message.get('emoticon'):
+            self._danmaku_pending.append(row)
 
     def _flush_danmaku(self):
         if not self._danmaku_pending:

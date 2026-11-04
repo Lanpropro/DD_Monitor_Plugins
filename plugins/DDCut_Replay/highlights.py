@@ -1,8 +1,6 @@
 """Local chat density analysis; no network or model calls."""
-from bisect import bisect_right
-import json
 import math
-from pathlib import Path
+from .chat import ChatReader, align_events
 
 WINDOW = 30
 STEP = 5
@@ -10,23 +8,7 @@ STEP = 5
 
 def media_records(records, segments):
     """Map receive times through HLS program dates, excluding reconnect gaps."""
-    starts, intervals = [], []
-    elapsed = 0
-    for segment in segments:
-        if segment.get('wall_start') is not None:
-            starts.append(segment['wall_start'])
-            intervals.append((elapsed, segment['duration']))
-        elapsed += segment['duration']
-    result = []
-    for record in records:
-        stamp = record['received_at']
-        index = bisect_right(starts, stamp) - 1
-        if index >= 0:
-            offset, duration = intervals[index]
-            delta = stamp - starts[index]
-            if 0 <= delta < duration:
-                result.append((offset + delta, record['text']))
-    return result
+    return [(row['time'], row.get('text', '')) for row in align_events(records, segments) if row['kind'] == 'danmaku']
 
 
 def detect_peaks(records, duration, percent=80, keywords=()):
@@ -81,23 +63,11 @@ def detect_peaks(records, duration, percent=80, keywords=()):
     return result
 
 
-class HighlightReader:
+class HighlightReader(ChatReader):
     """Each review has one reader; workers only read newly appended JSONL rows."""
-    def __init__(self):
-        self.offset = 0
-        self.records = []
-
-    def analyze(self, path, segments, duration, percent, keywords):
-        path = Path(path)
-        if path.stat().st_size < self.offset:
-            self.offset = 0
-            self.records.clear()
-        with path.open('rb') as handle:
-            handle.seek(self.offset)
-            while line := handle.readline():
-                if not line.endswith(b'\n'):
-                    break  # A live writer may not have finished this row.
-                self.offset = handle.tell()
-                record = json.loads(line)
-                self.records.append(record)
-        return detect_peaks(media_records(self.records, segments), duration, percent, keywords)
+    def analyze(self, path, segments, duration, percent, keywords, shift=0):
+        records = self.read(path)
+        events = align_events(records, segments)
+        result = detect_peaks([(row['time'] + shift, row.get('text', '')) for row in events if row['kind'] == 'danmaku'], duration, percent, keywords)
+        result['events'] = events
+        return result

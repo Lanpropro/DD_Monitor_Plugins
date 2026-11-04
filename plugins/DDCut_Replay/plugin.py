@@ -161,6 +161,8 @@ class DDCutReplay(api.Plugin):
             changed = True
             if job.lease:
                 self.service.release(job.lease)
+            if job.kind == 'export' and job.result:
+                self.hub.add_export(job)
             if job.state == 'done':
                 if job.kind == 'scan':
                     pending = set(self.service.options().get('pending_outputs', []))
@@ -177,9 +179,9 @@ class DDCutReplay(api.Plugin):
                     if self.workspace and self.workspace.isVisible() and self.workspace.pending_review == job.id:
                         self.workspace.review(entry)
                 elif job.kind == 'export':
-                    actual = job.result['actual_duration']
-                    self.hub.add_export(job)
-                    job.message = f"成品时长 {actual:.3f} 秒；方式 {job.result['mode']}；源 {job.result['source']}"
+                    outputs = job.result.get('outputs', [job.result])
+                    actual = sum(result['actual_duration'] for result in outputs)
+                    job.message = f"已生成 {len(outputs)} 个文件，总时长 {actual:.3f} 秒"
                     self.context.notify('切片已导出：' + job.output, on_click=self.open)
             elif job.state == 'failed':
                 self.context.notify(job.title + '失败：' + job.message[:240], kind='warning', on_click=self.open)

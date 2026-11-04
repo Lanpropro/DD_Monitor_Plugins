@@ -7,16 +7,20 @@ from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFrame, QLineEdit,
     QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
-    QListWidget, QListWidgetItem, QPushButton, QScrollArea, QScrollBar, QSizePolicy, QSlider, QSplitter, QStackedWidget, QTabWidget,
+    QListView, QListWidget, QListWidgetItem, QPushButton, QScrollArea, QScrollBar, QSizePolicy, QSlider, QSpinBox, QDoubleSpinBox, QSplitter, QStackedWidget, QTabWidget,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from ddm import theme
 
-from .media import ACTIVE, probe, scan_directory, prepare_snapshot, export_clip, thumbnail
+from .media import ACTIVE, probe, scan_directory, prepare_snapshot, export_clip, export_ranges, thumbnail
 from .hls import preview_options
 from .timeline import Timeline, TimeInput, timecode
 from .library_widgets import MediaCard, MediaGrid, media_type
 from .highlights import HighlightReader
+from .selections import restore_ranges, enabled_ranges
+from .chat import trim_events, write_json, write_ass
+from .chat_render import ReplayChat
+from .chat_model import ChatModel
 
 STATES = {'idle': '未录制', 'recording': '录制中', 'buffering': '缓存中',
           'stopping': '收尾中', 'reconnecting': '等待重连', 'queued': '等待中',
@@ -67,6 +71,19 @@ class Preview(QWidget):
         self.setAutoFillBackground(True)
         self.setAttribute(Qt.WA_NativeWindow)
         self.core = None
+        self.chat = ReplayChat(self)
+        self.chat_error = ''
+        self.chat_timer = QTimer(self)
+        self.chat_timer.setInterval(33)
+        self.chat_timer.timeout.connect(self.tick_chat)
+
+    def tick_chat(self):
+        if self.core is not None and self.isVisible():
+            try:
+                self.chat.update(self.position())
+                self.chat_error = ''
+            except Exception as error:
+                self.chat_error = str(error)
 
     def load(self, path):
         self.stop()
@@ -76,9 +93,12 @@ class Preview(QWidget):
         self.core = mpv.MPV(wid=str(int(self.winId())), mute=True, volume=50,
                             keep_open=True, **EMBEDDED_OPTIONS, **preview_options(path))
         self.core.play(self.source_url(path))
+        self.chat_timer.start()
 
     def stop(self):
+        self.chat_timer.stop()
         if self.core is not None:
+            self.chat.clear()
             self.core.terminate()
             self.core = None
 
@@ -169,7 +189,7 @@ class Workspace(QWidget):
             #replayReview QPushButton#PrimaryButton {{border-radius: 8px; background: #148cff;}}
             #replayReview QPushButton#PrimaryButton:disabled {{background: {theme.CONTENT_HOVER}; color: {theme.TEXT3};}}
             #replayReview QTabWidget::pane {{border: none; background: {panel};}}
-            #replayReview QListWidget#FollowList {{border-radius: 8px;}}
+            #replayReview QListWidget#FollowList, #replayReview QListView#FollowList {{border-radius: 8px;}}
             #replayWorkspace QTreeWidget {{
                 background: {theme.CONTENT}; color: {theme.TEXT1};
                 border: 1px solid {theme.BORDER}; border-radius: {theme.RADIUS_MD}px;
@@ -211,6 +231,7 @@ class Workspace(QWidget):
         ''')
         from PySide6.QtGui import QPalette
         palette = self.timeline.palette()
+        palette.setColor(QPalette.Text, theme.qcolor(theme.TEXT1))
         palette.setColor(QPalette.AlternateBase, theme.qcolor(theme.CONTENT_HOVER if theme.is_light() else '#0c1016'))
         palette.setColor(QPalette.Highlight, theme.qcolor('#148cff'))
         self.timeline.setPalette(palette)
@@ -354,6 +375,7 @@ class Workspace(QWidget):
         self.timeline = Timeline()
         self.timeline.seekRequested.connect(self.seek_position)
         self.timeline.selectionChanged.connect(self.set_selection)
+        self.timeline.rangeRequested.connect(self.select_range)
         middle_box.addWidget(self.timeline)
         row = QHBoxLayout()
         button('−', lambda: self.timeline.set_zoom(self.timeline.zoom / 2), row).setFixedWidth(40)
@@ -388,6 +410,23 @@ class Workspace(QWidget):
         inspector_box.setContentsMargins(4, 10, 4, 10)
         inspector_box.setSpacing(8)
         form = QFormLayout()
+        self.range_list = QListWidget()
+        self.range_list.setObjectName('FollowList')
+        self.range_list.setAccessibleName('切片选区列表')
+        self.range_list.setMinimumHeight(68)
+        self.range_list.setMaximumHeight(150)
+        self.range_list.currentRowChanged.connect(self.select_range)
+        self.range_list.itemChanged.connect(self.range_toggled)
+        inspector_box.addWidget(self.range_list)
+        row = QHBoxLayout()
+        button('新建选区', self.add_range, row)
+        button('删除', self.remove_range, row)
+        button('↑', lambda: self.move_range(-1), row).setFixedWidth(36)
+        button('↓', lambda: self.move_range(1), row).setFixedWidth(36)
+        inspector_box.addLayout(row)
+        self.ranges_all = QCheckBox('全选 / 启用全部选区')
+        self.ranges_all.clicked.connect(self.toggle_all_ranges)
+        inspector_box.addWidget(self.ranges_all)
         self.inpoint, self.outpoint = TimeInput(), TimeInput()
         for spin in (self.inpoint, self.outpoint):
             spin.setRange(0, 0)
@@ -404,6 +443,7 @@ class Workspace(QWidget):
         self.heat_heading = QLabel('亮点推荐')
         self.heat_heading.setObjectName('SettingsTitle')
         inspector_box.addWidget(self.heat_heading)
+        button('全部添加亮点', self.add_all_highlights, inspector_box)
         hint = QLabel('基于弹幕热度发现候选片段。每5秒统计30秒窗口，选择后请回看确认。')
         hint.setObjectName('SettingsHint')
         hint.setWordWrap(True)
@@ -433,6 +473,12 @@ class Workspace(QWidget):
         inspector_box.addWidget(self.heat_results)
         button('应用所选亮点为选区', self.apply_highlight, inspector_box)
         inspector_box.addWidget(QLabel('导出设置'))
+        self.export_scope = QComboBox()
+        self.export_scope.addItem('当前选区', 'current')
+        self.export_scope.addItem('启用选区：每段单独导出', 'separate')
+        self.export_scope.addItem('启用选区：按列表顺序拼接', 'merge')
+        self.export_scope.currentIndexChanged.connect(self.export_scope_changed)
+        inspector_box.addWidget(self.export_scope)
         self.mode = QComboBox()
         self.mode.addItem('快速复制 · 保留原编码', 'copy')
         self.mode.addItem('精确切片 · H.264 / AAC', 'precise')
@@ -470,6 +516,72 @@ class Workspace(QWidget):
         self.export_button.setObjectName('PrimaryButton')
         self.export_button.setProperty('updateAction', True)
         self.export_button.setEnabled(False)
+        chat_page = QWidget()
+        chat_box = QVBoxLayout(chat_page)
+        self.chat_enabled = QCheckBox('画面弹幕')
+        self.chat_enabled.setChecked(True)
+        self.chat_enabled.toggled.connect(self.save_chat_options)
+        chat_box.addWidget(self.chat_enabled)
+        form = QFormLayout()
+        self.chat_offset = QDoubleSpinBox()
+        self.chat_offset.setRange(-120, 120)
+        self.chat_offset.setDecimals(1)
+        self.chat_offset.setSuffix(' 秒')
+        self.chat_offset.setKeyboardTracking(False)
+        self.chat_offset.setToolTip('正值延后显示弹幕，负值提前；同时作用于热度、列表、回放和导出。')
+        self.chat_size = QSpinBox()
+        self.chat_size.setRange(18, 72)
+        self.chat_size.setValue(36)
+        self.chat_opacity = QSpinBox()
+        self.chat_opacity.setRange(10, 100)
+        self.chat_opacity.setValue(80)
+        self.chat_opacity.setSuffix('%')
+        for label, widget in [('时间偏移', self.chat_offset), ('字号（1080p）', self.chat_size), ('不透明度', self.chat_opacity)]:
+            widget.setMinimumHeight(theme.CONTROL_HEIGHT)
+            widget.valueChanged.connect(self.save_chat_options)
+            form.addRow(label, widget)
+        chat_box.addLayout(form)
+        self.chat_search = QLineEdit()
+        self.chat_search.setPlaceholderText('搜索弹幕 / SC / 发送者')
+        self.chat_search.textChanged.connect(self.filter_chat)
+        chat_box.addWidget(self.chat_search)
+        self.chat_kind = QComboBox()
+        for label, kind in [('全部弹幕', 'all'), ('普通弹幕', 'danmaku'), ('SC 醒目留言', 'super_chat')]:
+            self.chat_kind.addItem(label, kind)
+        self.chat_kind.currentIndexChanged.connect(self.filter_chat)
+        chat_box.addWidget(self.chat_kind)
+        self.chat_count = QLabel('暂无弹幕记录')
+        self.chat_count.setObjectName('SettingsHint')
+        self.chat_count.setWordWrap(True)
+        chat_box.addWidget(self.chat_count)
+        self.chat_model = ChatModel(self.preview.chat)
+        self.chat_list = QListView()
+        self.chat_list.setObjectName('FollowList')
+        self.chat_list.setAccessibleName('录像弹幕与醒目留言')
+        self.chat_list.setUniformItemSizes(True)
+        self.chat_list.setModel(self.chat_model)
+        self.chat_list.clicked.connect(self.seek_chat)
+        chat_box.addWidget(self.chat_list, 1)
+        self.chat_follow = QCheckBox('列表跟随播放')
+        self.chat_follow.setChecked(True)
+        chat_box.addWidget(self.chat_follow)
+        self.chat_scope = QComboBox()
+        self.chat_scope.addItem('导出整份录像弹幕', 'all')
+        self.chat_scope.addItem('导出当前选区弹幕', 'selection')
+        chat_box.addWidget(self.chat_scope)
+        row = QHBoxLayout()
+        button('导出 JSON', lambda: self.export_chat('json'), row)
+        button('导出 ASS', lambda: self.export_chat('ass'), row)
+        chat_box.addLayout(row)
+        tools.insertTab(1, chat_page, '弹幕')
+        self.playback_rate = QComboBox()
+        for rate in (.5, 1, 1.5, 2, 5):
+            self.playback_rate.addItem(f'{rate:g}倍', rate)
+        self.playback_rate.setCurrentIndex(1)
+        self.playback_rate.setAccessibleName('回看播放速度')
+        self.playback_rate.currentIndexChanged.connect(self.change_playback_rate)
+        row = middle_box.itemAt(1).layout()
+        row.insertWidget(row.count() - 1, self.playback_rate)
         split.addWidget(self.inspector)
         split.setSizes([800, 340])
         split.setStretchFactor(0, 1)
@@ -581,8 +693,11 @@ class Workspace(QWidget):
             except Exception as error:
                 self.heat_status.setText('弹幕分析失败：' + str(error))
                 return
-            options = (self.heat_threshold.value(), self.heat_keywords.text())
+            options = (self.heat_threshold.value(), self.heat_keywords.text(), self.chat_offset.value())
             if reader is self.heat_reader and options == self.heat_requested_options:
+                self.chat_model.events = result.get('events', [])
+                self.preview.chat.set_events(self.chat_model.events)
+                self.filter_chat()
                 self.timeline.heat_points = result['points']
                 self.timeline.heat_threshold = result['threshold']
                 self.timeline.update()
@@ -610,7 +725,7 @@ class Workspace(QWidget):
         except OSError as error:
             self.heat_status.setText('无法读取弹幕记录：' + str(error))
             return
-        options = (self.heat_threshold.value(), self.heat_keywords.text())
+        options = (self.heat_threshold.value(), self.heat_keywords.text(), self.chat_offset.value())
         signature = (path, info.st_size, info.st_mtime_ns, self.current['duration'], options)
         if signature == self.heat_signature:
             return
@@ -620,13 +735,13 @@ class Workspace(QWidget):
         keywords = options[1].replace('，', ',').split(',')
         self.heat_future = self.hub.pool.submit(self.heat_reader.analyze, path,
             list(self.current.get('segments', [])), self.current['duration'], options[0],
-            [word.strip() for word in keywords if word.strip()])
+            [word.strip() for word in keywords if word.strip()], options[2])
 
     def apply_highlight(self):
         item = self.heat_results.currentItem()
         if self.current and item is not None:
             peak = item.data(Qt.UserRole)
-            self.set_selection(peak['start'], min(self.current['duration'], peak['end']))
+            self.add_range(peak['start'], min(self.current['duration'], peak['end']))
             self.seek_position(peak['start'])
             self.report('已将推荐亮点设为选区；可调整入出点，再生成切片。')
 
@@ -888,6 +1003,7 @@ class Workspace(QWidget):
     def reload_preview(self, position, paused):
         muted = bool(self.preview.core.mute) if self.preview.core else True
         self.preview.load(self.current['path'])
+        self.change_playback_rate()
         self.loaded_duration = self.current['duration']
         self.preview.core.mute = muted
         self.preview.core.pause = True
@@ -959,6 +1075,9 @@ class Workspace(QWidget):
             self.load_entry(entry)
 
     def load_entry(self, entry):
+        sidecar = Path(entry['path']).with_suffix('.danmaku.json')
+        if not entry.get('danmaku_path') and sidecar.is_file():
+            entry['danmaku_path'] = str(sidecar)
         if entry.get('segments'):
             self.review(entry)
             return
@@ -999,6 +1118,20 @@ class Workspace(QWidget):
         self.timeline.set_duration(duration, reset=True)
         self.timeline.set_position(0)
         self.current = entry
+        self.mode.setCurrentIndex(1 if entry.get('danmaku_path') or self.export_scope.currentData() == 'merge' else 0)
+        restore_ranges(entry)
+        self.refresh_ranges()
+        self.preview.chat.set_events([])
+        self.chat_model.events = []
+        self.chat_model.filter()
+        for widget, value in [(self.chat_enabled, entry.get('chat_enabled', True)),
+                              (self.chat_offset, entry.get('danmaku_offset', 0)),
+                              (self.chat_size, entry.get('chat_size', 36)),
+                              (self.chat_opacity, entry.get('chat_opacity', 80))]:
+            widget.blockSignals(True)
+            widget.setChecked(value) if isinstance(widget, QCheckBox) else widget.setValue(value)
+            widget.blockSignals(False)
+        self.save_chat_options()
         if self.heat_future is not None:
             self.heat_future.cancel()
         self.heat_future = None
@@ -1028,40 +1161,223 @@ class Workspace(QWidget):
         self.preview.show()
         self.report('已打开回看；默认静音。时间轴使用媒体时间，断流间隔不计入时长。')
         self.guard(lambda: self.preview.load(entry['path']))
+        self.change_playback_rate()
         self.mute_button.setText('开启声音')
 
     def save_selection(self, *_):
         if not self.current:
             return
         start, end = self.inpoint.value(), self.outpoint.value()
+        ranges = self.current['ranges']
+        selected = self.current['selected_range']
+        if selected < 0 and (start or end):
+            ranges.append({'start': start, 'end': end, 'enabled': True})
+            self.current['selected_range'] = selected = len(ranges) - 1
+            self.refresh_ranges(update_selection=False)
+        if 0 <= selected < len(ranges):
+            ranges[selected].update(start=start, end=end)
+            self.range_list.blockSignals(True)
+            self.range_list.item(selected).setText(f'{selected + 1}. {clock(start)} → {clock(end)}')
+            self.range_list.blockSignals(False)
         self.current['selection'] = [start, end]
+        self.timeline.ranges = ranges
+        self.timeline.selected_range = selected
         self.timeline.set_selection(start, end)
-        valid = end > start
-        self.selection_label.setText(f'{clock(start)} → {clock(end)}\n选区 {max(0, end-start):.3f} 秒' if valid else '出点必须晚于入点')
-        self.export_button.setEnabled(valid)
+        valid = selected >= 0 and end > start
+        active = enabled_ranges(self.current)
+        all_valid = bool(active) and all(0 <= item['start'] < item['end'] <= self.current['duration'] for item in active)
+        total = sum(max(0, item['end'] - item['start']) for item in active)
+        self.selection_label.setText(f'当前 {clock(start)} → {clock(end)}\n启用 {len(active)}/{len(ranges)} 段 · 合计 {total:.3f} 秒')
+        self.export_button.setEnabled(valid if self.export_scope.currentData() == 'current' else all_valid)
         self.selection_button.setEnabled(valid)
         self.hub.save()
 
+    def refresh_ranges(self, *, update_selection=True):
+        if not self.current:
+            return
+        ranges = self.current['ranges']
+        selected = self.current['selected_range']
+        self.range_list.blockSignals(True)
+        self.range_list.clear()
+        for index, item in enumerate(ranges):
+            row = QListWidgetItem(f"{index + 1}. {clock(item['start'])} → {clock(item['end'])}")
+            row.setFlags(row.flags() | Qt.ItemIsUserCheckable)
+            row.setCheckState(Qt.Checked if item.get('enabled', True) else Qt.Unchecked)
+            self.range_list.addItem(row)
+        self.range_list.setCurrentRow(selected)
+        self.range_list.setFixedHeight(max(68, min(150, len(ranges) * 40 + 4)))
+        self.range_list.blockSignals(False)
+        self.ranges_all.blockSignals(True)
+        self.ranges_all.setChecked(bool(ranges) and all(item.get('enabled', True) for item in ranges))
+        self.ranges_all.blockSignals(False)
+        if update_selection:
+            self.select_range(selected)
+
+    def select_range(self, index):
+        if not self.current:
+            return
+        ranges = self.current['ranges']
+        index = index if 0 <= index < len(ranges) else -1
+        self.current['selected_range'] = index
+        self.range_list.blockSignals(True)
+        self.range_list.setCurrentRow(index)
+        self.range_list.blockSignals(False)
+        item = ranges[index] if index >= 0 else {'start': 0, 'end': 0}
+        for widget, value in ((self.inpoint, item['start']), (self.outpoint, item['end'])):
+            widget.blockSignals(True)
+            widget.setValue(value)
+            widget.blockSignals(False)
+        self.save_selection()
+
+    def add_range(self, start=None, end=None):
+        if not self.current or self.current['duration'] <= 0:
+            return
+        if start is None or isinstance(start, bool):
+            start = min(self.preview.position(), max(0, self.current['duration'] - 10))
+            end = min(self.current['duration'], start + 10)
+        start, end = max(0, float(start)), min(self.current['duration'], float(end))
+        if end <= start:
+            return
+        ranges = self.current['ranges']
+        ranges.append({'start': start, 'end': end, 'enabled': True})
+        self.current['selected_range'] = len(ranges) - 1
+        self.refresh_ranges()
+
+    def remove_range(self):
+        if self.current and self.current['selected_range'] >= 0:
+            self.current['ranges'].pop(self.current['selected_range'])
+            self.current['selected_range'] = min(self.current['selected_range'], len(self.current['ranges']) - 1)
+            self.refresh_ranges()
+
+    def move_range(self, direction):
+        if not self.current:
+            return
+        index = self.current['selected_range']
+        destination = index + direction
+        ranges = self.current['ranges']
+        if index >= 0 and 0 <= destination < len(ranges):
+            ranges[index], ranges[destination] = ranges[destination], ranges[index]
+            self.current['selected_range'] = destination
+            self.refresh_ranges()
+
+    def range_toggled(self, item):
+        if self.current:
+            self.current['ranges'][self.range_list.row(item)]['enabled'] = item.checkState() == Qt.Checked
+            self.refresh_ranges()
+
+    def toggle_all_ranges(self, checked):
+        if self.current:
+            for item in self.current['ranges']:
+                item['enabled'] = checked
+            self.refresh_ranges()
+
+    def add_all_highlights(self):
+        for index in range(self.heat_results.count()):
+            peak = self.heat_results.item(index).data(Qt.UserRole)
+            if self.current and not any(abs(item['start'] - peak['start']) < .001 and abs(item['end'] - peak['end']) < .001
+                                        for item in self.current['ranges']):
+                self.add_range(peak['start'], peak['end'])
+
+    def export_scope_changed(self, *_):
+        merge = self.export_scope.currentData() == 'merge'
+        self.mode.model().item(0).setEnabled(not merge)
+        if merge:
+            self.mode.setCurrentIndex(1)
+        if self.current:
+            self.save_selection()
+
+    def save_chat_options(self, *_):
+        renderer = self.preview.chat
+        renderer.enabled = self.chat_enabled.isChecked()
+        renderer.offset = self.chat_offset.value()
+        renderer.font_size = self.chat_size.value()
+        renderer.opacity = self.chat_opacity.value()
+        renderer.signature = None
+        renderer.frame = None
+        if self.current:
+            self.current.update(chat_enabled=renderer.enabled, danmaku_offset=renderer.offset,
+                                chat_size=renderer.font_size, chat_opacity=renderer.opacity)
+            self.hub.save()
+            self.heat_next_check = 0
+        if hasattr(self, 'chat_model'):
+            self.filter_chat()
+
+    def filter_chat(self, *_):
+        self.chat_model.filter(self.chat_search.text(), self.chat_kind.currentData(), self.chat_offset.value())
+        self.chat_count.setText(f'共 {len(self.chat_model.events)} 条 · 显示 {self.chat_model.rowCount()} 条'
+            if self.current and self.current.get('danmaku_path') else '没有弹幕记录；旧录像或原版单文件无法补回。')
+
+    def seek_chat(self, index):
+        event = index.data(Qt.UserRole)
+        if event:
+            self.seek_position(event['time'] + self.chat_offset.value())
+
+    def export_chat(self, extension):
+        if not self.current or not self.current.get('danmaku_path'):
+            self.report('这份录像没有弹幕记录。')
+            return
+        start, end = (self.inpoint.value(), self.outpoint.value()) if self.chat_scope.currentData() == 'selection' else (0, self.current['duration'])
+        if end <= start:
+            self.report('请先选择有效的时间范围。')
+            return
+        target, _ = QFileDialog.getSaveFileName(self, '导出弹幕（使用新文件名）',
+            str(Path(self.current['path']).with_suffix('.danmaku.json' if extension == 'json' else '.ass')), f'弹幕 (*.{extension})')
+        if not target:
+            return
+        if Path(target).suffix.lower() != '.' + extension:
+            target += '.' + extension
+        def save():
+            if Path(target).exists():
+                raise FileExistsError('目标已存在，请使用新文件名')
+            events = trim_events(self.chat_model.events, start, end, shift=self.chat_offset.value())
+            if extension == 'json':
+                write_json(target, events)
+            else:
+                write_ass(target, events, font_size=self.chat_size.value(), opacity=self.chat_opacity.value())
+            self.report('弹幕已导出：' + target)
+        self.guard(save)
+
+    def change_playback_rate(self, *_):
+        if self.preview.core is not None:
+            self.preview.core.speed = self.playback_rate.currentData()
+
     def mode_changed(self, *_):
-        self.mode_help.setText('保留编码，输出 MKV。起止可能按关键帧扩展，成品时长可能超过选区。'
+        self.mode_help.setText('保留编码，输出 MKV。起止可能按关键帧扩展，成品时长可能超过选区；侧车弹幕按请求选区裁剪，可能与视频偏移，需同步时请选择精确切片。'
             if self.mode.currentData() == 'copy' else '输出 MP4，按选区重编码为 H.264/AAC；需要更多时间，画质可能变化。')
 
     def export(self):
         if not self.current:
             return
         mode = self.mode.currentData()
+        scope = self.export_scope.currentData()
         suffix = '.mkv' if mode == 'copy' else '.mp4'
         name = Path(self.filename.text().strip() or 'clip').stem + suffix
         folder = Path(self.current['path']).parent
+        if scope == 'separate':
+            destination = QFileDialog.getExistingDirectory(self, '每个启用选区导出一个文件', str(folder))
+            if not destination:
+                return
+            targets = [str(Path(destination) / f'{Path(name).stem}-{index + 1:03}{suffix}') for index, _ in enumerate(enabled_ranges(self.current))]
+            def batch():
+                self.hub.submit('批量导出：' + self.current['title'], 'export', export_ranges,
+                    self.service.options()['ffmpeg'], dict(self.current), enabled_ranges(self.current), mode, targets, self.hub.root / 'work')
+                self.toggle_tasks(True)
+            self.guard(batch)
+            return
         target, _ = QFileDialog.getSaveFileName(self, '导出选区（使用新文件名）', str(folder / name), f'视频 (*{suffix})')
         if not target:
             return
         if Path(target).suffix.lower() != suffix:
             target += suffix
         def submit():
-            job = self.hub.submit('导出：' + self.current['title'], 'export', export_clip,
-                self.service.options()['ffmpeg'], dict(self.current), self.inpoint.value(),
-                self.outpoint.value(), mode, target, self.hub.root / 'work')
+            if scope == 'merge':
+                job = self.hub.submit('拼接导出：' + self.current['title'], 'export', export_ranges,
+                    self.service.options()['ffmpeg'], dict(self.current), enabled_ranges(self.current), mode,
+                    [target], self.hub.root / 'work', True)
+            else:
+                job = self.hub.submit('导出：' + self.current['title'], 'export', export_clip,
+                    self.service.options()['ffmpeg'], dict(self.current), self.inpoint.value(),
+                    self.outpoint.value(), mode, target, self.hub.root / 'work')
             self.toggle_tasks(True)
             self.report('导出已排队：' + job.title)
         self.guard(submit)
@@ -1122,6 +1438,13 @@ class Workspace(QWidget):
                 self.preview.seek(self.outpoint.value())
                 self.selection_playing = False
             self.timeline.set_position(position)
+            if self.chat_follow.isChecked():
+                index = self.chat_model.index_at(position)
+                if index.isValid() and index != self.chat_list.currentIndex():
+                    self.chat_list.setCurrentIndex(index)
+                    self.chat_list.scrollTo(index, QAbstractItemView.PositionAtCenter)
+            if self.preview.chat_error:
+                self.chat_count.setText('画面弹幕：' + self.preview.chat_error)
             if self.preview.core:
                 self.play_button.setText('播放' if self.preview.core.pause else '暂停')
             self.position_label.setText(clock(position) + ' / ' + clock(self.current['duration']))
@@ -1177,4 +1500,5 @@ class Workspace(QWidget):
         super().showEvent(event)
         if self.current and self.preview.core is None:
             self.guard(lambda: self.preview.load(self.current['path']))
+            self.change_playback_rate()
             self.mute_button.setText('开启声音')
