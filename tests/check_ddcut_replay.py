@@ -188,7 +188,8 @@ class DDCutReplayTests(unittest.TestCase):
                 self.assertGreaterEqual(row.height(), 40)
                 self.assertEqual(view.sources.font().pixelSize(), ui.theme.FONT_BODY)
                 self.assertEqual(view.back_button.font().pixelSize(), reference.font().pixelSize())
-                self.assertGreater(view.sources.columnWidth(0), view.sources.columnWidth(1))
+                self.assertIsNotNone(view.sources.itemWidget(first, 0))
+                self.assertIsNotNone(view.sources.itemWidget(first, 1))
                 self.assertGreaterEqual(view.back_button.height(), ui.theme.CONTROL_HEIGHT)
                 QTest.mouseClick(view.sources.viewport(), Qt.LeftButton, pos=QPoint(20, row.center().y()))
                 self.assertTrue(first.isSelected())
@@ -250,7 +251,7 @@ class DDCutReplayTests(unittest.TestCase):
             plugin.workspace = view
             plugin.hub.add_entry(self.entry)
             view.show()
-            self.assertEqual(view.tabs.count(), 2)
+            self.assertEqual(view.tabs.count(), 1)
             self.assertEqual(view.tabs.currentWidget(), view.library_page)
             self.assertEqual(view.category.currentData(), 'live')
             self.assertEqual(view.sources.topLevelItemCount(), 1)
@@ -321,7 +322,7 @@ class DDCutReplayTests(unittest.TestCase):
                 APP.processEvents()
                 self.assertLessEqual(view.minimumSizeHint().width(), size[0])
                 view.toggle_tasks(False)
-                self.assertFalse(view.tools.isHidden())
+                self.assertEqual(view.tools.isHidden(), not view.edit_button.isChecked())
             # Selection handles must update the time inputs using mouse drags.
             view.set_selection(.5, 2)
             timeline = view.timeline

@@ -5,16 +5,17 @@ import time
 
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
-from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFrame, QLineEdit,
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFrame, QLineEdit,
     QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
     QListWidget, QPushButton, QScrollArea, QScrollBar, QSizePolicy, QSplitter, QStackedWidget, QTabWidget,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from ddm import theme
 
-from .media import ACTIVE, probe, scan_directory, prepare_snapshot, export_clip
+from .media import ACTIVE, probe, scan_directory, prepare_snapshot, export_clip, thumbnail
 from .hls import preview_options
 from .timeline import Timeline, TimeInput, timecode
+from .library_widgets import IdentityCell, date_range
 
 STATES = {'idle': '未录制', 'recording': '录制中', 'buffering': '缓存中',
           'stopping': '收尾中', 'reconnecting': '等待重连', 'queued': '等待中',
@@ -119,11 +120,17 @@ class Workspace(QWidget):
         button('录制设置', self.settings, header)
         self.task_button = button('后台任务', self.toggle_tasks, header)
         self.task_button.setCheckable(True)
+        self.capture_switch = QCheckBox('仅录制切片素材')
+        self.capture_switch.setChecked(getattr(owner, 'capture_mode', 'clip') == 'clip')
+        self.capture_switch.setToolTip('开启：只保存可边录边看的切片素材；关闭：使用本体完整录像与即时重放。停止当前录制和缓存后可切换。')
+        self.capture_switch.toggled.connect(self.change_capture_mode)
+        header.insertWidget(1, self.capture_switch)
         root.addLayout(header)
         self.content = QSplitter(Qt.Horizontal)
         root.addWidget(self.content, 1)
         self.tabs = QTabWidget()
         self.tabs.setObjectName('PluginTabs')
+        self.tabs.tabBar().hide()
         self.content.addWidget(self.tabs)
         self.build_library()
         self.build_review()
@@ -157,6 +164,7 @@ class Workspace(QWidget):
                 height: 44px; padding: 0 12px; color: {theme.TEXT2};
                 border-bottom: 1px solid {theme.BORDER};
             }}
+            #replayWorkspace QTreeWidget#replayMediaList::item {{height: 96px;}}
             #replayWorkspace QTreeWidget::item:hover {{background: {theme.CONTENT_HOVER}; color: {theme.TEXT1};}}
             #replayWorkspace QTreeWidget::item:selected {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}
             #replayWorkspace QHeaderView::section {{
@@ -190,7 +198,7 @@ class Workspace(QWidget):
         return page, layout
 
     def build_library(self):
-        self.library_page, layout = self.page('录像库')
+        self.library_page, layout = self.page('录像与回看')
         filters = QFrame()
         filters.setObjectName('NotificationSettingsGroup')
         row = QHBoxLayout(filters)
@@ -209,14 +217,29 @@ class Workspace(QWidget):
         button('导入录像', self.import_media, row)
         button('刷新', self.refresh_all, row)
         layout.addWidget(filters)
+        self.library_review = QSplitter(Qt.Horizontal)
+        layout.addWidget(self.library_review, 1)
+        self.listing = QWidget()
+        self.listing.setMinimumWidth(300)
+        list_box = QVBoxLayout(self.listing)
+        list_box.setContentsMargins(0, 0, 0, 0)
+        self.library_review.addWidget(self.listing)
         self.library_stack = QStackedWidget()
-        layout.addWidget(self.library_stack, 1)
-        self.sources = table(['房间', '状态', '开始时间'])
+        list_box.addWidget(self.library_stack, 1)
+        self.sources = table(['直播内容', '平台 / 主播', '状态', '录制时间', '可读时长'])
         self.sources.setAccessibleName('正在录制的房间')
         self.sources.itemDoubleClicked.connect(lambda *_: self.prepare_review())
         self.library_stack.addWidget(self.sources)
-        self.library = table(['录像', '日期', '时长', '位置'])
+        self.library = table(['录像内容', '平台 / 主播', '类型', '录制时间', '时长'])
         self.library.setAccessibleName('本地录像与切片')
+        for tree in (self.sources, self.library):
+            tree.setObjectName('replayMediaList')
+            tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
+            tree.setColumnWidth(0, 400)
+            tree.setColumnWidth(1, 230)
+            tree.setColumnWidth(2, 110)
+            tree.setColumnWidth(3, 200)
+            tree.setColumnWidth(4, 120)
         self.library.itemDoubleClicked.connect(lambda *_: self.open_selected())
         self.library_stack.addWidget(self.library)
         empty = QWidget()
@@ -249,12 +272,17 @@ class Workspace(QWidget):
         self.open_button.setProperty('updateAction', True)
         self.folder_button = button('打开所在目录', self.open_library_folder, row)
         row.addStretch()
-        layout.addLayout(row)
+        list_box.addLayout(row)
         self.sources.itemSelectionChanged.connect(self.update_library_actions)
         self.library.itemSelectionChanged.connect(self.update_library_actions)
 
     def build_review(self):
-        self.review_page, layout = self.page('回看与切片')
+        self.review_page = self.library_page
+        self.review_panel = QWidget()
+        layout = QVBoxLayout(self.review_panel)
+        layout.setContentsMargins(8, 0, 0, 0)
+        self.library_review.addWidget(self.review_panel)
+        self.review_panel.hide()
         row = QHBoxLayout()
         self.review_title = QLabel('尚未打开录像')
         self.review_title.setMinimumWidth(0)
@@ -262,7 +290,9 @@ class Workspace(QWidget):
         row.addWidget(self.review_title, 1)
         self.review_state = QLabel('请先从录像库选择素材')
         row.addWidget(self.review_state)
-        button('切换录像', lambda: self.tabs.setCurrentWidget(self.library_page), row)
+        button('录像列表', self.show_library, row)
+        self.edit_button = button('制作切片', self.toggle_editor, row)
+        self.edit_button.setCheckable(True)
         layout.addLayout(row)
         split = QSplitter(Qt.Horizontal)
         layout.addWidget(split, 1)
@@ -303,6 +333,7 @@ class Workspace(QWidget):
         split.addWidget(middle)
         self.tools = tools = QTabWidget()
         tools.setObjectName('PluginTabs')
+        tools.hide()
         tools.setMinimumWidth(300)
         inspector = QWidget()
         inspector_box = QVBoxLayout(inspector)
@@ -362,6 +393,7 @@ class Workspace(QWidget):
         split.addWidget(tools)
         split.setSizes([680, 300])
         split.setStretchFactor(0, 1)
+        self.library_review.splitterMoved.connect(lambda *_: self.update_media_layout())
         self.mode_changed()
         for key, callback in [('Space', self.toggle_play), ('I', lambda: self.inpoint.setValue(self.preview.position())),
                               ('O', lambda: self.outpoint.setValue(self.preview.position())), ('M', self.add_marker)]:
@@ -397,7 +429,7 @@ class Workspace(QWidget):
             checked = self.task_panel.isHidden()
         self.task_panel.setVisible(checked)
         self.task_button.setChecked(checked)
-        self.tools.setVisible(not checked or self.width() >= 1100)
+        self.tools.setVisible(self.edit_button.isChecked() and not checked)
         if checked:
             self.refresh_tasks()
             self.content.setSizes([max(480, self.width() - 350), 320])
@@ -405,7 +437,55 @@ class Workspace(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if hasattr(self, 'task_panel'):
-            self.tools.setVisible(self.task_panel.isHidden() or self.width() >= 1100)
+            self.listing.setVisible(not (self.edit_button.isChecked() and self.width() < 1400))
+            self.update_media_layout()
+
+    def change_capture_mode(self, checked):
+        try:
+            self.owner.set_capture_mode('clip' if checked else 'original')
+        except Exception as error:
+            self.capture_switch.blockSignals(True)
+            self.capture_switch.setChecked(getattr(self.owner, 'capture_mode', 'clip') == 'clip')
+            self.capture_switch.blockSignals(False)
+            self.report(error)
+        else:
+            self.report('录制方式：仅切片素材' if checked else '录制方式：原版完整录像与即时重放')
+
+    def show_library(self):
+        self.review_panel.hide()
+        self.listing.show()
+        self.edit_button.setChecked(False)
+        self.tools.hide()
+        self.update_media_layout()
+        if self.preview.core:
+            self.preview.core.pause = True
+
+    def toggle_editor(self, checked):
+        self.tools.setVisible(checked and self.task_panel.isHidden())
+        self.listing.setVisible(not checked or self.width() >= 1400)
+
+    def fill_identity(self, tree, item, entry):
+        item.setData(0, Qt.UserRole + 1, item.text(0) + ' ' + item.text(1))
+        item.setData(0, Qt.UserRole + 2, entry)
+        item.setText(0, '')
+        item.setText(1, '')
+        compact = getattr(self, '_media_compact', False)
+        tree.setItemWidget(item, 0, IdentityCell(entry, compact=compact))
+        tree.setItemWidget(item, 1, IdentityCell(entry, author=True))
+
+    def update_media_layout(self):
+        compact = not self.review_panel.isHidden() and self.listing.width() < 850
+        if getattr(self, '_media_compact', None) == compact:
+            return
+        self._media_compact = compact
+        for tree in (self.sources, self.library):
+            for column in range(1, tree.columnCount()):
+                tree.setColumnHidden(column, compact)
+            for index in range(tree.topLevelItemCount()):
+                item = tree.topLevelItem(index)
+                entry = item.data(0, Qt.UserRole + 2)
+                if entry:
+                    tree.setItemWidget(item, 0, IdentityCell(entry, compact=compact))
 
     def refresh_all(self):
         self.refresh_sources()
@@ -418,7 +498,8 @@ class Workspace(QWidget):
         visible = 0
         for index in range(tree.topLevelItemCount()):
             item = tree.topLevelItem(index)
-            match = query in ' '.join(item.text(col) for col in range(tree.columnCount())).casefold()
+            content = str(item.data(0, Qt.UserRole + 1) or '') + ' ' + ' '.join(item.text(col) for col in range(tree.columnCount()))
+            match = query in content.casefold()
             item.setHidden(not match)
             visible += match
         kind = self.category.currentData()
@@ -493,22 +574,33 @@ class Workspace(QWidget):
             selected_id = selected.data(0, Qt.UserRole) if selected else ''
             data = self.service.sources()
             self.sources_data = {item['source_id']: item for item in data}
+            self.capture_switch.setEnabled(not any(item['state'] != 'idle' for item in data))
+            if hasattr(self.service, 'options'):
+                pending = set(self.service.options().get('pending_outputs', []))
+                if getattr(self, '_pending_outputs', set()) - pending:
+                    self.scan()
+                self._pending_outputs = pending
             self.active_paths = set()
             self.sources.clear()
             for entry in data:
                 if entry['state'] not in ('recording', 'reconnecting', 'stopping'):
                     continue
+                info = {}
                 if hasattr(self.service, 'live_recording'):
                     try:
-                        self.active_paths.add(self.service.live_recording(entry['source_id'], entry['session_id'])['path'])
+                        info = self.service.live_recording(entry['source_id'], entry['session_id'])
+                        self.active_paths.add(info['path'])
+                        self.hub.add_entry(info)
                     except RuntimeError:
                         pass  # The first segment may still be sealing.
                 room = entry['room']
-                started = datetime.fromtimestamp(entry['created_at']).strftime('%H:%M:%S') if entry['created_at'] else '—'
-                item = QTreeWidgetItem([str(room.get('uname') or room.get('room_id')),
-                                       STATES[entry['state']], started])
+                identity = {**info, 'room': room, 'title': room.get('title') or room.get('uname') or '直播', 'created_at': entry['created_at']}
+                search = ' '.join(str(room.get(key) or '') for key in ('platform', 'uname', 'title', 'room_id'))
+                item = QTreeWidgetItem([search, str(room.get('uname') or ''), STATES[entry['state']],
+                                       date_range(identity), clock(info['duration']) if info else '等待首段'])
                 item.setData(0, Qt.UserRole, entry['source_id'])
                 self.sources.addTopLevelItem(item)
+                self.fill_identity(self.sources, item, identity)
                 if entry['source_id'] == selected_id:
                     self.sources.setCurrentItem(item)
             if self.sources.currentItem() is None and self.sources.topLevelItemCount():
@@ -538,6 +630,9 @@ class Workspace(QWidget):
         entry = self.source()
         if not entry:
             return
+        if getattr(self.owner, 'capture_mode', 'clip') == 'original':
+            self.report('原版录制中；停止后可回看完整录像。')
+            return
         if hasattr(self.service, 'live_recording'):
             self.open_recording(entry)
             return
@@ -558,11 +653,17 @@ class Workspace(QWidget):
 
     def open_current_recording(self):
         entry = self.source() if self.sources.topLevelItemCount() else None
+        if entry is not None and getattr(self.owner, 'capture_mode', 'clip') == 'original':
+            self.report('原版录制中；停止后可在本页回看完整录像。')
+            return
         if entry is not None:
             if self.live_source != (entry['source_id'], entry['session_id']):
                 self.open_recording(entry)
             else:
-                self.tabs.setCurrentWidget(self.review_page)
+                self.tabs.setCurrentWidget(self.library_page)
+                self.review_panel.show()
+                self.listing.show()
+                self.update_media_layout()
         elif self.current is None:
             self.tabs.setCurrentWidget(self.library_page)
 
@@ -607,7 +708,7 @@ class Workspace(QWidget):
             self.review_state.setText('本段录制已保存')
             self.report('本段录制已保存。可从录像库打开正在录制的新分段。')
             return
-        if info['duration'] > self.current['duration']:
+        if info['duration'] > self.timeline.duration or info.get('ended_at'):
             self.current.update(info)
             for spin in (self.inpoint, self.outpoint):
                 spin.setMaximum(info['duration'])
@@ -667,11 +768,15 @@ class Workspace(QWidget):
         for entry in self.hub.entries:
             if (entry.get('kind') == 'clip') != (kind == 'clip') or entry['path'] in getattr(self, 'active_paths', set()):
                 continue
-            date = datetime.fromtimestamp(entry.get('created_at', 0)).strftime('%m-%d %H:%M')
-            item = QTreeWidgetItem([entry['title'], date,
-                                   clock(entry['duration']) if entry.get('duration') else '待探测', entry['path']])
+            room = entry.get('room') or {}
+            title = entry['title'] + ' ' + ' '.join(str(room.get(key) or '') for key in ('platform', 'uname', 'title', 'room_id'))
+            item = QTreeWidgetItem([title, str(room.get('uname') or '本地视频'),
+                '切片' if entry.get('kind') == 'clip' else '录像', date_range(entry),
+                clock(entry['duration']) if entry.get('duration') else '待探测'])
+            item.setToolTip(0, entry['path'])
             item.setData(0, Qt.UserRole, entry['path'])
             self.library.addTopLevelItem(item)
+            self.fill_identity(self.library, item, entry)
             if entry['path'] == selected_path:
                 self.library.setCurrentItem(item)
         self.filter_library()
@@ -703,7 +808,10 @@ class Workspace(QWidget):
             ffmpeg = self.service.options()['ffmpeg']
 
             def inspect(job):
-                return {**entry, **probe(job, ffmpeg, entry['path'], self.hub.root / 'work')}
+                info = {**entry, **probe(job, ffmpeg, entry['path'], self.hub.root / 'work')}
+                if not entry.get('cover_path'):
+                    info['cover_path'] = thumbnail(job, ffmpeg, entry['path'], self.hub.root / 'thumbnails')
+                return info
 
             job = self.hub.submit('打开：' + entry['title'], 'import', inspect)
             self.pending_review = job.id
@@ -735,7 +843,11 @@ class Workspace(QWidget):
         self.position_label.setText(clock(0) + ' / ' + clock(duration))
         self.refresh_markers()
         self.save_selection()
-        self.tabs.setCurrentWidget(self.review_page)
+        self.tabs.setCurrentWidget(self.library_page)
+        self.review_panel.show()
+        self.listing.show()
+        self.library_review.setSizes([380, max(520, self.width() - 420)])
+        self.update_media_layout()
         self.preview.show()
         self.report('已打开回看；默认静音。时间轴使用媒体时间，断流间隔不计入时长。')
         self.guard(lambda: self.preview.load(entry['path']))

@@ -105,6 +105,7 @@ class RecordingTests(unittest.TestCase):
                     with patch.object(module.config, 'data_root', return_value=str(root / fmt)), \
                          patch('ddm.recording.input_args', side_effect=lambda url, headers: ['-re', *input_args(url, headers)]):
                         plugin.on_load(context)
+                        plugin.set_capture_mode('clip')
                         try:
                             # This is the same control method wired to the main
                             # window's original tile recording signal.
@@ -166,11 +167,8 @@ class RecordingTests(unittest.TestCase):
                                     self.assertAlmostEqual(first_clip.result['actual_duration'], 1.5, delta=.1)
                                 self.assertIsNone(session.process.poll())
                                 host.settings['recording_replay_enabled'] = True
-                                self.assertTrue(host.recorder.save_replay(tile))
-                                wait_for(lambda: not host.recorder.exports)
-                                replays = list((root / fmt / 'replays').glob('*.' + session.extension))
-                                self.assertTrue(replays)
-                                self.assertGreater(media.probe(media.Job('probe', 'test'), FFMPEG, replays[0], root / 'work')['duration'], 1)
+                                self.assertFalse(host.recorder.save_replay(tile))
+                                self.assertFalse(list((root / fmt / 'replays').glob('*')))
                                 if fmt == 'av1':
                                     snapshot = context.recording.snapshot(str(id(tile)), session.session_id)
                                     snap_job = plugin.hub.submit('HLS snapshot', 'snapshot', media.prepare_snapshot,
@@ -192,11 +190,8 @@ class RecordingTests(unittest.TestCase):
                                     self.assertIsNone(view.live_source)
                                     self.assertEqual(view.current['path'], old_path)
                                     self.assertTrue(json.loads(Path(old_path).with_name('recording.json').read_text(encoding='utf-8'))['complete'])
-                                    replay_before = set((root / fmt / 'replays').glob('*.' + session.extension))
-                                    self.assertTrue(host.recorder.save_replay(tile))
-                                    wait_for(lambda: not host.recorder.exports)
-                                    combined = (set((root / fmt / 'replays').glob('*.' + session.extension)) - replay_before).pop()
-                                    self.assertGreater(media.probe(media.Job('probe', 'test'), FFMPEG, combined, root / 'work')['duration'], first['duration'] + 1)
+                                    self.assertFalse(host.recorder.save_replay(tile))
+                                    self.assertFalse(list((root / fmt / 'replays').glob('*')))
                             plugin.on_unload()
                             self.assertIs(host.recorder.session_factory, RecordingSession)
                             self.assertFalse(session.stopping)

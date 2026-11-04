@@ -28,6 +28,7 @@ class DDCutReplay(api.Plugin):
         self.entry = self.action = None
         self.preview_server = None
         self._ticks = 0
+        self.capture_mode = 'original'
 
     def on_load(self, context):
         self.context = context
@@ -36,8 +37,6 @@ class DDCutReplay(api.Plugin):
         self.service = getattr(context, 'recording', None)
         if self.service is not None and self.service.api_version != 1:
             self.service = None
-        if self.service is not None and hasattr(self.service, 'register_backend'):
-            self.service.register_backend(ReplayRecordingSession)
         action = self.action = QAction('录制切片', context.window)
         action.setCheckable(True)
         action.setToolTip('录制切片：回看正在录制的内容、时间轴与快速切片（Ctrl+Shift+R）')
@@ -74,10 +73,27 @@ class DDCutReplay(api.Plugin):
         if self.service is not None:
             self.preview_server = ArchiveServer()
             self.hub = TaskHub(Path(config.data_root()) / 'ddcut_replay')
+            self.capture_mode = self.hub.preferences.get('capture_mode', 'original')
+            if hasattr(self.service, 'register_backend'):
+                if self.capture_mode == 'original':
+                    self.service.register_backend(ReplayRecordingSession, enabled=False)
+                else:
+                    self.service.register_backend(ReplayRecordingSession)
             self.timer = QTimer(action)
             self.timer.setInterval(250)
             self.timer.timeout.connect(self.poll)
             self.timer.start()
+
+    def set_capture_mode(self, mode):
+        if mode not in ('clip', 'original'):
+            raise ValueError('未知录制方式')
+        setter = getattr(self.service, 'set_backend_enabled', None)
+        if setter is None:
+            raise RuntimeError('请更新配套本体，以支持互斥录制方式')
+        setter(mode == 'clip')
+        self.capture_mode = mode
+        self.hub.preferences['capture_mode'] = mode
+        self.hub.save()
 
     def open(self, *_):
         if self.service is None:
@@ -96,6 +112,7 @@ class DDCutReplay(api.Plugin):
         if show(self.workspace):
             self.action.setChecked(True)
             self.workspace.refresh_sources()
+            self.workspace.scan()
             self.workspace.open_current_recording()
         else:
             self.action.setChecked(False)

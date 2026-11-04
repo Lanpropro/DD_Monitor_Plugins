@@ -5,14 +5,19 @@ Implementation uses the bundled FFmpeg CLI, libmpv and a loopback archive
 reader. Existing EDL archives remain readable through their metadata.
 """
 from datetime import datetime
+import time
 import json
 from pathlib import Path
 
 from ddm.recording import RecordingSession, safe_name
+from ddm import images
+from ddm.room_artwork import room_platform
+from ddm.follow_folders import PLATFORM_NAMES
 from .hls import input_options, read_segments, write_playlist
 
 
 class ReplayRecordingSession(RecordingSession):
+    supports_replay = False
     def __init__(self, tile, settings, recording, folder, video_codec=''):
         # HLS storage follows the source codec. AVC/HEVC use TS; the host's
         # existing AV1 compatibility rule selects MP4, emitted here as fMP4.
@@ -25,11 +30,32 @@ class ReplayRecordingSession(RecordingSession):
         self._segments = []
         self._saved = False
         self.review_error = ''
+        self._artwork = {}
+
+    def recording_message(self, event, path=None):
+        return {'start': f'{self.name} 已开始录制切片素材',
+                'resume': f'{self.name} 直播源已更新，切片素材继续录制',
+                'saved': f'已保存切片素材：{path}'}[event]
 
     def parts_directory(self):
         if self._archive is None or self._saved:
             stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-            self._archive = self.folder / 'DDCut_Replay' / f'{safe_name(self.name)}_{stamp}_{self.session_id[:8]}_{self.chunk}'
+            platform = room_platform(self.room)
+            parts = [PLATFORM_NAMES.get(platform, platform or '直播'), self.name[:24],
+                     str(self.room.get('title') or '未命名直播')[:32], self.room_id[:24],
+                     stamp, self.session_id[:8], str(self.chunk)]
+            self._playlist_name = '_'.join(safe_name(part) for part in parts[:4]) + '_' + stamp + '.m3u8'
+            self._archive = self.folder / 'DDCut_Replay' / f'{safe_name(self.name)[:24]}_{stamp}_{self.session_id[:8]}_{self.chunk}'
+            self._archive.mkdir(parents=True, exist_ok=True)
+            self._archive_started = time.time()
+            cover = images.load_cached_image(self.room.get('cover_url', ''), 'covers') or images.load_room_cover(self.room_id)
+            avatar = images.load_cached_avatar(self.room.get('face', '')) or images.load_room_avatar(self.room_id)
+            self._artwork = {}
+            for key, picture in [('cover_path', cover), ('avatar_path', avatar)]:
+                if picture is not None:
+                    target = self._archive / (key + '.png')
+                    if picture.save(str(target)):
+                        self._artwork[key] = str(target)
             self._lists = []
             self._stamp = None
             self._info = None
@@ -69,10 +95,10 @@ class ReplayRecordingSession(RecordingSession):
             if not segments:
                 return
             self._segments = segments
-            playlist = self._archive / 'playlist.m3u8'
+            playlist = self._archive / self._playlist_name
             write_playlist(playlist, segments, complete=False)
-            self._info = {'path': str(playlist), 'title': self.name, 'room': dict(self.room),
-                'session_id': self.session_id, 'created_at': self.created_at,
+            self._info = {'path': str(playlist), 'title': self.room.get('title') or self.name, 'room': dict(self.room), **self._artwork,
+                'session_id': self.session_id, 'created_at': self._archive_started,
                 'source_created_at': self.created_at, 'kind': 'recording', 'index_format': 'hls',
                 'duration': sum(s['duration'] for s in segments), 'segments': segments,
                 'format': 'fmp4' if self.extension == 'mp4' else 'ts', 'video_codec': self.video_codec}
@@ -87,6 +113,8 @@ class ReplayRecordingSession(RecordingSession):
     def _write_metadata(self, *, complete):
         path = self._archive / 'recording.json'
         temporary = path.with_suffix('.json.tmp')
+        if complete:
+            self._info['ended_at'] = time.time()
         temporary.write_text(json.dumps({**self._info, 'recording': self.recording,
             'complete': complete}, ensure_ascii=False), encoding='utf-8')
         temporary.replace(path)

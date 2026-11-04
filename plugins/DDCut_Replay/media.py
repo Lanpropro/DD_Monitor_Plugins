@@ -129,8 +129,14 @@ def scan_directory(job, directory):
             check_cancel(job)
             if path.is_file() and path.suffix.lower() in MEDIA_SUFFIXES and '.partial.' not in path.name:
                 info = path.stat()
-                result.append({'path': str(path.resolve()), 'title': path.stem,
-                               'created_at': info.st_mtime, 'size': info.st_size})
+                entry = {'path': str(path.resolve()), 'title': path.stem, 'created_at': info.st_mtime, 'size': info.st_size}
+                metadata = path.with_suffix(path.suffix + '.recording.json')
+                if metadata.is_file():
+                    try:
+                        entry.update(json.loads(metadata.read_text(encoding='utf-8')))
+                    except (OSError, ValueError):
+                        pass
+                result.append(entry)
     archives = root / 'DDCut_Replay'
     if archives.is_dir():
         for metadata in archives.glob('*/recording.json'):
@@ -142,6 +148,15 @@ def scan_directory(job, directory):
             except (OSError, ValueError, KeyError):
                 continue
     return sorted(result, key=lambda entry: entry['created_at'], reverse=True)
+
+
+def thumbnail(job, ffmpeg, path, directory):
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / (job.id + '.png')
+    run_process(job, [ffmpeg, '-y', '-hide_banner', '-loglevel', 'error', '-i', str(path),
+        '-frames:v', '1', '-vf', 'scale=320:-2', str(target)], directory)
+    return str(target)
 
 
 def prepare_snapshot(job, ffmpeg, snapshot, destination, work):
@@ -260,6 +275,7 @@ def export_clip(job, ffmpeg, source, start, end, mode, target, work):
         return {'requested_start': start, 'requested_end': end,
                 'actual_duration': actual['duration'], 'mode': mode,
                 'actual_start': start if mode == 'precise' else None,
+                **{key: source[key] for key in ('cover_path', 'avatar_path') if source.get(key)},
                 'room': source.get('room'), 'source_created_at': source.get('source_created_at'),
                 'snapshot_at': source.get('snapshot_at'),
                 'source': source['path'], 'output': str(target)}
@@ -281,6 +297,7 @@ class TaskHub:
             saved = json.loads(self.state_file.read_text(encoding='utf-8'))
         except (FileNotFoundError, json.JSONDecodeError):
             saved = {}
+        self.preferences = saved.get('preferences', {})
         self.entries = saved.get('entries', [])
         for data in saved.get('jobs', [])[-100:]:
             job = Job(title=data['title'], kind=data['kind'])
@@ -296,7 +313,7 @@ class TaskHub:
                 self.add_export(job)
 
     def save(self):
-        data = {'entries': self.entries, 'jobs': [job.record() for job in self.jobs[-100:]]}
+        data = {'preferences': self.preferences, 'entries': self.entries, 'jobs': [job.record() for job in self.jobs[-100:]]}
         temporary = self.state_file.with_suffix('.tmp')
         temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
         temporary.replace(self.state_file)
@@ -314,7 +331,8 @@ class TaskHub:
         if job.output and job.result and path.is_file():
             self.add_entry({'path': str(path), 'title': path.stem, 'kind': 'clip',
                 'duration': job.result['actual_duration'], 'created_at': path.stat().st_mtime,
-                'source': job.result['source']})
+                'source': job.result['source'], 'room': job.result.get('room') or {},
+                **{key: job.result[key] for key in ('cover_path', 'avatar_path') if job.result.get(key)}})
 
     def submit(self, title, kind, function, *args, lease=''):
         if self.closed:

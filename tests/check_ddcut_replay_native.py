@@ -27,7 +27,7 @@ from ddm.config import DEFAULT_SETTINGS
 from ddm.plugins import PluginContext, PluginManager
 from selfcheck_recording import isolated_window_tasks
 from unittest.mock import patch
-from ddm import config
+from ddm import config, images
 from ddm.recording import input_args
 
 app = QApplication.instance() or QApplication([])
@@ -45,6 +45,7 @@ def wait_for(predicate, timeout=12):
 
 with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_window_tasks(), ExitStack() as cleanup:
     root = Path(directory)
+    cleanup.enter_context(patch.object(images, 'REPO', str(root)))
     source = root / 'local.mp4'
     subprocess.run([shutil.which('ffmpeg'), '-y', '-hide_banner', '-loglevel', 'error',
         '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30', '-t', '18',
@@ -62,6 +63,7 @@ with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_
     context = PluginContext(manager, 'ddcut_replay')
     with patch.object(config, 'data_root', return_value=str(root)):
         plugin.on_load(context)
+        plugin.set_capture_mode('clip')
         manager.plugins.append(plugin)
         ui = sys.modules[type(plugin).__module__ + '.workspace']
         Workspace = ui.Workspace
@@ -87,7 +89,12 @@ with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_
         view.inpoint.setValue(.5)
         view.outpoint.setValue(2)
         assert view.export_button.isEnabled()
-        assert view.tabs.count() == 2 and view.tabs.currentWidget() is view.review_page
+        assert view.tabs.count() == 1 and view.review_page is view.library_page
+        view.edit_button.click()
+        app.processEvents()
+        assert view.tools.isVisible()
+        view.edit_button.click()
+        assert view.tools.isHidden()
         view.play_selection()
         wait_for(lambda: not view.selection_playing and view.preview.core.pause)
         assert abs(view.preview.position() - 2) < .12
@@ -101,7 +108,7 @@ with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_
         view.toggle_tasks(False)
         view.tabs.setCurrentWidget(view.review_page)
         app.processEvents()
-        assert view.task_panel.isHidden() and view.tools.isVisible()
+        assert view.task_panel.isHidden() and view.review_panel.isVisible()
         assert view.tabs.width() >= view.content.width() - 8, (view.tabs.geometry(), view.content.geometry())
         if args.screenshots:
             from ddm import theme
@@ -123,7 +130,10 @@ with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_
         view.close()
         assert view.preview.core is None and not plugin.hub.closed
         tile = window.wall.tiles[0]
-        tile.set_room({'uname': '本地录制', 'room_id': 'offline', 'live': False})
+        for cached in (Path(images.room_cover_path('offline')), Path(images.room_avatar_path('offline'))):
+            cached.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(picture, cached)
+        tile.set_room({'uname': '本地录制', 'title': '本地媒体回看验证', 'platform': 'bilibili', 'room_id': 'offline', 'live': False})
         tile.room['live'] = True
         tile.stream_url, tile.stream_headers, tile.stream_codec = str(source), {}, 'avc'
         window.settings.update(recording_lock_quality=False, recording_format='ts', recording_replay_enabled=False)
