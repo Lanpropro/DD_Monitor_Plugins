@@ -48,7 +48,7 @@ def main():
             assert read_manifest(str(target), plugin_id)["version"] == versions[plugin_id]
             assert (target / "user-data.txt").read_bytes() == b"preserve user data"
             assert (target / "plugin.py").read_bytes() == (ROOT / "plugins" / plugin_id / "plugin.py").read_bytes()
-        manager.install_zip(str(ROOT / 'dist/bili_live-1.0.zip'))
+        manager.install_zip(str(ROOT / 'dist/bili_live-1.1.zip'))
         manager.enabled = set(versions)
         manager.load()
         assert len(manager.plugins) == len(versions) and not manager.skipped

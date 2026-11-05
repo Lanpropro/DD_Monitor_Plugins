@@ -32,7 +32,8 @@ class ContributionGuideTests(unittest.TestCase):
         readme = (ROOT / 'README.md').read_text(encoding='utf-8')
         self.assertIn('(CONTRIBUTING.md)', readme)
         documents = ['README.md', 'CONTRIBUTING.md', 'docs/repository-layout.md',
-                     'docs/releases/README.md', 'docs/archive/README.md']
+                     'docs/releases/README.md', 'docs/archive/README.md',
+                     'plugins/DDCut_Replay/README.md']
         documents += [str(path.relative_to(ROOT)) for path in (ROOT / 'docs/changes').glob('*.md')]
         for relative in documents:
             document = ROOT / relative
@@ -93,6 +94,12 @@ class ContributionGuideTests(unittest.TestCase):
                     self.assertTrue(entry['last_edit_verified'])
                     self.assertEqual(entry['source_kind'], 'github_release')
                     self.assertIn('release_updated_at', entry)
+                elif entry['status'] == 'prepared':
+                    self.assertFalse(entry['last_edit_verified'])
+                    self.assertEqual(entry['source_kind'], 'repository_candidate')
+                    self.assertRegex(entry['base_commit'], r'^[0-9a-f]{40}$')
+                    self.assertNotIn('release_id', entry)
+                    self.assertIn(f']({entry["file"]})', (directory / 'README.md').read_text(encoding='utf-8'))
                 else:
                     self.assertFalse(entry['last_edit_verified'])
                     self.assertIn(entry['source_kind'], ('release_backup', 'repository_history'))

@@ -129,7 +129,7 @@ def check_native_move_loop(owner,popup,anchor):
 def main():
     with tempfile.TemporaryDirectory() as root:
         root=Path(root);manager=host_api.PluginManager(plugins_dir=str(root/'plugins'),enabled=[])
-        manager.install_zip(str(ROOT/'dist/bili_live-1.0.zip'))
+        manager.install_zip(str(ROOT/'dist/bili_live-1.1.zip'))
         values={'SESSDATA':'synthetic','bili_jct':'synthetic','buvid3':'synthetic'}
         manager.register_credentials('bilibili',lambda:values,identity_keys=('SESSDATA','bili_jct'))
         for name in tuple(sys.modules):
