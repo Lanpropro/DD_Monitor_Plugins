@@ -105,10 +105,21 @@ class ContributionGuideTests(unittest.TestCase):
             with self.subTest(tag=entry['tag']):
                 data = (directory / entry['file']).read_bytes().replace(b'\r\n', b'\n')
                 self.assertEqual(hashlib.sha256(data).hexdigest(), entry['sha256'])
-                if entry['status'] == 'online':
+                if entry['status'] in ('online', 'archived_verified'):
                     self.assertTrue(entry['last_edit_verified'])
                     self.assertEqual(entry['source_kind'], 'github_release')
                     self.assertIn('release_updated_at', entry)
+                    if entry['status'] == 'archived_verified':
+                        self.assertRegex(entry['source_commit'], r'^[0-9a-f]{40}$')
+                        self.assertIn(entry['superseded_by'], {item['tag'] for item in entries})
+                        self.assertTrue(entry['plugin_author'])
+                        self.assertTrue(entry['release_author'])
+                        self.assertIn('archived_at', entry)
+                        self.assertTrue(entry['assets'])
+                        for asset in entry['assets']:
+                            self.assertGreater(asset['size'], 0)
+                            self.assertRegex(asset['sha256'], r'^[0-9a-f]{64}$')
+                            self.assertIn('/releases/download/' + entry['tag'] + '/', asset['url'])
                 elif entry['status'] == 'prepared':
                     self.assertFalse(entry['last_edit_verified'])
                     self.assertEqual(entry['source_kind'], 'repository_candidate')
