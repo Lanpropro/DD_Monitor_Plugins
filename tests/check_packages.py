@@ -55,6 +55,9 @@ def main():
                     assert manifest['min_app_version'] == '0.5.1'
                 if plugin_id == 'match_sync':
                     assert 'match_sync/fullscreen.py' in names, 'Fullscreen shell integration must ship with the viewer'
+                if plugin_id == 'domestic_live':
+                    assert 'domestic_live/douyin_native.js' in names, 'Official native input requires its browser script'
+                    assert 'domestic_live/douyin_browser.py' in names
                 assert f"{plugin_id}-{manifest['version']}.zip" == path.name
                 assert archive.read(f"{plugin_id}/LICENSE") == (ROOT / "LICENSE").read_bytes()
                 for name in names:
