@@ -162,14 +162,38 @@
     {
       "tag": "match-sync-v1.5",
       "file": "RELEASE-match-sync-v1.5.md",
-      "status": "online",
+      "status": "archived_verified",
       "source_kind": "github_release",
       "release_id": 431674948,
       "release_updated_at": "2026-11-03T12:13:29Z",
       "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.5",
       "last_edit_verified": true,
       "raw_body_sha256": "b0c85774c12ef7835ee26bfb27ffbb36562709cd46f64fb64e5150f3cedd72a8",
-      "sha256": "166bd3b2be1d48c76ed8c2494837cb4d8929c85cba7679f2c9eebf376372dc4e"
+      "sha256": "166bd3b2be1d48c76ed8c2494837cb4d8929c85cba7679f2c9eebf376372dc4e",
+      "release_name": "比赛二路同步 v1.5",
+      "release_author": "Lanpropro",
+      "plugin_author": "Lanpropro",
+      "release_created_at": "2026-11-02T16:08:53Z",
+      "release_published_at": "2026-11-02T16:10:07Z",
+      "source_commit": "fdd6d44972a6cce73ee39d7a5d4a94d63f6e59d7",
+      "assets": [
+        {
+          "id": 702342533,
+          "name": "match_sync-1.5.zip",
+          "size": 164548,
+          "sha256": "650d7a06b430d3a8e94f3f41fe86a792490e12a84f43b20d430c877ecd0e428e",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/match-sync-v1.5/match_sync-1.5.zip"
+        },
+        {
+          "id": 705484124,
+          "name": "plugin-catalog.json",
+          "size": 12912,
+          "sha256": "6e2fbfbebae966e42b443e0e27b953b632e2089930be906d608bcac5aede42da",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/match-sync-v1.5/plugin-catalog.json"
+        }
+      ],
+      "archived_at": "2026-11-05T15:21:09.384530+00:00",
+      "superseded_by": "match-sync-v1.6"
     },
     {
       "tag": "match-sync-v1.5-pre.1",
