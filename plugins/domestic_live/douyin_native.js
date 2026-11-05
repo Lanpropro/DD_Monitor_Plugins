@@ -20,10 +20,14 @@
     const editor = editors[0];
     if (editor.disabled || editor.getAttribute('aria-disabled') === 'true') return {ready: false, reason: 'editor'};
     const content = editor.cloneNode(true);
+    let ignoredZeroNodes = 0;
     // The official rich-text editor renders U+200B inside marked empty nodes.
     // Keep unmarked characters and any marked node containing real text intact.
     for (const node of content.querySelectorAll('[data-zero-space]')) {
-        if (node.textContent === '\u200b') node.remove();
+        if (node.textContent === '\u200b') {
+            node.remove();
+            ignoredZeroNodes++;
+        }
     }
     const text = editor.tagName === 'TEXTAREA' ? editor.value : content.textContent;
     if (action === 'verify') {
@@ -34,7 +38,22 @@
         if (!button || button.disabled || button.getAttribute('aria-disabled') === 'true') return {ready: false, reason: 'input'};
         return {ready: true};
     }
-    if (text) return {error: 'official_draft_exists'};
+    if (text) {
+        const count = pattern => (text.match(pattern) || []).length;
+        return {error: 'official_draft_exists', draft_shape: {
+            raw_length: (editor.tagName === 'TEXTAREA' ? editor.value : editor.textContent).length,
+            read_length: text.length, rendered_length: (editor.innerText || '').length,
+            zero_nodes: editor.querySelectorAll('[data-zero-space]').length,
+            ignored_zero_nodes: ignoredZeroNodes,
+            string_nodes: editor.querySelectorAll('[data-string]').length,
+            enter_nodes: editor.querySelectorAll('[data-enter]').length,
+            br_nodes: editor.querySelectorAll('br').length,
+            placeholder: Number(editor.hasAttribute('data-placeholder')),
+            lf: count(/\n/g), cr: count(/\r/g), tab: count(/\t/g), space: count(/ /g),
+            nbsp: count(/\u00a0/g), zwsp: count(/\u200b/g), bom: count(/\ufeff/g),
+            other: text.replace(/[\n\r\t \u00a0\u200b\ufeff]/g, '').length
+        }};
+    }
     if (action === 'focus') {
         editor.focus();
         window.__ddmNativeInput = editor;

@@ -12,6 +12,15 @@ SCRIPT = (Path(__file__).parent / 'douyin_native.js').read_text(encoding='utf-8'
 DELIVERY_TIMEOUT = 8
 
 
+def draft_shape_summary(shape):
+    if not isinstance(shape, dict):
+        return 'shape_unavailable'
+    keys = ('raw_length read_length rendered_length zero_nodes ignored_zero_nodes '
+            'string_nodes enter_nodes br_nodes placeholder lf cr tab space nbsp zwsp bom other').split()
+    return ' '.join(f'{key}={shape[key]}' for key in keys
+                    if type(shape.get(key)) is int and 0 <= shape[key] <= 1000000) or 'shape_unavailable'
+
+
 def commit_text(browser, text):
     event = QInputMethodEvent()
     event.setCommitString(text)
@@ -68,7 +77,7 @@ class BrowserChat(QObject):
                   'wrong_room_session': '官网当前直播与目标直播不一致，本次未提交',
                   'account_mismatch': '官网账号与所选账号不一致，本次未提交',
                   'ambiguous_editor': '官网出现多个输入框，本次未提交',
-                  'official_draft_exists': '官网输入框已有草稿，本次未覆盖或提交',
+                  'official_draft_exists': '官网输入框已有草稿，已保留官网窗口，本次未覆盖或提交',
                   'input_focus_lost': '官网输入焦点已变化，本次未提交',
                   'input_mismatch': '官网输入内容与软件草稿不一致，本次未提交',
                   'cancelled_before_send': '提交前已取消', 'cancelled': '窗口已关闭或请求已取消'}
@@ -185,6 +194,16 @@ class BrowserChat(QObject):
                     return
                 if result.get('error'):
                     request['result'] = result
+                    if result['error'] == 'official_draft_exists':
+                        trace('official_draft_exists ' + draft_shape_summary(result.get('draft_shape')))
+                        request['manual_review'] = state['holding'] = True
+                        timer.stop()
+                        dialog.setWindowTitle('抖音 · 输入框核对')
+                        dialog.status.setText('检测到官网输入框包含内容，本次未执行输入或发送。原草稿已保留，可在下方核对。')
+                        dialog.read_button.setText('自动发送已停止')
+                        dialog.read_button.setEnabled(False)
+                        request['done'].set()
+                        return
                     request['done'].set()
                     dialog.accept()
                     return

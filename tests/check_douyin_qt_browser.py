@@ -152,7 +152,19 @@ class BrowserTests(unittest.TestCase):
                     self.assertFalse(dialogs[0].read_button.isEnabled())
                     blocked=dict(room='douyin:123',params={},done=threading.Event(),cancelled=lambda:False)
                     bridge.open(blocked);self.assertEqual(blocked['result']['error'],'review_open')
-                else:self.assertIn('error',outcome)
+                else:
+                    self.assertIn('error',outcome)
+                    if '已有草稿' in str(outcome['error']):
+                        self.assertTrue(dialogs[0].isVisible(),'Preflight rejection must retain the original editor')
+                        self.assertFalse(dialogs[0].read_button.isEnabled())
+                        self.assertIs(bridge.active,dialogs[0])
+                        summary=next(line for line in logs if 'official_draft_exists' in line)
+                        self.assertIn('raw_length=',summary)
+                        self.assertIn('read_length=',summary)
+                        if existing=='\n':self.assertIn('lf=1',summary)
+                        if existing.strip():self.assertNotIn(existing,summary)
+                        dialogs[0].reject();self.assertIsNone(bridge.active)
+
                 if reload_before:self.assertEqual(dialogs[0].loads,2)
                 self.assertNotIn(text,'\n'.join(logs))
                 self.assertNotIn('7560000000000000001','\n'.join(logs))
@@ -174,6 +186,12 @@ class BrowserTests(unittest.TestCase):
     def test_wrong_origin_never_enters_text(self):self.exercise(wrong_origin=True)
     def test_multiple_visible_editors_are_rejected(self):self.exercise(duplicate=True)
     def test_existing_official_draft_is_not_overwritten(self):self.exercise(existing='existing draft')
+    def test_newline_content_is_diagnosed_without_sending(self):self.exercise(existing='\n')
+
+    def test_draft_shape_summary_only_logs_bounded_integer_counts(self):
+        self.assertEqual(module.draft_shape_summary({'raw_length':5,'read_length':True,'lf':'secret','other':-1,'br_nodes':1000001,'text':'private','uid':'42'}),'raw_length=5')
+        self.assertEqual(module.draft_shape_summary('private'),'shape_unavailable')
+        self.assertEqual(module.draft_shape_summary({}),'shape_unavailable')
     def test_changed_editor_text_is_not_submitted(self):self.exercise(mismatch=True)
     def test_cancel_before_open_never_loads_page(self):self.exercise(cancel_before=True)
     def test_cancel_after_typing_never_presses_enter(self):self.exercise(cancel_input=True)
