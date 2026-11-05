@@ -21,9 +21,9 @@
     if (editor.disabled || editor.getAttribute('aria-disabled') === 'true') return {ready: false, reason: 'editor'};
     const content = editor.cloneNode(true);
     let ignoredZeroNodes = 0;
-    // The official rich-text editor renders U+200B inside marked empty nodes.
+    // The official editor renders U+200B in empty nodes and marked line endings.
     // Keep unmarked characters and any marked node containing real text intact.
-    for (const node of content.querySelectorAll('[data-zero-space]')) {
+    for (const node of content.querySelectorAll('[data-zero-space],[data-string][data-enter]')) {
         if (node.textContent === '\u200b') {
             node.remove();
             ignoredZeroNodes++;

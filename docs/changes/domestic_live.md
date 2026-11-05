@@ -6,6 +6,16 @@
 
 ## 待发布
 
+### 2026-11-05｜按真实采样修复：官网行尾占位被误判为草稿
+
+- 真实证据：用户报告诊断窗口已出现。14:37:13.317记录raw_length=1、read_length=1、rendered_length=1、zero_nodes=0、string_nodes=1、enter_nodes=1、zwsp=1、other=0，其他字符计数均0；未到native_focus／native_input／native_submit。本次拦截的内容明确为单个U+200B，且包含data-string／data-enter标记，不是上一轮已处理的data-zero-space节点。
+- 官网源码核对：5457.1d4739eb.js模块478492将Ed定义为U+200B；行模型将换行转换为带enter属性的Ed，渲染时同时设置data-string和data-enter。与本次真实计数一致，上一轮只忽略data-zero-space导致遗漏。
+- 修复：只扩充脱离页面的克隆DOM读取选择器，识别[data-string][data-enter]中的单个U+200B行尾标记。仍仅在节点全部文字恰为U+200B时忽略；标记中的真实文字、其他位置的零宽字符与已有草稿均保护，不修改官网原DOM、不全局替换、不自动重发。输入校对也使用同样读取结果，避免行尾标记导致内容不匹配。
+- 验证：按真实标记约定构造回归，旧版出现与采样完全相同的计数和official_draft_exists、零Enter；修复后安装副本Qt26项通过。新增行尾空节点自动发送一次、行尾标记不隐藏普通草稿、标记夹带真实文字不覆盖；模拟编辑器用于功能回归，真实故障定位依据是上面的人工运行采样及官网源码。
+- 根run.cmd隔离桥接改用本次data-string＋data-enter节点，软件Enter自动输入／单次提交、匹配模拟广播清草稿／关页、完整8秒未确认保留，以及含换行的真实非空内容零提交／保留DOM和页全部通过；贡献文档、Python编译与diff检查通过。未使用真实账号或发送真实弹幕，不能据此宣布实投递成功。
+- 集成与验收：业务只改douyin_native.js的标记识别，已备份同步安装副本并核对字节；从根run.cmd重启后，只在软件输入新短文本按一次Enter，观察native_input／native_submit及独立广播结果。保留既有诊断和核对窗口，若有新阻塞继续据日志处理。未发布。
+- 证据：宿主logs/ddm-2026-11-05.log的14:37采样；work/douyin-native-draft-20261105/terminal-before.log、terminal-qt-final.log；work/douyin-native-terminal-entry-20261105/root-result.json。
+
 ### 2026-11-05｜官网草稿拦截仍复现：补充脱敏结构计数并保留现场
 
 - 真实反馈：用户重试XXFPS（douyin:203544315806）仍提示官网已有草稿。13:36:32.791开始、34.801等待上下文、36.362等待编辑器、42.031关页、42.065失败；未进入native_focus／native_input／native_submit。磁盘安装JS与185d0e0源码SHA256一致，但原日志没有运行时脚本版本／节点特征，不能把零宽空节点修正称为该次问题已解决。
