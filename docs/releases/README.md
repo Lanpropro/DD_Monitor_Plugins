@@ -4,12 +4,6 @@
 
 删除 GitHub Release 不会删除已提交的说明。网页后续修改不会自动回写仓库；删除发布页前，应先再次同步并提交。[来源记录](sources.json)保存各文件的来源、网页更新时间及正文校验值。
 
-## 待发布说明
-
-| 插件 | 仓库说明 | 状态 |
-| --- | --- | --- |
-| 国内直播平台 | [2.0](RELEASE-domestic-live-v2.0.md) | 发布候选，尚未公开 |
-
 ## 当前在线发布说明
 
 | 插件 | 仓库说明 | GitHub 来源 |
@@ -17,7 +11,7 @@
 | B站直播互动 | [1.1](RELEASE-bili-live-v1.1.md) | [bili-live-v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.1) |
 | 比赛二路同步 | [1.6](RELEASE-match-sync-v1.6.md) | [match-sync-v1.6](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.6) |
 | 比赛二路同步 | [1.5](RELEASE-match-sync-v1.5.md) | [match-sync-v1.5](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.5) |
-| 国内直播平台 | [1.5](RELEASE-domestic-live-v1.5.md) | [domestic-live-v1.5](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v1.5) |
+| 国内直播平台 | [2.0](RELEASE-domestic-live-v2.0.md) | [domestic-live-v2.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v2.0) |
 | 海外直播平台 | [1.2](RELEASE-global-live-v1.2.md) | [global-live-v1.2](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2) |
 
 ## 替代版本的核验归档
@@ -26,9 +20,10 @@
 
 | 插件 | 历史说明 | 保留源码 | 替代版本 |
 | --- | --- | --- | --- |
+| 国内直播平台 | [1.5](RELEASE-domestic-live-v1.5.md) | [domestic-live-v1.5 标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/domestic-live-v1.5) | [2.0](RELEASE-domestic-live-v2.0.md) |
 | B站直播互动 | [1.0](RELEASE-bili-live-v1.0.md) | [bili-live-v1.0 标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/bili-live-v1.0) | [1.1](RELEASE-bili-live-v1.1.md) |
 
-1.0 于 2026-11-05 在删除前核对最新正文及两个附件，正文未改写。作者、原发布者、发布时间、最后更新时间、源码提交和附件大小／SHA256 均保存在 [sources.json](sources.json)。`archived_verified` 表示归档前已核对网页最后编辑版，与下方无法确认最后编辑版的旧备份区分。
+B站 1.0 与国内平台 1.5 于 2026-11-05 在删除前分别核对最新正文及两个附件，正文未改写。作者、原发布者、发布时间、最后更新时间、源码提交和附件大小／SHA256 均保存在 [sources.json](sources.json)。`archived_verified` 表示归档前已核对网页最后编辑版，与下方无法确认最后编辑版的旧备份区分。
 
 ## 已删除 Release 的可恢复快照
 
