@@ -1089,16 +1089,56 @@ class DouyinPlatform(NumericLivePlatform):
         from .douyin_interaction import BroadcastReceipts
         self._chat_delivery = BroadcastReceipts()
         self._anchor_uids = {}
+        self._follow_profiles = {}
         self._profile_additions = {}
         self._context = None
 
     def restore_follow_rooms(self, rooms):
         for room in rooms:
             rid, uid = str(room.get("room_id") or ""), str(room.get("anchor_uid") or "")
+            if self._follow_reference_uid(rid):
+                rid = str(room.get("resolved_room_id") or "")
+            sec_uid = str(room.get("sec_uid") or "")
+            if re.fullmatch(r"[1-9][0-9]{0,19}", uid) and re.fullmatch(r"MS4wLjAB[A-Za-z0-9_-]{10,180}", sec_uid):
+                self._follow_profiles[uid] = sec_uid
             if re.fullmatch(r"douyin:[0-9]{1,20}", rid) and re.fullmatch(r"[0-9]{1,20}", uid):
                 self._anchor_uids[rid] = uid
         if self._context is not None:
             self._context.set_setting("douyin_room_owners", dict(self._anchor_uids))
+            if self._follow_profiles:
+                self._context.set_setting("douyin_follow_profiles", dict(self._follow_profiles))
+
+    @staticmethod
+    def _follow_reference_uid(value):
+        match = re.fullmatch(r"douyin:uid_([1-9][0-9]{0,19})", str(value))
+        return match[1] if match else ""
+
+    def follow_account_reference(self, account):
+        """稳定账号引用供侧栏保存；它不是主播固定网页房间号。"""
+        uid = str(account.get("anchor_uid") or "")
+        if not re.fullmatch(r"[1-9][0-9]{0,19}", uid):
+            raise ValueError("抖音关注账号身份无效，请重新读取关注")
+        rid = "douyin:uid_" + uid
+        resolved = self.normalize(rid)
+        return dict(account, room_id=rid, platform=self.kind, playback_mode="stream", follow_account_ref=True,
+                    resolved_room_id=resolved if resolved != rid else "")
+
+    def normalize(self, room_id):
+        text = str(room_id or "").strip()
+        uid = self._follow_reference_uid(text)
+        if uid:
+            return next((rid for rid, owner in list(self._anchor_uids.items()) if owner == uid), text)
+        return super().normalize(text)
+
+    def room_url(self, room_id):
+        canonical = self.normalize(room_id)
+        uid = self._follow_reference_uid(canonical)
+        if uid:
+            sec_uid = self._follow_profiles.get(uid)
+            if not sec_uid:
+                raise ValueError("账号主页资料尚未读取，请重新读取关注")
+            return "https://www.douyin.com/user/" + sec_uid
+        return super().room_url(canonical)
 
     def follow_accounts(self, session, cancelled):
         """关注身份独立于房间；读取阶段不逐个等待直播资料。"""
@@ -1108,6 +1148,20 @@ class DouyinPlatform(NumericLivePlatform):
         uid = str(account.get("anchor_uid") or "")
         if not re.fullmatch(r"[1-9][0-9]{0,19}", uid) or cancelled():
             return dict(account)
+        reference = str(account.get("room_id") or "")
+        reference_uid = self._follow_reference_uid(reference)
+        if reference_uid:
+            if reference_uid != uid:
+                raise RuntimeError("抖音关注账号身份不匹配")
+            canonical = self.normalize(reference)
+            resolved = self.resolve_follow_account(dict(account,
+                room_id="" if canonical == reference else canonical), cancelled)
+            if cancelled():
+                return dict(account)
+            fixed = resolved.get("room_id") or ""
+            return dict(resolved, room_id=reference, follow_account_ref=True, resolved_room_id=fixed,
+                        live=resolved.get("live", False) if fixed else False,
+                        live_known=resolved.get("live_known", False) if fixed else True)
         if not account.get("room_id"):
             known = next((rid for rid, owner_uid in self._anchor_uids.items() if owner_uid == uid), "")
             if known:
@@ -1132,6 +1186,8 @@ class DouyinPlatform(NumericLivePlatform):
                     "face": owner.get("avatar_thumb"), "cover": data.get("cover")}
         if not room or cancelled():
             return dict(account)
+        if not room.get("web_rid") and room.get("status") == 4 and not account.get("room_id"):
+            return dict(account, live=False, live_known=True)
         canonical = self.normalize("douyin:" + str(room["web_rid"]))
         if account.get("room_id") and account["room_id"] != canonical:
             raise RuntimeError("抖音关注主播信息不匹配，请稍后重试")
@@ -1331,6 +1387,8 @@ class DouyinPlatform(NumericLivePlatform):
             if re.fullmatch(r"[1-9][0-9]{0,19}", rid):
                 # 关注只需要身份和状态；接口已确认时不再依赖直播分享页或媒体流。
                 return dict(room, owner=dict(owner, id_str=uid, web_rid=rid))
+            if not rid and room["status"] == 4:
+                return dict(room, owner=dict(owner, id_str=uid, web_rid=""))
         if canonical and type(room.get("status")) is int and room["status"] == 4:
             # The owner mapping and API identity are verified; an ended room need not
             # expose a usable live share page (or any streams) to confirm its status.
@@ -1353,7 +1411,7 @@ class DouyinPlatform(NumericLivePlatform):
     @staticmethod
     def _share_identity(payload, uid):
         data = payload.get("data")
-        if payload.get("status_code") != 0 or not isinstance(data, dict):
+        if type(payload.get("status_code")) is not int or payload["status_code"] != 0 or not isinstance(data, dict):
             raise RuntimeError("抖音关注主播信息获取失败，请稍后重试")
         if not data:
             return ""
@@ -1468,6 +1526,14 @@ class DouyinPlatform(NumericLivePlatform):
 
     def room_info(self, room_id: str) -> api.RoomInfo:
         try:
+            reference_uid = self._follow_reference_uid(room_id)
+            if reference_uid and self.normalize(room_id) == room_id:
+                result = self.resolve_follow_account(dict(room_id=room_id, anchor_uid=reference_uid,
+                    live=False, live_known=False), lambda: False)
+                if not result.get("resolved_room_id"):
+                    return api.RoomInfo(room_id=room_id, platform=self.kind, uname="", title="", live=False,
+                        extra={"live_known": result["live_known"], "anchor_uid": reference_uid,
+                               "follow_account_ref": True, "playback_mode": "stream"})
             room_id, share = self._resolve_share_input(room_id)
             canonical = self.normalize(room_id)
             raw = canonical.split(":", 1)[1]
@@ -1509,6 +1575,8 @@ class DouyinPlatform(NumericLivePlatform):
 
     def room_data(self, room_id, session=None):
         canonical = self.normalize(room_id)
+        if self._follow_reference_uid(canonical):
+            raise RuntimeError("关注账号当前未取得可用直播间，请等待开播后刷新状态")
         uid = self._anchor_uids.get(canonical)
         if uid:
             try:
@@ -1621,6 +1689,8 @@ class DouyinPlatform(NumericLivePlatform):
     async def room_data_async(self, session, room_id):
         # 弹幕使用可取消的异步请求，共用关注/视频的身份校验与分享页解析。
         canonical = self.normalize(room_id)
+        if self._follow_reference_uid(canonical):
+            raise RuntimeError("关注账号当前未取得可用直播间，请等待开播后刷新状态")
         uid = self._anchor_uids.get(canonical)
         if uid:
             async with session.get("https://live.douyin.com/webcast/room/info_by_user/",
@@ -1993,6 +2063,9 @@ class LivePlatformsPlugin(api.Plugin):
             self._douyu_interaction = DouyuInteraction(context, douyu)
             self._huya_interaction = DouyuInteraction(context, huya, composer_class=HuyaComposer, control_id="huya_interaction")
         douyin = DouyinPlatform()
+        profiles = context.setting("douyin_follow_profiles", {})
+        if isinstance(profiles, dict):
+            douyin.restore_follow_rooms([{"anchor_uid": uid, "sec_uid": sec_uid} for uid, sec_uid in profiles.items()])
         saved = context.setting("douyin_room_owners", {})
         if isinstance(saved, dict):
             douyin.restore_follow_rooms([{"room_id": rid, "anchor_uid": uid} for rid, uid in saved.items()])

@@ -114,6 +114,80 @@ class LookupTests(unittest.TestCase):
         self.assertFalse(result['live'])
         read.assert_called_once()
 
+    def test_account_reference_import_does_not_require_room_number(self):
+        sec = 'MS4wLjAB' + 'x' * 20
+        account = self.provider.follow_account_reference(dict(room_id='', anchor_uid='101', sec_uid=sec,
+            uname='Offline account', live=False, live_known=False))
+        self.assertEqual(account['room_id'], 'douyin:uid_101')
+        self.provider.restore_follow_rooms([account])
+        self.assertEqual(self.provider.room_url(account['room_id']), 'https://www.douyin.com/user/' + sec)
+        with patch.object(module.requests, 'get', return_value=response(payload={'status_code': 0, 'data': {}})) as read:
+            status = self.provider.rooms_status([account['room_id']])[account['room_id']]
+        self.assertFalse(status['live'])
+        self.assertTrue(status['live_known'])
+        self.assertEqual(status['uname'], '')
+        self.assertEqual(self.provider.normalize(account['room_id']), account['room_id'])
+        self.assertFalse(self.provider._anchor_uids)
+        read.assert_called_once()
+
+    def test_account_reference_failed_requests_never_become_offline_confirmation(self):
+        for reply in (response(status=403), response(text=''), response(payload={'status_code': False, 'data': {}}),
+                      response(payload={'status_code': 1, 'data': {}})):
+            with self.subTest(http=reply.status_code), patch.object(module.requests, 'get', return_value=reply):
+                with self.assertRaises(RuntimeError):
+                    self.provider.rooms_status(['douyin:uid_101'])
+
+    def test_account_reference_ended_record_without_web_rid_is_offline(self):
+        with patch.object(module.requests, 'get', return_value=response(payload={'status_code':0,
+                'data':{'id_str':'90001','owner_user_id':'101','status':4,
+                        'owner':{'id_str':'101','web_rid':''}}})) as read:
+            status = self.provider.rooms_status(['douyin:uid_101'])['douyin:uid_101']
+        self.assertTrue(status['live_known'])
+        self.assertFalse(status['live'])
+        self.assertFalse(self.provider._anchor_uids)
+        read.assert_called_once()
+
+    def test_account_reference_discovers_live_room_and_keeps_stable_identity(self):
+        account = self.provider.follow_account_reference(dict(room_id='', anchor_uid='101', live=False, live_known=False))
+        payload = {'status_code': 0, 'data': {'id_str': '90001', 'owner_user_id': '101', 'status': 2,
+                   'owner': {'id_str': '101', 'web_rid': '439082987915'}}}
+        with patch.object(module.requests, 'get', return_value=response(payload=payload)):
+            result = self.provider.resolve_follow_account(account, lambda: False)
+        self.assertEqual(result['room_id'], account['room_id'])
+        self.assertEqual(result['resolved_room_id'], self.canonical)
+        self.assertTrue(result['live'])
+        self.assertTrue(result['live_known'])
+        self.assertEqual(self.provider.normalize(account['room_id']), self.canonical)
+        self.assertEqual(self.provider.room_url(account['room_id']), 'https://live.douyin.com/439082987915')
+        with patch.object(self.provider, '_share_room', return_value=dict(payload['data'])) as read:
+            self.provider.room_data(account['room_id'])
+        self.assertEqual(read.call_args.kwargs['canonical'], self.canonical)
+        self.assertEqual(read.call_args.args[1], '101')
+        with patch.object(self.provider, '_streams', return_value={}) as streams:
+            with self.assertRaises(RuntimeError):
+                self.provider.play_url(account['room_id'])
+        self.assertEqual(streams.call_args.args[1], account['room_id'])
+
+    def test_account_reference_cannot_be_associated_with_another_uid(self):
+        with patch.object(module.requests, 'get', side_effect=AssertionError('No request expected')):
+            with self.assertRaises(RuntimeError):
+                self.provider.resolve_follow_account(dict(room_id='douyin:uid_101', anchor_uid='999'), lambda: False)
+
+    def test_account_reference_mapping_and_profile_restore(self):
+        sec = 'MS4wLjAB' + 'x' * 20
+        saved = {}
+        self.provider._context = SimpleNamespace(set_setting=lambda key, value: saved.update({key: value}))
+        self.provider.restore_follow_rooms([dict(room_id='douyin:uid_101', anchor_uid='101', sec_uid=sec,
+                                                resolved_room_id=self.canonical)])
+        registered = []
+        context = SimpleNamespace(setting=lambda key, default: saved.get(key, default), register_platform=registered.append,
+                                  log=lambda *_: None, window=None)
+        plugin = module.LivePlatformsPlugin()
+        plugin.on_load(context)
+        restored = registered[-1]
+        self.assertEqual(restored.normalize('douyin:uid_101'), self.canonical)
+        self.assertEqual(restored._follow_profiles['101'], sec)
+
     def test_follow_identity_only_rejects_wrong_owner(self):
         account = dict(room_id='', anchor_uid='101', live=False, live_known=False)
         with patch.object(module.requests, 'get', return_value=response(payload={'status_code': 0,
