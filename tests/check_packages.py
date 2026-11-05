@@ -24,6 +24,12 @@ def main():
                 for path in (ROOT / "plugins").glob("*/plugin.json")}
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert all(f"| `{plugin_id}` | {version} |" in readme for plugin_id, version in versions.items())
+    domestic_version = versions["domestic_live"]
+    domestic_readme = (ROOT / "plugins/domestic_live/README.md").read_text(encoding="utf-8")
+    assert domestic_readme.startswith(f"# 国内直播平台 v{domestic_version}\n")
+    assert f"domestic_live-{domestic_version}.zip" in domestic_readme
+    assert (ROOT / "docs/releases" / f"RELEASE-domestic-live-v{domestic_version}.md").read_text(encoding="utf-8").startswith(
+        f"# 国内直播平台 v{domestic_version}\n")
     match_version = versions["match_sync"]
     match_readme = (ROOT / "plugins/match_sync/README.md").read_text(encoding="utf-8")
     assert match_readme.startswith(f"# 比赛二路同步 v{match_version}\n")
@@ -51,6 +57,9 @@ def main():
                     assert 'match_sync/fullscreen.py' in names, 'Fullscreen shell integration must ship with the viewer'
                     assert 'match_sync/recording.py' in names, 'The selectable audio track recorder must ship with the viewer'
                     assert 'match_sync/replay_preview.py' in names and 'match_sync/preview_frames.py' in names, 'Continuous timeline preview must ship with its background frame cache'
+                if plugin_id == 'domestic_live':
+                    assert 'domestic_live/douyin_native.js' in names, 'Official native input requires its browser script'
+                    assert 'domestic_live/douyin_browser.py' in names
                 assert f"{plugin_id}-{manifest['version']}.zip" == path.name
                 assert archive.read(f"{plugin_id}/LICENSE") == (ROOT / "LICENSE").read_bytes()
                 for name in names:

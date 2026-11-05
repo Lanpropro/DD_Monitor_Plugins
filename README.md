@@ -95,7 +95,7 @@ ZIP 内只有插件 ID 对应的顶层文件夹。GitHub 自动生成的 **Sourc
 
 | 插件 | ID | 源码版本 |
 | --- | --- | --- |
-| 国内直播平台 | `domestic_live` | 1.4 |
+| 国内直播平台 | `domestic_live` | 2.0 |
 | 海外直播平台 | `global_live` | 1.2 |
 | 比赛二路同步 | `match_sync` | 1.6 |
 | B站直播互动 | `bili_live` | 1.1 |
@@ -107,7 +107,7 @@ python tools/build_plugins.py
 python tests/check_packages.py --host ../DD_Monitor_CE
 ```
 
-输出为 `dist/domestic_live-1.4.zip`、`dist/global_live-1.2.zip`、`dist/match_sync-1.6.zip` 和 `dist/bili_live-1.1.zip`。
+输出为 `dist/domestic_live-2.0.zip`、`dist/global_live-1.2.zip`、`dist/match_sync-1.6.zip` 和 `dist/bili_live-1.1.zip`。
 
 B站直播互动 1.1 已发布，下载入口和在线插件目录已更新。
 构建只读取 Git 跟踪文件，并将许可与来源说明放入每个安装包。
