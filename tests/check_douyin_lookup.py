@@ -32,6 +32,59 @@ class LookupTests(unittest.TestCase):
     def setUp(self):
         self.provider = provider_type()
         self.canonical = 'douyin:439082987915'
+        # Identity/stream tests already have an avatar, so their HTTP budgets stay focused.
+        self.provider._follow_faces['101'] = 'https://p3.douyinpic.com/cached-avatar.jpg'
+
+    def test_offline_reference_fetches_verified_public_avatar_and_reuses_it(self):
+        self.provider._follow_faces.clear()
+        avatar = 'https://p3.douyinpic.com/public-avatar.jpg'
+        replies = [response(payload={'status_code':0,'data':{}}), response(payload={
+            'status_code':0,'data':{'id_str':'101','avatar_thumb':{'url_list':[avatar]}}})]
+        with patch.object(module.requests, 'get', side_effect=replies) as get:
+            info = self.provider.room_info('douyin:uid_101')
+        self.assertEqual(info.face, avatar)
+        self.assertFalse(info.live)
+        self.assertTrue(info.extra['live_known'])
+        self.assertEqual(get.call_args_list[1].args[0], 'https://live.douyin.com/webcast/user/')
+        self.assertEqual(get.call_args_list[1].kwargs['params']['target_uid'], '101')
+        with patch.object(module.requests, 'get', return_value=response(payload={'status_code':0,'data':{}})) as get:
+            again = self.provider.room_info('douyin:uid_101')
+        self.assertEqual(again.face, avatar)
+        get.assert_called_once()
+
+    def test_avatar_failure_or_wrong_identity_keeps_offline_status(self):
+        self.provider._follow_faces.clear()
+        bad = [response(status=403), response(text=''), response(payload=[]), response(payload={
+            'status_code':0,'data':{'id_str':'999','avatar_thumb':{'url_list':['https://p3.douyinpic.com/wrong.jpg']}}}),
+            response(payload={'status_code':1,'data':{}})]
+        for avatar_reply in bad:
+            with self.subTest(http=avatar_reply.status_code), patch.object(module.requests, 'get', side_effect=[
+                    response(payload={'status_code':0,'data':{}}), avatar_reply]):
+                info = self.provider.room_info('douyin:uid_101')
+            self.assertFalse(info.live)
+            self.assertTrue(info.extra['live_known'])
+            self.assertEqual(info.face, '')
+        self.assertFalse(self.provider._follow_faces)
+
+    def test_restored_follow_avatar_needs_no_profile_request(self):
+        avatar = 'https://p3.douyinpic.com/restored-avatar.jpg'
+        self.provider.restore_follow_rooms([dict(room_id='douyin:uid_101', anchor_uid='101', face=avatar)])
+        with patch.object(module.requests, 'get', return_value=response(payload={'status_code':0,'data':{}})) as get:
+            info = self.provider.room_info('douyin:uid_101')
+        self.assertEqual(info.face, avatar)
+        get.assert_called_once()
+
+    def test_known_offline_room_can_get_avatar_without_cover_or_banner(self):
+        self.provider._follow_faces.clear()
+        self.provider.restore_follow_rooms([dict(room_id=self.canonical, anchor_uid='101')])
+        avatar = 'https://p3.douyinpic.com/offline-avatar.jpg'
+        with patch.object(module.requests, 'get', side_effect=[response(payload={'status_code':0,'data':{}}),
+                response(payload={'status_code':0,'data':{'id_str':'101','avatar_medium':{'url_list':[avatar]}}})]):
+            info = self.provider.room_info(self.canonical)
+        self.assertEqual(info.face, avatar)
+        self.assertEqual(info.cover_url, '')
+        self.assertFalse(info.live)
+        self.assertTrue(info.extra['live_known'])
 
     def test_room_does_not_need_stream_data_or_login(self):
         for status in (2, 4):

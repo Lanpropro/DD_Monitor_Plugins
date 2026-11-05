@@ -1090,6 +1090,7 @@ class DouyinPlatform(NumericLivePlatform):
         self._chat_delivery = BroadcastReceipts()
         self._anchor_uids = {}
         self._follow_profiles = {}
+        self._follow_faces = {}
         self._profile_additions = {}
         self._context = None
 
@@ -1099,6 +1100,9 @@ class DouyinPlatform(NumericLivePlatform):
             if self._follow_reference_uid(rid):
                 rid = str(room.get("resolved_room_id") or "")
             sec_uid = str(room.get("sec_uid") or "")
+            face = self._image_url(room.get("face"))
+            if re.fullmatch(r"[1-9][0-9]{0,19}", uid) and face:
+                self._follow_faces[uid] = face
             if re.fullmatch(r"[1-9][0-9]{0,19}", uid) and re.fullmatch(r"MS4wLjAB[A-Za-z0-9_-]{10,180}", sec_uid):
                 self._follow_profiles[uid] = sec_uid
             if re.fullmatch(r"douyin:[0-9]{1,20}", rid) and re.fullmatch(r"[0-9]{1,20}", uid):
@@ -1144,6 +1148,33 @@ class DouyinPlatform(NumericLivePlatform):
         """关注身份独立于房间；读取阶段不逐个等待直播资料。"""
         return self.follow_rooms(session, cancelled, accounts_only=True)
 
+    def _follow_avatar(self, uid):
+        if uid in self._follow_faces:
+            return self._follow_faces[uid]
+        if not re.fullmatch(r"[1-9][0-9]{0,19}", str(uid)):
+            return ""
+        try:
+            with requests.get("https://live.douyin.com/webcast/user/",
+                    params={"aid": 6383, "app_name": "douyin_web", "target_uid": uid},
+                    headers={"User-Agent": self.interaction_user_agent, "Referer": "https://live.douyin.com/"},
+                    timeout=(4, 8)) as response:
+                response.raise_for_status()
+                payload = response.json()
+            if not isinstance(payload, dict):
+                return ""
+            user = payload.get("data")
+            if (type(payload.get("status_code")) is not int or payload["status_code"] != 0
+                    or not isinstance(user, dict) or str(user.get("id_str") or user.get("id")) != uid):
+                return ""
+            for key in ("avatar_medium", "avatar_thumb", "avatar_large"):
+                face = self._image_url(user.get(key))
+                if face:
+                    self._follow_faces[uid] = face
+                    return face
+        except (requests.RequestException, RuntimeError, ValueError, KeyError, TypeError):
+            pass  # 头像失败不覆盖已确认的直播状态；后续刷新可重试。
+        return ""
+
     def resolve_follow_account(self, account, cancelled):
         uid = str(account.get("anchor_uid") or "")
         if not re.fullmatch(r"[1-9][0-9]{0,19}", uid) or cancelled():
@@ -1160,6 +1191,8 @@ class DouyinPlatform(NumericLivePlatform):
                 return dict(account)
             fixed = resolved.get("room_id") or ""
             return dict(resolved, room_id=reference, follow_account_ref=True, resolved_room_id=fixed,
+                        face=resolved.get("face") or self._follow_faces.get(uid) or
+                             (self._follow_avatar(uid) if not resolved.get("live") else ""),
                         live=resolved.get("live", False) if fixed else False,
                         live_known=resolved.get("live_known", False) if fixed else True)
         if not account.get("room_id"):
@@ -1532,6 +1565,7 @@ class DouyinPlatform(NumericLivePlatform):
                     live=False, live_known=False), lambda: False)
                 if not result.get("resolved_room_id"):
                     return api.RoomInfo(room_id=room_id, platform=self.kind, uname="", title="", live=False,
+                        face=result.get("face") or "",
                         extra={"live_known": result["live_known"], "anchor_uid": reference_uid,
                                "follow_account_ref": True, "playback_mode": "stream"})
             room_id, share = self._resolve_share_input(room_id)
@@ -1544,9 +1578,13 @@ class DouyinPlatform(NumericLivePlatform):
             room = info["room"]
             owner = room.get("owner") or info.get("anchor") or {}
             status_only = room["status"] == 4 and not room.get("id_str")
+            owner_uid = str(owner.get("id_str") or owner.get("id") or "")
+            face = self._image_url(owner.get("avatar_thumb"))
+            if not face and room["status"] == 4:
+                face = self._follow_avatar(owner_uid)
             return api.RoomInfo(room_id=canonical, uname="" if status_only else owner.get("nickname") or f"抖音 · {raw}",
                 title="" if status_only else room.get("title") or "抖音直播间", live=room["status"] == 2,
-                platform=self.kind, face=self._image_url(owner.get("avatar_thumb")),
+                platform=self.kind, face=face,
                 cover_url=self._image_url(room.get("cover")),
                 extra={"playback_mode": "stream", "live_known": True,
                        "anchor_uid": str(owner.get("id_str") or owner.get("id") or "")})
