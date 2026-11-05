@@ -10,6 +10,21 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ContributionGuideTests(unittest.TestCase):
+    def test_bili_live_1_1_publication_records_agree(self):
+        tag = 'bili-live-v1.1'
+        url = f'https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/{tag}'
+        readme = (ROOT / 'README.md').read_text(encoding='utf-8')
+        changes = (ROOT / 'docs/changes/bili_live.md').read_text(encoding='utf-8')
+        self.assertIn(url, readme)
+        self.assertIn('1.1 已发布', readme)
+        self.assertIn('## 已发布 v1.1（2026-11-05）', changes)
+        self.assertIn(url, (ROOT / 'docs/changes/README.md').read_text(encoding='utf-8'))
+        entries = json.loads((ROOT / 'docs/releases/sources.json').read_text(encoding='utf-8'))['entries']
+        entry = next(item for item in entries if item['tag'] == tag)
+        self.assertEqual(entry['status'], 'online')
+        self.assertEqual(entry['release_url'], url)
+        self.assertTrue(entry['last_edit_verified'])
+
     def test_workflow_and_validation_commands(self):
         source = (ROOT / 'CONTRIBUTING.md').read_text(encoding='utf-8')
         for text in ('`main`', '`develop`', 'function/', 'release/', 'archive/',

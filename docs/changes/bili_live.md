@@ -2,18 +2,22 @@
 
 插件 ID：`bili_live`。
 
-上次公开发布基线：[bili-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.0)。
+上次公开发布基线：[bili-live-v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.1)。
 
 记录规则与条目模板见[增量记录入口](README.md)。
 
 ## 待发布
 
-以下已验收条目计划纳入 1.1；候选说明见 [B站直播互动 v1.1](../releases/RELEASE-bili-live-v1.1.md)。公开发布基线暂保持 1.0。
+暂无已验收但尚未发布的条目。
+
+## 已发布 v1.1（2026-11-05）
+
+[发布说明](../releases/RELEASE-bili-live-v1.1.md) · [GitHub Release](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.1)。源码提交 `5dae9abc1e8991767f0f1c705530c351a7e766fe`；公开安装包 SHA256：`0afa256d970f4ddf03f24de23522555ac5dcd11ddb75e9f1372a56c88db7c992`。
 
 ### 2026-11-05｜修复：收到的独立表情支持通过 +1 原样发送
 
 - 更新内容：使用表情完整 ID 发送，保留输入草稿；发送前实时检查当前房间的表情权限，缺失、未解锁或查询失败时提示并停止，不降级为描述文字。
 - 验收：此前用户已确认表情 +1 成功；本次用户再次确认本机自带、购买及房间表情测试正常。权限拒绝和上下文取消由离线回归验证，不扩称这些分支已完成人工验收。
 - 追踪：[PR22](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/22)，功能提交 `1c8cd68`、`1f28f0d`；宿主 [PR102](https://github.com/Lanpropro/DD_Monitor_CE/pull/102)。
-- 集成状态：已通过 PR22 合入 develop，集成提交 `30aebf2`；尚未发布新版插件附件。
-- 发布注意：公开 1.0 安装包没有 `repeat_message` 接口，会使宿主禁用所有独立大表情的 +1；本机同版本号的副本已有修正。需要在后续插件更新中包含此项，不能仅更新宿主或以版本号相同认定源码相同。
+- 集成状态：已通过 PR22 合入 develop，集成提交 `30aebf2`；经 PR45 合入 main，已随 v1.1 公开发布。
+- 发布注意：公开 1.0 安装包没有 `repeat_message` 接口，会使宿主禁用所有独立大表情的 +1；本机同版本号的副本已有修正。v1.1 已包含此项，用户需更新插件；不能仅更新宿主或以旧版本号相同认定源码相同。
