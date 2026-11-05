@@ -2,11 +2,21 @@
 
 插件 ID：`domestic_live`。
 
-上次公开发布基线：[domestic-live-v1.5](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v1.5)。
+上次公开发布基线：[domestic-live-v2.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v2.0)。
 
 记录规则与条目模板见[增量记录入口](README.md)。
 
 ## 待发布
+
+暂无新增发布内容；原有待实况验收及实验功能限制继续保留。
+
+## 已发布 v2.0（2026-11-05）
+
+- 正式发布 domestic-live-v2.0，源码50f21ec；附件为国内插件ZIP与汇总目录，未包含软件本体。抖音发送、账号关注和头像补取，以及此前斗鱼修复包含于该版本；原记录中的实况验收边界不变。
+- 归档旧1.5：保存GitHub最新正文、原发布者/作者/时间及源码标签提交，原Release JSON、ZIP和目录另存本地并验证公开附件大小/SHA256。新版公开下载、汇总目录及网站入口验证后删除旧Release；保留domestic-live-v1.5源码标签。归档信息见docs/releases/sources.json。
+- 同步维护者在网页上最后编辑的2.0正文，不以打包候选说明覆盖网页修改，不改写1.5历史内容。
+
+## v2.0 开发与打包历史（保留原验收记录）
 
 ### 2026-11-05｜2.0 发布源码集成与草稿准备
 
