@@ -13,7 +13,16 @@
 | 比赛二路同步 | [1.5](RELEASE-match-sync-v1.5.md) | [match-sync-v1.5](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.5) |
 | 国内直播平台 | [1.5](RELEASE-domestic-live-v1.5.md) | [domestic-live-v1.5](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v1.5) |
 | 海外直播平台 | [1.2](RELEASE-global-live-v1.2.md) | [global-live-v1.2](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2) |
-| B站直播互动 | [1.0](RELEASE-bili-live-v1.0.md) | [bili-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.0) |
+
+## 替代版本的核验归档
+
+新版公开下载及商店、网站入口验证完成后，先同步旧 Release 最新正文和来源信息、提交归档，再删除旧发布页及附件。保留源码标签和提交；原始 Release JSON、安装包及目录附件另存本地备份，不加入源码仓库。
+
+| 插件 | 历史说明 | 保留源码 | 替代版本 |
+| --- | --- | --- | --- |
+| B站直播互动 | [1.0](RELEASE-bili-live-v1.0.md) | [bili-live-v1.0 标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/bili-live-v1.0) | [1.1](RELEASE-bili-live-v1.1.md) |
+
+1.0 于 2026-11-05 在删除前核对最新正文及两个附件，正文未改写。作者、原发布者、发布时间、最后更新时间、源码提交和附件大小／SHA256 均保存在 [sources.json](sources.json)。`archived_verified` 表示归档前已核对网页最后编辑版，与下方无法确认最后编辑版的旧备份区分。
 
 ## 已删除 Release 的可恢复快照
 
