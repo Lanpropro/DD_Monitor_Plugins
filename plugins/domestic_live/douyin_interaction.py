@@ -1,4 +1,4 @@
-"""Single-attempt Douyin web chat with explicit server acknowledgement."""
+"""Single-attempt Douyin chat with independent broadcast confirmation."""
 import os
 import time
 import threading
@@ -10,7 +10,7 @@ from .douyu_interaction import ChatReceipt, InteractionError, LoginRequired
 
 
 class DeliveryUnconfirmed(InteractionError):
-    """The accepted message was not matched on the independent receiver."""
+    """The submitted message has no independently confirmed broadcast."""
 
 
 class BroadcastReceipts:
@@ -24,7 +24,7 @@ class BroadcastReceipts:
         if not mid:
             return
         with self.condition:
-            self.recent.append((time.monotonic(), room, str(mid), event.get("uid", "")))
+            self.recent.append((time.monotonic(), room, str(mid), event.get("uid", ""), event.get("text", "")))
             self.condition.notify_all()
         if self.own_uid and event.get("uid") == self.own_uid:
             event["self_sent"] = True
@@ -35,7 +35,7 @@ class BroadcastReceipts:
             while not cancelled():
                 now = time.monotonic()
                 if any(now - stamp < 30 and rid == room and message == mid
-                       for stamp, rid, message, _ in self.recent):
+                       for stamp, rid, message, _, _ in self.recent):
                     return True
                 if now >= deadline:
                     return False
@@ -45,14 +45,21 @@ class BroadcastReceipts:
     def sample_count(self, room, since):
         # Bounded message-ID samples, not a connection-health or delivery verdict.
         with self.condition:
-            return sum(stamp >= since and rid == room for stamp, rid, _, _ in self.recent)
+            return sum(stamp >= since and rid == room for stamp, rid, _, _, _ in self.recent)
 
     def has_own_since(self, room, uid, since, exclude_mid):
         if not uid:
             return False
         with self.condition:
             return any(stamp >= since and rid == room and sender == uid and mid != exclude_mid
-                       for stamp, rid, mid, sender in self.recent)
+                       for stamp, rid, mid, sender, _ in self.recent)
+
+    def find_own(self, room, uid, text, since):
+        if not uid:
+            return ""
+        with self.condition:
+            return next((mid for stamp, rid, mid, sender, content in self.recent
+                         if stamp >= since and rid == room and sender == uid and content == text), "")
 
 
 def playback_cookies(platform):
@@ -151,6 +158,13 @@ class DouyinAPI:
                 raise
             except (requests.RequestException, ValueError):
                 raise InteractionError("抖音发送结果未确认（阶段：room/chat），请在官网核对；不要立即重复发送") from None
+            if isinstance(payload, dict) and "broadcast_id" in payload:
+                mid = payload["broadcast_id"]
+                if (not isinstance(mid, str) or not re.fullmatch(r"[1-9][0-9]{0,19}", mid)
+                        or delivery is None or not delivery.wait(canonical, mid, cancelled, timeout=0)):
+                    raise DeliveryUnconfirmed("官网输入发送的独立广播未能复核，草稿已保留；请核对直播间，不要立即重复发送")
+                progress("broadcast")
+                return ChatReceipt(str(account["uid"]), account.get("uname") or "我", text.strip())
             if not isinstance(payload, dict) or type(payload.get("status_code")) is not int:
                 raise InteractionError("抖音发送回执格式无效，结果未确认")
             code = payload["status_code"]

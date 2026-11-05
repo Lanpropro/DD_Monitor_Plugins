@@ -1502,6 +1502,37 @@ class DouyinTests(unittest.TestCase):
             self.client.send_text("douyin:123","hello")
         self.session.get.assert_not_called()
 
+    def test_native_transport_uses_real_broadcast_without_fabricated_http_ack(self):
+        tracker=self.module.BroadcastReceipts()
+        self.platform._chat_delivery=tracker
+        def transport(room,params,cancelled):
+            tracker.observe(room,{"message_id":"12345","uid":"42","text":"hello"})
+            return {"broadcast_id":"12345"}
+        self.client.transport=Mock(side_effect=transport)
+        phases=[]
+        self.assertEqual(self.client.send_text("douyin:123","hello",progress=phases.append),api.ChatReceipt("42","fixture","hello"))
+        self.assertEqual(phases[-1],"broadcast")
+        self.assertNotIn("ack",phases)
+        self.session.get.assert_not_called()
+
+    def test_native_transport_cannot_claim_a_broadcast_that_was_not_received(self):
+        self.platform._chat_delivery=self.module.BroadcastReceipts()
+        self.client.transport=Mock(return_value={"broadcast_id":"12345"})
+        with self.assertRaises(self.module.DeliveryUnconfirmed):self.client.send_text("douyin:123","hello")
+        self.client.transport.assert_called_once()
+        self.session.get.assert_not_called()
+
+    def test_native_match_requires_room_user_text_and_new_receipt(self):
+        tracker=self.module.BroadcastReceipts()
+        with patch.object(self.module.time,"monotonic",return_value=10):
+            tracker.observe("douyin:123",{"message_id":"old","uid":"42","text":"hello"})
+        tracker.observe("douyin:124",{"message_id":"room","uid":"42","text":"hello"})
+        tracker.observe("douyin:123",{"message_id":"user","uid":"24","text":"hello"})
+        tracker.observe("douyin:123",{"message_id":"text","uid":"42","text":"other"})
+        self.assertEqual(tracker.find_own("douyin:123","42","hello",11),"")
+        tracker.observe("douyin:123",{"message_id":"new","uid":"42","text":"hello"})
+        self.assertEqual(tracker.find_own("douyin:123","42","hello",11),"new")
+
     def test_details_dialog_is_selectable_and_has_separate_normal_size_buttons(self):
         dialog=ui.SendDetailsDialog({"platform":"douyin","uname":"fixture"},"阶段：官方客户端；官网发送模块未就绪")
         try:
@@ -1525,60 +1556,25 @@ class DouyinTests(unittest.TestCase):
             self.assertNotIn("登录",str(error.exception))
         finally:parent.deleteLater();APP.processEvents()
 
-    def test_browser_starts_without_loadfinished_and_only_retries_before_submission(self):
-        from PySide6.QtCore import QTimer
-        from PySide6.QtWidgets import QDialog, QLabel, QPushButton
+    def test_browser_stale_finish_cannot_close_current_request(self):
+        from PySide6.QtWidgets import QDialog
         browser_module=importlib.import_module("ddm_plugin_domestic_live.douyin_browser")
         parent=QWidget()
         page=Mock()
-        states=[None, '{"ready":false,"reason":"page"}', '{"ready":true}',
-                '{"submitted":false,"result":{"error":"official_client_not_ready"}}',
-                '{"ready":true}', '{"submitted":true,"result":{"status_code":0,"data":{"msg_id_str":"12345"}}}']
-        def execute(script, callback=None):
-            if callback:callback(states.pop(0))
-        page.runJavaScript.side_effect=execute
         dialog=QDialog(parent)
-        dialog.status=QLabel(dialog)
-        dialog.remember=QWidget(dialog)
-        dialog.forget_button=QPushButton(dialog)
-        dialog.read_button=QPushButton(dialog)
-        dialog.read_button.clicked.connect(lambda:None)
-        dialog.browser=SimpleNamespace(page=lambda:page,load=Mock(),reload=Mock(),loadStarted=Mock(),loadFinished=Mock())
-        log=Mock()
-        bridge=browser_module.BrowserChat(self.platform,SimpleNamespace(window=None,log=log),parent)
-        request=dict(room="douyin:123",params={"room_id":"999999","content":"hello"},cancelled=lambda:False,
-                     done=threading.Event(),result=None,deadline=time.monotonic()+55)
+        dialog.browser=SimpleNamespace(page=lambda:page)
+        cancelled=lambda:False
+        bridge=browser_module.BrowserChat(self.platform,SimpleNamespace(window=None),parent)
+        bridge.active=dialog
+        bridge._active_request={"cancelled":cancelled}
         try:
-            with patch("ddm.platform_login.PlatformFollowDialog",return_value=dialog):bridge.open(request)
-            timer=dialog.findChild(QTimer,"ddm-chat-poll")
-            self.assertTrue(dialog.read_button.isEnabled())
-            timer.timeout.emit()
-            self.assertTrue(dialog.read_button.isEnabled())
-            timer.timeout.emit()
-            self.assertTrue(dialog.read_button.isEnabled())
-            self.assertEqual(page.runJavaScript.call_count,2)
-            timer.timeout.emit()
-            self.assertIn("__ddmChatTaskId",page.runJavaScript.call_args.args[0])
-            self.assertFalse(dialog.read_button.isEnabled())
-            timer.timeout.emit()
-            self.assertTrue(dialog.read_button.isEnabled())
-            dialog.read_button.click()
-            self.assertEqual(dialog.browser.load.call_count,2)
-            self.assertTrue(any("user_reload_before_submit" in call.args[0] for call in log.call_args_list))
-            timer.timeout.emit()
-            self.assertFalse(dialog.read_button.isEnabled())
-            timer.timeout.emit()
-            self.assertTrue(request["done"].is_set())
-            self.assertEqual(request["result"]["status_code"],0)
-            self.assertTrue(dialog.isVisible(), "The official page must remain alive while broadcast delivery is checked")
-            timer.timeout.emit()
+            dialog.show();APP.processEvents()
+            bridge.finish(lambda:False,delivery_unconfirmed=True)
             self.assertTrue(dialog.isVisible())
-            bridge.finish(lambda:False)
-            self.assertTrue(dialog.isVisible(), "A stale completion must not close the active request")
-            bridge.finish(request['cancelled'])
-            self.assertEqual(page.runJavaScript.call_args.args[0], 'window.__ddmChatCancelled=true')
+            page.runJavaScript.assert_not_called()
+            bridge.finish(cancelled)
             self.assertFalse(dialog.isVisible())
-            self.assertNotIn("登录",str(browser_module.InteractionError("窗口已关闭或请求已取消")))
+            page.runJavaScript.assert_called_once_with('window.__ddmChatCancelled=true')
         finally:bridge.shutdown();parent.close();parent.deleteLater();APP.processEvents()
 
     def test_unconfirmed_or_rejected_response_never_succeeds(self):

@@ -1,14 +1,27 @@
-"""GUI bridge to the official Douyin chat client; no HTTP write fallback."""
+"""Send through the official editor using native Qt input, then verify real broadcast."""
 import json
 import threading
 import time
-import uuid
 from pathlib import Path
-from PySide6.QtCore import QObject, QTimer, QUrl, Signal
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QInputMethodEvent, QKeyEvent
 from .douyu_interaction import InteractionError
+from .douyin_interaction import DeliveryUnconfirmed
 
-SCRIPT = (Path(__file__).parent / "douyin_send.js").read_text(encoding="utf-8")
-CLIENT_SCRIPT = (Path(__file__).parent / "douyin_client.js").read_text(encoding="utf-8")
+SCRIPT = (Path(__file__).parent / 'douyin_native.js').read_text(encoding='utf-8')
+DELIVERY_TIMEOUT = 8
+
+
+def commit_text(browser, text):
+    event = QInputMethodEvent()
+    event.setCommitString(text)
+    QCoreApplication.sendEvent(browser.focusProxy() or browser, event)
+
+
+def press_enter(browser):
+    target = browser.focusProxy() or browser
+    for kind in (QEvent.KeyPress, QEvent.KeyRelease):
+        QCoreApplication.sendEvent(target, QKeyEvent(kind, Qt.Key_Return, Qt.NoModifier, '\r'))
 
 
 class BrowserChat(QObject):
@@ -30,260 +43,184 @@ class BrowserChat(QObject):
 
     def close_request(self, cancelled, delivery_unconfirmed=False):
         if self._active_request is not None and self._active_request['cancelled'] is cancelled:
-            self.active.browser.page().runJavaScript("window.__ddmChatCancelled=true")
+            self.active.browser.page().runJavaScript('window.__ddmChatCancelled=true')
             if delivery_unconfirmed and not cancelled():
-                self._active_request["retain_for_review"]("delivery_unconfirmed")
-            if not self._active_request.get("manual_review") or cancelled():
+                self._active_request['retain_for_review']()
+            if not self._active_request.get('manual_review') or cancelled():
                 self.active.accept()
 
     def request(self, room, params, cancelled):
         request = dict(room=room, params=dict(params), cancelled=cancelled,
                        done=threading.Event(), result=None, deadline=time.monotonic() + 55)
         self.requested.emit(request)
-        while not request["done"].wait(.1):
-            if cancelled() or time.monotonic() > request["deadline"]:
-                request["done"].set()
-                raise InteractionError("抖音官网发送已取消或超时，结果未确认；请在官网核对，不要立即重复发送")
-        result = request["result"]
-        if not isinstance(result, dict) or result.get("error"):
-            code = result.get("error", "cancelled") if isinstance(result, dict) else "cancelled"
-            if code == "review_open":
-                raise InteractionError("请先关闭已保留的抖音官网核对窗口，再从软件发送；本次未提交")
-            # Only fixed error categories leave the browser; never arbitrary exception messages.
-            labels = {"wrong_room_page": "官网页面与目标直播间不匹配",
-                      "cancelled_before_send": "提交前已取消", "official_client_changed": "官网发送模块结构已变化",
-                      "official_client_not_ready": "官网发送模块未就绪", "invalid_response": "官网未返回有效回执",
-                      "official_security_not_ready": "官网安全环境模块在准备期限内未加载，本次未提交",
-                      "official_security_export_missing": "官网安全环境模块已找到，但初始化导出不可用，本次未提交",
-                      "official_security_timeout": "官网安全环境初始化超时，本次未提交",
-                      "official_security_failed": "官网安全环境初始化失败，本次未提交",
-                      "official_context_not_ready": "官网登录与直播间信息尚未就绪，本次未提交",
-                      "wrong_room_session": "官网当前直播与目标直播不一致，本次未提交",
-                      "account_mismatch": "官网当前账号与所选账号不一致，本次未提交",
-                      "official_request_failed": "官网客户端调用失败", "cancelled": "窗口已关闭或请求已取消"}
-            reason = labels.get(code, "官网客户端返回未知错误")
-            if isinstance(result, dict):
-                stages = {"page": "页面校验", "context": "账号与直播间核对", "module": "模块初始化", "security": "安全环境准备",
-                          "request": "官网请求", "response": "回执解析"}
-                stage = stages.get(result.get("stage"), "未知")
-                names = {"Error", "TypeError", "ReferenceError", "RangeError", "SyntaxError", "SecurityError",
-                         "NotAllowedError", "AbortError", "TimeoutError", "NetworkError", "AxiosError"}
-                name = result.get("exception")
-                name = name if name in names else "其他异常"
-                submitted = "是" if result.get("submitted") is True else "否"
-                reason += f"；位置：{stage}；异常：{name}；已调用发送：{submitted}"
-                causes = {"missing_call": "模块调用目标缺失", "not_callable": "模块依赖不可调用"}
-                if result.get("cause") in causes:
-                    reason += "；分类：" + causes[result["cause"]]
-                status = result.get("http_status")
-                if type(status) is int and 100 <= status <= 599:
-                    reason += f"；HTTP：{status}"
-                status = result.get("api_status")
-                if type(status) is int:
-                    reason += f"；接口状态：{status}"
-                code = result.get("request_code")
-                if code in ("ERR_NETWORK", "ECONNABORTED", "ETIMEDOUT", "ERR_CANCELED"):
-                    reason += "；请求代码：" + code
-            raise InteractionError(f"抖音官网发送未确认（阶段：官方客户端；原因：{reason}），请先核对直播间内是否出现该条消息。")
-        return result
+        while not request['done'].wait(.1):
+            if cancelled() or time.monotonic() > request['deadline']:
+                request['done'].set()
+                raise InteractionError('抖音官网输入发送已取消或超时，结果未确认；请核对直播间，不要立即重复发送')
+        result = request['result']
+        if isinstance(result, dict) and result.get('broadcast_id'):
+            return result
+        code = result.get('error', 'cancelled') if isinstance(result, dict) else 'cancelled'
+        if code == 'native_unconfirmed':
+            raise DeliveryUnconfirmed('已通过官网输入框执行发送，但软件尚未收到本人同内容的新广播；草稿已保留，请先在官网核对，不要立即重复发送。')
+        labels = {'review_open': '请先关闭已保留的官网核对窗口，本次未提交',
+                  'wrong_room_page': '官网页面与目标直播间不匹配，本次未提交',
+                  'wrong_room_session': '官网当前直播与目标直播不一致，本次未提交',
+                  'account_mismatch': '官网账号与所选账号不一致，本次未提交',
+                  'ambiguous_editor': '官网出现多个输入框，本次未提交',
+                  'official_draft_exists': '官网输入框已有草稿，本次未覆盖或提交',
+                  'input_focus_lost': '官网输入焦点已变化，本次未提交',
+                  'input_mismatch': '官网输入内容与软件草稿不一致，本次未提交',
+                  'cancelled_before_send': '提交前已取消', 'cancelled': '窗口已关闭或请求已取消'}
+        raise InteractionError('抖音官网输入发送未确认：' + labels.get(code, '官网输入未就绪或返回未知状态') + '。')
 
     def open(self, request):
-        if self.closed or request["done"].is_set() or request["cancelled"]():
-            request["done"].set()
+        if self.closed or request['done'].is_set() or request['cancelled']():
+            request['done'].set()
             return
-        if self._active_request is not None and self._active_request.get("manual_review"):
-            request["result"] = {"error": "review_open"}
-            request["done"].set()
+        if self._active_request is not None and self._active_request.get('manual_review'):
+            request['result'] = {'error': 'review_open'}
+            request['done'].set()
             return
         from ddm.platform_login import PlatformFollowDialog
         dialog = PlatformFollowDialog(self.platform, self.parent(), login_only=True,
                                       defer_login=True, owner=self.context.window)
-        self.active = dialog
-        self._active_request = request
-        dialog.setWindowTitle("抖音 · 官网弹幕发送")
-        dialog.status.setText("正在加载官网互动环境；如有登录或安全验证，请在下方完成。请勿重复点击网页发送。")
+        self.active, self._active_request = dialog, request
+        dialog.setWindowTitle('抖音 · 官网输入发送')
+        dialog.resize(1100, 720)
+        dialog.status.setWordWrap(True)
+        dialog.status.setText('正在准备官网输入环境，软件将自动输入并发送；如有登录或验证，请在下方完成。')
         dialog.remember.hide()
         dialog.forget_button.hide()
-        dialog.read_button.setText("重新加载环境")
+        dialog.read_button.setText('重新加载环境')
         dialog.read_button.clicked.disconnect()
         dialog.read_button.setEnabled(True)
-        task = dict(id=uuid.uuid4().hex, webRid=request["room"].split(":",1)[1],
-                    roomId=request["params"]["room_id"], text=request["params"]["content"],
-                    senderUid=request["params"].get("_sender_uid", ""))
         page = dialog.browser.page()
+        for script in page.scripts().find('ddm-follow-list'):
+            page.scripts().remove(script)
         page.setAudioMuted(True)
-        state = {"started": False, "submitted": False, "retry_safe": True, "polling": False, "epoch": 0,
-                 "holding": False}
-        opened = time.monotonic()
-        last_stage = None
+        task = dict(webRid=request['room'].split(':', 1)[1], roomId=request['params']['room_id'],
+                    senderUid=request['params'].get('_sender_uid', ''), text=request['params']['content'])
+        state = dict(phase='inspect', polling=False, submitted=False, since=None, holding=False, epoch=0)
+        review = dict(since=None, text='')
+        opened, last_stage = time.monotonic(), None
         def trace(stage):
             nonlocal last_stage
-            if stage == last_stage:
+            if last_stage == stage:
                 return
             last_stage = stage
-            log = getattr(self.context, "log", None)
+            log = getattr(self.context, 'log', None)
             if callable(log):
                 log(f"[douyin官网] 房间={request['room']} 阶段={stage} 耗时={time.monotonic() - opened:.2f}s")
-        dialog.browser.loadStarted.connect(lambda: trace("page_loading"))
-        dialog.browser.loadFinished.connect(lambda ok: trace("page_loaded" if ok else "page_load_failed"))
-        prepare = """JSON.stringify((() => {
-            if(location.origin!=='https://live.douyin.com'||
-               location.pathname.replace(/\/$/,'')!=='/'+%s) return {ready:false,reason:'page'};
-            let require=window.__ddmChatRequire; const chunks=window.webpackChunkdouyin_live_v2;
-            if(!require&&Array.isArray(chunks)) chunks.push([['ddm-prepare-'+%s],{},r=>{
-                require=r;window.__ddmChatRequire=r;
-            }]);
-            return (%s)(require);
-        })())""" % (json.dumps(task["webRid"]), json.dumps(task["id"]), CLIENT_SCRIPT)
-        submit = """if(window.__ddmChatTaskId!==%s){
-            window.__ddmChatTaskId=%s;window.__ddmChatCancelled=false;
-            window.__ddmChatSubmitted=false;window.__ddmChatResult=null;
-            window.__ddmChatStage='page';
-            Promise.resolve().then(()=> (%s)(%s, (%s))).then(data=>{window.__ddmChatResult=data})
-            .catch(e=>{const allowed=['wrong_room_page','cancelled_before_send','official_client_changed',
-            'official_client_not_ready','invalid_response',
-            'official_security_not_ready','official_security_export_missing',
-            'official_security_timeout','official_security_failed','official_context_not_ready',
-            'wrong_room_session','account_mismatch'];window.__ddmChatResult={error:
-            allowed.includes(e?.message)?e.message:'official_request_failed',
-            stage:['page','context','module','security','request','response'].includes(window.__ddmChatStage)?window.__ddmChatStage:'unknown',
-            exception:['Error','TypeError','ReferenceError','RangeError','SyntaxError','SecurityError',
-            'NotAllowedError','AbortError','TimeoutError','NetworkError','AxiosError'].includes(e?.name)?e.name:'Other',
-            cause:window.__ddmChatStage==='module'&&e?.name==='TypeError'&&typeof e.message==='string'?
-            (e.message.includes("reading 'call'")?'missing_call':e.message.includes('is not a function')?'not_callable':'other'):'other',
-            http_status:Number.isInteger(e?.response?.status)&&e.response.status>=100&&e.response.status<=599?e.response.status:null,
-            api_status:Number.isSafeInteger(e?.response?.data?.status_code)?e.response.data.status_code:null,
-            request_code:['ERR_NETWORK','ECONNABORTED','ETIMEDOUT','ERR_CANCELED'].includes(e?.code)?e.code:null,
-            submitted:!!window.__ddmChatSubmitted}});
-        }""" % (json.dumps(task["id"]), json.dumps(task["id"]), SCRIPT, json.dumps(task), CLIENT_SCRIPT)
-        read_state = "JSON.stringify({submitted:!!window.__ddmChatSubmitted,result:window.__ddmChatResult,stage:window.__ddmChatStage})"
-        def retry():
-            if state["submitted"] or not state["retry_safe"] or request["done"].is_set():
-                return
-            state.update(started=False, retry_safe=True, polling=False, epoch=state["epoch"] + 1)
-            trace("user_reload_before_submit")
-            request["deadline"] = time.monotonic() + 55
-            dialog.status.setText("正在重新加载官网环境；本次尚未提交弹幕。")
-            dialog.browser.load(QUrl(self.platform.room_url(request["room"])))
-        dialog.read_button.clicked.connect(retry)
-        review_state = {"since": None, "text": ""}
-        review_timer = QTimer(dialog)
-        review_timer.setObjectName("ddm-review-receiver")
+        dialog.browser.loadStarted.connect(lambda: trace('page_loading'))
+        dialog.browser.loadFinished.connect(lambda ok: trace('page_loaded' if ok else 'page_load_failed'))
+        timer, review_timer = QTimer(dialog), QTimer(dialog)
+        timer.setObjectName('ddm-chat-poll')
+        review_timer.setObjectName('ddm-review-receiver')
+        timer.setInterval(150)
         review_timer.setInterval(500)
         def observe_review():
-            receipt = request.get("result", {}).get("data", {})
-            original_mid = receipt.get("msg_id_str", "")
-            if self.platform._chat_delivery.has_own_since(request["room"], task["senderUid"],
-                                                         review_state["since"], original_mid):
+            original = self.platform._chat_delivery.find_own(request['room'], task['senderUid'], task['text'], state['since'])
+            if self.platform._chat_delivery.has_own_since(request['room'], task['senderUid'], review['since'], original):
                 review_timer.stop()
-                dialog.status.setText(review_state["text"] + "\n软件独立接收：已收到本人新增弹幕（至少1条）；原软件请求仍未确认。")
-                trace("review_self_broadcast")
+                dialog.status.setText(review['text'] + '\n软件独立接收：已收到本人新增弹幕（至少1条）；原软件请求仍未确认。')
+                trace('review_self_broadcast')
         review_timer.timeout.connect(observe_review)
-        def retain_for_review(reason):
-            if review_state["since"] is not None:
+        def retain_for_review():
+            if review['since'] is not None:
                 return
-            request["manual_review"] = True
-            state["holding"] = True
+            request['manual_review'] = state['holding'] = True
             timer.stop()
-            trace(reason + "_review")
-            dialog.setWindowTitle("抖音 · 官网发送核对")
+            review['since'] = time.monotonic()
+            review['text'] = ('官网已执行输入发送，弹幕投递仍未确认，自动发送已停止，草稿保留。'
+                              '请核对原消息；若未出现，可在下方官网手动输入不同短文本作对照。')
+            dialog.setWindowTitle('抖音 · 官网发送核对')
+            dialog.read_button.setText('自动发送已停止')
             dialog.read_button.setEnabled(False)
-            dialog.read_button.setText("自动发送已停止")
-            dialog.status.setWordWrap(True)
-            prefix = ("接口已受理，但弹幕投递未确认" if reason == "delivery_unconfirmed" else "本次发送返回 HTTP 403")
-            review_state["text"] = (prefix + "，自动发送已停止，草稿保留。请先核对原消息；"
-                                    "若未出现，可在下方官网输入一条不同的短文本手动发送作对照。")
-            review_state["since"] = time.monotonic()
-            dialog.status.setText(review_state["text"] + "\n软件独立接收：尚未观察到本人新增弹幕（0条）。")
-            trace("review_self_wait")
+            dialog.status.setText(review['text'] + '\n软件独立接收：尚未观察到本人新增弹幕（0条）。')
+            trace('native_unconfirmed_review')
             review_timer.start()
-        request["retain_for_review"] = retain_for_review
+        request['retain_for_review'] = retain_for_review
+        def retry():
+            if state['phase'] != 'inspect' or state['submitted'] or request['done'].is_set():
+                return
+            state.update(polling=False, epoch=state['epoch'] + 1)
+            request['deadline'] = time.monotonic() + 55
+            trace('user_reload_before_submit')
+            dialog.browser.load(QUrl(self.platform.room_url(request['room'])))
+        dialog.read_button.clicked.connect(retry)
         def poll():
-            if request["cancelled"]() or self.closed:
-                page.runJavaScript("window.__ddmChatCancelled=true")
+            if request['cancelled']() or self.closed:
+                page.runJavaScript('window.__ddmChatCancelled=true')
                 dialog.reject()
                 return
-            if request["done"].is_set():
-                if not state["holding"]:
-                    dialog.reject()
+            if request['done'].is_set() or state['polling']:
                 return
-            if state["polling"] or state["started"] and state["retry_safe"]:
+            if state['submitted']:
+                mid = self.platform._chat_delivery.find_own(request['room'], task['senderUid'], task['text'], state['since'])
+                if mid:
+                    request['result'] = {'broadcast_id': mid}
+                    state['holding'] = True
+                    request['done'].set()
+                    timer.stop()
+                    trace('native_broadcast')
+                elif time.monotonic() - state['since'] >= DELIVERY_TIMEOUT:
+                    request['result'] = {'error': 'native_unconfirmed'}
+                    retain_for_review()
+                    request['done'].set()
                 return
-            state["polling"] = True
-            epoch = state["epoch"]
+            state['polling'] = True
+            epoch, action = state['epoch'], state['phase']
             def received(raw):
-                if epoch != state["epoch"]:
-                    return  # A read-only probe from the previous page cannot start a write.
-                state["polling"] = False
-                if request["done"].is_set() or request["cancelled"]():
+                if epoch != state['epoch']:
+                    return
+                state['polling'] = False
+                if request['done'].is_set() or request['cancelled']() or self.closed:
                     return
                 try:
                     result = json.loads(raw) if isinstance(raw, str) else raw
-                except (ValueError, TypeError):
+                except (TypeError, ValueError):
                     result = None
                 if not isinstance(result, dict):
-                    if not state["started"]:
-                        dialog.status.setText("官网页面尚未就绪，本次未提交弹幕。可重新加载环境。")
                     return
-                if not state["started"]:
-                    if not result.get("ready"):
-                        reason = result.get("reason")
-                        trace("prepare_" + (reason if reason in ("page", "module", "dependency") else "unknown"))
-                        if result.get("reason") == "dependency":
-                            dialog.status.setText("官网发送模块的依赖尚未加载；本次尚未提交，可重新加载环境。")
-                        else:
-                            dialog.status.setText("正在等待官网页面及发送模块；本次尚未提交，可重新加载环境。")
-                        return
-                    state.update(started=True, retry_safe=False)
-                    trace("client_ready")
-                    dialog.read_button.setEnabled(False)
-                    dialog.status.setText("正在核对官网账号与直播间，准备发送弹幕。")
-                    page.runJavaScript(submit)
-                    return
-                state["submitted"] = state["submitted"] or bool(result.get("submitted"))
-                stage = result.get("stage")
-                if stage in ("page", "context", "module", "security", "request", "response"):
-                    trace(stage)
-                outcome = result.get("result")
-                if not isinstance(outcome, dict):
-                    return
-                safe_error = outcome.get("error") in ("official_client_not_ready", "official_client_changed", "wrong_room_page")
-                if safe_error and not state["submitted"]:
-                    state["retry_safe"] = True
-                    dialog.read_button.setEnabled(True)
-                    dialog.status.setText("官网发送模块未就绪，本次尚未提交。可重新加载环境再试。")
-                    return
-                request["result"] = outcome
-                accepted = (not outcome.get('error') and type(outcome.get('status_code')) is int
-                            and outcome['status_code'] == 0)
-                review = bool(outcome.get('error') and type(outcome.get('http_status')) is int
-                              and outcome['http_status'] == 403)
-                request["manual_review"] = review
-                state["holding"] = accepted or review
-                request["done"].set()
-                trace("ack" if accepted else "unconfirmed")
-                if review:
-                    retain_for_review("http_403")
-                elif accepted:
-                    dialog.status.setText("官网已受理，正在核对弹幕投递，请勿重复发送。")
-                else:
+                if result.get('error'):
+                    request['result'] = result
+                    request['done'].set()
                     dialog.accept()
-            page.runJavaScript(read_state if state["started"] else prepare, received)
-        timer = QTimer(dialog)
-        timer.setObjectName("ddm-chat-poll")
-        timer.setInterval(150)
+                    return
+                if not result.get('ready'):
+                    reason = result.get('reason')
+                    trace('prepare_' + (reason if reason in ('page', 'context', 'editor', 'input') else 'unknown'))
+                    return
+                if action == 'inspect':
+                    state['phase'] = 'focus'
+                    dialog.read_button.setEnabled(False)
+                    dialog.browser.setFocus(Qt.OtherFocusReason)
+                    dialog.status.setText('正在将软件草稿输入官网，请勿操作下方输入框。')
+                    trace('native_focus')
+                elif action == 'focus':
+                    state['phase'] = 'verify'
+                    commit_text(dialog.browser, task['text'])
+                    trace('native_input')
+                else:
+                    state.update(submitted=True, since=time.monotonic())
+                    request['deadline'] = time.monotonic() + DELIVERY_TIMEOUT + 2
+                    press_enter(dialog.browser)
+                    dialog.status.setText('官网已执行输入发送，正在等待软件独立接收确认，请勿重复发送。')
+                    trace('native_submit')
+            code = 'JSON.stringify((%s)(%s,%s))' % (SCRIPT, json.dumps(task), json.dumps(action))
+            page.runJavaScript(code, received)
         timer.timeout.connect(poll)
         def finished(_result):
-            trace("page_closed")
+            trace('page_closed')
             timer.stop()
             review_timer.stop()
-            request["done"].set()
+            request['done'].set()
             if self.active is dialog:
-                self.active = None
-                self._active_request = None
+                self.active = self._active_request = None
             dialog.deleteLater()
         dialog.finished.connect(finished)
-        dialog.browser.load(QUrl(self.platform.room_url(request["room"])))
+        dialog.browser.load(QUrl(self.platform.room_url(request['room'])))
         timer.start()
         dialog.show()
 
