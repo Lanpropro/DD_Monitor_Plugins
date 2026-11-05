@@ -6,6 +6,19 @@
 
 UI也按用户最新要求先参考ShadowReplay，再做定制。当前回看工作区已调整为大画面、底部时间轴与右侧片段检查器；选区和亮点推荐在一起，生成按钮固定在检查器底部。尚未实现的功能页面按计划逐批接入。
 
+剪辑工程已接入同一主窗口：顶部“剪辑工程”打开工程列表，回看选区页也可“用启用选区新建工程”。编辑器参考对方的左侧文件、中央预览、右侧属性与底部多轨时间轴，使用本体Qt控件和主题。
+
+## 剪辑工程
+
+1. 新建工程后导入外部视频、音频或图片，选择文件并添加到主轨、画中画、音频或贴纸；文件列表只保存本工程引用，不建立素材库。视频和图片显示真实缩略图，缺失文件可重新定位。
+2. 主视频首尾相接；拖动片段排序、拖动边缘裁剪，用S分割、Ctrl+D复制、Delete删除、Ctrl+Z/Ctrl+Shift+Z撤销/重做。属性栏可修改来源入出点、0.25～4倍速度和音量，点击“应用属性”保存。吸附对齐播放头/边界，时间轴可缩放与滚动。
+3. 文字支持多行、颜色/字号、位置/尺寸与透明度；贴纸引用外部图片，画中画引用外部视频，音频支持来源入点、速度、音量及淡入淡出。图文位于画中画上方，主视频在下，音频轨独立；同类轨道可通过编号调整层次，重叠内容自动分轨。附加内容锚定主视频，移动/分割时跟随；裁剪掉起点时隐藏，恢复边界后重现。
+4. “波形”从选中文件真实音轨提取，显示在相应时间轴块中；没有音轨不会伪造波形。画布支持横屏/竖屏/方形及1～60fps；可勾选压制主轨来源弹幕。
+5. 修改自动保存为 `.ddcut.json`，Ctrl+S手动保存，另存为可交付工程文件；相对路径在同盘时使用，跨盘保留绝对路径。移动工程时保留引用文件的相对位置，或使用“重新定位文件”。删除片段或工程JSON不删除外部源文件。
+6. 预览与导出共用FFmpeg合成链路，预览按当前位置生成8秒缓存，默认静音；修改后自动更新，跨预览段播放会等待合成，不能等同即时实时多轨预览。导出完整H.264/AAC MP4，统一画布/帧率，保留项目对应弹幕JSON；取消清理未完成输出，已有外部文件不覆盖。
+
+当前尚未对齐的编辑细节包括画面内直接拖动/旋转、视频与图文轨任意交错、转场和复杂样式；字幕、投稿和高级编码仍按后续批次推进。真实长工程负载、音画听感与高DPI交互待人工验收。
+
 ## 安装与兼容
 
 候选包为 `ddcut_replay-0.1.3.zip`，ZIP 顶层和安装目录均为小写 `ddcut_replay/`。源码按维护者要求保留 `plugins/DDCut_Replay/`，由构建器映射，禁止将源码目录直接改名安装。
@@ -50,6 +63,7 @@ python tests/check_ddcut_modes.py --host ../DD_Monitor_CE
 python tests/check_ddcut_highlights.py --host ../DD_Monitor_CE --native
 python tests/check_ddcut_ranges_chat.py --host ../DD_Monitor_CE --native --screenshots work/ranges-chat-native
 python tests/check_ddcut_burn.py --host ../DD_Monitor_CE --screenshots work/burn-check
+python tests/check_ddcut_projects.py --host ../DD_Monitor_CE --native --screenshots work/project-native
 python tests/check_ddcut_hls.py
 python tests/check_ddcut_replay_native.py --host ../DD_Monitor_CE --package dist/ddcut_replay-0.1.3.zip
 python tests/check_contributing.py

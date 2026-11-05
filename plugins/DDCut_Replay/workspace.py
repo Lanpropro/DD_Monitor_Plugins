@@ -1,14 +1,15 @@
 """Dedicated Qt recording, archive, review and task workspace."""
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 import time
 
-from PySide6.QtCore import Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
+from PySide6.QtCore import Qt, QTimer, QUrl, QSize, Signal
+from PySide6.QtGui import QDesktopServices, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFrame, QLineEdit,
     QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
     QListView, QListWidget, QListWidgetItem, QPushButton, QScrollArea, QScrollBar, QSizePolicy, QSlider, QSpinBox, QDoubleSpinBox, QSplitter, QStackedWidget, QTabWidget,
-    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, QMessageBox)
 
 from ddm import theme
 
@@ -129,6 +130,7 @@ class Workspace(QWidget):
         self.heat_reader = None
         self.heat_signature = None
         self.heat_next_check = 0
+        self.pending_project = None
         self.setWindowTitle('DDCut Replay · 录制与切片')
         self.selection_playing = False
         self.task_signature = None
@@ -144,6 +146,7 @@ class Workspace(QWidget):
         self.back_button = button('返回画面墙', self.close, header)
         button('录制设置', self.settings, header)
         self.task_button = button('后台任务', self.toggle_tasks, header)
+        self.projects_button = button('剪辑工程', self.show_projects, header)
         self.task_button.setCheckable(True)
         self.capture_switch = QCheckBox('仅录制切片素材')
         self.capture_switch.setChecked(getattr(owner, 'capture_mode', 'clip') == 'clip')
@@ -159,6 +162,7 @@ class Workspace(QWidget):
         self.content.addWidget(self.tabs)
         self.build_library()
         self.build_review()
+        self.build_projects()
         self.build_tasks()
         self.content.setStretchFactor(0, 1)
         self.status = QLabel()
@@ -492,6 +496,7 @@ class Workspace(QWidget):
         self.burn_chat.setToolTip('将文字、表情和SC合成进MP4，沿用弹幕页字号、透明度及时间偏移；需要重编码。画面开关仅影响预览。')
         self.burn_chat.toggled.connect(self.save_burn_options)
         inspector_box.addWidget(self.burn_chat)
+        button('用启用选区新建工程', self.project_from_ranges, inspector_box)
         self.filename = QLineEdit()
         self.filename.setPlaceholderText('成品文件名')
         self.filename.setAccessibleName('成品文件名')
@@ -598,6 +603,166 @@ class Workspace(QWidget):
             shortcut.activated.connect(callback)
         middle.setFocusPolicy(Qt.StrongFocus)
 
+    def build_projects(self):
+        from .project_editor import ProjectEditor
+        self.project_page = QWidget()
+        box = QVBoxLayout(self.project_page)
+        box.setContentsMargins(0, 0, 0, 0)
+        row = QHBoxLayout()
+        title = QLabel('剪辑工程')
+        title.setObjectName('SettingsTitle')
+        row.addWidget(title)
+        self.project_search = QLineEdit()
+        self.project_search.setPlaceholderText('搜索工程标题或备注')
+        self.project_search.textChanged.connect(self.filter_projects)
+        row.addWidget(self.project_search, 1)
+        button('新建工程', self.new_project, row)
+        button('打开工程文件', self.import_project, row)
+        button('返回录像', self.show_library, row)
+        box.addLayout(row)
+        hint = QLabel('工程引用外部文件；在编辑器中编排片段、图文、画中画与音频。素材由外部软件管理。')
+        hint.setObjectName('SettingsHint')
+        hint.setWordWrap(True)
+        box.addWidget(hint)
+        self.project_list = table(['工程', '最近编辑', '时长', '片段', '备注'])
+        self.project_list.setAccessibleName('剪辑工程列表')
+        self.project_list.setIconSize(QSize(72, 40))
+        self.project_list.itemDoubleClicked.connect(lambda *_: self.open_project_selection())
+        box.addWidget(self.project_list, 1)
+        row = QHBoxLayout()
+        button('打开工程', self.open_project_selection, row)
+        button('删除工程文件', self.delete_project, row)
+        row.addStretch()
+        box.addLayout(row)
+        self.library_review.addWidget(self.project_page)
+        self.project_editor = ProjectEditor(self)
+        self.project_editor.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        self.project_editor.backRequested.connect(self.show_projects)
+        self.library_review.addWidget(self.project_editor)
+
+    def show_projects(self):
+        self.preview.stop()
+        self.current, self.live_source = None, None
+        self.project_editor.shutdown_preview()
+        self.filters.hide()
+        self.library_review.setCurrentWidget(self.project_page)
+        self.refresh_projects()
+
+    def refresh_projects(self):
+        from .project import read_project, duration
+        folder = self.hub.root / 'projects'
+        paths = list(folder.glob('*.ddcut.json')) if folder.is_dir() else []
+        paths += [Path(path) for path in self.hub.preferences.get('project_paths', [])]
+        rows = []
+        for path in dict.fromkeys(paths):
+            try:
+                data = read_project(path)
+                rows.append((path, data))
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+        rows.sort(key=lambda row: row[1].get('updated_at', 0), reverse=True)
+        self.project_list.clear()
+        for path, data in rows:
+            item = QTreeWidgetItem([data['title'], datetime.fromtimestamp(data.get('updated_at', 0)).strftime('%Y-%m-%d %H:%M'),
+                                   timecode(duration(data)), str(len(data['clips'])), data.get('note', '')])
+            item.setData(0, Qt.UserRole, str(path))
+            item.setToolTip(0, str(path))
+            if data['clips']:
+                source = data['media'][data['clips'][0]['source']]
+                cover = source.get('cover_path')
+                if cover and Path(cover).is_file():
+                    item.setIcon(0, QIcon(cover))
+            self.project_list.addTopLevelItem(item)
+        self.filter_projects()
+
+    def filter_projects(self, *_):
+        query = self.project_search.text().casefold()
+        for index in range(self.project_list.topLevelItemCount()):
+            item = self.project_list.topLevelItem(index)
+            item.setHidden(query not in (item.text(0)+' '+item.text(4)).casefold())
+
+    def new_project(self, *_):
+        from .project import new_project, ProjectDocument
+        data = new_project()
+        path = self.hub.root / 'projects' / (data['id'] + '.ddcut.json')
+        document = ProjectDocument(path, data)
+        self.guard(document.save)
+        self.open_project_document(document)
+
+    def open_project_document(self, document):
+        self.preview.stop()
+        self.current, self.live_source = None, None
+        self.filters.hide()
+        self.library_review.setCurrentWidget(self.project_editor)
+        self.project_editor.open_document(document)
+
+    def open_project_selection(self):
+        from .project import ProjectDocument
+        item = self.project_list.currentItem()
+        if item:
+            self.guard(lambda: self.open_project_document(ProjectDocument(item.data(0, Qt.UserRole))))
+
+    def import_project(self):
+        from .project import ProjectDocument
+        path, _ = QFileDialog.getOpenFileName(self, '打开剪辑工程', '', '剪辑工程 (*.ddcut.json *.json)')
+        if path:
+            def load():
+                document = ProjectDocument(path)
+                paths = self.hub.preferences.setdefault('project_paths', [])
+                if str(Path(path).resolve()) not in paths:
+                    paths.append(str(Path(path).resolve()))
+                    self.hub.save()
+                self.open_project_document(document)
+            self.guard(load)
+
+    def delete_project(self):
+        item = self.project_list.currentItem()
+        if not item:
+            return
+        path = Path(item.data(0, Qt.UserRole))
+        if QMessageBox.question(self, '删除工程', '删除此工程JSON文件？引用的视频、图片与音频会保留。') == QMessageBox.Yes:
+            self.project_editor.discard_document(path)
+            self.guard(lambda: path.unlink())
+            paths = self.hub.preferences.get('project_paths', [])
+            self.hub.preferences['project_paths'] = [entry for entry in paths if Path(entry) != path]
+            self.hub.save()
+            self.refresh_projects()
+
+    def project_from_ranges(self):
+        from .project_media import inspect_file
+        if not self.current:
+            return
+        ranges = enabled_ranges(self.current)
+        if not ranges or any(item['end'] <= item['start'] for item in ranges):
+            self.report('请先启用至少一个有效选区。')
+            return
+        source = deepcopy(self.current)
+        ffmpeg = self.service.options()['ffmpeg']
+        def inspect(job):
+            info = inspect_file(job, ffmpeg, source['path'], self.hub.root / 'work')
+            return {**info, **source, 'type': 'video', 'has_audio': info['has_audio']}
+        job = self.hub.submit('从选区创建工程', 'project_source', inspect)
+        self.pending_project = job, ranges
+        self.report('正在读取来源文件信息…')
+
+    def finish_project_source(self):
+        if not self.pending_project or not self.pending_project[0].future.done():
+            return
+        from .project import new_project, append_clip, ProjectDocument
+        job, ranges = self.pending_project
+        self.pending_project = None
+        if job.state != 'done':
+            self.report(job.message)
+            return
+        info = job.result
+        data = new_project(info.get('title', '录像')+' · 剪辑工程')
+        data['media'][info['path']] = info
+        for item in ranges:
+            append_clip(data, info['path'], item['start'], item['end'])
+        document = ProjectDocument(self.hub.root / 'projects' / (data['id']+'.ddcut.json'), data)
+        document.save()
+        self.open_project_document(document)
+
     def build_tasks(self):
         # A shared side pane resizes the native video surface instead of covering it.
         self.task_panel = QFrame()
@@ -649,6 +814,7 @@ class Workspace(QWidget):
             self.report('录制方式：仅切片素材' if checked else '录制方式：原版完整录像与即时重放')
 
     def show_library(self):
+        self.project_editor.shutdown_preview()
         self.library_review.setCurrentWidget(self.listing)
         self.filters.show()
         self.inspector.hide()
@@ -937,6 +1103,8 @@ class Workspace(QWidget):
             self.report(error)
 
     def open_current_recording(self):
+        if self.library_review.currentWidget() in (self.project_page, self.project_editor):
+            return
         entry = self.source() if self.sources.count() else None
         if entry is not None and getattr(self.owner, 'capture_mode', 'clip') == 'original':
             self.report('原版录制中；停止后可在本页回看完整录像。')
@@ -1484,6 +1652,7 @@ class Workspace(QWidget):
             self.report('播放器：' + str(error))
 
     def refresh_tasks(self):
+        self.guard(self.finish_project_source)
         active = sum(job.state in ACTIVE for job in self.hub.jobs)
         self.task_button.setText(f'后台任务 ({active})' if active else '后台任务')
         signature = [(job.id, job.state, job.progress, job.output, job.message) for job in self.hub.jobs]
@@ -1524,12 +1693,15 @@ class Workspace(QWidget):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(entry['path']).parent)))
 
     def closeEvent(self, event):
+        self.project_editor.shutdown_preview()
         self.preview.stop()
         super().closeEvent(event)
         self.closed.emit()
 
     def showEvent(self, event):
         super().showEvent(event)
+        if hasattr(self, 'project_editor') and self.library_review.currentWidget() is self.project_editor:
+            QTimer.singleShot(0, self.project_editor.request_preview)
         if self.current and self.preview.core is None:
             self.guard(lambda: self.preview.load(self.current['path']))
             self.change_playback_rate()

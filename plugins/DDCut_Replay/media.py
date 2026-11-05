@@ -179,11 +179,12 @@ def scan_directory(job, directory):
     return sorted(result, key=lambda entry: entry['created_at'], reverse=True)
 
 
-def thumbnail(job, ffmpeg, path, directory):
+def thumbnail(job, ffmpeg, path, directory, *, input_args=None):
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / (job.id + '.png')
-    run_process(job, [ffmpeg, '-y', '-hide_banner', '-loglevel', 'error', '-i', str(path),
+    inputs = input_args if input_args is not None else ['-i', str(path)]
+    run_process(job, [ffmpeg, '-y', '-hide_banner', '-loglevel', 'error', *inputs,
         '-frames:v', '1', '-vf', 'scale=320:-2', str(target)], directory)
     return str(target)
 
@@ -454,7 +455,7 @@ class TaskHub:
                     'source': result['source'], 'room': result.get('room') or {},
                     **{key: result[key] for key in ('cover_path', 'avatar_path', 'danmaku_path') if result.get(key)}})
 
-    def submit(self, title, kind, function, *args, lease=''):
+    def submit(self, title, kind, function, *args, lease='', **kwargs):
         if self.closed:
             raise RuntimeError('任务服务已停止')
         job = Job(title=title, kind=kind, lease=lease)
@@ -465,7 +466,7 @@ class TaskHub:
             try:
                 check_cancel(job)
                 job.state = 'running'
-                job.result = function(job, *args)
+                job.result = function(job, *args, **kwargs)
                 job.progress, job.state = 1, 'done'
             except Cancelled:
                 job.state, job.message = 'cancelled', '已取消；已有成品保留'
