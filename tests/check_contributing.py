@@ -138,6 +138,10 @@ class ContributionGuideTests(unittest.TestCase):
                         self.assertTrue(entry['plugin_author'])
                         self.assertTrue(entry['release_author'])
                         self.assertIn('archived_at', entry)
+                        index = (directory / 'README.md').read_text(encoding='utf-8')
+                        self.assertIn('/tree/' + entry['tag'], index)
+                        online = index.split('## 当前在线发布说明', 1)[1].split('## ', 1)[0]
+                        self.assertNotIn(entry['file'], online)
                         self.assertTrue(entry['assets'])
                         for asset in entry['assets']:
                             self.assertGreater(asset['size'], 0)
