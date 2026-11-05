@@ -20,8 +20,10 @@ def main():
     os.chdir(args.host.resolve())  # Resolve the host's bundled VLC DLLs on Windows.
     os.environ["DDM_NO_SAVE"] = "1"
     from ddm.plugins import PluginManager
-    versions = {path.parent.name: json.loads(path.read_text(encoding="utf-8"))["version"]
+    versions = {json.loads(path.read_text(encoding="utf-8"))["id"]: json.loads(path.read_text(encoding="utf-8"))["version"]
                 for path in (ROOT / "plugins").glob("*/plugin.json")}
+    source_dirs = {json.loads(path.read_text(encoding='utf-8'))['id']: path.parent
+                   for path in (ROOT / 'plugins').glob('*/plugin.json')}
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert all(f"| `{plugin_id}` | {version} |" in readme for plugin_id, version in versions.items())
     match_version = versions["match_sync"]
@@ -30,7 +32,7 @@ def main():
     assert f"match_sync-{match_version}.zip" in match_readme
     notes = ROOT / 'docs/releases' / f"RELEASE-match-sync-v{match_version}.md"
     assert notes.read_text(encoding="utf-8").startswith(f"# 比赛二路同步 v{match_version}\n")
-    display_names = {"domestic_live": "国内直播平台", "global_live": "海外直播平台", "match_sync": "比赛二路同步", "bili_live": "B站直播互动"}
+    display_names = {"domestic_live": "国内直播平台", "global_live": "海外直播平台", "match_sync": "比赛二路同步", "bili_live": "B站直播互动", "ddcut_replay": "录制与切片"}
     with tempfile.TemporaryDirectory() as directory:
         manager = PluginManager(plugins_dir=directory, enabled=[])
         for path in build():
@@ -54,7 +56,7 @@ def main():
                 assert f"{plugin_id}-{manifest['version']}.zip" == path.name
                 assert archive.read(f"{plugin_id}/LICENSE") == (ROOT / "LICENSE").read_bytes()
                 for name in names:
-                    source = ROOT / "plugins" / name
+                    source = source_dirs[plugin_id] / Path(name).relative_to(plugin_id)
                     if source.is_file():
                         assert archive.read(name) == source.read_bytes()
             assert manager.install_zip(str(path)) == plugin_id

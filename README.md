@@ -55,6 +55,13 @@
 </tr>
 </table>
 
+<table><tr><td valign="top">
+<h3><a href="plugins/DDCut_Replay/README.md">DDCut Replay · 录制与切片（开发候选）</a></h3>
+<p>集中管理录制与回放，独立回看、标记、单选区和后台导出。需要配套本体录制服务 v1。</p>
+<p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
+<p><a href="plugins/DDCut_Replay/README.md">功能与兼容说明</a> · 下载插件：候选包由开发任务交付，尚未公开发布。</p>
+</td></tr></table>
+
 比赛二路同步 [v1.5 候选更新说明](docs/releases/RELEASE-match-sync-v1.5.md)（待实播录制验收）；已发布测试版：[v1.5-pre.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.5-pre.1)。
 
 插件依赖配套的 [DD监控室CE](https://github.com/Lanpropro/DD_Monitor_CE/releases/latest) 运行。具体能力、账号要求与最低本体版本，以各插件说明及对应 Release 为准。
@@ -96,6 +103,7 @@ ZIP 内只有插件 ID 对应的顶层文件夹。GitHub 自动生成的 **Sourc
 | 插件 | ID | 源码版本 |
 | --- | --- | --- |
 | 国内直播平台 | `domestic_live` | 1.4 |
+| 录制与切片（开发候选） | `ddcut_replay` | 0.1.3 |
 | 海外直播平台 | `global_live` | 1.2 |
 | 比赛二路同步 | `match_sync` | 1.6 |
 | B站直播互动 | `bili_live` | 1.0 |
