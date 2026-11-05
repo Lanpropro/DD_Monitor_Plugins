@@ -37,7 +37,7 @@ class IntegrationTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory()
         self.directory=Path(self.temp.name)/'plugins';self.directory.mkdir()
         installer=host_api.PluginManager(plugins_dir=str(self.directory),enabled=[])
-        archive=ROOT/'dist/bili_live-1.0.zip'
+        archive=ROOT/'dist/bili_live-1.1.zip'
         self.assertTrue(archive.is_file())
         installer.install_zip(str(archive));self.assertEqual(installer.plugins,[])
         self.patches=[patch.object(host_api,'DEFAULT_PLUGINS_DIR',str(self.directory)),
@@ -201,13 +201,13 @@ class IntegrationTests(unittest.TestCase):
             self.assertTrue(login.call_args.kwargs['reauthenticate'])
 
     def test_zip_integrity_and_tracked_source_bytes(self):
-        with zipfile.ZipFile(ROOT/'dist/bili_live-1.0.zip') as archive:
+        with zipfile.ZipFile(ROOT/'dist/bili_live-1.1.zip') as archive:
             self.assertIsNone(archive.testzip())
             names=archive.namelist()
             self.assertEqual(len(names),len(set(names)))
             self.assertTrue(all(name.startswith('bili_live/') for name in names))
             manifest=json.loads(archive.read('bili_live/plugin.json'))
-            self.assertEqual((manifest['id'],manifest['version']),('bili_live','1.0'))
+            self.assertEqual((manifest['id'],manifest['version']),('bili_live','1.1'))
             self.assertEqual(archive.read('bili_live/LICENSE'),(ROOT/'LICENSE').read_bytes())
             for name in names:
                 source=ROOT/'plugins'/name
@@ -215,24 +215,24 @@ class IntegrationTests(unittest.TestCase):
     def test_zip_upgrade_preserves_local_data(self):
         from ddm.plugin_updates import stage,apply_pending,pending_versions
         old_zip=Path(self.temp.name)/'bili-live-old.zip'
-        current=ROOT/'dist/bili_live-1.0.zip'
+        current=ROOT/'dist/bili_live-1.1.zip'
         with zipfile.ZipFile(current) as source,zipfile.ZipFile(old_zip,'w') as target:
             for name in source.namelist():
                 data=source.read(name)
                 if name=='bili_live/plugin.json':
-                    manifest=json.loads(data);manifest['version']='0.9'
+                    manifest=json.loads(data);manifest['version']='1.0'
                     data=json.dumps(manifest).encode('utf-8')
                 target.writestr(name,data)
         manager=host_api.PluginManager(plugins_dir=str(Path(self.temp.name)/'upgrade'),enabled=[])
         manager.install_zip(str(old_zip))
         folder=Path(manager.plugins_dir)/'bili_live'
         sentinel=folder/'user-data.txt';sentinel.write_bytes(b'preserve local data')
-        stage(manager,str(current),'bili_live','1.0')
-        self.assertEqual(pending_versions(manager),{'bili_live':'1.0'})
-        self.assertEqual(host_api.read_manifest(str(folder),'bili_live')['version'],'0.9')
+        stage(manager,str(current),'bili_live','1.1')
+        self.assertEqual(pending_versions(manager),{'bili_live':'1.1'})
+        self.assertEqual(host_api.read_manifest(str(folder),'bili_live')['version'],'1.0')
         apply_pending(manager)
         self.assertEqual(pending_versions(manager),{})
-        self.assertEqual(host_api.read_manifest(str(folder),'bili_live')['version'],'1.0')
+        self.assertEqual(host_api.read_manifest(str(folder),'bili_live')['version'],'1.1')
         self.assertEqual(sentinel.read_bytes(),b'preserve local data')
         self.assertEqual((folder/'plugin.py').read_bytes(),(ROOT/'plugins/bili_live/plugin.py').read_bytes())
     def test_gift_row_lazy_shared_state_and_drafts(self):

@@ -156,6 +156,15 @@
       "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/v1.1",
       "last_edit_verified": false,
       "sha256": "a87bfefd286656b15da6c220f103139da91f6cadf34cacbadee1e3b23f84c8ff"
+    },
+    {
+      "tag": "bili-live-v1.1",
+      "file": "RELEASE-bili-live-v1.1.md",
+      "status": "prepared",
+      "source_kind": "repository_candidate",
+      "base_commit": "159c9f730075b3aaf12d663aed3cce445b09f48e",
+      "last_edit_verified": false,
+      "sha256": "3544dd016d20b00767d170aa7c336ccf56c0c6ed37b91b3954c99fcd4afcd7a7"
     }
   ],
   "tags_without_recoverable_body": [
