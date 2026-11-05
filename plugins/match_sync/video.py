@@ -1,7 +1,10 @@
 """Original encoded video history and bounded, asynchronous native pictures."""
 from __future__ import annotations
 
-from collections import deque
+from collections import deque, OrderedDict
+from contextlib import contextmanager
+from bisect import bisect_right
+from itertools import islice
 from dataclasses import dataclass, replace
 import threading
 import time
@@ -16,38 +19,63 @@ except ImportError:
     VideoReformatter = None
 
 from .engine import History, np
+from .replay_cache import DiskAudioRing, PacketStore
+from .diagnostics import FrameCadence, StageTimings
 
 
 class StreamInput:
     """Windows subprocess pipes advertise seek() but cannot actually seek."""
 
-    def __init__(self, pipe):
+    def __init__(self, pipe, on_first_read=None):
         self.pipe = pipe
+        self.on_first_read = on_first_read
 
     def read(self, size):
-        return self.pipe.read(size)
+        data = self.pipe.read(size)
+        if data and self.on_first_read is not None:
+            callback, self.on_first_read = self.on_first_read, None
+            callback()
+        return data
 
 
 _conversion = threading.local()
 
 
 def reformat_frame(frame, **options):
-    # VideoFrame.reformat caches on that frame only. Live frames are short-lived;
-    # keep one scaler per worker instead, without sharing mutable state across sources.
-    if not hasattr(_conversion, "reformatter"):
-        _conversion.reformatter = VideoReformatter()
-    return _conversion.reformatter.reformat(frame, **options)
+    # Analysis alternates a few small gray sizes. Reconfiguring one scaler
+    # repeatedly rebuilds swscale's automatic worker pools.
+    if options.get('format') == 'gray':
+        options.setdefault('threads', 1)
+    if not hasattr(_conversion, 'reformatters'):
+        _conversion.reformatters = OrderedDict()
+    cache = _conversion.reformatters
+    key = (frame.width, frame.height, frame.format.name, tuple(sorted(options.items())))
+    converter = cache.pop(key, None)
+    if converter is None:
+        converter = VideoReformatter()
+    cache[key] = converter
+    while len(cache) > 4:
+        cache.popitem(last=False)
+    return converter.reformat(frame, **options)
 
 
-def image_from_frame(frame):
-    rgb = reformat_frame(frame, format="bgra")
+def image_from_frame(frame, timings=None, width=None):
+    started = time.perf_counter()
+    size = {} if width is None else dict(width=min(width, frame.width), height=max(1, round(frame.height * min(width, frame.width) / frame.width)), threads=1)
+    rgb = reformat_frame(frame, format="bgra", **size)
+    if timings is not None:
+        timings.record('display_bgra_convert', time.perf_counter() - started)
+    started = time.perf_counter()
     plane = rgb.planes[0]
     if np is None:
-        return QImage(bytes(plane), rgb.width, rgb.height, plane.line_size, QImage.Format_ARGB32).copy()
-    image = QImage(rgb.width, rgb.height, QImage.Format_ARGB32)
-    source = np.frombuffer(plane, dtype=np.uint8).reshape(rgb.height, plane.line_size)
-    target = np.frombuffer(image.bits(), dtype=np.uint8).reshape(rgb.height, image.bytesPerLine())
-    target[:, :rgb.width * 4] = source[:, :rgb.width * 4]
+        image = QImage(bytes(plane), rgb.width, rgb.height, plane.line_size, QImage.Format_ARGB32).copy()
+    else:
+        image = QImage(rgb.width, rgb.height, QImage.Format_ARGB32)
+        source = np.frombuffer(plane, dtype=np.uint8).reshape(rgb.height, plane.line_size)
+        target = np.frombuffer(image.bits(), dtype=np.uint8).reshape(rgb.height, image.bytesPerLine())
+        target[:, :rgb.width * 4] = source[:, :rgb.width * 4]
+    if timings is not None:
+        timings.record('display_image_copy', time.perf_counter() - started, payload_bytes=rgb.width * rgb.height * 4)
     return image
 
 
@@ -66,19 +94,36 @@ class EncodedPacket:
         return float((self.pts if self.pts is not None else self.dts or 0) * self.time_base)
 
     def decode_packet(self):
-        packet = av.Packet(self.data)
+        packet = av.Packet(bytes(self.data))
         packet.pts, packet.dts = self.pts, self.dts
         packet.duration, packet.time_base = self.duration, self.time_base
         return packet
 
 
+@contextmanager
+def recording_template(history, container):
+    with history.lock:
+        history.stream_template = container.streams.video[0]
+    try:
+        yield
+    finally:
+        with history.lock:
+            history.stream_template = None
+
+
 class VideoHistory(History):
     """Retain complete GOPs under the existing time/byte limits, without JPEG."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, disk_cache=False, **kwargs):
+        if disk_cache:
+            kwargs['audio_factory'] = DiskAudioRing
         super().__init__(**kwargs)
+        self.analysis_seconds = 60
+        self.packet_store = PacketStore() if disk_cache else None
         self.packets = deque()
+        self.keyframes = deque()
         self.codec = None
+        self.stream_template = None
         self.video_size = (0, 0)
         self.sequence = 0
         self.received_frames = 0
@@ -103,10 +148,10 @@ class VideoHistory(History):
             return self
         return None
 
-    def bounds_at(self, timestamp):
+    def bounds_at(self, timestamp, minimum_duration=0.):
         segment = self.segment_at(timestamp)
         if segment is not None and segment is not self:
-            return segment.bounds_at(timestamp)
+            return segment.bounds_at(timestamp, minimum_duration)
         with self.lock:
             bounds = super().bounds()
             if bounds is None:
@@ -114,9 +159,10 @@ class VideoHistory(History):
             while self.intervals and self.intervals[0][1] < bounds[0]:
                 self.intervals.popleft()
             for start, end in self.intervals:
-                if timestamp <= end + .05:
+                if (timestamp <= end + .05
+                        and min(end, bounds[1]) - max(start, bounds[0]) >= minimum_duration):
                     return max(start, bounds[0]), min(end, bounds[1])
-            return bounds
+            return None if minimum_duration else bounds
 
     def frame_at(self, timestamp):
         segment = self.segment_at(timestamp)
@@ -125,7 +171,9 @@ class VideoHistory(History):
         bounds = self.bounds_at(timestamp)
         if bounds is None or not bounds[0] <= timestamp <= bounds[1] + .05:
             return None
-        return super().frame_at(timestamp)
+        with self.lock:
+            index = bisect_right(self.frames, (timestamp, float('inf'))) - 1
+            return self.frames[index] if index >= 0 else None
 
     def pcm_at(self, timestamp, frames):
         segment = self.segment_at(timestamp)
@@ -140,8 +188,14 @@ class VideoHistory(History):
                 while self.packets and not self.packets[0].keyframe:
                     self.byte_size -= len(self.packets.popleft().data)
             first = self.packets[0].time + (self.origin or 0) if self.packets else float('inf')
+            self._trim_keyframes()
             while self.frames and self.frames[0][0] < first:
                 self.frames.popleft()
+
+    def _trim_keyframes(self):
+        first = self.packets[0].sequence if self.packets else float('inf')
+        while self.keyframes and self.keyframes[0].sequence < first:
+            self.keyframes.popleft()
 
     def set_origin(self, origin):
         with self.lock:
@@ -157,13 +211,18 @@ class VideoHistory(History):
         return super().snapshots() if self.origin is not None else []
 
     def append_packet(self, packet):
+        data = bytes(packet)
+        if self.packet_store is not None:
+            data = self.packet_store.append(data)
         with self.lock:
-            record = EncodedPacket(self.sequence, bytes(packet), packet.pts, packet.dts,
+            record = EncodedPacket(self.sequence, data, packet.pts, packet.dts,
                                    packet.duration, packet.time_base, packet.is_keyframe)
             self.sequence += 1
             if not self.packets and not record.keyframe:
                 return
             self.packets.append(record)
+            if record.keyframe:
+                self.keyframes.append(record)
             self.byte_size += len(record.data)
             if self.previous is not None:
                 self.previous.trim_bytes(max(0, self.byte_limit - self.byte_size))
@@ -174,6 +233,7 @@ class VideoHistory(History):
                 while self.packets and not self.packets[0].keyframe:
                     self.byte_size -= len(self.packets.popleft().data)
             first = self.packets[0].time if self.packets else float("inf")
+            self._trim_keyframes()
             if self.origin is None:
                 while self.pending_frames and self.pending_frames[0] < first:
                     self.pending_frames.popleft()
@@ -193,7 +253,7 @@ class VideoHistory(History):
             self.received_frames += 1
             if sample is not None:
                 self.samples.append(sample)
-            while self.samples and timestamp - self.samples[0].time > self.seconds:
+            while self.samples and timestamp - self.samples[0].time > self.analysis_seconds:
                 self.samples.popleft()
 
     def packet_range(self, sequence, target):
@@ -201,16 +261,13 @@ class VideoHistory(History):
             if not self.packets or self.codec is None:
                 return None
             reset = sequence is None or sequence < self.packets[0].sequence
-            packets = []
-            for packet in reversed(self.packets):
-                if not reset and packet.sequence < sequence:
-                    break
-                packets.append(packet)
-                if reset and packet.keyframe and packet.time <= target:
-                    break
-            if reset and (not packets or not packets[-1].keyframe or packets[-1].time > target):
-                return None
-            packets.reverse()
+            if reset:
+                index = bisect_right(self.keyframes, target, key=lambda packet: packet.time) - 1
+                if index < 0:
+                    return None
+                sequence = self.keyframes[index].sequence
+            first = max(0, sequence - self.packets[0].sequence)
+            packets = list(islice(self.packets, first, first + 512))
             return self.codec, packets, reset
 
 
@@ -228,6 +285,8 @@ class PictureReader:
         self.requested = 0.0
         self.decode_ms = 0.0
         self.decoded = 0
+        self.decoded_cadence = FrameCadence()
+        self.timings = StageTimings()
         self.byte_limit = 64 * 1024 * 1024
         self.max_frames = 8
         self.fps = 60.0
@@ -235,6 +294,9 @@ class PictureReader:
         self.active = True
         self.snapshot_until = 0.0
         self.reset_requested = False
+        self.codec_creations = 0
+        self.reset_reason = 'initial'
+        self.decode_phase = 'idle'
 
     def configure(self, byte_limit, fps, lead=.35, active=True):
         with self.lock:
@@ -242,6 +304,8 @@ class PictureReader:
             self.active = active or time.monotonic() < self.snapshot_until
             if not self.active:
                 self.reset_requested |= previous_active
+                if previous_active:
+                    self.reset_reason = 'inactive'
                 self.target = None
                 self.images.clear()
             if (self.byte_limit, self.fps, self.lead, self.max_frames) == (byte_limit, max(1, fps), lead, 24):
@@ -262,11 +326,17 @@ class PictureReader:
             if self.history is not history:
                 self.images.clear()
                 self.history = history
-            self.requested = time.monotonic()
+                self.reset_reason = 'source_changed'
+            now = time.monotonic()
+            elapsed = max(0, now - self.requested)
+            self.requested = now
             cached_backward = frame[0] in self.images and self.target is not None and frame[0] < self.target[0]
             if not cached_backward and (frame != self.target or frame[0] not in self.images):
-                if self.target is not None and (frame[1] < self.target[1] - .05 or frame[1] > self.target[1] + .5):
+                # A delayed GUI poll advances with elapsed playback time; it is
+                # not a seek and must not restart decoding from a keyframe.
+                if self.target is not None and (frame[1] < self.target[1] - .05 or frame[1] > self.target[1] + elapsed + .5):
                     self.reset_requested = True
+                    self.reset_reason = 'seek_backward' if frame[1] < self.target[1] else 'seek_forward'
                 self.target = frame
                 self.wake.set()
             if self.thread is None and not self.cancelled.is_set():
@@ -288,9 +358,10 @@ class PictureReader:
         capacity = 8
         try:
             while not self.cancelled.is_set():
+                self.decode_phase = 'idle'
                 if not self.wake.wait(1):
                     with self.lock:
-                        if time.monotonic() - self.requested >= 1:
+                        if self.target is None or not self.active:
                             self.images.clear()
                             codec = owner = sequence = decoded_until = None
                     continue
@@ -312,13 +383,18 @@ class PictureReader:
                 horizon = target + min(self.lead, max(1, capacity * 3 // 4) / self.fps)
                 if decoded_until is not None and decoded_until >= horizon:
                     continue
+                range_started = time.perf_counter()
                 result = history.packet_range(sequence, target)
+                self.timings.record('display_packet_range', time.perf_counter() - range_started)
                 if result is None:
                     continue
                 config, packets, reset = result
                 if codec is None or reset:
+                    if codec is not None and reset:
+                        self.reset_reason = 'history_evicted'
                     decoded_until = None
                     codec = av.CodecContext.create(config[0], "r")
+                    self.codec_creations += 1
                     codec.extradata = config[1]
                     # UHD streams often have one slice per frame: SLICE then
                     # serializes decoding even when a thread count is configured.
@@ -335,7 +411,13 @@ class PictureReader:
                                 or self.reset_requested):
                             break
                     started = time.perf_counter()
-                    frames = codec.decode(packet.decode_packet())
+                    self.decode_phase = 'packet_read'
+                    encoded = packet.decode_packet()
+                    self.timings.record('display_packet_unpack', time.perf_counter() - started)
+                    self.decode_phase = 'decode'
+                    decode_started = time.perf_counter()
+                    frames = codec.decode(encoded)
+                    self.timings.record('display_video_decode', time.perf_counter() - decode_started, items=len(frames))
                     sequence = packet.sequence + 1
                     complete = False
                     for frame in frames:
@@ -345,7 +427,8 @@ class PictureReader:
                             requested_target = self.target[1] if self.target is not None else target
                         if pts + .00001 < max(target, requested_target - .05):
                             continue
-                        image = image_from_frame(frame)
+                        self.decode_phase = 'convert'
+                        image = image_from_frame(frame, self.timings)
                         key = history.origin + pts
                         with self.lock:
                             if not self.active or self.history is not history or self.cancelled.is_set():
@@ -356,11 +439,13 @@ class PictureReader:
                             while len(self.images) > capacity:
                                 self.images.pop(next(iter(self.images)))
                             self.decoded += 1
+                            self.decoded_cadence.record(time.perf_counter(), key)
                         complete = pts >= horizon
                     self.decode_ms = (time.perf_counter() - started) * 1000
                     if complete:
                         break
         finally:
+            self.decode_phase = 'stopped'
             with self.lock:
                 self.images.clear()
 

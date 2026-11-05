@@ -28,13 +28,13 @@ def main():
     domestic_readme = (ROOT / "plugins/domestic_live/README.md").read_text(encoding="utf-8")
     assert domestic_readme.startswith(f"# 国内直播平台 v{domestic_version}\n")
     assert f"domestic_live-{domestic_version}.zip" in domestic_readme
-    assert (ROOT / f"RELEASE-domestic-live-v{domestic_version}.md").read_text(encoding="utf-8").startswith(
+    assert (ROOT / "docs/releases" / f"RELEASE-domestic-live-v{domestic_version}.md").read_text(encoding="utf-8").startswith(
         f"# 国内直播平台 v{domestic_version}\n")
     match_version = versions["match_sync"]
     match_readme = (ROOT / "plugins/match_sync/README.md").read_text(encoding="utf-8")
     assert match_readme.startswith(f"# 比赛二路同步 v{match_version}\n")
     assert f"match_sync-{match_version}.zip" in match_readme
-    notes = ROOT / f"RELEASE-match-sync-v{match_version}.md"
+    notes = ROOT / 'docs/releases' / f"RELEASE-match-sync-v{match_version}.md"
     assert notes.read_text(encoding="utf-8").startswith(f"# 比赛二路同步 v{match_version}\n")
     display_names = {"domestic_live": "国内直播平台", "global_live": "海外直播平台", "match_sync": "比赛二路同步", "bili_live": "B站直播互动"}
     with tempfile.TemporaryDirectory() as directory:
@@ -55,6 +55,8 @@ def main():
                     assert manifest['min_app_version'] == '0.5.1'
                 if plugin_id == 'match_sync':
                     assert 'match_sync/fullscreen.py' in names, 'Fullscreen shell integration must ship with the viewer'
+                    assert 'match_sync/recording.py' in names, 'The selectable audio track recorder must ship with the viewer'
+                    assert 'match_sync/replay_preview.py' in names and 'match_sync/preview_frames.py' in names, 'Continuous timeline preview must ship with its background frame cache'
                 if plugin_id == 'domestic_live':
                     assert 'domestic_live/douyin_native.js' in names, 'Official native input requires its browser script'
                     assert 'domestic_live/douyin_browser.py' in names
