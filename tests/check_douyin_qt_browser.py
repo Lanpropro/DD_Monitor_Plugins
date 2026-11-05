@@ -41,7 +41,7 @@ class BrowserTests(unittest.TestCase):
     def exercise(self, *, text="中文🙂 hello", uid="42", room="999999", duplicate=False,
                  existing="", mismatch=False, receive="matched", cancel_before=False,
                  cancel_input=False, close_before=False, reload_before=False, late_context=False,
-                 textarea=False, wrong_origin=False):
+                 textarea=False, wrong_origin=False, official_scaffold=False, scaffold_text="\u200b"):
         dialogs, logs, snapshots = [], [], []
         tracker = delivery_module.BroadcastReceipts()
         cancellation = threading.Event()
@@ -56,14 +56,17 @@ class BrowserTests(unittest.TestCase):
         const box=document.querySelector('#chatInput [contenteditable],#chatInput textarea');
         const button=document.querySelector('button');
         if(box.tagName==='TEXTAREA')box.value=%s;else box.textContent=%s;
+        %s
         box.addEventListener('input',e=>{window.events.push({type:'input',trusted:e.isTrusted});button.disabled=false;%s});
         box.addEventListener('keydown',e=>{window.events.push({type:e.key,trusted:e.isTrusted});
-            if(e.key==='Enter'){e.preventDefault();window.calls++;window.sent=box.value??box.textContent;}});
+            if(e.key==='Enter'){e.preventDefault();window.calls++;window.sent=box.value??box.textContent;%s}});
         %s
         %s
         %s
         </script></body></html>""" % (json.dumps(room),json.dumps("0" if late_context else uid),editor,json.dumps(existing),json.dumps(existing),
+            "box.insertAdjacentHTML('afterbegin',"+json.dumps('<span data-zero-space="true" contenteditable="false">'+scaffold_text+'</span>')+");" if official_scaffold else "",
             "if(box.tagName==='TEXTAREA')box.value='changed';else box.textContent='changed';" if mismatch else "",
+            "window.sent=window.sent.replace(/\\u200b/g,'');" if official_scaffold else "",
             "document.querySelector('#chatInput').appendChild(box.cloneNode(true));" if duplicate else "",
             "setTimeout(()=>{window.__STORE__.userStore.userInfo.id_str='42';},300);" if late_context else "",
             "box.style.display='none';setTimeout(()=>box.style.display='block',450);" if reload_before else "")
@@ -135,7 +138,7 @@ class BrowserTests(unittest.TestCase):
                 self.assertEqual(len(dialogs),1)
                 self.assertTrue(snapshots)
                 state=snapshots[-1]
-                expected_send=not (uid!='42' or room!='999999' or duplicate or existing or mismatch or cancel_input or close_before or wrong_origin)
+                expected_send=not (uid!='42' or room!='999999' or duplicate or existing or mismatch or cancel_input or close_before or wrong_origin or (official_scaffold and scaffold_text!="\u200b"))
                 self.assertEqual(state.get('calls',0),1 if expected_send else 0,(state,outcome,logs))
                 self.assertFalse(state['hook'],'The follow-list script must not run in the sender page')
                 self.assertTrue(all(e['trusted'] for e in state['events']))
@@ -160,6 +163,10 @@ class BrowserTests(unittest.TestCase):
             parent.deleteLater();QTest.qWait(50)
 
     def test_native_unicode_input_and_single_enter(self):self.exercise()
+    def test_official_empty_zero_space_node_is_not_a_draft(self):self.exercise(official_scaffold=True)
+    def test_official_zero_space_node_does_not_hide_a_real_draft(self):self.exercise(official_scaffold=True,existing='existing draft')
+    def test_unmarked_zero_width_draft_is_not_overwritten(self):self.exercise(existing='\u200b')
+    def test_marked_node_containing_real_text_is_not_overwritten(self):self.exercise(official_scaffold=True,scaffold_text='\u200bdraft')
     def test_native_textarea_input(self):self.exercise(textarea=True)
     def test_late_login_context_waits_without_an_extra_click(self):self.exercise(late_context=True)
     def test_wrong_account_never_enters_text(self):self.exercise(uid='43')

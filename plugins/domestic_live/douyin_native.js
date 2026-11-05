@@ -19,7 +19,13 @@
     if (editors.length !== 1) return {error: 'ambiguous_editor'};
     const editor = editors[0];
     if (editor.disabled || editor.getAttribute('aria-disabled') === 'true') return {ready: false, reason: 'editor'};
-    const text = editor.tagName === 'TEXTAREA' ? editor.value : editor.textContent;
+    const content = editor.cloneNode(true);
+    // The official rich-text editor renders U+200B inside marked empty nodes.
+    // Keep unmarked characters and any marked node containing real text intact.
+    for (const node of content.querySelectorAll('[data-zero-space]')) {
+        if (node.textContent === '\u200b') node.remove();
+    }
+    const text = editor.tagName === 'TEXTAREA' ? editor.value : content.textContent;
     if (action === 'verify') {
         if (window.__ddmNativeInput !== editor || document.activeElement !== editor) return {error: 'input_focus_lost'};
         if (!text) return {ready: false, reason: 'input'};
