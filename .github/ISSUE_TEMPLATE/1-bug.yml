@@ -1,0 +1,60 @@
+name: 问题反馈
+description: 报告插件运行、播放、弹幕或其他异常，偶发问题也欢迎反馈。
+title: "[问题反馈] "
+labels: ["bug", "待确认"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先选择相关插件。偶发或暂时无法复现也可以反馈。
+        附件请先检查个人信息，不要上传密码、Cookie 或账号文件。
+  - type: dropdown
+    id: plugin
+    attributes:
+      label: 相关插件
+      options:
+        - 国内直播平台
+        - 海外直播平台
+        - 比赛二路同步
+        - B站直播互动
+        - 多个插件或暂不确定
+    validations:
+      required: true
+  - type: input
+    id: plugin_version
+    attributes:
+      label: 插件版本（可选）
+      placeholder: 填写插件清单或设置页面显示的版本号
+    validations:
+      required: false
+  - type: input
+    id: host_version
+    attributes:
+      label: DD监控室CE 版本（可选）
+      placeholder: 填写软件显示的版本号；不知道时可留空
+    validations:
+      required: false
+  - type: textarea
+    id: actual
+    attributes:
+      label: 问题描述
+      placeholder: 简述出现的异常和期望结果；知道操作步骤时可一并说明。
+    validations:
+      required: true
+  - type: dropdown
+    id: reproducibility
+    attributes:
+      label: 复现情况
+      options:
+        - 稳定复现
+        - 偶发
+        - 尚不确定
+    validations:
+      required: true
+  - type: textarea
+    id: attachments
+    attributes:
+      label: 截图、视频或补充信息（可选）
+      description: 拖入文件或粘贴附件链接。请先遮挡个人信息；不要上传账号文件或 Cookie。
+    validations:
+      required: false

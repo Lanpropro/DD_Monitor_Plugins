@@ -1,0 +1,101 @@
+name: Issue labels
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  issues: write
+
+concurrency:
+  group: issue-labels-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Sync labels from the issue form
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: python
+        run: |
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text(encoding='utf-8'))
+          number = event['issue']['number']
+          base = os.environ['GITHUB_API_URL'] + '/repos/' + os.environ['GITHUB_REPOSITORY']
+
+          labels = {
+              '待确认': ('FBCA04', 'Issue 已收到，尚未开始复现或处理。'),
+              '待复现': ('D4C5F9', '等待维护者复现问题。'),
+              '处理中': ('FBCA04', '维护者正在处理。'),
+              '待验收': ('1D76DB', '等待验收。'),
+              '已完成': ('0E8A16', '改动已完成；是否发布以版本说明为准。'),
+              '暂缓': ('BFD4F2', '当前暂缓处理。'),
+              '复现：稳定': ('B60205', '提交者反馈问题可稳定复现。'),
+              '复现：偶发': ('D93F0B', '提交者反馈问题偶尔出现。'),
+              '复现：不确定': ('D4C5F9', '提交者暂不确定复现情况。'),
+          }
+
+          def request(path, method='GET', data=None):
+              req = urllib.request.Request(base + path,
+                  data=None if data is None else json.dumps(data).encode(), method=method,
+                  headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                           'Accept': 'application/vnd.github+json',
+                           'Content-Type': 'application/json',
+                           'User-Agent': 'DDMonitorPlugins-issue-labels'})
+              with urllib.request.urlopen(req, timeout=20) as response:
+                  payload = response.read()
+                  return json.loads(payload) if payload else None
+
+          existing = {item['name'] for item in request('/labels?per_page=100')}
+          for name, (color, description) in labels.items():
+              if name in existing:
+                  continue
+              try:
+                  request('/labels', 'POST', {'name': name, 'color': color,
+                                              'description': description})
+                  existing.add(name)
+              except urllib.error.HTTPError as error:
+                  if error.code != 422:
+                      raise
+                  existing = {item['name'] for item in request('/labels?per_page=100')}
+                  if name not in existing:
+                      raise
+
+          issue = request('/issues/' + str(number))
+          body = issue.get('body') or ''
+          form_types = (
+              (r'^### 问题描述\s*$', 'bug'),
+              (r'^### 使用场景与当前不便\s*$', 'enhancement'),
+              (r'^### 想咨询的问题\s*$', 'question'),
+          )
+          issue_type = next((label for pattern, label in form_types
+                             if re.search(pattern, body, re.MULTILINE)), None)
+
+          if event['action'] == 'opened' and issue_type:
+              names = {label['name'] for label in issue['labels']}
+              if '待确认' not in names:
+                  request('/issues/' + str(number) + '/labels', 'POST',
+                          {'labels': ['待确认']})
+
+          match = re.search(r'^### 复现情况\r?\n\s*([^\r\n]+)', body, re.MULTILINE)
+          choices = {'稳定复现': '复现：稳定', '偶发': '复现：偶发', '尚不确定': '复现：不确定'}
+          selection = match.group(1).strip() if match else None
+          if issue_type == 'bug' and selection in choices:
+              target = choices[selection]
+              existing = {label['name'] for label in issue['labels']}
+              if target not in existing:
+                  request('/issues/' + str(number) + '/labels', 'POST', {'labels': [target]})
+              for name in choices.values():
+                  if name != target and name in existing:
+                      request('/issues/' + str(number) + '/labels/' +
+                              urllib.parse.quote(name, safe=''), 'DELETE')
