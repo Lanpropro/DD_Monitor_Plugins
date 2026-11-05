@@ -6,6 +6,17 @@
 
 ## 待发布
 
+### 2026-11-05｜核查抖音 WebSocket 直连发送可行性（未找到可实现协议）
+
+- 用户要求尝试与斗鱼／虎牙相同的 WebSocket 直连发送方案，最终仍须软件输入即发送。本轮先核查真实官网代码，不构造猜测命令、不自动向真实房间试发。
+- 当前公开资源：匿名读取官网成功，取得 runtime~client-entry.894c77ea.js、ChatRoom.d19e0d8e.js、island_237ab.824fc589.js 及当前页面资源；首次无 User-Agent 请求返回 HTTP200 空正文，补浏览器 User-Agent 后取得页面，未将空正文误认成有效源码。旧缓存与新下载的编码／字节差异不作为协议变化证据。
+- 普通文本发送链：ChatRoom 引用模块40356的 W，普通文本分支调用它；当前1474.38aa2841.js及island_237ab.824fc589.js中的该模块均调用 HTTP GET /webcast/room/chat/，附当场room_id、content等参数。该结论来自当前官网函数和调用点，不依赖搜索结果或函数名称猜测。
+- WebSocket 上行：当前3466.19a0df0b.js模块378303仅见驱动封装send、心跳ping和接收ack；4846.4d746183.js模块317807增加租户／主题subscribe与重连心跳／ack。msg为下行分发类型，不能据名称将其视作可上行的评论命令。宿主现有抖音连接亦只有访客接收、心跳和接收确认，没有已验证的登录发言协议。
+- 验证：分别提取两份当前官网模块40356，实际执行其原始函数、以离线HTTP依赖记录调用，均只调用一次GET /webcast/room/chat/；无真实账号、无发送网络请求。它只验证这些函数的调用路径，不证明平台不存在任何未公开、移动端或合作协议，也不证明真实投递。贡献文档及diff检查通过。
+- 结论与范围：本轮未找到具备鉴权、普通文字命令及对应发送回执的抖音WebSocket发送协议，因此未新增伪实现、未改接收链路、未切换默认发送；当前仍为af3be17官网原生输入试验方案，真实投递仍未验收。无法把“接收确认ack”当成“发言回执”。
+- 本机证据：宿主work/douyin-websocket-20261105，包含匿名公开资源、URL／SHA256清单、当前发送／socket模块片段、replay-current-helper.cjs及helper-replay.json。没有保存或导出真实登录凭证；未改安装副本、不发布。
+- 来源：[当前官网聊天组件](https://lf-webcast-platform.bytetos.com/obj/webcast-platform-cdn/webcast/douyin_live/chunks/ChatRoom.d19e0d8e.js)、[普通文本发送模块](https://lf-webcast-platform.bytetos.com/obj/webcast-platform-cdn/webcast/douyin_live/chunks/island_237ab.824fc589.js)、[接收连接驱动](https://lf-webcast-platform.bytetos.com/obj/webcast-platform-cdn/webcast/douyin_live/3466.19a0df0b.js)。
+
 ### 2026-11-05｜抖音改用官网原生输入，保持软件输入即发送（待真实验收）
 
 - 用户要求：最终操作须与 B 站类似，只在软件输入并按 Enter，不逐条到官网补输入／点击；此前内置官网列表出现文本不等于独立广播，真实投递始终未验收。
