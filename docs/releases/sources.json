@@ -74,14 +74,38 @@
     {
       "tag": "domestic-live-v1.5",
       "file": "RELEASE-domestic-live-v1.5.md",
-      "status": "online",
+      "status": "archived_verified",
       "source_kind": "github_release",
       "release_id": 428193547,
       "release_updated_at": "2026-10-29T17:50:46Z",
       "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v1.5",
       "last_edit_verified": true,
       "raw_body_sha256": "7f848d3f13c822ef6e0c5fb17e48b9d2180ef4c7400c5f088da08a14a50b71b5",
-      "sha256": "b3e50fcbf0e76d2db46acc141236f6767be82bf331370d9cc8af119a8525e51a"
+      "sha256": "b3e50fcbf0e76d2db46acc141236f6767be82bf331370d9cc8af119a8525e51a",
+      "release_name": "国内直播平台 v1.5",
+      "release_author": "Lanpropro",
+      "plugin_author": "Lanpropro",
+      "release_created_at": "2026-10-29T17:37:18Z",
+      "release_published_at": "2026-10-29T17:38:20Z",
+      "source_commit": "0038e5b0490c43ad54b6d56c7e5f01c5fb52416b",
+      "assets": [
+        {
+          "id": 689363818,
+          "name": "domestic_live-1.5.zip",
+          "size": 97072,
+          "sha256": "a2ac4d53ac0a4dfff95554b2377ef47361bee9c7458fbe0a5ac661088310b005",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/domestic-live-v1.5/domestic_live-1.5.zip"
+        },
+        {
+          "id": 689363902,
+          "name": "plugin-catalog.json",
+          "size": 7821,
+          "sha256": "c4f0532b30baf7d2e23b8d69113999e70ec3108e761349ebad37d40e040350ed",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/domestic-live-v1.5/plugin-catalog.json"
+        }
+      ],
+      "archived_at": "2026-11-05T14:44:52.239131+00:00",
+      "superseded_by": "domestic-live-v2.0"
     },
     {
       "tag": "global-live-v1.1",
@@ -196,11 +220,36 @@
     {
       "tag": "domestic-live-v2.0",
       "file": "RELEASE-domestic-live-v2.0.md",
-      "status": "prepared",
-      "source_kind": "repository_candidate",
-      "base_commit": "37b5a3bbcae9f8e6cb77d68c3fa125e4f23eac1f",
-      "last_edit_verified": false,
-      "sha256": "984813852d724c3dccab2bb8f255b4b4b670751a306345de86f69833175ebba3"
+      "status": "online",
+      "source_kind": "github_release",
+      "last_edit_verified": true,
+      "sha256": "5d9c9eeff28303ff98a12a46ccccf40c02ad4dffbc0fc7ddb5a2db1fd599f4da",
+      "release_id": 435290674,
+      "release_updated_at": "2026-11-05T14:30:55Z",
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v2.0",
+      "raw_body_sha256": "b09744a221745aed775253f7adf8688bf279f31bfbbbf7ae61aca1fcc58ce7af",
+      "release_name": "国内直播平台 v2.0",
+      "release_author": "Lanpropro",
+      "plugin_author": "Lanpropro",
+      "release_created_at": "2026-11-05T14:06:57Z",
+      "release_published_at": "2026-11-05T14:26:22Z",
+      "source_commit": "50f21ece8ebc7b6b4b7e462ad55cad20e2e7c47d",
+      "assets": [
+        {
+          "id": 713643868,
+          "name": "domestic_live-2.0.zip",
+          "size": 100528,
+          "sha256": "c169f369fe8ff4b88c1169a8f28f471fc313099aafe081072ec89563e0e610df",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/domestic-live-v2.0/domestic_live-2.0.zip"
+        },
+        {
+          "id": 713644293,
+          "name": "plugin-catalog.json",
+          "size": 8921,
+          "sha256": "fb8fbf7c66fc6dfe6a783c72172b7e29aae88395904f43352bed8139be6f320c",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/domestic-live-v2.0/plugin-catalog.json"
+        }
+      ]
     }
   ],
   "tags_without_recoverable_body": [

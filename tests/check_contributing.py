@@ -10,6 +10,23 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ContributionGuideTests(unittest.TestCase):
+    def test_domestic_1_5_archive_preserves_source_and_replacement(self):
+        entries = json.loads((ROOT / 'docs/releases/sources.json').read_text(encoding='utf-8'))['entries']
+        old = next(entry for entry in entries if entry['tag'] == 'domestic-live-v1.5')
+        new = next(entry for entry in entries if entry['tag'] == old['superseded_by'])
+        self.assertEqual(old['status'], 'archived_verified')
+        self.assertEqual(old['release_id'], 428193547)
+        self.assertEqual(old['source_commit'], '0038e5b0490c43ad54b6d56c7e5f01c5fb52416b')
+        self.assertEqual({asset['name'] for asset in old['assets']},
+                         {'domestic_live-1.5.zip', 'plugin-catalog.json'})
+        self.assertEqual(new['tag'], 'domestic-live-v2.0')
+        self.assertEqual(new['status'], 'online')
+        self.assertEqual(new['source_commit'], '50f21ece8ebc7b6b4b7e462ad55cad20e2e7c47d')
+        index = (ROOT / 'docs/releases/README.md').read_text(encoding='utf-8')
+        online = index.split('## 当前在线发布说明', 1)[1].split('## 替代版本的核验归档', 1)[0]
+        self.assertIn('RELEASE-domestic-live-v2.0.md', online)
+        self.assertNotIn('RELEASE-domestic-live-v1.5.md', online)
+
     def test_accepted_douyu_quality_change_records_scope_and_source(self):
         source = (ROOT / 'docs/changes/domestic_live.md').read_text(encoding='utf-8')
         for text in ('2026-11-02', '清晰度验收通过', '9f533b6', 'ba058ef',
