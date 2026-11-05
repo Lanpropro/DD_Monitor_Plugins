@@ -50,7 +50,7 @@
 <p><strong>弹幕 · 表情 · 礼物</strong></p>
 <p>使用本体登录，在直播格子里发送文字与表情，浏览礼物目录和背包并参与互动。</p>
 <p>作者：<a href="https://github.com/reon-nynes">@reon-nynes</a><br>兼容维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
-<p><a href="plugins/bili_live/README.md">功能与兼容说明</a> · <a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.0">下载插件</a></p>
+<p><a href="plugins/bili_live/README.md">功能与兼容说明</a> · <a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.1">下载插件</a></p>
 </td>
 </tr>
 </table>
@@ -109,7 +109,7 @@ python tests/check_packages.py --host ../DD_Monitor_CE
 
 输出为 `dist/domestic_live-1.4.zip`、`dist/global_live-1.2.zip`、`dist/match_sync-1.6.zip` 和 `dist/bili_live-1.1.zip`。
 
-B站直播互动 1.1 正在准备发布，下载入口仍指向当前公开的 1.0；发布后更新下载入口。
+B站直播互动 1.1 已发布，下载入口和在线插件目录已更新。
 构建只读取 Git 跟踪文件，并将许可与来源说明放入每个安装包。
 
 每个插件使用独立的版本标签和 Release，同一个 Release 不混放不同插件的 ZIP。`plugin-catalog.json` 汇总各插件独立 Release 的在线更新信息。
