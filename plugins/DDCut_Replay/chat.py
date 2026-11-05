@@ -11,6 +11,7 @@ class ChatReader:
         self.offset = 0
         self.records = []
         self.signature = None
+        self.video_burned = False
 
     def read(self, path):
         path = Path(path)
@@ -18,7 +19,9 @@ class ChatReader:
         if path.suffix.lower() == '.json':
             signature = (info.st_size, info.st_mtime_ns)
             if signature != self.signature:
-                self.records = json.loads(path.read_text(encoding='utf-8'))
+                data = json.loads(path.read_text(encoding='utf-8'))
+                self.video_burned = isinstance(data, dict) and data.get('video_burned', False)
+                self.records = data['events'] if isinstance(data, dict) else data
                 for row in self.records:
                     row['image_paths'] = {url: str((path.parent / local).resolve())
                                           for url, local in row.get('image_paths', {}).items()}
@@ -99,7 +102,7 @@ def trim_events(events, start, end, *, offset=0, shift=0):
     return result
 
 
-def write_json(path, events):
+def write_json(path, events, *, video_burned=False):
     path = Path(path)
     portable = []
     for event in events:
@@ -118,7 +121,8 @@ def write_json(path, events):
         else:
             row.pop('image_paths', None)
         portable.append(row)
-    path.write_text(json.dumps(portable, ensure_ascii=False, indent=2), encoding='utf-8')
+    data = {'video_burned': True, 'events': portable} if video_burned else portable
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
 
 
 def ass_time(seconds):
@@ -135,7 +139,7 @@ def ass_text(text):
 
 def write_ass(path, events, *, shift=0, font_size=36, opacity=80):
     """ASS is text-only and uses the same deterministic lane schedule as preview."""
-    from .chat_render import layout_events, display_text
+    from .chat_scene import layout_events, display_text
     from PySide6.QtGui import QFont, QFontMetrics
     font = QFont('Microsoft YaHei')
     font.setPixelSize(font_size)

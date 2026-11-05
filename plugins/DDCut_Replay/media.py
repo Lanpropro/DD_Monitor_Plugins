@@ -51,7 +51,7 @@ def check_cancel(job):
         raise Cancelled()
 
 
-def run_process(job, command, folder, *, duration=0, capture=False):
+def run_process(job, command, folder, *, duration=0, capture=False, frames=None):
     """Drain into files, support cancellation, and always reap the child."""
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
@@ -64,8 +64,24 @@ def run_process(job, command, folder, *, duration=0, capture=False):
     try:
         check_cancel(job)
         with log.open('wb') as handle:
-            process = subprocess.Popen(args, stdin=subprocess.DEVNULL,
+            process = subprocess.Popen(args, stdin=subprocess.PIPE if frames is not None else subprocess.DEVNULL,
                                        stdout=handle, stderr=handle, creationflags=flags)
+            writer, errors = None, []
+            if frames is not None:
+                def feed():
+                    try:
+                        for frame in frames:
+                            check_cancel(job)
+                            process.stdin.write(frame)
+                    except Exception as error:
+                        errors.append(error)
+                    finally:
+                        try:
+                            process.stdin.close()
+                        except OSError:
+                            pass
+                writer = threading.Thread(target=feed, name='ddcut-chat-frames', daemon=True)
+                writer.start()
             started = time.monotonic()
             try:
                 while process.poll() is None:
@@ -90,26 +106,36 @@ def run_process(job, command, folder, *, duration=0, capture=False):
                     except subprocess.TimeoutExpired:
                         process.kill()
                         process.wait()
+                if writer is not None:
+                    writer.join()
+            if errors:
+                raise errors[0]
         return log.read_text(encoding='utf-8', errors='replace') if capture else ''
     finally:
         log.unlink(missing_ok=True)
         progress_file.unlink(missing_ok=True)
 
 
-def probe(job, ffmpeg, path, work):
+def probe(job, ffmpeg, path, work, *, input_args=None):
     sibling = Path(ffmpeg).with_name('ffprobe.exe' if os.name == 'nt' else 'ffprobe')
     executable = str(sibling) if sibling.is_file() else shutil.which('ffprobe')
     if not executable:
         raise RuntimeError('未找到 ffprobe，请将它放在 FFmpeg 同目录')
     data = json.loads(run_process(job, [executable, '-v', 'error', '-show_format',
-        '-show_streams', '-of', 'json', str(path)], work, capture=True))
+        '-show_streams', '-of', 'json', *(input_args if input_args is not None else [str(path)])], work, capture=True))
     streams = data.get('streams', [])
     if not any(stream.get('codec_type') == 'video' for stream in streams):
         raise RuntimeError('文件中没有可回看的视频轨道')
     duration = float(data.get('format', {}).get('duration') or 0)
     if not math.isfinite(duration) or duration <= 0:
         raise RuntimeError('无法确定媒体时长，请先确认文件已写入完成')
+    video = next(stream for stream in streams if stream.get('codec_type') == 'video')
+    rotation = next((side['rotation'] for side in video.get('side_data_list', []) if 'rotation' in side),
+                    video.get('tags', {}).get('rotate', 0))
     return {'duration': duration,
+            'video_width': video.get('width'), 'video_height': video.get('height'),
+            'frame_rate': video.get('avg_frame_rate') if video.get('avg_frame_rate') not in (None, '0/0', '0/1') else video.get('r_frame_rate'),
+            'sample_aspect_ratio': video.get('sample_aspect_ratio'), 'rotation': rotation,
             'video_codec': next(stream.get('codec_name', '') for stream in streams
                                 if stream.get('codec_type') == 'video'),
             'has_audio': any(stream.get('codec_type') == 'audio' for stream in streams),
@@ -205,12 +231,14 @@ def prepare_snapshot(job, ffmpeg, snapshot, destination, work):
         playlist.unlink(missing_ok=True)
 
 
-def export_clip(job, ffmpeg, source, start, end, mode, target, work):
+def export_clip(job, ffmpeg, source, start, end, mode, target, work, burn=False):
     duration = float(source['duration'])
     if not (math.isfinite(start) and math.isfinite(end) and 0 <= start < end <= duration + .001):
         raise ValueError('选区必须在可读范围内，且出点晚于入点')
     if mode not in {'copy', 'precise'}:
         raise ValueError('Unknown export mode')
+    if burn and (mode != 'precise' or not source.get('danmaku_path')):
+        raise ValueError('弹幕压制需要弹幕记录并使用精确切片模式')
     target = Path(target)
     chat_target = target.with_suffix('.danmaku.json')
     if target.exists() or chat_target.exists():
@@ -266,12 +294,17 @@ def export_clip(job, ffmpeg, source, start, end, mode, target, work):
         command += (['-c', 'copy', '-avoid_negative_ts', 'make_zero'] if mode == 'copy' else
                     ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-c:a', 'aac', '-movflags', '+faststart'])
         command += [str(partial)]
-        run_process(job, command, work, duration=end-start)
+        if burn:
+            from .burn import encode_chat
+            encode_chat(job, ffmpeg, source, start, end, local_start, input_args, partial, work)
+        else:
+            run_process(job, command, work, duration=end-start)
         actual = probe(job, ffmpeg, partial, work)
         check_cancel(job)
         chat = {}
         if source.get('danmaku_path'):
-            write_json(chat_target, trim_events(load_events(source), start, end, shift=source.get('danmaku_offset', 0)))
+            write_json(chat_target, trim_events(load_events(source), start, end, shift=source.get('danmaku_offset', 0)),
+                       video_burned=burn or source.get('chat_burned', False))
             chat_written = True
             chat = {'danmaku_path': str(chat_target)}
         if target.exists():
@@ -283,7 +316,7 @@ def export_clip(job, ffmpeg, source, start, end, mode, target, work):
             os.link(partial, target)
         published = True
         job.output = str(target)
-        return {'requested_start': start, 'requested_end': end, **chat,
+        return {'requested_start': start, 'requested_end': end, **chat, 'chat_burned': burn or source.get('chat_burned', False),
                 'actual_duration': actual['duration'], 'mode': mode,
                 'actual_start': start if mode == 'precise' else None,
                 **{key: source[key] for key in ('cover_path', 'avatar_path') if source.get(key)},
@@ -297,7 +330,7 @@ def export_clip(job, ffmpeg, source, start, end, mode, target, work):
         playlist.unlink(missing_ok=True)
 
 
-def export_ranges(job, ffmpeg, source, ranges, mode, targets, work, merge=False):
+def export_ranges(job, ffmpeg, source, ranges, mode, targets, work, merge=False, burn=False):
     """Keep completed separate outputs on cancel; commit a merge only when complete."""
     targets = list(map(Path, targets))
     if not ranges or len(targets) != (1 if merge else len(ranges)):
@@ -319,7 +352,7 @@ def export_ranges(job, ffmpeg, source, ranges, mode, targets, work, merge=False)
             job.message = f'正在导出 {index + 1}/{len(ranges)}'
             child = Job(job.title, 'export', cancel=job.cancel)
             destination = folder / f'{index}.mp4' if merge else targets[index]
-            result = export_clip(child, ffmpeg, source, item['start'], item['end'], mode, destination, folder)
+            result = export_clip(child, ffmpeg, source, item['start'], item['end'], mode, destination, folder, burn)
             completed.append(result)
             if not merge:
                 job.result['outputs'].append(result)
@@ -347,7 +380,7 @@ def export_ranges(job, ffmpeg, source, ranges, mode, targets, work, merge=False)
                     for part in completed:
                         events.extend(dict(row, time=row['time'] + offset) for row in load_events(part))
                         offset += part['actual_duration']
-                    write_json(chat_target, events)
+                    write_json(chat_target, events, video_burned=burn or source.get('chat_burned', False))
                     chat_written = True
                     result['danmaku_path'] = str(chat_target)
                 check_cancel(job)
@@ -417,6 +450,7 @@ class TaskHub:
             if path.is_file():
                 self.add_entry({'path': str(path), 'title': path.stem, 'kind': 'clip',
                     'duration': result['actual_duration'], 'created_at': path.stat().st_mtime,
+                    'chat_burned': result.get('chat_burned', False),
                     'source': result['source'], 'room': result.get('room') or {},
                     **{key: result[key] for key in ('cover_path', 'avatar_path', 'danmaku_path') if result.get(key)}})
 

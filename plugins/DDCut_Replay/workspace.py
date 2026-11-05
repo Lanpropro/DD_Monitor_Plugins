@@ -18,7 +18,7 @@ from .timeline import Timeline, TimeInput, timecode
 from .library_widgets import MediaCard, MediaGrid, media_type
 from .highlights import HighlightReader
 from .selections import restore_ranges, enabled_ranges
-from .chat import trim_events, write_json, write_ass
+from .chat import ChatReader, trim_events, write_json, write_ass
 from .chat_render import ReplayChat
 from .chat_model import ChatModel
 
@@ -488,6 +488,10 @@ class Workspace(QWidget):
         self.mode_help.setObjectName('SettingsHint')
         self.mode_help.setWordWrap(True)
         inspector_box.addWidget(self.mode_help)
+        self.burn_chat = QCheckBox('将弹幕压入视频')
+        self.burn_chat.setToolTip('将文字、表情和SC合成进MP4，沿用弹幕页字号、透明度及时间偏移；需要重编码。画面开关仅影响预览。')
+        self.burn_chat.toggled.connect(self.save_burn_options)
+        inspector_box.addWidget(self.burn_chat)
         self.filename = QLineEdit()
         self.filename.setPlaceholderText('成品文件名')
         self.filename.setAccessibleName('成品文件名')
@@ -695,6 +699,13 @@ class Workspace(QWidget):
                 return
             options = (self.heat_threshold.value(), self.heat_keywords.text(), self.chat_offset.value())
             if reader is self.heat_reader and options == self.heat_requested_options:
+                if result.get('video_burned') and not self.current.get('chat_burned'):
+                    self.current['chat_burned'] = True
+                    self.chat_enabled.setChecked(False)
+                    self.burn_chat.setChecked(False)
+                    self.burn_chat.setEnabled(False)
+                    self.review_state.setText(media_type(self.current) + ' · 画面已含弹幕')
+                    self.hub.save()
                 self.chat_model.events = result.get('events', [])
                 self.preview.chat.set_events(self.chat_model.events)
                 self.filter_chat()
@@ -1088,6 +1099,10 @@ class Workspace(QWidget):
 
             def inspect(job):
                 info = {**entry, **probe(job, ffmpeg, entry['path'], self.hub.root / 'work')}
+                if entry.get('danmaku_path'):
+                    reader = ChatReader()
+                    reader.read(entry['danmaku_path'])
+                    info['chat_burned'] = reader.video_burned or entry.get('chat_burned', False)
                 if not entry.get('cover_path'):
                     info['cover_path'] = thumbnail(job, ffmpeg, entry['path'], self.hub.root / 'thumbnails')
                 return info
@@ -1106,7 +1121,7 @@ class Workspace(QWidget):
         self.selection_playing = False
         self.review_title.setText(entry['title'])
         self.review_title.setToolTip(entry['path'])
-        self.review_state.setText(media_type(entry))
+        self.review_state.setText(media_type(entry) + (' · 画面已含弹幕' if entry.get('chat_burned') else ''))
         self.filename.setText(Path(entry['path']).stem + '-clip-' + datetime.now().strftime('%H%M%S'))
         duration = entry['duration']
         for spin in (self.inpoint, self.outpoint):
@@ -1118,13 +1133,19 @@ class Workspace(QWidget):
         self.timeline.set_duration(duration, reset=True)
         self.timeline.set_position(0)
         self.current = entry
+        self.burn_chat.blockSignals(True)
+        self.burn_chat.setEnabled(bool(entry.get('danmaku_path')) and not entry.get('chat_burned', False))
+        self.burn_chat.setChecked(self.burn_chat.isEnabled() and entry.get('export_burn_chat', False))
+        self.burn_chat.blockSignals(False)
         self.mode.setCurrentIndex(1 if entry.get('danmaku_path') or self.export_scope.currentData() == 'merge' else 0)
         restore_ranges(entry)
         self.refresh_ranges()
+        self.export_scope_changed()
+        self.mode_changed()
         self.preview.chat.set_events([])
         self.chat_model.events = []
         self.chat_model.filter()
-        for widget, value in [(self.chat_enabled, entry.get('chat_enabled', True)),
+        for widget, value in [(self.chat_enabled, entry.get('chat_enabled', not entry.get('chat_burned', False))),
                               (self.chat_offset, entry.get('danmaku_offset', 0)),
                               (self.chat_size, entry.get('chat_size', 36)),
                               (self.chat_opacity, entry.get('chat_opacity', 80))]:
@@ -1279,12 +1300,19 @@ class Workspace(QWidget):
                 self.add_range(peak['start'], peak['end'])
 
     def export_scope_changed(self, *_):
-        merge = self.export_scope.currentData() == 'merge'
-        self.mode.model().item(0).setEnabled(not merge)
-        if merge:
+        precise = self.export_scope.currentData() == 'merge' or self.burn_chat.isChecked()
+        self.mode.model().item(0).setEnabled(not precise)
+        if precise:
             self.mode.setCurrentIndex(1)
-        if self.current:
+        if self.current and 'ranges' in self.current:
             self.save_selection()
+
+    def save_burn_options(self, *_):
+        if self.current:
+            self.current['export_burn_chat'] = self.burn_chat.isChecked()
+            self.hub.save()
+        self.export_scope_changed()
+        self.mode_changed()
 
     def save_chat_options(self, *_):
         renderer = self.preview.chat
@@ -1331,7 +1359,7 @@ class Workspace(QWidget):
                 raise FileExistsError('目标已存在，请使用新文件名')
             events = trim_events(self.chat_model.events, start, end, shift=self.chat_offset.value())
             if extension == 'json':
-                write_json(target, events)
+                write_json(target, events, video_burned=self.current.get('chat_burned', False))
             else:
                 write_ass(target, events, font_size=self.chat_size.value(), opacity=self.chat_opacity.value())
             self.report('弹幕已导出：' + target)
@@ -1342,6 +1370,9 @@ class Workspace(QWidget):
             self.preview.core.speed = self.playback_rate.currentData()
 
     def mode_changed(self, *_):
+        if hasattr(self, 'burn_chat') and self.burn_chat.isChecked():
+            self.mode_help.setText('将文字弹幕、表情与SC合成到MP4，另保留弹幕文件。沿用弹幕页字号、透明度和时间偏移；重编码可能改变画质，变帧率录像按探测帧率输出。')
+            return
         self.mode_help.setText('保留编码，输出 MKV。起止可能按关键帧扩展，成品时长可能超过选区；侧车弹幕按请求选区裁剪，可能与视频偏移，需同步时请选择精确切片。'
             if self.mode.currentData() == 'copy' else '输出 MP4，按选区重编码为 H.264/AAC；需要更多时间，画质可能变化。')
 
@@ -1350,6 +1381,7 @@ class Workspace(QWidget):
             return
         mode = self.mode.currentData()
         scope = self.export_scope.currentData()
+        burn = self.burn_chat.isChecked()
         suffix = '.mkv' if mode == 'copy' else '.mp4'
         name = Path(self.filename.text().strip() or 'clip').stem + suffix
         folder = Path(self.current['path']).parent
@@ -1360,7 +1392,7 @@ class Workspace(QWidget):
             targets = [str(Path(destination) / f'{Path(name).stem}-{index + 1:03}{suffix}') for index, _ in enumerate(enabled_ranges(self.current))]
             def batch():
                 self.hub.submit('批量导出：' + self.current['title'], 'export', export_ranges,
-                    self.service.options()['ffmpeg'], dict(self.current), enabled_ranges(self.current), mode, targets, self.hub.root / 'work')
+                    self.service.options()['ffmpeg'], dict(self.current), enabled_ranges(self.current), mode, targets, self.hub.root / 'work', False, burn)
                 self.toggle_tasks(True)
             self.guard(batch)
             return
@@ -1373,11 +1405,11 @@ class Workspace(QWidget):
             if scope == 'merge':
                 job = self.hub.submit('拼接导出：' + self.current['title'], 'export', export_ranges,
                     self.service.options()['ffmpeg'], dict(self.current), enabled_ranges(self.current), mode,
-                    [target], self.hub.root / 'work', True)
+                    [target], self.hub.root / 'work', True, burn)
             else:
                 job = self.hub.submit('导出：' + self.current['title'], 'export', export_clip,
                     self.service.options()['ffmpeg'], dict(self.current), self.inpoint.value(),
-                    self.outpoint.value(), mode, target, self.hub.root / 'work')
+                    self.outpoint.value(), mode, target, self.hub.root / 'work', burn)
             self.toggle_tasks(True)
             self.report('导出已排队：' + job.title)
         self.guard(submit)

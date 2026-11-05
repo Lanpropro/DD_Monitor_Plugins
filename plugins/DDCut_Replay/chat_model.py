@@ -6,7 +6,7 @@ from PySide6.QtGui import QPixmap
 
 from ddm.danmaku_content import content_runs
 from .timeline import timecode
-from .chat_render import display_text
+from .chat_scene import display_text
 
 
 class ChatModel(QAbstractListModel):

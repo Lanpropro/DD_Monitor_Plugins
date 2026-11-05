@@ -25,7 +25,7 @@ UI也按用户最新要求先参考ShadowReplay，再做定制。当前回看工
 7. **后台任务**：从顶部打开共用右侧面板，录像与回看过程中均可查看进度、取消或打开成品。关闭面板不会取消任务；打开任务面板暂时收起检查器，关闭任务后恢复原开合状态。返回画面墙仅停止预览，任务继续；退出/禁用插件会取消插件任务并回收进程，原录像和已有成品保留。重启后未完成任务标为中断，需要重新提交。
 8. **弹幕亮点**：满30秒可读内容后显示30秒窗口/5秒步长热度；默认阈值80%，支持50%～100%及逗号分隔关键词。点击推荐添加选区，也可“全部添加亮点”；重复全部添加会跳过已存在的同一候选。阈值是相对数量，不能代替人工判断。
 9. **完整弹幕回放**：新切片素材记录普通弹幕、SC/删除和表情，复用本体连接与过滤。右侧“弹幕”提供画面开关、字号/透明度、±120秒偏移、搜索、普通/SC筛选、点击定位和列表跟随；画面弹幕随暂停、跳转和0.5/1/1.5/2/5倍速同步。SC卡片保留发送者、金额、内容和有效时长。旧日志只能回放已有字段，原版录像没有日志时不能补回。
-10. **弹幕文件交付**：整份或当前选区可导出JSON与文字ASS；切片自动附带同名 `.danmaku.json`，裁剪/拼接后重排时间，并复制已有表情到相邻 `.danmaku.images` 目录。移动视频时一起保留侧车和图片目录，重新导入会自动关联同名侧车。ASS使用表情文字回退；视频内嵌弹幕压制尚未实现。成品普通文件交给外部软件管理，不建立内部素材库。
+10. **弹幕文件交付与压制**：整份或当前选区可导出JSON与文字ASS；切片自动附带同名 `.danmaku.json` 并复制已有表情到相邻 `.danmaku.images` 目录。选区页勾选“将弹幕压入视频”后，文字、表情与SC永久合成进MP4，沿用弹幕页字号/透明度/时间偏移，支持单段、分别导出与拼接；重编码可能改变画质。预览画面开关不影响这项选择。压制成品侧车带 `video_burned` 标记，重新导入默认关闭额外画面弹幕，避免重复；旧数组JSON仍兼容。移动成品时一起保留侧车/图片。ASS使用文字回退；变帧率输入按探测帧率输出，缺失本地表情回退文字。文件交给外部软件管理，不建立内部素材库。
 
 切片素材模式采用与 [BiliBili ShadowReplay](https://github.com/Xinrea/bili-shadowreplay) 相同的核心链路：本地 HLS 分段归档 → 活动 EVENT 播放列表 → 内部本地读取服务 → 结束转 VOD → 从归档选区生成切片。普通 AVC/HEVC 使用 TS；AV1 使用 fMP4 初始化段和媒体分段，保持原编码。无需用户固定选择 TS，也不为满足 TS 容器而自动转码。本体单文件格式选项用于默认录制后端；插件接管后的内部存储由 HLS 归档管理，导出成品仍按快速 MKV / 精确 MP4 选择。
 
@@ -49,6 +49,7 @@ python tests/check_ddcut_recording.py --host ../DD_Monitor_CE
 python tests/check_ddcut_modes.py --host ../DD_Monitor_CE
 python tests/check_ddcut_highlights.py --host ../DD_Monitor_CE --native
 python tests/check_ddcut_ranges_chat.py --host ../DD_Monitor_CE --native --screenshots work/ranges-chat-native
+python tests/check_ddcut_burn.py --host ../DD_Monitor_CE --screenshots work/burn-check
 python tests/check_ddcut_hls.py
 python tests/check_ddcut_replay_native.py --host ../DD_Monitor_CE --package dist/ddcut_replay-0.1.3.zip
 python tests/check_contributing.py

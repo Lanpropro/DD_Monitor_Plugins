@@ -70,4 +70,5 @@ class HighlightReader(ChatReader):
         events = align_events(records, segments)
         result = detect_peaks([(row['time'] + shift, row.get('text', '')) for row in events if row['kind'] == 'danmaku'], duration, percent, keywords)
         result['events'] = events
+        result['video_burned'] = self.video_burned
         return result
