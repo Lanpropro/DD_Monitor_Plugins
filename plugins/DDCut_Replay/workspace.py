@@ -61,9 +61,10 @@ def table(headers):
 
 
 class Preview(QWidget):
-    def __init__(self, source_url):
+    def __init__(self, source_url, interactive=False):
         super().__init__()
         self.source_url = source_url
+        self.interactive = interactive
         self.setMinimumSize(280, 100)
         from PySide6.QtGui import QColor, QPalette
         palette = self.palette()
@@ -92,7 +93,9 @@ class Preview(QWidget):
         from ddm.player import EMBEDDED_OPTIONS
         import mpv
         self.core = mpv.MPV(wid=str(int(self.winId())), mute=True, volume=50,
-                            keep_open=True, **EMBEDDED_OPTIONS, **preview_options(path))
+                            keep_open=True, **EMBEDDED_OPTIONS, **preview_options(path),
+                            **({'input_default_bindings': False, 'input_vo_keyboard': True,
+                                'input_cursor': True, 'input_builtin_dragging': False} if self.interactive else {}))
         self.core.play(self.source_url(path))
         self.chat_timer.start()
 

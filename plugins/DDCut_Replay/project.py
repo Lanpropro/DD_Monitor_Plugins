@@ -16,7 +16,7 @@ def identity():
 def new_project(title='未命名工程'):
     return {'version': 1, 'id': identity(), 'title': title, 'note': '', 'created_at': time.time(),
             'updated_at': time.time(), 'media': {}, 'clips': [], 'layers': [],
-            'render': {'width': 1280, 'height': 720, 'fps': 30}, 'danmaku': False}
+            'render': {'width': 1280, 'height': 720, 'fps': 30}, 'danmaku': False, 'visual_order': 'mixed'}
 
 
 def clip_length(clip):
@@ -76,7 +76,7 @@ def add_layer(project, kind, position, path=None, text='文字'):
             'duration': 3, 'track': max([row['track'] for row in project['layers']] or [0]) + 1,
             'x': .1, 'y': .1, 'w': .35, 'h': .35, 'opacity': 1,
             'text': text, 'font_size': 48, 'color': '#ffffff', 'volume': 1 if kind == 'audio' else 0,
-            'source': path, 'in': 0, 'speed': 1, 'fade_in': 0, 'fade_out': 0}
+            'source': path, 'in': 0, 'speed': 1, 'fade_in': 0, 'fade_out': 0, 'rotation': 0}
     if kind in ('audio', 'video'):
         item['duration'] = min(3, project['media'][path]['duration'])
     project['layers'].append(item)
@@ -134,7 +134,7 @@ def duplicate_item(project, item_id):
 def settle_tracks(project):
     occupied = {}
     for layer, start, end in placed_layers(project):
-        key = ('audio' if layer['kind'] == 'audio' else 'video' if layer['kind'] == 'video' else 'graphics', layer['track'])
+        key = ('audio' if layer['kind'] == 'audio' else 'visual', layer['track'])
         if any(start < b and end > a for a, b in occupied.get(key, [])):
             layer['track'] = max([row['track'] for row in project['layers']] or [0]) + 1
             key = (key[0], layer['track'])
@@ -167,6 +167,8 @@ def validate(project):
                 raise ValueError('轨道属性超出支持范围：' + key)
         if not isinstance(layer['track'], int) or not 1 <= layer['track'] <= 999:
             raise ValueError('轨道编号必须在1到999之间')
+        if not isinstance(layer.get('rotation', 0), (int, float)) or not math.isfinite(layer.get('rotation', 0)) or not -180 <= layer.get('rotation', 0) <= 180:
+            raise ValueError('旋转角度必须在-180到180度之间')
         if layer['kind'] in ('video', 'audio', 'image') and layer['source'] not in project['media']:
             raise ValueError('轨道来源文件引用不存在')
         if layer['kind'] == 'text' and not re.fullmatch(r'#[0-9a-fA-F]{6}', layer['color']):
@@ -236,6 +238,14 @@ def read_project(path):
     for row in data['clips'] + data['layers']:
         if row.get('source'):
             row['source'] = sources[row['source']]
+    # Earlier projects always drew graphics over all videos, regardless of track number.
+    if data.get('visual_order') != 'mixed':
+        visual = sorted({(row['kind'] != 'video', row['track']) for row in data['layers'] if row['kind'] != 'audio'})
+        order = {key: index+1 for index, key in enumerate(visual)}
+        for row in data['layers']:
+            if row['kind'] != 'audio':
+                row['track'] = order[(row['kind'] != 'video', row['track'])]
+        data['visual_order'] = 'mixed'
     validate(data)
     return data
 

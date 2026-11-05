@@ -13,6 +13,7 @@ from .project import (add_layer, anchor_at, append_clip, duplicate_item, duratio
                       placed_clips, placed_layers, remove_item, split_clip, write_project)
 from .project_media import inspect_file, render_project, waveform
 from .project_timeline import ProjectTimeline
+from .project_stage import ProjectStage
 from .timeline import timecode
 from .workspace import Preview, button
 
@@ -79,7 +80,8 @@ class ProjectEditor(QWidget):
         center.setMinimumWidth(240)
         stage = QVBoxLayout(center)
         stage.setContentsMargins(0, 0, 0, 0)
-        self.preview = Preview(workspace.owner.preview_server.source_url)
+        self.preview = Preview(workspace.owner.preview_server.source_url, interactive=True)
+        self.stage = ProjectStage(self)
         self.preview.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         stage.addWidget(self.preview, 1)
         self.preview_hint = QLabel('添加主视频后，按当前位置生成工程预览。')
@@ -124,8 +126,9 @@ class ProjectEditor(QWidget):
             ('x', 'X %', -100, 200, 1), ('y', 'Y %', -100, 200, 1),
             ('w', '宽度 %', 2, 200, 1), ('h', '高度 %', 2, 200, 1),
             ('opacity', '不透明度 %', 0, 100, 0), ('font_size', '字号(1080p)', 8, 200, 0),
+            ('rotation', '旋转 °', -180, 180, 1),
             ('fade_in', '淡入 秒', 0, 3600, 2), ('fade_out', '淡出 秒', 0, 3600, 2),
-            ('track', '同类轨道', 1, 999, 0)]:
+            ('track', '轨道层级', 1, 999, 0)]:
             field = QDoubleSpinBox()
             field.setDecimals(decimals)
             field.setRange(lower, upper)
@@ -143,6 +146,19 @@ class ProjectEditor(QWidget):
         self.color = QLineEdit('#ffffff')
         self.form.addRow('颜色', self.color)
         button('应用属性', self.apply_fields, props)
+        self.visual_tools = QWidget()
+        tools = QVBoxLayout(self.visual_tools)
+        tools.setContentsMargins(0, 0, 0, 0)
+        row = QHBoxLayout()
+        button('居中', lambda: self.place_selected('center'), row)
+        button('铺满画面', lambda: self.place_selected('fill'), row)
+        tools.addLayout(row)
+        row = QHBoxLayout()
+        button('下移一层', lambda: self.move_visual(-1), row)
+        button('上移一层', lambda: self.move_visual(1), row)
+        tools.addLayout(row)
+        button('取消旋转', lambda: self.place_selected('reset'), tools)
+        props.addWidget(self.visual_tools)
         self.note = QLineEdit()
         self.note.setPlaceholderText('工程备注')
         self.note.editingFinished.connect(self.rename)
@@ -314,7 +330,7 @@ class ProjectEditor(QWidget):
                 item, main, start, end = selected
                 kind = 'main' if main else item['kind']
                 visible = key in {'at', 'duration'} or key in {'in', 'out', 'speed', 'volume'} and kind in {'main', 'audio', 'video'} \
-                    or key in {'x', 'y', 'w', 'h', 'opacity'} and kind in {'image', 'text', 'video'} \
+                    or key in {'x', 'y', 'w', 'h', 'opacity', 'rotation'} and kind in {'image', 'text', 'video'} \
                     or key == 'font_size' and kind == 'text' or key in {'fade_in', 'fade_out'} and kind == 'audio' or key == 'track' and not main
                 values = {'at': start, 'duration': end-start, 'in': item['start'] if main else item.get('in', 0),
                           'out': item['end'] if main else item.get('in', 0) + item['duration'] * item.get('speed', 1)}
@@ -329,6 +345,8 @@ class ProjectEditor(QWidget):
         if text_visible:
             self.text.setPlainText(selected[0]['text'])
             self.color.setText(selected[0]['color'])
+        self.visual_tools.setVisible(selected is not None and not selected[1] and selected[0]['kind'] != 'audio')
+        self.stage.update()
 
     def apply_fields(self):
         selected = self.selected()
@@ -348,6 +366,46 @@ class ProjectEditor(QWidget):
                     item[key] = values[key]/100
                 item.update(speed=values['speed'], **{'in': values['in']}, fade_in=values['fade_in'], fade_out=values['fade_out'])
                 item.update(text=text, color=color, font_size=values['font_size'])
+                item['rotation'] = values['rotation']
+        self.change(operation)
+
+    def place_item(self, identity, values):
+        def operation(data):
+            item = next(row for row in data['layers'] if row['id'] == identity)
+            item.update(values)
+        self.change(operation)
+
+    def place_selected(self, action):
+        selected = self.selected()
+        if not selected or selected[1] or selected[0]['kind'] == 'audio':
+            return
+        item = selected[0]
+        if action == 'reset':
+            self.place_item(item['id'], {'rotation': 0})
+            return
+        w, h = item['w'], item['h']
+        if action == 'fill':
+            render = self.document.data['render']
+            info = self.document.data['media'].get(item.get('source'), {})
+            ratio = info.get('video_width', render['width'])/max(1, info.get('video_height', render['height']))
+            w, h = max(1, ratio*render['height']/render['width']), max(1, render['width']/ratio/render['height'])
+            factor = min(1, 2/max(w, h))
+            w, h = w*factor, h*factor
+        self.place_item(item['id'], dict(x=(1-w)/2, y=(1-h)/2, w=w, h=h))
+
+    def move_visual(self, direction):
+        selected = self.selected()
+        if not selected or selected[1] or selected[0]['kind'] == 'audio':
+            return
+        track = selected[0]['track']
+        def operation(data):
+            tracks = sorted({row['track'] for row in data['layers'] if row['kind'] != 'audio'})
+            index = tracks.index(track)+direction
+            if 0 <= index < len(tracks):
+                other = tracks[index]
+                for row in data['layers']:
+                    if row['kind'] != 'audio':
+                        row['track'] = other if row['track'] == track else track if row['track'] == other else row['track']
         self.change(operation)
 
     def choose_files(self):
@@ -561,7 +619,9 @@ class ProjectEditor(QWidget):
             begin=begin, length=8, preview=True, project_path=str(self.document.path))
 
     def load_preview(self, path, key, begin, position, playing):
+        self.stage.clear()
         self.preview.load(str(path))
+        self.stage.attach()
         self.preview.chat.enabled = False
         self.loaded_key, self.preview_begin = key, begin
         self.preview_dirty = False
@@ -573,6 +633,7 @@ class ProjectEditor(QWidget):
         self.position = max(0, min(duration(self.document.data), position))
         self.timeline.position = self.position
         self.timeline.update()
+        self.guard(self.stage.update)
         if self.preview.core and self.preview_begin <= position < self.preview_end and not self.preview_dirty:
             self.preview.seek(position-self.preview_begin)
         else:
@@ -659,10 +720,12 @@ class ProjectEditor(QWidget):
         self.timeline.update()
         self.clock.setText(timecode(self.position)+' / '+timecode(duration(self.document.data)))
         self.play_button.setText('暂停' if self.playing else '播放')
+        self.guard(self.stage.update)
 
     def shutdown_preview(self):
         self.debounce.stop()
         self.pending_preview = None
+        self.stage.clear()
         self.preview.stop()
         self.resume = None
         self.playing = False

@@ -13,7 +13,7 @@ import unittest
 from unittest.mock import patch
 
 from check_ddcut_ranges_chat import args, remainder, app, ffmpeg, media, run, ui, until
-from PySide6.QtCore import QCoreApplication, QEvent, QPoint, Qt, QTimer
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, Qt, QTimer
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QMainWindow
 from PySide6.QtTest import QTest
@@ -330,6 +330,176 @@ class ProjectTests(unittest.TestCase):
             engine.render_project(job, ffmpeg, value, self.root/'cancelled.mp4', self.root/'work')
         self.assertFalse((self.root/'cancelled.mp4').exists())
         self.assertFalse(list((self.root/'work').glob('project-*')))
+
+    def test_rotated_visual_order_legacy_migration_and_export(self):
+        value = project.new_project('混合视觉轨道')
+        value['media'] = deepcopy(self.media_info)
+        value['render'] = {'width': 320, 'height': 180, 'fps': 20}
+        project.append_clip(value, str(self.red), 0, 1)
+        project.add_layer(value, 'image', 0, str(self.image))
+        image = value['layers'][-1]
+        image.update(x=.2, y=.2, w=.5, h=.2, rotation=90, duration=1, track=1)
+        project.add_layer(value, 'video', 0, str(self.blue))
+        video = value['layers'][-1]
+        video.update(x=.2, y=.2, w=.5, h=.2, rotation=90, duration=1, track=2)
+        def picture(name):
+            target = self.root/(name+'.mp4')
+            engine.render_project(media.Job('rotated layers', 'export'), ffmpeg, value, target, self.root/'work')
+            frame = self.root/(name+'.png')
+            run(ffmpeg, '-y', '-v', 'error', '-ss', '0.5', '-i', target, '-frames:v', '1', frame)
+            if args.screenshots:
+                shutil.copyfile(frame, args.screenshots/frame.name)
+            return QImage(str(frame))
+        result = picture('video-over-image')
+        self.assertGreater(result.pixelColor(144, 110).blue(), 180)
+        self.assertGreater(result.pixelColor(90, 54).red(), 180)
+        image['track'], video['track'] = 3, 2
+        result = picture('image-over-video')
+        self.assertGreater(result.pixelColor(144, 110).green(), 180)
+        self.assertGreater(result.pixelColor(90, 54).red(), 180)
+        # Graphics above and below a video must both survive in the same output.
+        project.add_layer(value, 'image', 0, str(self.image))
+        value['layers'][-1].update(x=.75, y=.65, w=.1, h=.1, duration=1, track=1, opacity=.5)
+        result = picture('graphics-around-video')
+        self.assertAlmostEqual(result.pixelColor(260, 125).green(), 128, delta=15)
+        self.assertAlmostEqual(result.pixelColor(260, 125).red(), 128, delta=15)
+        self.assertGreater(result.pixelColor(144, 110).green(), 180)
+        legacy = deepcopy(value)
+        legacy.pop('visual_order')
+        legacy['layers'][0]['track'] = 1
+        legacy['layers'][1]['track'] = 9
+        legacy['layers'][0].pop('rotation')
+        path = self.root/'legacy-layers.ddcut.json'
+        project.write_project(path, legacy)
+        restored = project.read_project(path)
+        self.assertEqual(restored['visual_order'], 'mixed')
+        self.assertGreater(restored['layers'][0]['track'], restored['layers'][1]['track'])
+        self.assertEqual(restored['layers'][0].get('rotation', 0), 0)
+        invalid = deepcopy(value)
+        invalid['layers'][0]['rotation'] = float('nan')
+        with self.assertRaises(ValueError):
+            project.validate(invalid)
+
+    @unittest.skipUnless(args.native, 'Native project stage check is explicit')
+    def test_native_stage_selection_move_resize_rotate_cancel_history_and_layers(self):
+        from ddcut_ranges_test.project_stage import geometry
+        hub = media.TaskHub(self.root/'stage-ui')
+        host = QMainWindow()
+        host.setAttribute(Qt.WA_ShowWithoutActivating)
+        host.move(-30000, -30000)
+        owner = SimpleNamespace(context=SimpleNamespace(window=host), hub=hub,
+            service=SimpleNamespace(sources=lambda: [], options=lambda: {'ffmpeg': ffmpeg}),
+            preview_server=SimpleNamespace(source_url=lambda path: path))
+        view = ui.Workspace(owner)
+        host.setCentralWidget(view)
+        host.resize(1440, 900)
+        host.show()
+        try:
+            value = project.new_project('画面操作')
+            value['media'] = deepcopy(self.media_info)
+            value['render'] = {'width': 320, 'height': 180, 'fps': 20}
+            project.append_clip(value, str(self.red), 0, 2)
+            identity = project.add_layer(value, 'image', 0, str(self.image))
+            value['layers'][-1].update(x=.1, y=.1, w=.3, h=.25, duration=2, rotation=25)
+            doc = project.ProjectDocument(self.root/'stage.ddcut.json', value)
+            doc.save()
+            view.open_project_document(doc)
+            editor = view.project_editor
+            def ready():
+                until(lambda: editor.loaded_key is not None and not editor.preview_dirty and editor.preview_job is None and editor.resume is None, timeout=30)
+            ready()
+            editor.seek(.5)
+            until(lambda: abs(editor.preview.position()-.5) < .06)
+            editor.select_item(identity)
+            stage, core = editor.stage, editor.preview.core
+            until(lambda: stage.visible)
+            frame = self.root/'stage-handles.png'
+            core.command('screenshot-to-file', str(frame), 'window')
+            picture = QImage(str(frame))
+            cyan = sum(picture.pixelColor(x, y).blue() > 150 and picture.pixelColor(x, y).green() > 120
+                       and picture.pixelColor(x, y).red() < 80
+                       for y in range(0, picture.height(), 2) for x in range(0, picture.width(), 2))
+            self.assertGreater(cyan, 30)
+            if args.screenshots:
+                shutil.copyfile(frame, args.screenshots/frame.name)
+            def item():
+                return next(row for row in doc.data['layers'] if row['id'] == identity)
+            # Route through the real libmpv mouse/key bindings, not just Qt's parent widget.
+            bounds = stage.frame()
+            center = geometry(item(), bounds)[0].map(QPointF())
+            core.command('mouse', round(center.x()), round(center.y()))
+            core.command('keydown', 'MBTN_LEFT')
+            until(lambda: stage.drag is not None)
+            revision = doc.revision
+            core.command('mouse', round(center.x()+bounds.width()*.1), round(center.y()+bounds.height()*.1))
+            until(lambda: stage.drag['draft']['x'] > .19)
+            self.assertEqual(doc.revision, revision)
+            core.command('keyup', 'MBTN_LEFT')
+            until(lambda: doc.revision == revision+1)
+            self.assertAlmostEqual(item()['x'], .2, delta=.01)
+            self.assertAlmostEqual(item()['y'], .2, delta=.01)
+            ready()
+            # Qt input is also supported; use the actual preview surface coordinates.
+            def widget_point(point):
+                dim = editor.preview.core.osd_dimensions
+                return QPoint(round(point.x()*editor.preview.width()/dim['w']), round(point.y()*editor.preview.height()/dim['h']))
+            bounds = stage.frame()
+            corners = geometry(item(), bounds)[2]
+            origin, target = corners[2], corners[0]+(corners[2]-corners[0])*1.2
+            revision = doc.revision
+            QTest.mousePress(editor.preview, Qt.LeftButton, pos=widget_point(origin))
+            QTest.mouseMove(editor.preview, widget_point(target))
+            QTest.mouseRelease(editor.preview, Qt.LeftButton, pos=widget_point(target))
+            self.assertEqual(doc.revision, revision+1)
+            self.assertAlmostEqual(item()['w'], .36, delta=.01)
+            self.assertAlmostEqual(item()['h'], .3, delta=.01)
+            ready()
+            bounds = stage.frame()
+            transform, _, _, handle = geometry(item(), bounds)
+            center = transform.map(QPointF())
+            vector = handle-center
+            target = center+QPointF(-vector.y(), vector.x())
+            previous = deepcopy(item())
+            QTest.mousePress(editor.preview, Qt.LeftButton, pos=widget_point(handle))
+            QTest.mouseMove(editor.preview, widget_point(target))
+            QTest.keyClick(editor.preview, Qt.Key_Escape)
+            QTest.mouseRelease(editor.preview, Qt.LeftButton, pos=widget_point(target))
+            self.assertEqual(item(), previous)
+            QTest.mousePress(editor.preview, Qt.LeftButton, pos=widget_point(handle))
+            QTest.mouseMove(editor.preview, widget_point(target))
+            QTest.mouseRelease(editor.preview, Qt.LeftButton, pos=widget_point(target))
+            self.assertAlmostEqual(item()['rotation'], 115, delta=2)
+            editor.history(False)
+            self.assertAlmostEqual(item()['rotation'], 25, delta=.01)
+            editor.history(True)
+            self.assertAlmostEqual(item()['rotation'], 115, delta=2)
+            editor.place_selected('center')
+            self.assertAlmostEqual(item()['x']+item()['w']/2, .5)
+            editor.place_selected('reset')
+            self.assertEqual(item()['rotation'], 0)
+            pip = editor.change(lambda data: project.add_layer(data, 'video', 0, str(self.blue)))
+            editor.select_item(identity)
+            editor.move_visual(1)
+            self.assertGreater(item()['track'], next(row['track'] for row in doc.data['layers'] if row['id'] == pip))
+            editor.history(False)
+            self.assertLess(item()['track'], next(row['track'] for row in doc.data['layers'] if row['id'] == pip))
+            ready()
+            host.resize(920, 600)
+            QTest.qWait(150)
+            self.assertEqual((host.width(), host.height()), (920, 600))
+            self.assertTrue(stage.visible)
+            loaded = project.read_project(doc.path)
+            self.assertEqual(loaded['layers'], doc.data['layers'])
+            editor.shutdown_preview()
+            self.assertFalse(stage.visible)
+            self.assertIsNone(stage.buffer)
+        finally:
+            view.close()
+            hub.close()
+            host.close()
+            host.deleteLater()
+            QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+            app.processEvents()
 
     def test_ranges_to_project_relocate_save_as_and_delete_only_project(self):
         source = self.root/'relocate-source.mp4'

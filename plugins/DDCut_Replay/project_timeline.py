@@ -37,17 +37,16 @@ class ProjectTimeline(QWidget):
         parent_width = self.parentWidget().width() if self.parentWidget() else 800
         self.scale = max(.5, (parent_width - 100) / max(10, duration(self.project))) * self.zoom
         self.setMinimumWidth(max(parent_width - 4, round(duration(self.project) * self.scale + 120)))
-        graphics = sorted({row['track'] for row, _, _ in placed_layers(self.project) if row['kind'] in ('text', 'image')}, reverse=True)
-        visual = sorted({row['track'] for row, _, _ in placed_layers(self.project) if row['kind'] == 'video'}, reverse=True)
+        visual = sorted({row['track'] for row, _, _ in placed_layers(self.project) if row['kind'] != 'audio'}, reverse=True)
         audio = sorted({row['track'] for row, _, _ in placed_layers(self.project) if row['kind'] == 'audio'})
-        self.rows = [('graphics', track) for track in graphics] + [('video', track) for track in visual] + [('main', 0)] + [('audio', track) for track in audio]
+        self.rows = [('visual', track) for track in visual] + [('main', 0)] + [('audio', track) for track in audio]
         self.setMinimumHeight(max(180, 30 + len(self.rows) * 46))
         self.blocks = []
         main_y = 30 + self.rows.index(('main', 0)) * 46
         for clip, start, end in placed_clips(self.project):
             self.blocks.append((clip, start, end, QRectF(self.x(start), main_y, max(5, (end-start)*self.scale), 42), True))
         for item, start, end in placed_layers(self.project):
-            row = ('audio' if item['kind'] == 'audio' else 'video' if item['kind'] == 'video' else 'graphics', item['track'])
+            row = ('audio' if item['kind'] == 'audio' else 'visual', item['track'])
             y = 30 + self.rows.index(row) * 46
             self.blocks.append((item, start, end, QRectF(self.x(start), y, max(5, (end-start)*self.scale), 38), False))
         self.update()
@@ -86,7 +85,7 @@ class ProjectTimeline(QWidget):
             painter.setPen(theme.qcolor(theme.TEXT2))
         for index, (kind, track) in enumerate(self.rows):
             y = 30 + index * 46
-            painter.drawText(QRectF(4, y, 78, 38), Qt.AlignVCenter, '主视频' if kind == 'main' else {'audio': '音频', 'video': '画中画', 'graphics': '图文'}[kind] + str(track))
+            painter.drawText(QRectF(4, y, 78, 38), Qt.AlignVCenter, '主视频' if kind == 'main' else {'audio': '音频', 'visual': '画面'}[kind] + str(track))
         for item, start, end, rect, main in self.blocks:
             color = QColor('#205678' if main else '#524075' if item['kind'] in ('text', 'image') else '#23634e')
             painter.setBrush(color)

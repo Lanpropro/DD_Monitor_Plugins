@@ -1,5 +1,6 @@
 """Project media inspection, real waveforms and the shared preview/export renderer."""
 from array import array
+from itertools import groupby
 import json
 import math
 import os
@@ -91,8 +92,8 @@ def tempo(speed):
 
 
 class ProjectGraphics:
-    def __init__(self, project, width, height):
-        self.layers = [(row, start, end) for row, start, end in placed_layers(project) if row['kind'] in ('text', 'image')]
+    def __init__(self, project, width, height, layers=None):
+        self.layers = [(row, start, end) for row, start, end in (placed_layers(project) if layers is None else layers) if row['kind'] in ('text', 'image')]
         self.layers.sort(key=lambda row: row[0]['track'])
         self.width, self.height = width, height
         self.images = {}
@@ -110,6 +111,10 @@ class ProjectGraphics:
             painter.setOpacity(item['opacity'])
             rect = QRectF(item['x'] * self.width, item['y'] * self.height,
                           item['w'] * self.width, item['h'] * self.height)
+            painter.translate(rect.center())
+            painter.rotate(item.get('rotation', 0))
+            painter.translate(-rect.width()/2, -rect.height()/2)
+            rect = QRectF(0, 0, rect.width(), rect.height())
             if item['kind'] == 'image':
                 if item['source'] not in self.images:
                     self.images[item['source']] = QImage(item['source'])
@@ -204,7 +209,32 @@ def render_project(job, ffmpeg, project, target, work, *, begin=0, length=None, 
             filters.append(''.join(chain) + f'concat=n={len(chain)//2}:v=1:a=1[base][mainaudio]')
             video, audio = 'base', ['[mainaudio]']
             layers = sorted(placed_layers(project), key=lambda row: row[0]['track'])
+            visuals = [row for row in layers if row[0]['kind'] != 'audio' and row[1] < end and row[2] > begin]
+            groups = {}
+            for graphics, rows in groupby(visuals, key=lambda row: row[0]['kind'] != 'video'):
+                rows = list(rows)
+                if graphics:
+                    groups[rows[0][0]['id']] = rows
             for item, start, stop in layers:
+                if item['id'] in groups:
+                    graphics = ProjectGraphics(project, width, height, groups[item['id']])
+                    def produce():
+                        for frame in range(math.ceil(span * fps)):
+                            check_cancel(job)
+                            image = graphics.frame_at(begin + frame / fps)
+                            yield image.constBits().tobytes()
+                    graphic_file = folder / (item['id'] + '-graphics.mkv')
+                    job.message = '准备图文轨道'
+                    run_process(job, [ffmpeg, '-y', '-v', 'error', '-f', 'rawvideo', '-pixel_format', 'bgra',
+                                      '-video_size', f'{width}x{height}', '-framerate', str(fps), '-i', 'pipe:0',
+                                      '-c:v', 'ffv1', '-level', '3', '-pix_fmt', 'bgra', str(graphic_file)],
+                                work, duration=span, frames=produce())
+                    stream = input_count
+                    input_count += 1
+                    inputs += ['-i', str(graphic_file)]
+                    name = f'graphics{stream}'
+                    filters.append(f'[{video}][{stream}:v]overlay=eof_action=pass:repeatlast=0:format=rgb:alpha=premultiplied[{name}]')
+                    video = name
                 if item['kind'] not in ('video', 'audio') or stop <= begin or start >= end:
                     continue
                 check_cancel(job)
@@ -223,10 +253,15 @@ def render_project(job, ffmpeg, project, target, work, *, begin=0, length=None, 
                 input_count += 1
                 if item['kind'] == 'video':
                     w, h = max(2, round(item['w'] * width / 2) * 2), max(2, round(item['h'] * height / 2) * 2)
+                    rotation = math.radians(item.get('rotation', 0))
+                    rotated_w = max(2, math.ceil(abs(w * math.cos(rotation)) + abs(h * math.sin(rotation)) - 1e-7))
+                    rotated_h = max(2, math.ceil(abs(w * math.sin(rotation)) + abs(h * math.cos(rotation)) - 1e-7))
                     filters.append(f'[{stream}:v]setpts=(PTS-STARTPTS)/{item["speed"]}+{offset:.6f}/TB,scale={w}:{h},'
-                                   f'setsar=1,format=rgba,colorchannelmixer=aa={item["opacity"]}[pip{stream}]')
+                                   f'setsar=1,format=rgba,rotate={rotation:.10f}:ow={rotated_w}:oh={rotated_h}:c=none,'
+                                   f'colorchannelmixer=aa={item["opacity"]}[pip{stream}]')
                     name = f'picture{stream}'
-                    filters.append(f'[{video}][pip{stream}]overlay=x={round(item["x"]*width)}:y={round(item["y"]*height)}:'
+                    x, y = round(item['x']*width + (w-rotated_w)/2), round(item['y']*height + (h-rotated_h)/2)
+                    filters.append(f'[{video}][pip{stream}]overlay=x={x}:y={y}:format=rgb:'
                                    f'eof_action=pass:repeatlast=0:enable=\'gte(t,{offset:.6f})\'[{name}]')
                     video = name
                 if info.get('has_audio'):
@@ -242,25 +277,11 @@ def render_project(job, ffmpeg, project, target, work, *, begin=0, length=None, 
                                    f'adelay={round(offset*48000)}S:all=1[sound{stream}]')
                     audio.append(f'[sound{stream}]')
             filters.append(''.join(audio) + f'amix=inputs={len(audio)}:normalize=0:duration=longest,alimiter=limit=0.95:latency=1[audio]')
-            graphics = ProjectGraphics(project, width, height)
-            frames = None
-            if graphics.layers:
-                stream = input_count
-                inputs += ['-f', 'rawvideo', '-pixel_format', 'bgra', '-video_size', f'{width}x{height}',
-                           '-framerate', str(fps), '-i', 'pipe:0']
-                filters.append(f'[{video}][{stream}:v]overlay=shortest=1:format=rgb:alpha=premultiplied[graphics]')
-                video = 'graphics'
-                def produce():
-                    for frame in range(math.ceil(span * fps)):
-                        check_cancel(job)
-                        image = graphics.frame_at(begin + frame / fps)
-                        yield image.constBits().tobytes()
-                frames = produce()
             command = [ffmpeg, '-y', '-v', 'error', *inputs, '-filter_complex', ';'.join(filters),
                        '-map', f'[{video}]', '-map', '[audio]', '-t', f'{span:.6f}', '-c:v', 'libx264',
                        '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-movflags', '+faststart', str(partial)]
             job.message = '合成工程预览' if preview else '合成剪辑工程'
-            run_process(job, command, work, duration=span, frames=frames)
+            run_process(job, command, work, duration=span)
             info = probe(job, ffmpeg, partial, work)
             check_cancel(job)
             write_json(chat_target, sorted(events, key=lambda row: row['time']), video_burned=project.get('danmaku', False))
