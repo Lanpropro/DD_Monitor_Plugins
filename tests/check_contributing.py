@@ -1,4 +1,5 @@
 """Contribution workflow and local documentation links; standard library only."""
+import ast
 from pathlib import Path
 import hashlib
 import json
@@ -93,6 +94,23 @@ class ContributionGuideTests(unittest.TestCase):
                 self.assertIn(text, workflow)
         script = textwrap.dedent(workflow.split('        run: |\n', 1)[1])
         compile(script, str(workflow_path), 'exec')
+        tree = ast.parse(script)
+        label_assignment = next(node for node in tree.body
+                                if isinstance(node, ast.Assign)
+                                and any(isinstance(target, ast.Name)
+                                        and target.id == 'labels'
+                                        for target in node.targets))
+        self.assertEqual(ast.literal_eval(label_assignment.value), {
+            '待确认': ('FEF2C0', '新反馈，尚待核实问题类型、范围或处理方向'),
+            '待复现': ('D4C5F9', '已收到异常反馈，仍需复现或补充现场证据；不代表不存在问题'),
+            '处理中': ('1D76DB', '正在分析或开发；不代表已经修复'),
+            '待验收': ('FBCA04', '已有实现或修复，等待人工复测确认'),
+            '已完成': ('0E8A16', '已确认修复或完成；是否已发布以版本说明为准'),
+            '暂缓': ('D93F0B', '暂不推进，保留问题和已知证据；不等于已解决'),
+            '复现：稳定': ('0E8A16', '报告者表示能够稳定复现；不代表维护者已复现或确认根因'),
+            '复现：偶发': ('FBCA04', '报告者表示异常偶发，尚需结合现场记录判断'),
+            '复现：不确定': ('C5DEF5', '报告者尚不确定复现规律，不表示问题不存在'),
+        })
 
         guide = (ROOT / 'CONTRIBUTING.md').read_text(encoding='utf-8')
         self.assertIn('issues/new/choose', guide)
