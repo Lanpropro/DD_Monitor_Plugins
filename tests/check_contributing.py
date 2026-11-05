@@ -3,6 +3,7 @@ from pathlib import Path
 import hashlib
 import json
 import re
+import textwrap
 import unittest
 
 
@@ -58,6 +59,45 @@ class ContributionGuideTests(unittest.TestCase):
                      '源码清单必须与公开附件一致'):
             with self.subTest(text=text):
                 self.assertIn(text, source)
+
+    def test_issue_forms_and_automatic_labels(self):
+        templates = {
+            '1-bug.yml': ('labels: ["bug", "待确认"]', 'id: plugin_version',
+                          'id: host_version', 'label: 复现情况', '稳定复现', '偶发', '尚不确定'),
+            '2-feature.yml': ('labels: ["enhancement", "待确认"]',
+                              'label: 使用场景与当前不便', 'label: 希望的功能或改进'),
+            '3-question.yml': ('labels: ["question", "待确认"]', 'id: plugin_version',
+                               'id: host_version', 'label: 想咨询的问题'),
+        }
+        directory = ROOT / '.github/ISSUE_TEMPLATE'
+        plugin_names = [json.loads(path.read_text(encoding='utf-8'))['name']
+                        for path in (ROOT / 'plugins').glob('*/plugin.json')]
+        for filename, expected in templates.items():
+            source = (directory / filename).read_text(encoding='utf-8')
+            with self.subTest(template=filename):
+                for text in expected:
+                    self.assertIn(text, source)
+                for plugin_name in plugin_names:
+                    self.assertIn(f'- {plugin_name}', source)
+                self.assertIn('name:', source)
+                self.assertIn('description:', source)
+        self.assertIn('blank_issues_enabled: true',
+                      (directory / 'config.yml').read_text(encoding='utf-8'))
+
+        workflow_path = ROOT / '.github/workflows/issue-labels.yml'
+        workflow = workflow_path.read_text(encoding='utf-8')
+        for text in ('types: [opened, edited]', 'issues: write', '待确认', '待复现',
+                     '处理中', '待验收', '已完成', '暂缓', '复现：稳定', '复现：偶发',
+                     '复现：不确定', "event['action'] == 'opened'", 'urllib.error.HTTPError'):
+            with self.subTest(workflow=text):
+                self.assertIn(text, workflow)
+        script = textwrap.dedent(workflow.split('        run: |\n', 1)[1])
+        compile(script, str(workflow_path), 'exec')
+
+        guide = (ROOT / 'CONTRIBUTING.md').read_text(encoding='utf-8')
+        self.assertIn('issues/new/choose', guide)
+        self.assertIn('旧 Issue 未填写该字段时不会推断分类', guide)
+        self.assertIn('同一问题通常保留一个当前状态', guide)
 
     def test_website_is_maintained_in_the_standalone_repository(self):
         self.assertFalse((ROOT / 'package.json').exists())
