@@ -65,6 +65,7 @@ class LookupTests(unittest.TestCase):
             info = self.provider.rooms_status([self.canonical])[self.canonical]
         self.assertFalse(info['live'])
         self.assertTrue(info['live_known'])
+
         self.assertEqual(info['anchor_uid'], '101')
         self.assertEqual(info['room_id'], self.canonical)
         self.assertEqual(info['uname'], '')  # A status-only update preserves the saved display metadata.
@@ -72,6 +73,54 @@ class LookupTests(unittest.TestCase):
         read.assert_called_once()
         self.assertEqual(read.call_args.args[0], 'https://live.douyin.com/webcast/room/info_by_user/')
 
+    def test_follow_resolver_uses_verified_room_for_empty_live_record(self):
+        account = dict(room_id=self.canonical, anchor_uid='101', live=False, live_known=False,
+                       uname='cached anchor', title='cached title')
+        with patch.object(module.requests, 'get', return_value=response(
+                payload={'status_code': 0, 'data': {}})) as read:
+            result = self.provider.resolve_follow_account(account, lambda: False)
+        self.assertEqual(result['room_id'], self.canonical)
+        self.assertTrue(result['live_known'])
+        self.assertFalse(result['live'])
+        self.assertEqual(result['uname'], 'cached anchor')
+        read.assert_called_once()
+
+    def test_follow_resolver_uses_returned_identity_without_share_page(self):
+        account = dict(room_id='', anchor_uid='101', live=False, live_known=False)
+        for status in (2, 4):
+            with self.subTest(status=status), patch.object(module.requests, 'get', return_value=response(
+                    payload={'status_code': 0, 'data': {'id_str': '90001', 'owner_user_id': '101',
+                        'status': status, 'owner': {'id_str': '101', 'web_rid': '439082987915'}}})) as read:
+                result = self.provider.resolve_follow_account(account, lambda: False)
+            self.assertEqual(result['room_id'], self.canonical)
+            self.assertTrue(result['live_known'])
+            self.assertEqual(result['live'], status == 2)
+            read.assert_called_once()
+
+    def test_unknown_follow_empty_record_does_not_invent_room_or_status(self):
+        account = dict(room_id='', anchor_uid='101', live=False, live_known=False)
+        with patch.object(module.requests, 'get', return_value=response(
+                payload={'status_code': 0, 'data': {}})):
+            self.assertEqual(self.provider.resolve_follow_account(account, lambda: False), account)
+
+    def test_pending_follow_reuses_verified_mapping_without_rereading_list(self):
+        self.provider.restore_follow_rooms([dict(room_id=self.canonical, anchor_uid='101')])
+        account = dict(room_id='', anchor_uid='101', live=False, live_known=False)
+        with patch.object(module.requests, 'get', return_value=response(
+                payload={'status_code': 0, 'data': {}})) as read:
+            result = self.provider.resolve_follow_account(account, lambda: False)
+        self.assertEqual(result['room_id'], self.canonical)
+        self.assertTrue(result['live_known'])
+        self.assertFalse(result['live'])
+        read.assert_called_once()
+
+    def test_follow_identity_only_rejects_wrong_owner(self):
+        account = dict(room_id='', anchor_uid='101', live=False, live_known=False)
+        with patch.object(module.requests, 'get', return_value=response(payload={'status_code': 0,
+                'data': {'id_str': '90001', 'owner_user_id': '101', 'status': 4,
+                         'owner': {'id_str': '999', 'web_rid': '439082987915'}}})):
+            with self.assertRaises(RuntimeError):
+                self.provider.resolve_follow_account(account, lambda: False)
     def test_no_live_record_does_not_fabricate_an_unknown_fixed_room(self):
         with patch.object(module.requests, 'get', return_value=response(payload={'status_code': 0, 'data': {}})) as read:
             self.assertEqual(self.provider._share_room(module.requests, '101', lambda: False), {})

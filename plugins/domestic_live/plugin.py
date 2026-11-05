@@ -1108,8 +1108,12 @@ class DouyinPlatform(NumericLivePlatform):
         uid = str(account.get("anchor_uid") or "")
         if not re.fullmatch(r"[1-9][0-9]{0,19}", uid) or cancelled():
             return dict(account)
+        if not account.get("room_id"):
+            known = next((rid for rid, owner_uid in self._anchor_uids.items() if owner_uid == uid), "")
+            if known:
+                account = dict(account, room_id=known)
         try:
-            room = self._follow_room(requests, uid, cancelled)
+            room = self._follow_room(requests, uid, cancelled, canonical=account.get("room_id") or "")
         except (requests.RequestException, RuntimeError, ValueError, KeyError, TypeError) as error:
             if cancelled():
                 return dict(account)
@@ -1135,7 +1139,7 @@ class DouyinPlatform(NumericLivePlatform):
         result = dict(account)
         result.update(room_id=canonical, live=room.get("status") == 2,
                       live_known=type(room.get("status")) is int,
-                      title=room.get("title") or "",
+                      title=room.get("title") or account.get("title") or "",
                       cover_url=self._image_url(room.get("cover")))
         if not result.get("face"):
             result["face"] = self._image_url(room.get("face"))
@@ -1288,8 +1292,8 @@ class DouyinPlatform(NumericLivePlatform):
             params.update(zip(("offset", "min_time", "max_time"), cursor))
         return []
 
-    def _follow_room(self, session, uid, cancelled):
-        room = self._share_room(session, uid, cancelled)
+    def _follow_room(self, session, uid, cancelled, *, canonical=""):
+        room = self._share_room(session, uid, cancelled, canonical=canonical, identity_only=True)
         if not room:
             return {}
         owner = room["owner"]
@@ -1297,7 +1301,7 @@ class DouyinPlatform(NumericLivePlatform):
         return {"web_rid": rid, "status": room["status"], "title": room.get("title", ""),
                 "face": owner.get("avatar_thumb"), "cover": room.get("cover")}
 
-    def _share_room(self, session, uid, cancelled, *, canonical=""):
+    def _share_room(self, session, uid, cancelled, *, canonical="", identity_only=False):
         # 个人页下播后没有 room_data；直播资料的 web_rid 也可能为空。
         # 通过最近直播记录的内部 ID 读取官方分享页，得到长期有效的网页房间号。
         with session.get("https://live.douyin.com/webcast/room/info_by_user/",
@@ -1317,6 +1321,16 @@ class DouyinPlatform(NumericLivePlatform):
         if not internal:
             return {}
         room = payload["data"]
+        if identity_only and type(room.get("status")) is int:
+            owner = room.get("owner") or {}
+            owner_uid = str(owner.get("id_str") or owner.get("id") or uid)
+            rid = str(room.get("web_rid") or owner.get("web_rid") or
+                      (canonical.split(":", 1)[1] if canonical else ""))
+            if owner_uid != uid or (canonical and rid != canonical.split(":", 1)[1]):
+                raise RuntimeError("抖音关注主播信息不匹配，请稍后重试")
+            if re.fullmatch(r"[1-9][0-9]{0,19}", rid):
+                # 关注只需要身份和状态；接口已确认时不再依赖直播分享页或媒体流。
+                return dict(room, owner=dict(owner, id_str=uid, web_rid=rid))
         if canonical and type(room.get("status")) is int and room["status"] == 4:
             # The owner mapping and API identity are verified; an ended room need not
             # expose a usable live share page (or any streams) to confirm its status.
