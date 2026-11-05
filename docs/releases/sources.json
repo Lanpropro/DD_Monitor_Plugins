@@ -192,6 +192,15 @@
       "last_edit_verified": true,
       "raw_body_sha256": "3544dd016d20b00767d170aa7c336ccf56c0c6ed37b91b3954c99fcd4afcd7a7",
       "sha256": "3544dd016d20b00767d170aa7c336ccf56c0c6ed37b91b3954c99fcd4afcd7a7"
+    },
+    {
+      "tag": "domestic-live-v2.0",
+      "file": "RELEASE-domestic-live-v2.0.md",
+      "status": "prepared",
+      "source_kind": "repository_candidate",
+      "base_commit": "37b5a3bbcae9f8e6cb77d68c3fa125e4f23eac1f",
+      "last_edit_verified": false,
+      "sha256": "984813852d724c3dccab2bb8f255b4b4b670751a306345de86f69833175ebba3"
     }
   ],
   "tags_without_recoverable_body": [

@@ -10,6 +10,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ContributionGuideTests(unittest.TestCase):
+    def test_accepted_douyu_quality_change_records_scope_and_source(self):
+        source = (ROOT / 'docs/changes/domestic_live.md').read_text(encoding='utf-8')
+        for text in ('2026-11-02', '清晰度验收通过', '9f533b6', 'ba058ef',
+                     '尚未合入 develop', 'BUG-071 仍待定位'):
+            self.assertIn(text, source)
+
     def test_bili_live_1_1_publication_records_agree(self):
         tag = 'bili-live-v1.1'
         url = f'https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/{tag}'

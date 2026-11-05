@@ -54,7 +54,8 @@ def main():
         assert len(manager.plugins) == len(versions) and not manager.skipped
         assert all(plugin.version == versions[plugin.context.name] for plugin in manager.plugins)
         manager.unload()
-    for plugin_id, old_version, ref in (("domestic_live", "1.1", "v1.1"),
+    for plugin_id, old_version, ref in (("domestic_live", "1.5", "domestic-live-v1.5"),
+                                       ("domestic_live", "1.1", "v1.1"),
             ("domestic_live", "1.2", "domestic-live-v1.2"),
             ("domestic_live", "1.3", "domestic-live-v1.3"),
             ("global_live", "1.1", "global-live-v1.1")):
@@ -101,7 +102,7 @@ def main():
         for name in ('viewer.py', 'fullscreen.py'):
             assert (target / name).read_bytes() == (ROOT / 'plugins/match_sync' / name).read_bytes()
         assert (target / 'user-data.txt').read_bytes() == b'preserve 1.3 settings'
-    print("PASS: old plugins upgrade to current versions, including domestic 1.1/1.2/1.3, global 1.1 and match_sync 1.3; source and user data preserved")
+    print("PASS: old plugins upgrade to current versions, including domestic 1.1/1.2/1.3/1.5, global 1.1 and match_sync 1.3; source and user data preserved")
 
 
 if __name__ == "__main__":

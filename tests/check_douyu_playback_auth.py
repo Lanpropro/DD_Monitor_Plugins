@@ -41,6 +41,7 @@ def main():
         assert not platform._playback_cookies(), 'Cleared runtime login must not resurrect stale saved cookies'
     source = {"rtmp_url": "https://cdn.test", "rtmp_live": "source.flv", "rate": 4,
               "multirates": [{"rate": 0, "bit": 16000, "name": "原画1080P60"},
+                             {"rate": 15, "bit": 15000, "name": "2K超高清"},
                              {"rate": 4, "bit": 4000, "name": "蓝光4M"}]}
     session = module.Streamlink()
 
@@ -55,6 +56,12 @@ def main():
             stream = platform._streams(session, "douyu:123", 10000)["source"]
             assert request.call_count == 2 and request.call_args.kwargs["rate"] == 0
             assert stream.ddm_quality == 10000, "Highest quality must explicitly request native rate 0"
+            assert [item['qn'] for item in platform.room_quality_options('douyu:123')] == [
+                2000015, 10000, 2000004], '2K menu entry must precede original 1080P60'
+            assert platform._select_quality('douyu:123', 250, False)['rate'] == 0
+            assert platform._select_quality('douyu:123', 10000, False)['rate'] == 0
+            assert platform._select_quality('douyu:123', 2000015, False)['rate'] == 15
+            assert platform._select_quality('douyu:123', 10000, True)['rate'] == 4
         with patch.object(platform, "room_info", return_value=plugins.RoomInfo("douyu:123", live=True)), \
                 patch.object(platform, "_request_source", side_effect=[source, {}]):
             try:
