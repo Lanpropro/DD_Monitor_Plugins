@@ -72,7 +72,8 @@ class EntryButton(QToolButton):
         self._placement = QTimer(self)
         self._placement.setSingleShot(True)
         self._placement.timeout.connect(self._place)
-        self._set_side_original = getattr(sidebar, "set_side", None)
+        self._set_side_original = (None if hasattr(sidebar, 'workspace_controls')
+                                   else getattr(sidebar, "set_side", None))
         if self._set_side_original is not None:
             sidebar.set_side = self._set_side
         sidebar.installEventFilter(self)
@@ -165,7 +166,8 @@ class EntryButton(QToolButton):
         self._place()
 
     def eventFilter(self, watched, event):
-        if watched is self.sidebar.layout_button and event.type() == QEvent.Show and self._mode:
+        if (not hasattr(self.sidebar, 'workspace_controls') and watched is self.sidebar.layout_button
+                and event.type() == QEvent.Show and self._mode):
             watched.hide()
         if watched is self.sidebar and event.type() in (
                 QEvent.LayoutRequest, QEvent.Resize, QEvent.Show):
@@ -186,6 +188,8 @@ class EntryButton(QToolButton):
 
     def _place(self):
         sidebar = self.sidebar
+        if hasattr(sidebar, 'workspace_controls'):
+            return
         occupied = self._mode
         top = getattr(sidebar, "side", "left") == "top" and not occupied
         sidebar.layout_button.setVisible(not occupied)
@@ -260,6 +264,9 @@ class MatchSyncPlugin(api.Plugin):
             self.button.setCheckable(True)
             self.button.toggled.connect(self.set_enabled)
             self.entry = EntryButton(sidebar, self.button)
+            register = getattr(context, 'register_workspace_control', None)
+            if register is not None:
+                register('entry', self.entry, priority=20)
             self.entry.feedback_painted.connect(self._entry_painted)
             self.entry._stretch.valueChanged.connect(self.switch_probe.animation_tick)
             self.entry.transition_finished.connect(self.switch_probe.animation_finished)
@@ -349,7 +356,12 @@ class MatchSyncPlugin(api.Plugin):
             self.viewer.add_room(str(room["room_id"]), {"alias": room.get("uname") or ""})
         self.switch_probe.watch_target(self.viewer)
         with self.switch_probe.span('show_viewer'):
-            self.viewer.show()
+            show = getattr(self.context, 'show_workspace', None)
+            if show is not None and self.button is not None:
+                if not show(self.viewer, manages_content=True):
+                    return
+            else:
+                self.viewer.show()
             self.viewer.raise_()
         if self.entry is not None:
             self.entry.set_mode(True)
@@ -366,6 +378,9 @@ class MatchSyncPlugin(api.Plugin):
         if self.viewer is not None:
             self.viewer.close()
         if self.entry is not None:
+            unregister = getattr(self.context, 'unregister_workspace_control', None)
+            if unregister is not None:
+                unregister('entry')
             self.entry.detach()
             self.entry = None
             self.button.deleteLater()
