@@ -1029,8 +1029,8 @@ class Workspace(QWidget):
         }[kind]
         self.library_empty.setText('没有找到匹配的录像' if query else title)
         self.library_empty_hint.setText('试试其他关键词，或切换录像分类。' if query else hint)
-        self.library_stack.setCurrentIndex((0 if kind == 'live' else
-            3 if self.library_tools.calendar_toggle.isChecked() else 1) if visible else 2)
+        self.library_stack.setCurrentIndex(3 if kind != 'live' and self.library_tools.calendar_toggle.isChecked()
+            else (0 if kind == 'live' else 1) if visible else 2)
         self.update_library_actions()
         self.library_tools.refresh()
 

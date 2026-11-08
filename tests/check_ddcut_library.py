@@ -10,7 +10,8 @@ from unittest.mock import patch
 import sys
 
 from check_ddcut_ranges_chat import app, args, remainder, media, module, ui, until
-from PySide6.QtCore import QCoreApplication, QDate, QEvent, QPoint, Qt, QTimer
+from PySide6.QtCore import QCoreApplication, QDate, QEvent, QPoint, QPointF, Qt, QTimer
+from PySide6.QtGui import QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QMainWindow, QMessageBox
 
@@ -174,6 +175,32 @@ class LibraryTests(unittest.TestCase):
             self.assertEqual(len(controls.calendar.entries), 3)
             controls.calendar.grab()
             self.assertTrue(controls.calendar.hits)
+            controls.span.setCurrentIndex(0)
+            self.assertEqual(controls.calendar.hours, 12)
+            self.assertFalse(controls.calendar.entries)
+            self.assertEqual(view.library_stack.currentIndex(), 3)
+            controls.calendar.move(-1)
+            self.assertEqual(len(controls.calendar.entries), 3)
+            controls.calendar.move(-1)
+            self.assertEqual(len(controls.calendar.entries), 3)
+            controls.calendar.move(-1)
+            self.assertEqual(len(controls.calendar.entries), 2)
+            begin = controls.calendar.bounds()[0]
+            count = len(controls.selected())
+            QTest.mousePress(controls.calendar, Qt.LeftButton, pos=QPoint(250, 10))
+            QTest.mouseMove(controls.calendar, QPoint(300, 10))
+            QTest.mouseRelease(controls.calendar, Qt.LeftButton, pos=QPoint(300, 10))
+            self.assertLess(controls.calendar.bounds()[0], begin)
+            self.assertEqual(len(controls.selected()), count)
+            begin = controls.calendar.bounds()[0]
+            wheel = QWheelEvent(QPointF(250, 10), QPointF(250, 10), QPoint(), QPoint(120, 0),
+                                Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
+            app.sendEvent(controls.calendar, wheel)
+            self.assertGreater(controls.calendar.bounds()[0], begin)
+            controls.span.setCurrentIndex(1)
+            controls.date.setDate(QDate(2026, 11, 9))
+            controls.date_changed()
+            controls.calendar.grab()
             controls.calendar.selected.emit(entries[0]['path'], False)
             self.assertEqual(view.library.currentItem().data(Qt.UserRole), entries[0]['path'])
             controls.request_stats()
@@ -190,7 +217,8 @@ class LibraryTests(unittest.TestCase):
                     args.screenshots.mkdir(parents=True, exist_ok=True)
                     host.grab().save(str(args.screenshots/f'library-{size[0]}.png'))
             controls.date.setDate(QDate(2026, 11, 10))
-            self.assertEqual(view.library_stack.currentIndex(), 2)
+            self.assertEqual(view.library_stack.currentIndex(), 3)
+            self.assertFalse(controls.calendar.entries)
             controls.date_filter.setChecked(False)
             controls.clear()
             item = next(view.library.item(i) for i in range(3) if view.library.item(i).data(Qt.UserRole) == entries[0]['path'])

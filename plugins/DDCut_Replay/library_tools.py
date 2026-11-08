@@ -28,9 +28,10 @@ class LibraryTools(QObject):
         self.date = QDateEdit(QDate.currentDate())
         self.date.setCalendarPopup(True)
         self.date.setDisplayFormat('yyyy-MM-dd')
+        self.date.setMinimumWidth(140)
         self.date.setAccessibleName('录像日期')
-        self.date.dateChanged.connect(workspace.filter_library)
-        self.date_filter.toggled.connect(workspace.filter_library)
+        self.date.dateChanged.connect(self.date_changed)
+        self.date_filter.toggled.connect(self.date_filter_changed)
         self.calendar_toggle = QCheckBox('录播日历')
         self.calendar_toggle.toggled.connect(self.toggle_calendar)
         self.bar = QWidget()
@@ -46,6 +47,27 @@ class LibraryTools(QObject):
         layout.insertWidget(1, self.summary)
         self.calendar = ArchiveDay()
         self.calendar.selected.connect(self.calendar_selected)
+        self.calendar.rangeChanged.connect(workspace.filter_library)
+        self.calendar_bar = QWidget()
+        navigation = QHBoxLayout(self.calendar_bar)
+        navigation.setContentsMargins(0, 0, 0, 0)
+        for label, direction in [('上一时段', -1), ('下一时段', 1)]:
+            button = QPushButton(label)
+            button.setObjectName('IconButton')
+            button.clicked.connect(lambda checked=False, step=direction: self.calendar.move(step))
+            navigation.addWidget(button)
+        self.span = QComboBox()
+        for hours in (12, 24):
+            self.span.addItem(f'{hours}小时', hours)
+        self.span.setCurrentIndex(1)
+        self.span.setAccessibleName('录播日历时间跨度')
+        self.span.currentIndexChanged.connect(lambda: self.calendar.set_hours(self.span.currentData()))
+        navigation.addWidget(self.span)
+        self.calendar_range = QLabel()
+        self.calendar_range.setObjectName('SettingsHint')
+        navigation.addWidget(self.calendar_range, 1)
+        self.calendar_bar.hide()
+        layout.insertWidget(2, self.calendar_bar)
         self.calendar_scroll = QScrollArea()
         self.calendar_scroll.setWidgetResizable(True)
         self.calendar_scroll.setWidget(self.calendar)
@@ -108,7 +130,18 @@ class LibraryTools(QObject):
         return sorted(self.hub.entries, key=value, reverse=key != 'title')
 
     def matches(self, entry):
+        if self.calendar_toggle.isChecked():
+            return self.calendar.matches(entry)
         return not self.date_filter.isChecked() or on_date(entry, self.date.date().toPython())
+
+    def date_changed(self):
+        self.calendar.reset_date(self.date.date().toPython())
+        self.view.filter_library()
+
+    def date_filter_changed(self, checked):
+        if not checked and self.calendar_toggle.isChecked():
+            self.calendar_toggle.setChecked(False)
+        self.view.filter_library()
 
     def toggle_calendar(self, checked):
         if checked:
@@ -122,7 +155,16 @@ class LibraryTools(QObject):
 
     def refresh(self):
         live = self.view.category.currentData() == 'live'
+        calendar = not live and self.calendar_toggle.isChecked()
         self.bar.setVisible(not live)
+        self.calendar_bar.setVisible(calendar)
+        begin, end = self.calendar.bounds()
+        from datetime import datetime
+        if calendar:
+            self.date.blockSignals(True)
+            self.date.setDate(QDate(datetime.fromtimestamp((begin + end) / 2).date()))
+            self.date.blockSignals(False)
+        self.calendar_range.setText(datetime.fromtimestamp(begin).strftime('%m-%d %H:%M') + ' — ' + datetime.fromtimestamp(end).strftime('%m-%d %H:%M'))
         self.actions.setVisible(not live and self.batch.isChecked())
         paths = {self.view.library.item(i).data(Qt.UserRole) for i in range(self.view.library.count())
                  if not self.view.library.item(i).isHidden()}
@@ -130,6 +172,8 @@ class LibraryTools(QObject):
         self.update_count()
 
     def calendar_selected(self, path, activate):
+        if activate and self.batch.isChecked():
+            return
         grid = self.view.library
         for index in range(grid.count()):
             item = grid.item(index)
