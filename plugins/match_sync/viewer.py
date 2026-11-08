@@ -797,8 +797,11 @@ class CompactStatus(QLabel):
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
     def set_status(self, parts, detail, hints=None):
+        hints = hints if hints is not None else [text for _, text in parts]
+        if (self.parts, self.detail, self.hints) == (parts, detail, hints):
+            return
         self.parts = parts
-        self.hints = hints if hints is not None else [text for _, text in parts]
+        self.hints = hints
         self.hit_regions = []
         self.detail = detail
         self.setText(' · '.join(text for _, text in parts if text))
@@ -1183,10 +1186,16 @@ class RoomRow(QFrame):
 
     def refresh_avatar(self, *_args):
         if hasattr(self, 'name_label'):
-            self.name_label.setText(self.name_label.fontMetrics().elidedText(self.label(), Qt.ElideRight, 140))
-            self.name_label.setToolTip(self.label())
-        self.avatar.setToolTip(f"{self.label()} · 拖动整张卡片调整顺序")
-        self.setToolTip(self.avatar.toolTip())
+            text = self.name_label.fontMetrics().elidedText(self.label(), Qt.ElideRight, 140)
+            if self.name_label.text() != text:
+                self.name_label.setText(text)
+            if self.name_label.toolTip() != self.label():
+                self.name_label.setToolTip(self.label())
+        tooltip = f"{self.label()} · 拖动整张卡片调整顺序"
+        if self.avatar.toolTip() != tooltip:
+            self.avatar.setToolTip(tooltip)
+        if self.toolTip() != tooltip:
+            self.setToolTip(tooltip)
         sidebar = getattr(self.viewer.context.window, "sidebar", None)
         item = next((item for item in getattr(sidebar, "_items", [])
                      if str(item.room.get("room_id") or "") == self.room_id), None)
@@ -1195,7 +1204,7 @@ class RoomRow(QFrame):
             if self.avatar_key != pixmap.cacheKey():
                 self.avatar_key = pixmap.cacheKey()
                 self.avatar.set_pixmap_image(pixmap)
-        elif self.avatar_key is None:
+        elif self.avatar_key is None and self.avatar.text() != self.label()[0]:
             self.avatar.setText(self.label()[0])
 
     def mousePressEvent(self, event):
@@ -1990,11 +1999,15 @@ class Viewer(QDialog):
         self._sync_strip_marks(sidebar, True)
 
     def _style_sidebar_item(self, item, active, hold):
+        # Newer hosts convert QSS for continuous corners. Compare their source
+        # recipe, otherwise each poll reapplies QSS that the host converts again.
+        source_style = getattr(sys.modules.get('ddm.continuous_corners'), 'source_stylesheet', str)
+        current = source_style(item.styleSheet())
         changed = bool(item.property('matchSync')) != active
         if changed:
             item.setProperty('matchSync', active)
         if active or hold:
-            original = self.sidebar_item_styles.setdefault(item, item.styleSheet())
+            original = self.sidebar_item_styles.setdefault(item, current)
             style = original + """
                 #NavItem[onWall="true"] { border: none; }
                 #NavItem[matchSync="true"], #NavItem[matchSync="true"][onWall="true"] {
@@ -2005,7 +2018,7 @@ class Viewer(QDialog):
             style = self.sidebar_item_styles.pop(item)
         else:
             return
-        if item.styleSheet() != style:
+        if current != style:
             item.setStyleSheet(style)
         elif changed:
             item.style().unpolish(item)
@@ -3731,8 +3744,12 @@ class Viewer(QDialog):
             if probe is not None:
                 probe.pipeline_sources = tuple((index, row.decoder) for index, row in enumerate(self.rows.values())
                                                if row.decoder is not None and hasattr(row.decoder, 'timings'))
+        if probe is not None:
+            probe.mark('metadata_sidebar')
         if not dragging_crop:
             self._sync_sidebar_marks()
+        if probe is not None:
+            probe.mark('metadata_picture')
         self.sync_picture(refresh_metadata=refresh_status_ui)
         if probe is not None:
             probe.mark('clock')

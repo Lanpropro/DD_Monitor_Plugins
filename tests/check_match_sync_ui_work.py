@@ -67,6 +67,7 @@ def check(app, host, module):
                 assert frames.call_count == 125, 'Do not throttle the playback path'
             assert len(calls) == 4, len(calls)
             assert viewer.render_timer.interval() == 8
+            assert {'metadata_sidebar', 'metadata_picture'} <= dict(viewer.playback_probe.stages).keys()
             # Explicit source information and room changes bypass periodic UI throttling.
             row.title = 'new title'
             viewer.sync_picture()
