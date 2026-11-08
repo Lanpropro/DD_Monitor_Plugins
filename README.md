@@ -42,7 +42,7 @@
 <p><strong>一路主画面，多路解说</strong></p>
 <p>对齐比赛主画面与二路直播，混合解说声音、合并带来源标记的弹幕。其他平台需先启用对应平台插件。</p>
 <p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
-<p><a href="plugins/match_sync/README.md">功能与兼容说明</a> · <a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.4">下载插件</a></p>
+<p><a href="plugins/match_sync/README.md">功能与兼容说明</a> · <a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.6.1">下载插件</a></p>
 </td>
 <td width="50%" valign="top">
 <h3><a href="plugins/bili_live/README.md">B站直播互动</a></h3>
