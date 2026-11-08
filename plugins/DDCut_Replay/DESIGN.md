@@ -6,6 +6,8 @@
 
 ## 当前增量：外部文件剪辑工程（2026-11-05）
 
+2026-11-09封面增量：参考固定CoverEditor/cover-elements的16:9与4:3、独立裁切和同步元素方式，使用独立`.ddcover.json`草稿，不复制Svelte实现或贴纸资源。`cover_model.py`管理纯数据、校验/相对路径/历史，`cover_render.py`共用预览和图片导出绘制，`cover_media.py`复用原精确导出与工程合成冻结取帧，`cover_canvas.py`负责指针草稿，`cover_editor.py`协调控件与任务。工程只引用封面草稿，封面文档是其内容的唯一状态来源；Qt父子归属编辑页，轮询定时器随进入/离开启停，任务只接收深拷贝。换背景取消旧取帧并丢弃迟到结果；读入QImage保留具名对象和缓存引用。旋转选框几何提取至`graphic_geometry.py`供工程和封面共用，旧project_stage.geometry保留兼容导入；旧原生手势回归验证行为未变。Workspace仍协调页面，未为减少行数扩展通用框架。
+
 2026-11-09补充字幕与编码职责：`subtitles.py`只管理来源时间锚点、可见区间和校验，`subtitle_srt.py`负责无GUI依赖的SRT协议，`subtitle_render.py`绘制可复用字幕帧，`subtitle_panel.py`承载Qt编辑操作；`encoding.py`校验编码配置并映射FFmpeg参数，`encoding_widgets.py`复用界面控件。工程文档仍是单一可变状态来源，编辑器负责提交、撤销及原定时器；字幕面板属于编辑器的Qt子树，没有额外播放器或定时器。合成任务只持有提交时深拷贝的数据，字幕在最后一层按工程时间求值，预览与最终输出共用绘制，SRT按可见范围重排。`workspace.py`仍协调录像列表与导出，`project_editor.py`仍协调工程与预览；本批未为减少行数机械拆分既有协调职责。
 
 参考固定快照的ProjectEditor/ProjectTimeline/ItemInspector与material-project架构，接入工程列表和同页编辑器，布局为左文件/中预览/右属性/下多轨。工程用独立JSON保存外部引用、主轨片段与附加内容，未建立素材数据库；自动保存、相对路径另存、缺失文件重新定位和会话内100步撤销重做。主轨磁吸编排，附加内容锚定来源片段时间，裁剪起点后隐藏，分割时复制跨界内容；同类重叠自动分轨。

@@ -153,6 +153,7 @@ class Workspace(QWidget):
         button('录制设置', self.settings, header)
         self.task_button = button('后台任务', self.toggle_tasks, header)
         self.projects_button = button('剪辑工程', self.show_projects, header)
+        button('封面制作', self.open_cover, header)
         self.task_button.setCheckable(True)
         self.capture_switch = QCheckBox('仅录制切片素材')
         self.capture_switch.setChecked(getattr(owner, 'capture_mode', 'clip') == 'clip')
@@ -649,8 +650,53 @@ class Workspace(QWidget):
         self.project_editor.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.project_editor.backRequested.connect(self.show_projects)
         self.library_review.addWidget(self.project_editor)
+        from .cover_editor import CoverEditor
+        self.cover_editor = CoverEditor(self)
+        self.cover_editor.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        self.cover_editor.backRequested.connect(self.return_from_cover)
+        self.library_review.addWidget(self.cover_editor)
+
+    def open_cover(self):
+        if self.library_review.currentWidget() is self.cover_editor:
+            return
+        self.cover_origin = self.library_review.currentWidget()
+        project_document = None
+        source = None
+        if self.cover_origin is self.project_editor and self.project_editor.document:
+            project_document = self.project_editor.document
+            source = {'project': deepcopy(project_document.data)}
+        elif self.cover_origin is self.review_panel and self.current:
+            source = deepcopy(self.current)
+        def open_page():
+            self.cover_editor.open_source(source, project_document)
+            if source:
+                self.cover_editor.time.setValue(self.project_editor.position if project_document else self.preview.position())
+            self.project_editor.shutdown_preview()
+            self.cover_review_pause = self.preview.core.pause if self.preview.core else True
+            if self.preview.core:
+                self.preview.core.pause = True
+            self.filters.hide()
+            self.library_review.setCurrentWidget(self.cover_editor)
+            if source and not self.cover_editor.document.data['background']:
+                self.cover_editor.capture()
+        self.guard(open_page)
+
+    def return_from_cover(self):
+        origin = getattr(self, 'cover_origin', self.listing)
+        self.library_review.setCurrentWidget(origin)
+        if origin is self.project_editor:
+            self.project_editor.refresh()
+            self.project_editor.request_preview()
+        elif origin is self.review_panel and self.current:
+            if self.preview.core:
+                self.preview.core.pause = self.cover_review_pause
+            else:
+                self.review(self.current)
+        elif origin is self.listing:
+            self.show_library()
 
     def show_projects(self):
+        self.cover_editor.shutdown()
         self.preview.stop()
         self.current, self.live_source = None, None
         self.project_editor.shutdown_preview()
@@ -824,6 +870,7 @@ class Workspace(QWidget):
             self.report('录制方式：仅切片素材' if checked else '录制方式：原版完整录像与即时重放')
 
     def show_library(self):
+        self.cover_editor.shutdown()
         self.project_editor.shutdown_preview()
         self.library_review.setCurrentWidget(self.listing)
         self.filters.show()
@@ -1113,7 +1160,7 @@ class Workspace(QWidget):
             self.report(error)
 
     def open_current_recording(self):
-        if self.library_review.currentWidget() in (self.project_page, self.project_editor):
+        if self.library_review.currentWidget() in (self.project_page, self.project_editor, self.cover_editor):
             return
         entry = self.source() if self.sources.count() else None
         if entry is not None and getattr(self.owner, 'capture_mode', 'clip') == 'original':
@@ -1711,6 +1758,7 @@ class Workspace(QWidget):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(entry['path']).parent)))
 
     def closeEvent(self, event):
+        self.cover_editor.shutdown()
         self.project_editor.shutdown_preview()
         self.preview.stop()
         super().closeEvent(event)
@@ -1718,6 +1766,9 @@ class Workspace(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
+        if hasattr(self, 'cover_editor') and self.library_review.currentWidget() is self.cover_editor:
+            self.cover_editor.timer.start()
+            return
         if hasattr(self, 'project_editor') and self.library_review.currentWidget() is self.project_editor:
             QTimer.singleShot(0, self.project_editor.request_preview)
         if self.current and self.preview.core is None:

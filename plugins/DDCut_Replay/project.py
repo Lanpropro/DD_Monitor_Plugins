@@ -232,6 +232,11 @@ def write_project(path, project):
     for row in data['clips'] + data['layers']:
         if row.get('source'):
             row['source'] = references[row['source']]
+    if data.get('cover_draft'):
+        try:
+            data['cover_draft'] = os.path.relpath(data['cover_draft'], path.parent).replace('\\', '/')
+        except ValueError:
+            pass
     temporary = path.with_suffix(path.suffix + '.tmp')
     temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False), encoding='utf-8')
     temporary.replace(path)
@@ -256,6 +261,8 @@ def read_project(path):
     for row in data['clips'] + data['layers']:
         if row.get('source'):
             row['source'] = sources[row['source']]
+    if data.get('cover_draft'):
+        data['cover_draft'] = str((path.parent/data['cover_draft']).resolve())
     # Earlier projects always drew graphics over all videos, regardless of track number.
     if data.get('visual_order') != 'mixed':
         visual = sorted({(row['kind'] != 'video', row['track']) for row in data['layers'] if row['kind'] != 'audio'})
