@@ -15,6 +15,10 @@ from .chat import load_events, write_json
 from .hls import input_options, read_segments
 from .media import Job, check_cancel, export_clip, probe, run_process, thumbnail
 from .project import duration, placed_clips, placed_layers, validate
+from .subtitles import placed_cues
+from .subtitle_render import SubtitleGraphics
+from .subtitle_srt import srt_text
+from .encoding import video_args
 
 
 def inspect_file(job, ffmpeg, path, work, *, thumbnails=None):
@@ -139,6 +143,17 @@ class ProjectGraphics:
         return image
 
 
+def graphic_segment(job, ffmpeg, graphics, target, work, begin, span, fps):
+    def produce():
+        for frame in range(math.ceil(span*fps)):
+            check_cancel(job)
+            image = graphics.frame_at(begin+frame/fps)
+            yield image.constBits().tobytes()
+    run_process(job, [ffmpeg, '-y', '-v', 'error', '-f', 'rawvideo', '-pixel_format', 'bgra',
+                      '-video_size', f'{graphics.width}x{graphics.height}', '-framerate', str(fps), '-i', 'pipe:0',
+                      '-c:v', 'ffv1', '-level', '3', '-pix_fmt', 'bgra', str(target)], work, duration=span, frames=produce())
+
+
 def render_project(job, ffmpeg, project, target, work, *, begin=0, length=None, preview=False, project_path=''):
     validate(project)
     total = duration(project)
@@ -148,7 +163,9 @@ def render_project(job, ffmpeg, project, target, work, *, begin=0, length=None, 
         raise ValueError('请先在主轨添加有效的视频片段')
     target = Path(target)
     chat_target = target.with_suffix('.danmaku.json')
-    if target.exists() or chat_target.exists():
+    subtitle_target = target.with_suffix('.srt')
+    has_subtitles = bool(placed_cues(project))
+    if target.exists() or chat_target.exists() or (has_subtitles and subtitle_target.exists()):
         raise FileExistsError('目标文件已存在，请使用新文件名')
     referenced = {row['source'] for row in project['clips'] + project['layers'] if row.get('source')}
     for source in referenced:
@@ -162,7 +179,7 @@ def render_project(job, ffmpeg, project, target, work, *, begin=0, length=None, 
         height, width = round(height * 640 / width / 2) * 2, 640
     width, height = width // 2 * 2, height // 2 * 2
     partial = target.with_name(f'.{target.stem}.{job.id}.partial.mp4')
-    written = published = False
+    written = subtitle_written = published = False
     try:
         with tempfile.TemporaryDirectory(prefix='project-', dir=work) as temporary:
             folder = Path(temporary)
@@ -218,17 +235,9 @@ def render_project(job, ffmpeg, project, target, work, *, begin=0, length=None, 
             for item, start, stop in layers:
                 if item['id'] in groups:
                     graphics = ProjectGraphics(project, width, height, groups[item['id']])
-                    def produce():
-                        for frame in range(math.ceil(span * fps)):
-                            check_cancel(job)
-                            image = graphics.frame_at(begin + frame / fps)
-                            yield image.constBits().tobytes()
                     graphic_file = folder / (item['id'] + '-graphics.mkv')
                     job.message = '准备图文轨道'
-                    run_process(job, [ffmpeg, '-y', '-v', 'error', '-f', 'rawvideo', '-pixel_format', 'bgra',
-                                      '-video_size', f'{width}x{height}', '-framerate', str(fps), '-i', 'pipe:0',
-                                      '-c:v', 'ffv1', '-level', '3', '-pix_fmt', 'bgra', str(graphic_file)],
-                                work, duration=span, frames=produce())
+                    graphic_segment(job, ffmpeg, graphics, graphic_file, work, begin, span, fps)
                     stream = input_count
                     input_count += 1
                     inputs += ['-i', str(graphic_file)]
@@ -277,15 +286,26 @@ def render_project(job, ffmpeg, project, target, work, *, begin=0, length=None, 
                                    f'adelay={round(offset*48000)}S:all=1[sound{stream}]')
                     audio.append(f'[sound{stream}]')
             filters.append(''.join(audio) + f'amix=inputs={len(audio)}:normalize=0:duration=longest,alimiter=limit=0.95:latency=1[audio]')
+            if has_subtitles and project.get('burn_subtitles', True):
+                subtitle_file = folder/'subtitles.mkv'
+                job.message = '准备字幕轨道'
+                graphic_segment(job, ffmpeg, SubtitleGraphics(project, width, height), subtitle_file, work, begin, span, fps)
+                inputs += ['-i', str(subtitle_file)]
+                filters.append(f'[{video}][{input_count}:v]overlay=eof_action=pass:repeatlast=0:format=rgb:alpha=premultiplied[captions]')
+                video = 'captions'
             command = [ffmpeg, '-y', '-v', 'error', *inputs, '-filter_complex', ';'.join(filters),
-                       '-map', f'[{video}]', '-map', '[audio]', '-t', f'{span:.6f}', '-c:v', 'libx264',
-                       '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-movflags', '+faststart', str(partial)]
+                       '-map', f'[{video}]', '-map', '[audio]', '-t', f'{span:.6f}', *video_args(None if preview else project.get('encoding')),
+                       '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-movflags', '+faststart', str(partial)]
             job.message = '合成工程预览' if preview else '合成剪辑工程'
             run_process(job, command, work, duration=span)
             info = probe(job, ffmpeg, partial, work)
             check_cancel(job)
             write_json(chat_target, sorted(events, key=lambda row: row['time']), video_burned=project.get('danmaku', False))
             written = True
+            if has_subtitles and not preview:
+                with subtitle_target.open('x', encoding='utf-8-sig') as handle:
+                    handle.write(srt_text(project, begin, end))
+                subtitle_written = True
             if target.exists():
                 raise FileExistsError('目标文件已存在')
             if os.name == 'nt':
@@ -296,8 +316,11 @@ def render_project(job, ffmpeg, project, target, work, *, begin=0, length=None, 
             job.output = str(target)
             return {'output': str(target), 'source': project_path, 'actual_duration': info['duration'],
                     'mode': 'project', 'danmaku_path': str(chat_target), 'chat_burned': project.get('danmaku', False),
+                    'subtitle_path': str(subtitle_target) if subtitle_written else '',
                     'requested_start': begin, 'requested_end': end}
     finally:
         partial.unlink(missing_ok=True)
         if written and not published:
             chat_target.unlink(missing_ok=True)
+        if subtitle_written and not published:
+            subtitle_target.unlink(missing_ok=True)

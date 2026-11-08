@@ -4,6 +4,7 @@ from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 from ddm import theme
 from .project import duration, placed_clips, placed_layers
+from .subtitles import placed_cues
 from .timeline import timecode
 
 
@@ -39,7 +40,8 @@ class ProjectTimeline(QWidget):
         self.setMinimumWidth(max(parent_width - 4, round(duration(self.project) * self.scale + 120)))
         visual = sorted({row['track'] for row, _, _ in placed_layers(self.project) if row['kind'] != 'audio'}, reverse=True)
         audio = sorted({row['track'] for row, _, _ in placed_layers(self.project) if row['kind'] == 'audio'})
-        self.rows = [('visual', track) for track in visual] + [('main', 0)] + [('audio', track) for track in audio]
+        captions = placed_cues(self.project)
+        self.rows = ([('subtitle', 0)] if captions else []) + [('visual', track) for track in visual] + [('main', 0)] + [('audio', track) for track in audio]
         self.setMinimumHeight(max(180, 30 + len(self.rows) * 46))
         self.blocks = []
         main_y = 30 + self.rows.index(('main', 0)) * 46
@@ -49,6 +51,8 @@ class ProjectTimeline(QWidget):
             row = ('audio' if item['kind'] == 'audio' else 'visual', item['track'])
             y = 30 + self.rows.index(row) * 46
             self.blocks.append((item, start, end, QRectF(self.x(start), y, max(5, (end-start)*self.scale), 38), False))
+        for cue, start, end in captions:
+            self.blocks.append((dict(cue, kind='subtitle'), start, end, QRectF(self.x(start), 30, max(5, (end-start)*self.scale), 38), False))
         self.update()
 
     def x(self, stamp):
@@ -85,7 +89,7 @@ class ProjectTimeline(QWidget):
             painter.setPen(theme.qcolor(theme.TEXT2))
         for index, (kind, track) in enumerate(self.rows):
             y = 30 + index * 46
-            painter.drawText(QRectF(4, y, 78, 38), Qt.AlignVCenter, '主视频' if kind == 'main' else {'audio': '音频', 'visual': '画面'}[kind] + str(track))
+            painter.drawText(QRectF(4, y, 78, 38), Qt.AlignVCenter, '主视频' if kind == 'main' else '字幕' if kind == 'subtitle' else {'audio': '音频', 'visual': '画面'}[kind] + str(track))
         for item, start, end, rect, main in self.blocks:
             color = QColor('#205678' if main else '#524075' if item['kind'] in ('text', 'image') else '#23634e')
             painter.setBrush(color)
@@ -103,8 +107,8 @@ class ProjectTimeline(QWidget):
                     height = peaks[index] * 15
                     painter.drawLine(QPointF(x, rect.bottom()-4), QPointF(x, rect.bottom()-4-height))
                 painter.restore()
-            label = info.get('title', '') if main else {'text': '文字', 'image': '贴纸', 'video': '画中画', 'audio': '音频'}[item['kind']]
-            if not main and item['kind'] == 'text':
+            label = info.get('title', '') if main else {'text': '文字', 'image': '贴纸', 'video': '画中画', 'audio': '音频', 'subtitle': '字幕'}[item['kind']]
+            if not main and item['kind'] in ('text', 'subtitle'):
                 label += ' · ' + item['text']
             painter.setPen(QColor('#e6edf5'))
             painter.drawText(rect.adjusted(7, 2, -5, -6), Qt.AlignTop | Qt.AlignLeft,

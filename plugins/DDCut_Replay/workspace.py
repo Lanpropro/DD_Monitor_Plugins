@@ -22,6 +22,7 @@ from .selections import restore_ranges, enabled_ranges
 from .chat import ChatReader, trim_events, write_json, write_ass
 from .chat_render import ReplayChat
 from .chat_model import ChatModel
+from .encoding_widgets import EncodingOptions
 
 STATES = {'idle': '未录制', 'recording': '录制中', 'buffering': '缓存中',
           'stopping': '收尾中', 'reconnecting': '等待重连', 'queued': '等待中',
@@ -486,17 +487,21 @@ class Workspace(QWidget):
         self.export_scope.addItem('当前选区', 'current')
         self.export_scope.addItem('启用选区：每段单独导出', 'separate')
         self.export_scope.addItem('启用选区：按列表顺序拼接', 'merge')
+        self.export_scope.addItem('完整录像：冻结当前可读范围', 'full')
         self.export_scope.currentIndexChanged.connect(self.export_scope_changed)
         inspector_box.addWidget(self.export_scope)
         self.mode = QComboBox()
         self.mode.addItem('快速复制 · 保留原编码', 'copy')
-        self.mode.addItem('精确切片 · H.264 / AAC', 'precise')
+        self.mode.addItem('精确切片 · 重编码 MP4', 'precise')
         self.mode.currentIndexChanged.connect(self.mode_changed)
         inspector_box.addWidget(self.mode)
         self.mode_help = QLabel()
         self.mode_help.setObjectName('SettingsHint')
         self.mode_help.setWordWrap(True)
         inspector_box.addWidget(self.mode_help)
+        self.encoding = EncodingOptions()
+        self.encoding.changed.connect(self.save_encoding_options)
+        inspector_box.addWidget(self.encoding)
         self.burn_chat = QCheckBox('将弹幕压入视频')
         self.burn_chat.setToolTip('将文字、表情和SC合成进MP4，沿用弹幕页字号、透明度及时间偏移；需要重编码。画面开关仅影响预览。')
         self.burn_chat.toggled.connect(self.save_burn_options)
@@ -1311,6 +1316,7 @@ class Workspace(QWidget):
         self.burn_chat.setChecked(self.burn_chat.isEnabled() and entry.get('export_burn_chat', False))
         self.burn_chat.blockSignals(False)
         self.mode.setCurrentIndex(1 if entry.get('danmaku_path') or self.export_scope.currentData() == 'merge' else 0)
+        self.encoding.set_value(entry.get('encoding'))
         restore_ranges(entry)
         self.refresh_ranges()
         self.export_scope_changed()
@@ -1543,11 +1549,17 @@ class Workspace(QWidget):
             self.preview.core.speed = self.playback_rate.currentData()
 
     def mode_changed(self, *_):
+        self.encoding.setEnabled(self.mode.currentData() == 'precise')
         if hasattr(self, 'burn_chat') and self.burn_chat.isChecked():
             self.mode_help.setText('将文字弹幕、表情与SC合成到MP4，另保留弹幕文件。沿用弹幕页字号、透明度和时间偏移；重编码可能改变画质，变帧率录像按探测帧率输出。')
             return
         self.mode_help.setText('保留编码，输出 MKV。起止可能按关键帧扩展，成品时长可能超过选区；侧车弹幕按请求选区裁剪，可能与视频偏移，需同步时请选择精确切片。'
-            if self.mode.currentData() == 'copy' else '输出 MP4，按选区重编码为 H.264/AAC；需要更多时间，画质可能变化。')
+            if self.mode.currentData() == 'copy' else '输出 MP4，使用下方视频编码与AAC音频；需要更多时间，画质可能变化。')
+
+    def save_encoding_options(self):
+        if self.current:
+            self.current['encoding'] = self.encoding.value()
+            self.hub.save()
 
     def export(self):
         if not self.current:
@@ -1555,6 +1567,7 @@ class Workspace(QWidget):
         mode = self.mode.currentData()
         scope = self.export_scope.currentData()
         burn = self.burn_chat.isChecked()
+        encoding = self.encoding.value()
         suffix = '.mkv' if mode == 'copy' else '.mp4'
         name = Path(self.filename.text().strip() or 'clip').stem + suffix
         folder = Path(self.current['path']).parent
@@ -1565,7 +1578,7 @@ class Workspace(QWidget):
             targets = [str(Path(destination) / f'{Path(name).stem}-{index + 1:03}{suffix}') for index, _ in enumerate(enabled_ranges(self.current))]
             def batch():
                 self.hub.submit('批量导出：' + self.current['title'], 'export', export_ranges,
-                    self.service.options()['ffmpeg'], dict(self.current), enabled_ranges(self.current), mode, targets, self.hub.root / 'work', False, burn)
+                    self.service.options()['ffmpeg'], dict(self.current), enabled_ranges(self.current), mode, targets, self.hub.root / 'work', False, burn, encoding)
                 self.toggle_tasks(True)
             self.guard(batch)
             return
@@ -1578,11 +1591,11 @@ class Workspace(QWidget):
             if scope == 'merge':
                 job = self.hub.submit('拼接导出：' + self.current['title'], 'export', export_ranges,
                     self.service.options()['ffmpeg'], dict(self.current), enabled_ranges(self.current), mode,
-                    [target], self.hub.root / 'work', True, burn)
+                    [target], self.hub.root / 'work', True, burn, encoding)
             else:
                 job = self.hub.submit('导出：' + self.current['title'], 'export', export_clip,
-                    self.service.options()['ffmpeg'], dict(self.current), self.inpoint.value(),
-                    self.outpoint.value(), mode, target, self.hub.root / 'work', burn)
+                    self.service.options()['ffmpeg'], dict(self.current), 0 if scope == 'full' else self.inpoint.value(),
+                    self.current['duration'] if scope == 'full' else self.outpoint.value(), mode, target, self.hub.root / 'work', burn, encoding)
             self.toggle_tasks(True)
             self.report('导出已排队：' + job.title)
         self.guard(submit)

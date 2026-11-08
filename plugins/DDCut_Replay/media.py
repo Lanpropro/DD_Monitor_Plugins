@@ -232,7 +232,9 @@ def prepare_snapshot(job, ffmpeg, snapshot, destination, work):
         playlist.unlink(missing_ok=True)
 
 
-def export_clip(job, ffmpeg, source, start, end, mode, target, work, burn=False):
+def export_clip(job, ffmpeg, source, start, end, mode, target, work, burn=False, encoding=None):
+    from .encoding import normalize, video_args
+    encoding = normalize(encoding)
     duration = float(source['duration'])
     if not (math.isfinite(start) and math.isfinite(end) and 0 <= start < end <= duration + .001):
         raise ValueError('选区必须在可读范围内，且出点晚于入点')
@@ -293,11 +295,11 @@ def export_clip(job, ffmpeg, source, start, end, mode, target, work, burn=False)
             command += ['-ss', f'{local_start:.6f}', *input_args]
         command += ['-t', f'{end-start:.6f}', '-map', '0:v:0', '-map', '0:a?']
         command += (['-c', 'copy', '-avoid_negative_ts', 'make_zero'] if mode == 'copy' else
-                    ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-c:a', 'aac', '-movflags', '+faststart'])
+                    [*video_args(encoding), '-c:a', 'aac', '-movflags', '+faststart'])
         command += [str(partial)]
         if burn:
             from .burn import encode_chat
-            encode_chat(job, ffmpeg, source, start, end, local_start, input_args, partial, work)
+            encode_chat(job, ffmpeg, source, start, end, local_start, input_args, partial, work, encoding)
         else:
             run_process(job, command, work, duration=end-start)
         actual = probe(job, ffmpeg, partial, work)
@@ -331,7 +333,7 @@ def export_clip(job, ffmpeg, source, start, end, mode, target, work, burn=False)
         playlist.unlink(missing_ok=True)
 
 
-def export_ranges(job, ffmpeg, source, ranges, mode, targets, work, merge=False, burn=False):
+def export_ranges(job, ffmpeg, source, ranges, mode, targets, work, merge=False, burn=False, encoding=None):
     """Keep completed separate outputs on cancel; commit a merge only when complete."""
     targets = list(map(Path, targets))
     if not ranges or len(targets) != (1 if merge else len(ranges)):
@@ -353,7 +355,7 @@ def export_ranges(job, ffmpeg, source, ranges, mode, targets, work, merge=False,
             job.message = f'正在导出 {index + 1}/{len(ranges)}'
             child = Job(job.title, 'export', cancel=job.cancel)
             destination = folder / f'{index}.mp4' if merge else targets[index]
-            result = export_clip(child, ffmpeg, source, item['start'], item['end'], mode, destination, folder, burn)
+            result = export_clip(child, ffmpeg, source, item['start'], item['end'], mode, destination, folder, burn, encoding)
             completed.append(result)
             if not merge:
                 job.result['outputs'].append(result)

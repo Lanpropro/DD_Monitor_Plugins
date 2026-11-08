@@ -7,6 +7,8 @@ import re
 from pathlib import Path
 import time
 import uuid
+from .encoding import normalize as normalize_encoding
+from .subtitles import validate_subtitles
 
 
 def identity():
@@ -91,6 +93,12 @@ def split_clip(project, clip_id, position):
     second = dict(clip, id=identity(), start=source_cut)
     clip['end'] = source_cut
     project['clips'].insert(project['clips'].index(clip) + 1, second)
+    for cue in list(project.get('subtitles', [])):
+        if cue['anchor'] == clip_id:
+            if cue['start'] >= source_cut:
+                cue['anchor'] = second['id']
+            elif cue['end'] > source_cut:
+                project['subtitles'].append(dict(cue, id=identity(), anchor=second['id']))
     for layer in list(project['layers']):
         if layer['anchor'] != clip_id:
             continue
@@ -114,6 +122,7 @@ def split_clip(project, clip_id, position):
 def remove_item(project, item_id):
     project['clips'] = [row for row in project['clips'] if row['id'] != item_id]
     project['layers'] = [row for row in project['layers'] if row['id'] != item_id and row['anchor'] != item_id]
+    project['subtitles'] = [row for row in project.get('subtitles', []) if row['id'] != item_id and row['anchor'] != item_id]
 
 
 def duplicate_item(project, item_id):
@@ -123,11 +132,18 @@ def duplicate_item(project, item_id):
             project['clips'].insert(index+1, copy)
             project['layers'] += [dict(layer, id=identity(), anchor=copy['id'])
                                   for layer in list(project['layers']) if layer['anchor'] == item_id]
+            project.setdefault('subtitles', []).extend([dict(cue, id=identity(), anchor=copy['id'])
+                for cue in list(project.get('subtitles', [])) if cue['anchor'] == item_id])
             return copy['id']
     for layer in project['layers']:
         if layer['id'] == item_id:
             copy = dict(layer, id=identity())
             project['layers'].append(copy)
+            return copy['id']
+    for cue in project.get('subtitles', []):
+        if cue['id'] == item_id:
+            copy = dict(cue, id=identity())
+            project['subtitles'].append(copy)
             return copy['id']
 
 
@@ -180,6 +196,8 @@ def validate(project):
                 raise ValueError('轨道内容超出来源文件时长')
         seen.add(layer['id'])
     render = project['render']
+    validate_subtitles(project, anchors, seen)
+    normalize_encoding(project.get('encoding'))
     if not 160 <= render['width'] <= 3840 or not 90 <= render['height'] <= 2160 or not 1 <= render['fps'] <= 60:
         raise ValueError('工程画布或帧率超出支持范围')
 

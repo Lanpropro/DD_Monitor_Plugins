@@ -8,12 +8,15 @@ from PySide6.QtCore import Qt, QTimer, Signal, QSize
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout,
     QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit, QScrollArea,
-    QSizePolicy, QSpinBox, QSplitter, QVBoxLayout, QWidget)
+    QSizePolicy, QSpinBox, QSplitter, QTabWidget, QVBoxLayout, QWidget)
 from .project import (add_layer, anchor_at, append_clip, duplicate_item, duration,
                       placed_clips, placed_layers, remove_item, split_clip, write_project)
 from .project_media import inspect_file, render_project, waveform
 from .project_timeline import ProjectTimeline
 from .project_stage import ProjectStage
+from .subtitle_panel import SubtitlePanel
+from .subtitles import placed_cues, set_cue
+from .encoding_widgets import EncodingOptions
 from .timeline import timecode
 from .workspace import Preview, button
 
@@ -180,9 +183,18 @@ class ProjectEditor(QWidget):
         self.chat = QCheckBox('压制主轨来源弹幕')
         self.chat.toggled.connect(self.canvas_changed)
         props.addWidget(self.chat)
+        self.encoding = EncodingOptions()
+        self.encoding.changed.connect(lambda: self.change(lambda data: data.update(encoding=self.encoding.value())))
+        props.addWidget(QLabel('导出设置'))
+        props.addWidget(self.encoding)
         props.addStretch()
         scroll.setWidget(properties)
-        top.addWidget(right)
+        self.right_tabs = QTabWidget()
+        self.right_tabs.setMaximumWidth(350)
+        self.right_tabs.addTab(right, '属性')
+        self.subtitle_panel = SubtitlePanel(self)
+        self.right_tabs.addTab(self.subtitle_panel, '字幕')
+        top.addWidget(self.right_tabs)
         top.setSizes([190, 650, 240])
         top.setStretchFactor(1, 1)
         bottom = QWidget()
@@ -287,6 +299,8 @@ class ProjectEditor(QWidget):
         self.chat.blockSignals(True)
         self.chat.setChecked(data.get('danmaku', False))
         self.chat.blockSignals(False)
+        self.encoding.set_value(data.get('encoding'))
+        self.subtitle_panel.refresh()
         self.select_item(self.selected_id)
         self.clock.setText(timecode(self.position) + ' / ' + timecode(duration(data)))
 
@@ -345,6 +359,11 @@ class ProjectEditor(QWidget):
         if text_visible:
             self.text.setPlainText(selected[0]['text'])
             self.color.setText(selected[0]['color'])
+        if any(cue['id'] == item_id for cue in self.document.data.get('subtitles', [])):
+            self.right_tabs.setCurrentWidget(self.subtitle_panel)
+            self.subtitle_panel.select(item_id)
+        elif selected is not None:
+            self.right_tabs.setCurrentIndex(0)
         self.visual_tools.setVisible(selected is not None and not selected[1] and selected[0]['kind'] != 'audio')
         self.stage.update()
 
@@ -468,6 +487,17 @@ class ProjectEditor(QWidget):
             self.imports.append((job, self.document, False, original))
 
     def split(self):
+        cue = next((row for row in placed_cues(self.document.data) if row[0]['id'] == self.selected_id), None) if self.document else None
+        if cue and cue[1]+.04 < self.position < cue[2]-.04:
+            def operation(data):
+                from .project import identity
+                original = next(row for row in data['subtitles'] if row['id'] == cue[0]['id'])
+                clip = next(row for row in data['clips'] if row['id'] == original['anchor'])
+                cut = max(original['start'], clip['start'])+(self.position-cue[1])*clip['speed']
+                data['subtitles'].append(dict(original, id=identity(), start=cut))
+                original['end'] = cut
+            self.change(operation)
+            return
         if self.selected():
             item, main, start, end = self.selected()
             if main:
@@ -504,6 +534,18 @@ class ProjectEditor(QWidget):
         self.change(operation)
 
     def timeline_edit(self, edit):
+        cue = next((row for row in self.document.data.get('subtitles', []) if row['id'] == edit['id']), None)
+        if cue:
+            start, end = edit['start'], edit['end']
+            if edit['edge'] == 'move':
+                end += edit['preview']-start
+                start = edit['preview']
+            elif edit['edge'] == 'left':
+                start = edit['preview']
+            else:
+                end = edit['preview']
+            self.change(lambda data: set_cue(data, cue['id'], start, end, cue['text']))
+            return
         def operation(data):
             item = next(row for row in data['clips' if edit['main'] else 'layers'] if row['id'] == edit['id'])
             stamp = edit['preview']
