@@ -110,7 +110,7 @@ def split_clip(project, clip_id, position):
         elif layer['source_at'] >= clip['start']:
             remaining = (source_cut - layer['source_at']) / clip.get('speed', 1)
             if layer['duration'] > remaining:
-                copy = dict(layer, id=identity(), anchor=second['id'], source_at=source_cut,
+                copy = dict(deepcopy(layer), id=identity(), anchor=second['id'], source_at=source_cut,
                             duration=layer['duration'] - remaining)
                 if layer['kind'] in ('video', 'audio'):
                     copy['in'] += remaining * layer.get('speed', 1)
@@ -133,14 +133,14 @@ def duplicate_item(project, item_id):
         if clip['id'] == item_id:
             copy = dict(clip, id=identity())
             project['clips'].insert(index+1, copy)
-            project['layers'] += [dict(layer, id=identity(), anchor=copy['id'])
+            project['layers'] += [dict(deepcopy(layer), id=identity(), anchor=copy['id'])
                                   for layer in list(project['layers']) if layer['anchor'] == item_id]
             project.setdefault('subtitles', []).extend([dict(cue, id=identity(), anchor=copy['id'])
                 for cue in list(project.get('subtitles', [])) if cue['anchor'] == item_id])
             return copy['id']
     for layer in project['layers']:
         if layer['id'] == item_id:
-            copy = dict(layer, id=identity())
+            copy = dict(deepcopy(layer), id=identity())
             project['layers'].append(copy)
             return copy['id']
     for cue in project.get('subtitles', []):

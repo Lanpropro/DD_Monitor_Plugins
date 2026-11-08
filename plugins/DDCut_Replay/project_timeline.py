@@ -26,7 +26,7 @@ class ProjectTimeline(QWidget):
         self.setMinimumHeight(180)
         self.setAcceptDrops(True)
         self.setFocusPolicy(Qt.StrongFocus)
-        self.setAccessibleName('剪辑工程多轨时间轴')
+        self.setAccessibleName('剪辑工程多轨时间轴；主视频拖到新增画面行成为画中画，画中画拖回主视频行成为主片段')
 
     def set_project(self, project, selected=''):
         self.project, self.selection = project, selected
@@ -41,7 +41,8 @@ class ProjectTimeline(QWidget):
         visual = sorted({row['track'] for row, _, _ in placed_layers(self.project) if row['kind'] != 'audio'}, reverse=True)
         audio = sorted({row['track'] for row, _, _ in placed_layers(self.project) if row['kind'] == 'audio'})
         captions = placed_cues(self.project)
-        self.rows = ([('subtitle', 0)] if captions else []) + [('visual', track) for track in visual] + [('main', 0)] + [('audio', track) for track in audio]
+        next_track = max(visual+audio or [0])+1
+        self.rows = ([('subtitle', 0)] if captions else []) + [('visual_new', next_track)] + [('visual', track) for track in visual] + [('main', 0)] + [('audio', track) for track in audio] + [('audio_new', next_track)]
         self.setMinimumHeight(max(180, 30 + len(self.rows) * 46))
         self.blocks = []
         main_y = 30 + self.rows.index(('main', 0)) * 46
@@ -89,7 +90,8 @@ class ProjectTimeline(QWidget):
             painter.setPen(theme.qcolor(theme.TEXT2))
         for index, (kind, track) in enumerate(self.rows):
             y = 30 + index * 46
-            painter.drawText(QRectF(4, y, 78, 38), Qt.AlignVCenter, '主视频' if kind == 'main' else '字幕' if kind == 'subtitle' else {'audio': '音频', 'visual': '画面'}[kind] + str(track))
+            label = {'main': '主视频', 'subtitle': '字幕', 'visual_new': '+ 画面', 'audio_new': '+ 音频'}.get(kind)
+            painter.drawText(QRectF(4, y, 78, 38), Qt.AlignVCenter, label or {'audio': '音频', 'visual': '画面'}[kind] + str(track))
         for item, start, end, rect, main in self.blocks:
             color = QColor('#205678' if main else '#524075' if item['kind'] in ('text', 'image') else '#23634e')
             painter.setBrush(color)
@@ -135,7 +137,7 @@ class ProjectTimeline(QWidget):
         self.selected.emit(item['id'])
         edge = 'left' if abs(point.x()-rect.left()) < 7 else 'right' if abs(point.x()-rect.right()) < 7 else 'move'
         self.drag = {'id': item['id'], 'edge': edge, 'main': main, 'start': start, 'end': end,
-                     'origin': self.seconds(point.x()), 'preview': start}
+                     'origin': self.seconds(point.x()), 'origin_y': point.y(), 'preview': start}
         self.update()
 
     def mouseMoveEvent(self, event):
@@ -149,7 +151,10 @@ class ProjectTimeline(QWidget):
         if self.drag:
             move = self.drag
             self.drag = None
-            if abs(self.seconds(event.position().x()) - move['origin']) * self.scale > 3:
+            if abs(self.seconds(event.position().x()) - move['origin']) * self.scale > 3 or abs(event.position().y()-move['origin_y']) > 12:
+                if move['edge'] == 'move':
+                    index = max(0, min(len(self.rows)-1, int((event.position().y()-30)//46)))
+                    move['target_kind'], move['track'] = self.rows[index]
                 self.editRequested.emit(move)
             self.update()
 

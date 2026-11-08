@@ -18,6 +18,7 @@ from .subtitle_panel import SubtitlePanel
 from .subtitles import placed_cues, set_cue
 from .encoding_widgets import EncodingOptions
 from .graphic_style_widgets import TextStyleOptions
+from .project_tracks import clip_to_overlay, overlay_to_clip, insertion_index
 from .timeline import timecode
 from .workspace import Preview, button
 
@@ -155,6 +156,7 @@ class ProjectEditor(QWidget):
         self.image_flip = QCheckBox('水平翻转贴纸')
         self.form.addRow(self.image_flip)
         button('应用属性', self.apply_fields, props)
+        self.convert_button = button('转为画中画', self.convert_selected, props)
         self.visual_tools = QWidget()
         tools = QVBoxLayout(self.visual_tools)
         tools.setContentsMargins(0, 0, 0, 0)
@@ -377,7 +379,22 @@ class ProjectEditor(QWidget):
         elif selected is not None:
             self.right_tabs.setCurrentIndex(0)
         self.visual_tools.setVisible(selected is not None and not selected[1] and selected[0]['kind'] != 'audio')
+        convertible = selected is not None and (selected[1] or selected[0]['kind'] == 'video')
+        self.convert_button.setVisible(convertible)
+        if convertible:
+            self.convert_button.setText('转为画中画' if selected[1] else '转为主轨')
+            self.convert_button.setEnabled(not selected[1] or len(self.document.data['clips']) > 1)
         self.stage.update()
+
+    def convert_selected(self):
+        selected = self.selected()
+        if not selected:
+            return
+        item, main, start, _ = selected
+        identity = self.change(lambda data: clip_to_overlay(data, item['id'], start) if main else
+            overlay_to_clip(data, item['id'], insertion_index(data, start)))
+        if identity:
+            self.select_item(identity)
 
     def apply_fields(self):
         selected = self.selected()
@@ -535,7 +552,7 @@ class ProjectEditor(QWidget):
                 def operation(data):
                     layer = next(row for row in data['layers'] if row['id'] == item['id'])
                     from .project import identity
-                    copy = dict(layer, id=identity(), duration=end-self.position)
+                    copy = dict(deepcopy(layer), id=identity(), duration=end-self.position)
                     copy['anchor'], copy['source_at'] = anchor_at(data, self.position)
                     copy['in'] += (self.position-start)*copy.get('speed', 1)
                     layer['duration'] = self.position-start
@@ -573,6 +590,23 @@ class ProjectEditor(QWidget):
                 end = edit['preview']
             self.change(lambda data: set_cue(data, cue['id'], start, end, cue['text']))
             return
+        if edit['edge'] == 'move' and edit.get('target_kind'):
+            target = edit['target_kind']
+            item = next(row for row in self.document.data['clips' if edit['main'] else 'layers'] if row['id'] == edit['id'])
+            if edit['main'] and target in ('visual', 'visual_new'):
+                identity = self.change(lambda data: clip_to_overlay(data, item['id'], edit['preview'], edit['track']))
+                if identity:
+                    self.select_item(identity)
+                return
+            if not edit['main'] and target == 'main':
+                identity = self.change(lambda data: overlay_to_clip(data, item['id'], insertion_index(data, edit['preview'])))
+                if identity:
+                    self.select_item(identity)
+                return
+            lane = 'audio' if not edit['main'] and item['kind'] == 'audio' else 'main' if edit['main'] else 'visual'
+            if target.replace('_new', '') != lane:
+                self.status.setText('请将内容拖到同类轨道；主视频与画中画可互相转换。')
+                return
         def operation(data):
             item = next(row for row in data['clips' if edit['main'] else 'layers'] if row['id'] == edit['id'])
             stamp = edit['preview']
@@ -588,6 +622,8 @@ class ProjectEditor(QWidget):
                 item['duration'] += delta
             else:
                 item['anchor'], item['source_at'] = anchor_at(data, stamp)
+                if edit['edge'] == 'move' and 'track' in edit:
+                    item['track'] = edit['track']
                 if edit['edge'] == 'left':
                     item['duration'] -= delta
                     if item['kind'] in ('video', 'audio'):
