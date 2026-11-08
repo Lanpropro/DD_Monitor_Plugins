@@ -253,3 +253,10 @@ Qt 6.11.2 上 `selfcheck_match_sync_retry_rows.py` 的离屏全屏窗口退出�
 重新从根 `run.cmd` 加载，等待主来源播放并积累预览后，按正常观看、缓慢拖动、快速往返、反复回拖各约15秒操作。预览应在持续移动时更新，无需停稳；目标帧率约8fps，不承诺主视频同帧率。新实现只覆盖本次运行已准备到的主来源时间段，32MB压缩预算不足或工作繁忙丢帧时可能存在空缺。正常停止后保留 `logs/match-playback.jsonl` 及轮转。
 
 头标 `replay_preview_continuous=1`；`playback.replay_preview` 与同记录的主画面、音频、进程CPU关联。`gui` 为目标查询、取图和请求到绘图调用的墙钟时间；`worker_pipeline` 为后台缩图/拷贝/JPEG压缩与小图读取，不再包含第二条视频包解码。`prepared_count/bytes/bounds` 为当前压缩小图缓存；`produced/dropped/queued` 为完成、丢弃、单待处理项；`cache_hits` 为直接取得准备图的目标数，`frame_error_ms` 为小图与请求的时间差（最多250ms，超过即视为缺失）。线程累计CPU只覆盖预览处理线程，不等同于进程CPU。导出不保存画面/房间/账号或URL，不访问QWidget、不等待媒体锁。
+
+
+### 功能中心入口与 1.6.1 安装包
+
+`check_match_sync_package_entry.py --host <根宿主目录> --archive <match_sync-1.6.1.zip> --previous <公开 match_sync-1.6.zip>` 使用临时插件目录与真实 Qt Sidebar、Viewer，验证新安装、暂存升级、用户数据保留、功能中心搜索／打开／退出、横竖布局与卸载。无直播源、账号或发送；不是实播性能验收。
+
+`check_match_sync_sidebar_entry.py --host <根宿主目录>` 检查首帧、收展与横竖入口放置；顶部横栏通过功能中心访问插件，不要求隐藏的固定图标可见。旧版入口与切换生命周期继续由 `check_match_sync_mode_switch.py` 覆盖。
