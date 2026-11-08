@@ -84,11 +84,9 @@ class CoverEditor(QWidget):
         self.button('导入贴纸', self.choose_sticker, tools)
         tools.addWidget(QLabel('文字样式'))
         self.presets = QComboBox()
-        self.presets.addItem('白字黑边', ('#ffffff', '#111111', '', False))
-        self.presets.addItem('醒目黄', ('#ffe04d', '#111111', '', False))
-        self.presets.addItem('红字白边', ('#ff3b30', '#ffffff', '', True))
-        self.presets.addItem('蓝字白边', ('#0084ff', '#ffffff', '', True))
-        self.presets.addItem('黑底黄字', ('#ffe04d', '', '#111111', False))
+        from .graphic_style import TEXT_PRESETS
+        for title, values in TEXT_PRESETS:
+            self.presets.addItem(title, values)
         tools.addWidget(self.presets)
         self.button('应用所选样式', self.apply_preset, tools)
         tools.addWidget(QLabel('图层 · 上方显示在前'))

@@ -17,6 +17,7 @@ from .project_stage import ProjectStage
 from .subtitle_panel import SubtitlePanel
 from .subtitles import placed_cues, set_cue
 from .encoding_widgets import EncodingOptions
+from .graphic_style_widgets import TextStyleOptions
 from .timeline import timecode
 from .workspace import Preview, button
 
@@ -148,6 +149,11 @@ class ProjectEditor(QWidget):
         self.form.addRow('文字', self.text)
         self.color = QLineEdit('#ffffff')
         self.form.addRow('颜色', self.color)
+        self.text_style = TextStyleOptions()
+        self.text_style.presetRequested.connect(self.apply_text_preset)
+        self.form.addRow(self.text_style)
+        self.image_flip = QCheckBox('水平翻转贴纸')
+        self.form.addRow(self.image_flip)
         button('应用属性', self.apply_fields, props)
         self.visual_tools = QWidget()
         tools = QVBoxLayout(self.visual_tools)
@@ -359,6 +365,12 @@ class ProjectEditor(QWidget):
         if text_visible:
             self.text.setPlainText(selected[0]['text'])
             self.color.setText(selected[0]['color'])
+            self.text_style.set_values(selected[0].get('text_style', {}))
+        self.text_style.setVisible(text_visible)
+        image_visible = selected is not None and not selected[1] and selected[0]['kind'] == 'image'
+        self.image_flip.setVisible(image_visible)
+        if image_visible:
+            self.image_flip.setChecked(selected[0].get('flip', False))
         if any(cue['id'] == item_id for cue in self.document.data.get('subtitles', [])):
             self.right_tabs.setCurrentWidget(self.subtitle_panel)
             self.subtitle_panel.select(item_id)
@@ -374,6 +386,7 @@ class ProjectEditor(QWidget):
         identity, main = selected[0]['id'], selected[1]
         values = {key: field.value() for key, field in self.fields.items()}
         text, color = self.text.toPlainText(), self.color.text()
+        style, flip = self.text_style.values(), self.image_flip.isChecked()
         def operation(data):
             item = next(row for row in data['clips' if main else 'layers'] if row['id'] == identity)
             if main:
@@ -386,7 +399,21 @@ class ProjectEditor(QWidget):
                 item.update(speed=values['speed'], **{'in': values['in']}, fade_in=values['fade_in'], fade_out=values['fade_out'])
                 item.update(text=text, color=color, font_size=values['font_size'])
                 item['rotation'] = values['rotation']
+                if item['kind'] == 'text':
+                    item['text_style'] = style
+                elif item['kind'] == 'image':
+                    item['flip'] = flip
         self.change(operation)
+
+    def apply_text_preset(self):
+        selected = self.selected()
+        if not selected or selected[1] or selected[0]['kind'] != 'text':
+            return
+        color, stroke, background, shadow = self.text_style.presets.currentData()
+        self.color.setText(color)
+        self.text_style.set_values({**self.text_style.values(), 'stroke': stroke,
+            'background': background, 'shadow': shadow, 'outline': 6 if stroke else 0, 'bold': True})
+        self.apply_fields()
 
     def place_item(self, identity, values):
         def operation(data):

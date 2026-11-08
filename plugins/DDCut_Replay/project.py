@@ -81,6 +81,9 @@ def add_layer(project, kind, position, path=None, text='文字'):
             'source': path, 'in': 0, 'speed': 1, 'fade_in': 0, 'fade_out': 0, 'rotation': 0}
     if kind in ('audio', 'video'):
         item['duration'] = min(3, project['media'][path]['duration'])
+    if kind == 'text':
+        from .graphic_style import TEXT_DEFAULTS
+        item['text_style'] = dict(TEXT_DEFAULTS)
     project['layers'].append(item)
     return item['id']
 
@@ -189,6 +192,11 @@ def validate(project):
             raise ValueError('轨道来源文件引用不存在')
         if layer['kind'] == 'text' and not re.fullmatch(r'#[0-9a-fA-F]{6}', layer['color']):
             raise ValueError('文字颜色请使用#RRGGBB格式')
+        if layer['kind'] == 'text' and 'text_style' in layer:
+            from .graphic_style import validate_style
+            validate_style(layer['text_style'])
+        if layer['kind'] == 'image' and not isinstance(layer.get('flip', False), bool):
+            raise ValueError('贴纸翻转开关无效')
         if layer['kind'] in ('audio', 'video'):
             if not .25 <= layer['speed'] <= 4 or not 0 <= layer['in'] < project['media'][layer['source']]['duration']:
                 raise ValueError('轨道来源时间或速度无效')

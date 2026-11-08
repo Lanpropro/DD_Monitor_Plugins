@@ -2,11 +2,11 @@
 import os
 from pathlib import Path
 import tempfile
-from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter, QPainterPath, QPainterPathStroker
-from ddm import theme
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QColor, QImage, QPainter
 from .cover_model import SIZES, validate
 from .media import check_cancel
+from .graphic_text import draw_text
 
 
 def crop_rect(image, size, frame):
@@ -49,30 +49,7 @@ def render_cover(data, ratio, *, cache=None):
                     painter.scale(-1, 1)
                 painter.drawImage(rect, load(item['path']))
             else:
-                painter.setClipRect(rect.adjusted(-item['outline'], -item['outline'], item['outline'], item['outline']))
-                font = QFont(item['font'] or theme.danmaku_font_family())
-                font.setPixelSize(round(item['font_size']))
-                font.setBold(item['bold'])
-                font.setItalic(item['italic'])
-                metrics = QFontMetricsF(font)
-                path = QPainterPath()
-                for index, line in enumerate(item['text'].splitlines() or ['']):
-                    measured = metrics.horizontalAdvance(line)
-                    x = rect.left() if item['align'] == 'left' else rect.right()-measured if item['align'] == 'right' else -measured/2
-                    path.addText(QPointF(x, rect.top()+metrics.ascent()+index*metrics.lineSpacing()*1.15), font, line)
-                if item['background']:
-                    painter.fillRect(path.boundingRect().adjusted(-12, -8, 12, 8), QColor(item['background']))
-                if item['shadow']:
-                    painter.save()
-                    painter.translate(5, 5)
-                    painter.fillPath(path, QColor(0, 0, 0, 170))
-                    painter.restore()
-                if item['outline'] and item['stroke']:
-                    stroker = QPainterPathStroker()
-                    stroker.setWidth(item['outline']*2)
-                    stroker.setJoinStyle(Qt.RoundJoin)
-                    painter.fillPath(stroker.createStroke(path), QColor(item['stroke']))
-                painter.fillPath(path, QColor(item['color']))
+                draw_text(painter, rect, item)
             painter.restore()
     finally:
         painter.end()

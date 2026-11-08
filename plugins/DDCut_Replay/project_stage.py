@@ -36,6 +36,8 @@ class ProjectStage(QObject):
             elif state.startswith('u'):
                 self.nativeInput.emit(core, 'cancel' if 'c' in state else 'up', core.mouse_pos)
         core.register_key_binding('MBTN_LEFT', click)
+        core.register_key_binding('MBTN_LEFT_DBL', lambda state, *_:
+            self.nativeInput.emit(core, 'edit', core.mouse_pos) if state[:1] in ('d', 'p') else None)
         for key in ('ESC', 'LEFT', 'RIGHT', 'UP', 'DOWN'):
             def pressed(state, *_, key=key):
                 if state[:1] in ('d', 'p', 'r'):
@@ -75,7 +77,8 @@ class ProjectStage(QObject):
             self.pointer(action, QPointF(point.get('x', 0), point.get('y', 0)))
 
     def eventFilter(self, watched, event):
-        kinds = {QEvent.MouseButtonPress: 'down', QEvent.MouseMove: 'move', QEvent.MouseButtonRelease: 'up'}
+        kinds = {QEvent.MouseButtonPress: 'down', QEvent.MouseMove: 'move', QEvent.MouseButtonRelease: 'up',
+                 QEvent.MouseButtonDblClick: 'edit'}
         if event.type() in kinds and (event.type() == QEvent.MouseMove or event.button() == Qt.LeftButton):
             point = event.position()
             if self.preview.core:
@@ -101,6 +104,18 @@ class ProjectStage(QObject):
             return
         frame = self.frame()
         if frame.isEmpty():
+            return
+        if action == 'edit':
+            for item in reversed(self.layers()):
+                transform, rect, _, _ = geometry(item, frame)
+                if item['opacity'] > 0 and rect.contains(transform.inverted()[0].map(point)):
+                    if item['kind'] == 'text':
+                        self.cancel()
+                        self.editor.select_item(item['id'])
+                        self.editor.inspector_scroll.ensureWidgetVisible(self.editor.text)
+                        self.editor.text.setFocus(Qt.MouseFocusReason)
+                        self.editor.text.selectAll()
+                    break
             return
         if action == 'down' and not self.drag:
             self.editor.playing = False
@@ -137,6 +152,11 @@ class ProjectStage(QObject):
             if drag['mode'] == 'move':
                 delta = point-drag['origin']
                 draft.update(x=item['x']+delta.x()/frame.width(), y=item['y']+delta.y()/frame.height())
+                for key, dimension, extent in [('x', 'w', frame.width()), ('y', 'h', frame.height())]:
+                    snapped = self.editor.snap.isChecked() and abs(draft[key]+draft[dimension]/2-.5)*extent < 8
+                    drag['snap_'+key] = snapped
+                    if snapped:
+                        draft[key] = (1-draft[dimension])/2
             elif drag['mode'] == 'rotate':
                 center = transform.map(QPointF())
                 vector, initial = point-center, drag['origin']-center
@@ -152,6 +172,9 @@ class ProjectStage(QObject):
                 dx, dy = sx*rect.width(), sy*rect.height()
                 scale = (delta.x()*dx+delta.y()*dy)/(dx*dx+dy*dy)
                 scale = max(max(.02/item['w'], .02/item['h']), min(min(2/item['w'], 2/item['h']), scale))
+                if item['kind'] == 'text':
+                    scale = max(8/item['font_size'], min(200/item['font_size'], scale))
+                    draft['font_size'] = item['font_size']*scale
                 center = anchor+QTransform().rotate(item.get('rotation', 0)).map(QPointF(dx*scale/2, dy*scale/2))
                 w, h = item['w']*scale, item['h']*scale
                 draft.update(w=w, h=h, x=(center.x()-frame.left())/frame.width()-w/2,
@@ -161,7 +184,8 @@ class ProjectStage(QObject):
         elif action == 'up' and self.drag:
             draft = self.drag['draft']
             self.drag = None
-            self.editor.place_item(draft['id'], {key: draft.get(key, 0) for key in ('x', 'y', 'w', 'h', 'rotation')})
+            keys = ('x', 'y', 'w', 'h', 'rotation') + (('font_size',) if draft['kind'] == 'text' else ())
+            self.editor.place_item(draft['id'], {key: draft.get(key, 0) for key in keys})
         self.update()
 
     def cancel(self):
@@ -194,7 +218,8 @@ class ProjectStage(QObject):
         if not width or not height:
             return
         frame = self.frame()
-        signature = (width, height, frame.getRect(), tuple(item.get(key, 0) for key in ('x', 'y', 'w', 'h', 'rotation')))
+        guides = tuple(self.drag.get('snap_'+key, False) for key in ('x', 'y')) if self.drag else (False, False)
+        signature = (width, height, frame.getRect(), guides, tuple(item.get(key, 0) for key in ('x', 'y', 'w', 'h', 'rotation')))
         if signature == self.signature:
             return
         image = QImage(width, height, QImage.Format_ARGB32_Premultiplied)
@@ -205,6 +230,10 @@ class ProjectStage(QObject):
         painter.setPen(QPen(QColor('#00b5e2'), 2))
         painter.setBrush(Qt.NoBrush)
         painter.drawPolygon(QPolygonF(corners))
+        if guides[0]:
+            painter.drawLine(QPointF(frame.center().x(), frame.top()), QPointF(frame.center().x(), frame.bottom()))
+        if guides[1]:
+            painter.drawLine(QPointF(frame.left(), frame.center().y()), QPointF(frame.right(), frame.center().y()))
         painter.drawLine((corners[0]+corners[1])/2, rotate)
         painter.setBrush(QColor('#ffffff'))
         for point in corners:

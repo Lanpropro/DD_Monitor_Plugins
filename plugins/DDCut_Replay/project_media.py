@@ -19,6 +19,8 @@ from .subtitles import placed_cues
 from .subtitle_render import SubtitleGraphics
 from .subtitle_srt import srt_text
 from .encoding import video_args
+from .graphic_style import TEXT_DEFAULTS
+from .graphic_text import draw_text
 
 
 def inspect_file(job, ffmpeg, path, work, *, thumbnails=None):
@@ -117,8 +119,11 @@ class ProjectGraphics:
                           item['w'] * self.width, item['h'] * self.height)
             painter.translate(rect.center())
             painter.rotate(item.get('rotation', 0))
-            painter.translate(-rect.width()/2, -rect.height()/2)
-            rect = QRectF(0, 0, rect.width(), rect.height())
+            if item['kind'] == 'text' and 'text_style' in item:
+                rect = QRectF(-rect.width()/2, -rect.height()/2, rect.width(), rect.height())
+            else:
+                painter.translate(-rect.width()/2, -rect.height()/2)
+                rect = QRectF(0, 0, rect.width(), rect.height())
             if item['kind'] == 'image':
                 if item['source'] not in self.images:
                     self.images[item['source']] = QImage(item['source'])
@@ -126,7 +131,12 @@ class ProjectGraphics:
                 if picture.isNull():
                     painter.end()
                     raise FileNotFoundError('贴纸图片无法读取：' + item['source'])
+                if item.get('flip'):
+                    painter.translate(rect.width(), 0)
+                    painter.scale(-1, 1)
                 painter.drawImage(rect, picture)
+            elif 'text_style' in item:
+                draw_text(painter, rect, {**item, **TEXT_DEFAULTS, **item['text_style']}, self.width / 1920)
             else:
                 font = QFont(theme.danmaku_font_family())
                 font.setPixelSize(max(8, round(item['font_size'] * self.width / 1920)))
