@@ -166,7 +166,7 @@ class DDCutReplayTests(unittest.TestCase):
                  'state': 'recording', 'created_at': time.time() - 120}
                 for i, title in enumerate(('本地测试房间甲', '本地测试房间乙'))]
         owner = SimpleNamespace(context=SimpleNamespace(window=host), hub=self.hub,
-            service=SimpleNamespace(sources=lambda: data),
+            service=SimpleNamespace(sources=lambda: data, options=lambda: {}),
             preview_server=SimpleNamespace(source_url=lambda path: path))
         view = ui.Workspace(owner)
         host.setCentralWidget(view)

@@ -41,7 +41,7 @@ class Job:
     def record(self):
         data = {key: getattr(self, key) for key in
                 ('id', 'title', 'kind', 'state', 'progress', 'message', 'output')}
-        if self.kind == 'export' and self.result:
+        if self.kind in {'export', 'library_delete'} and self.result:
             data['result'] = self.result
         return data
 
@@ -428,6 +428,8 @@ class TaskHub:
             job.delivered = True
             self.jobs.append(job)
         for job in self.jobs:
+            if job.kind == 'library_delete' and job.result:
+                self.apply_library_delete(job)
             if job.kind == 'export' and job.result:
                 self.add_export(job)
 
@@ -438,6 +440,9 @@ class TaskHub:
         temporary.replace(self.state_file)
 
     def add_entry(self, entry):
+        from .library_data import identity
+        forgotten = self.preferences.get('library_hidden', [])
+        self.preferences['library_hidden'] = [path for path in forgotten if path != identity(entry['path'])]
         existing = next((item for item in self.entries if item['path'] == entry['path']), None)
         if existing is None:
             self.entries.insert(0, entry)
@@ -445,12 +450,30 @@ class TaskHub:
             existing.update(entry)
         self.save()
 
-    def add_export(self, job):
+    def is_forgotten(self, path):
+        from .library_data import identity
+        return identity(path) in self.preferences.get('library_hidden', [])
+
+    def forget_entries(self, paths):
+        from .library_data import identity
+        keys = {identity(path) for path in paths}
+        hidden = set(self.preferences.get('library_hidden', [])) | keys
+        self.preferences['library_hidden'] = sorted(hidden)
+        self.entries[:] = [entry for entry in self.entries if identity(entry['path']) not in keys]
+        self.save()
+
+    def apply_library_delete(self, job):
+        if job.result and not job.result.get('indexed'):
+            self.forget_entries(job.result.get('removed', []))
+            job.result['indexed'] = True
+            self.save()
+
+    def add_export(self, job, *, restore=False):
         if not job.result:
             return
         for result in job.result.get('outputs', [job.result]):
             path = Path(result.get('output') or job.output)
-            if path.is_file():
+            if path.is_file() and (restore or not self.is_forgotten(path)):
                 self.add_entry({'path': str(path), 'title': path.stem, 'kind': 'clip',
                     'duration': result['actual_duration'], 'created_at': path.stat().st_mtime,
                     'chat_burned': result.get('chat_burned', False),
@@ -471,7 +494,8 @@ class TaskHub:
                 job.result = function(job, *args, **kwargs)
                 job.progress, job.state = 1, 'done'
             except Cancelled:
-                job.state, job.message = 'cancelled', '已取消；已有成品保留'
+                job.state = 'cancelled'
+                job.message = '已取消；尚未处理的录像保留' if kind == 'library_delete' else '已取消；已有成品保留'
             except Exception as error:
                 job.state, job.message = 'failed', str(error)
 
@@ -491,8 +515,10 @@ class TaskHub:
             self.cancel(job)
         self.pool.shutdown(wait=True)
         for job in self.jobs:
+            if job.kind == 'library_delete' and job.result:
+                self.apply_library_delete(job)
             if job.state == 'done' and not job.delivered and job.kind in {'snapshot', 'import'}:
                 self.add_entry(job.result)
             elif job.result and not job.delivered and job.kind == 'export':
-                self.add_export(job)
+                self.add_export(job, restore=True)
         self.save()

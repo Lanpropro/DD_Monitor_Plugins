@@ -17,6 +17,7 @@ from .media import ACTIVE, probe, scan_directory, prepare_snapshot, export_clip,
 from .hls import preview_options
 from .timeline import Timeline, TimeInput, timecode
 from .library_widgets import MediaCard, MediaGrid, media_type
+from .library_tools import LibraryTools
 from .highlights import HighlightReader
 from .selections import restore_ranges, enabled_ranges
 from .chat import ChatReader, trim_events, write_json, write_ass
@@ -229,7 +230,7 @@ class Workspace(QWidget):
                 border: none; border-bottom: 1px solid {theme.BORDER}; padding: 10px 12px;
                 font-size: {theme.FONT_CONTROL}px; font-weight: 600;
             }}
-            #replayWorkspace QDoubleSpinBox {{
+            #replayWorkspace QDoubleSpinBox, #replayWorkspace QDateEdit {{
                 background: {theme.CONTENT}; color: {theme.TEXT1};
                 border: 1px solid {theme.BORDER}; border-radius: {theme.RADIUS_MD}px; padding: 5px 8px;
             }}
@@ -298,8 +299,8 @@ class Workspace(QWidget):
         self.library_stack.addWidget(self.sources)
         self.library = MediaGrid()
         self.library.setAccessibleName('本地录像与切片')
-        self.library.itemClicked.connect(lambda *_: self.open_selected())
-        self.library.itemActivated.connect(lambda *_: self.open_selected())
+        self.library.itemClicked.connect(lambda *_: None if self.library_tools.batch.isChecked() else self.open_selected())
+        self.library.itemActivated.connect(lambda *_: None if self.library_tools.batch.isChecked() else self.open_selected())
         self.library_stack.addWidget(self.library)
         empty = QWidget()
         empty_layout = QVBoxLayout(empty)
@@ -334,6 +335,7 @@ class Workspace(QWidget):
         list_box.addLayout(row)
         self.sources.itemSelectionChanged.connect(self.update_library_actions)
         self.library.itemSelectionChanged.connect(self.update_library_actions)
+        self.library_tools = LibraryTools(self, list_box)
 
     def build_review(self):
         self.review_page = self.library_page
@@ -985,6 +987,12 @@ class Workspace(QWidget):
                           media_type(entry), *[room.get(key, '') for key in ('platform', 'uname', 'title', 'room_id')]))
         item.setData(Qt.UserRole + 1, search)
         card = MediaCard(entry)
+        tools = getattr(self, 'library_tools', None)
+        if tools and tools.stats:
+            from .library_data import identity
+            info = tools.stats['entries'].get(identity(entry.get('path', '')))
+            if info:
+                card.set_file_info(info)
         item.setToolTip(card.toolTip())
         grid.setItemWidget(item, card)
 
@@ -993,6 +1001,7 @@ class Workspace(QWidget):
             grid.reflow()
 
     def refresh_all(self):
+        self.library_tools.next_check = 0
         self.refresh_sources()
         self.refresh_library()
         self.scan()
@@ -1001,11 +1010,16 @@ class Workspace(QWidget):
         query = self.search.text().strip().casefold()
         tree = self.sources if self.category.currentData() == 'live' else self.library
         visible = 0
+        entries = {entry['path']: entry for entry in self.hub.entries}
         for index in range(tree.count()):
             item = tree.item(index)
             content = str(item.data(Qt.UserRole + 1) or '')
             match = query in content.casefold()
+            if self.category.currentData() != 'live':
+                match = match and self.library_tools.matches(entries.get(item.data(Qt.UserRole), {}))
             item.setHidden(not match)
+            if not match:
+                item.setSelected(False)
             visible += match
         kind = self.category.currentData()
         title, hint = {
@@ -1015,8 +1029,10 @@ class Workspace(QWidget):
         }[kind]
         self.library_empty.setText('没有找到匹配的录像' if query else title)
         self.library_empty_hint.setText('试试其他关键词，或切换录像分类。' if query else hint)
-        self.library_stack.setCurrentIndex((0 if kind == 'live' else 1) if visible else 2)
+        self.library_stack.setCurrentIndex((0 if kind == 'live' else
+            3 if self.library_tools.calendar_toggle.isChecked() else 1) if visible else 2)
         self.update_library_actions()
+        self.library_tools.refresh()
 
     def update_library_actions(self):
         if not hasattr(self, 'open_button'):
@@ -1024,6 +1040,8 @@ class Workspace(QWidget):
         live = self.category.currentData() == 'live'
         item = (self.sources if live else self.library).currentItem()
         selected = item is not None and not item.isHidden()
+        if not live and hasattr(self, 'library_tools') and self.library_tools.batch.isChecked():
+            selected = len(self.library_tools.selected()) == 1
         self.open_button.setEnabled(selected)
         self.folder_button.setEnabled(selected and not live)
 
@@ -1278,8 +1296,10 @@ class Workspace(QWidget):
         scroll = self.library.verticalScrollBar().value()
         selected = self.library.currentItem()
         selected_path = selected.data(Qt.UserRole) if selected else ''
+        selected_paths = {item.data(Qt.UserRole) for item in self.library.selectedItems()}
+        self.library.blockSignals(True)
         self.library.clear()
-        for entry in self.hub.entries:
+        for entry in self.library_tools.sorted_entries():
             if (entry.get('kind') == 'clip') != (kind == 'clip') or entry['path'] in getattr(self, 'active_paths', set()):
                 continue
             item = QListWidgetItem()
@@ -1287,13 +1307,19 @@ class Workspace(QWidget):
             self.library.addItem(item)
             self.fill_identity(self.library, item, entry)
             if entry['path'] == selected_path:
-                self.library.setCurrentItem(item)
+                from PySide6.QtCore import QItemSelectionModel
+                self.library.setCurrentItem(item, QItemSelectionModel.NoUpdate)
+            item.setSelected(entry['path'] in selected_paths)
+        self.library.blockSignals(False)
         self.library.reflow()
         self.filter_library()
         self.library.doItemsLayout()
         self.library.verticalScrollBar().setValue(scroll)
 
     def selected_entry(self):
+        if self.library_tools.batch.isChecked():
+            entries = self.library_tools.selected()
+            return entries[0] if len(entries) == 1 else None
         item = self.library.currentItem()
         if item is None:
             self.report('请先选择一份录像。')
@@ -1311,6 +1337,9 @@ class Workspace(QWidget):
             self.load_entry(entry)
 
     def load_entry(self, entry):
+        if any(job.kind == 'library_delete' and job.state in ACTIVE for job in self.hub.jobs):
+            self.report('请等待录像删除完成后再打开文件。')
+            return
         sidecar = Path(entry['path']).with_suffix('.danmaku.json')
         if not entry.get('danmaku_path') and sidecar.is_file():
             entry['danmaku_path'] = str(sidecar)
@@ -1758,6 +1787,7 @@ class Workspace(QWidget):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(entry['path']).parent)))
 
     def closeEvent(self, event):
+        self.library_tools.stop()
         self.cover_editor.shutdown()
         self.project_editor.shutdown_preview()
         self.preview.stop()
@@ -1766,6 +1796,8 @@ class Workspace(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
+        self.library_tools.timer.start()
+        self.library_tools.next_check = 0
         if hasattr(self, 'cover_editor') and self.library_review.currentWidget() is self.cover_editor:
             self.cover_editor.timer.start()
             return

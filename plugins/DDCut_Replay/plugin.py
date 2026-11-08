@@ -162,12 +162,19 @@ class DDCutReplay(api.Plugin):
             if job.lease:
                 self.service.release(job.lease)
             if job.kind == 'export' and job.result:
-                self.hub.add_export(job)
+                self.hub.add_export(job, restore=True)
+            if job.kind == 'library_delete' and job.result:
+                self.hub.apply_library_delete(job)
+                errors = job.result.get('errors', [])
+                job.message = f"已删除 {len(job.result.get('removed', []))} 项" + ('；部分失败：' + '\n'.join(errors) if errors else '')
+                if self.workspace:
+                    self.workspace.report(job.message)
+                    self.workspace.library_tools.next_check = 0
             if job.state == 'done':
                 if job.kind == 'scan':
                     pending = set(self.service.options().get('pending_outputs', []))
                     for entry in job.result:
-                        if entry['path'] not in pending:
+                        if entry['path'] not in pending and not self.hub.is_forgotten(entry['path']):
                             existing = next((item for item in self.hub.entries if item['path'] == entry['path']), None)
                             if existing:
                                 existing.update({key: value for key, value in entry.items() if key not in existing})

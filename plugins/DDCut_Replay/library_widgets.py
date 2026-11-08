@@ -10,6 +10,7 @@ from ddm import images
 from ddm.follow_folders import PLATFORM_NAMES
 from ddm.room_artwork import add_platform_logos, room_platform
 from .timeline import timecode
+from .library_data import human_size
 
 
 def picture(entry, key, room):
@@ -84,10 +85,16 @@ class MediaCard(QWidget):
         duration.setObjectName('SettingsHint')
         details.addWidget(duration)
         box.addLayout(details)
+        self.file_info = QLabel('')
+        self.file_info.setObjectName('SettingsHint')
+        box.addWidget(self.file_info)
         extension = Path(entry.get('path', '')).suffix.upper().lstrip('.')
         self.setToolTip('\n'.join([self.title.text(), name, media_type(entry) + (' · ' + extension if extension else ''),
                                   date_range(entry), str(entry.get('path') or '')]))
         self.setAccessibleName(self.title.text() + ' · ' + name + ' · ' + self.type_label.text())
+
+    def set_file_info(self, info):
+        self.file_info.setText(('文件缺失或不完整 · ' if info.get('missing') else '') + human_size(info.get('bytes', 0)))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -120,7 +127,7 @@ class MediaGrid(QListWidget):
         available = max(1, self.viewport().width() - 12)
         columns = max(1, available // 288)
         width = min(360, max(240, available // columns - 12))
-        size = QSize(width, round((width - 20) * 9 / 16) + 112)
+        size = QSize(width, round((width - 20) * 9 / 16) + 134)
         if self.gridSize() != size + QSize(12, 12):
             self.setGridSize(size + QSize(12, 12))
         for index in range(self.count()):
