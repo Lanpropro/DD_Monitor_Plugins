@@ -274,6 +274,35 @@
           "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/domestic-live-v2.0/plugin-catalog.json"
         }
       ]
+    },
+    {
+      "tag": "match-sync-v1.6.1",
+      "file": "RELEASE-match-sync-v1.6.1.md",
+      "status": "online",
+      "source_kind": "github_release",
+      "release_id": 438035903,
+      "release_updated_at": "2026-11-08T04:41:32Z",
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.6.1",
+      "last_edit_verified": true,
+      "raw_body_sha256": "35edb141948d2766d9b065766c7f2c83ae92bf2fae916fd31bd7e18026fcae3d",
+      "sha256": "35edb141948d2766d9b065766c7f2c83ae92bf2fae916fd31bd7e18026fcae3d",
+      "source_commit": "fc84870f5b1e1e149c63f1aef5538dfb79a2b247",
+      "assets": [
+        {
+          "id": 722901715,
+          "name": "match_sync-1.6.1.zip",
+          "size": 175193,
+          "sha256": "ab1f32433405395e22b656b4fd0dc05b5804453f6473efba0c9ca02af1b01fe3",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/match-sync-v1.6.1/match_sync-1.6.1.zip"
+        },
+        {
+          "id": 722901763,
+          "name": "plugin-catalog.json",
+          "size": 7112,
+          "sha256": "045d79cf628eb42173aa9175c66bf99314a61b1a2dc69a3a867eae24848f40c7",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/match-sync-v1.6.1/plugin-catalog.json"
+        }
+      ]
     }
   ],
   "tags_without_recoverable_body": [

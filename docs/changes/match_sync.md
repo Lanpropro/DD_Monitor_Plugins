@@ -195,10 +195,11 @@
 - 打包完整性、隔离安装与五平台注册、旧版升级保留用户数据、8 项功能回归及根 run.cmd Windows 三进程（连续预览／录制通知／控制台缓冲提醒）全部通过；证据位于宿主 work/test-artifacts/match-package-1.6-20261103。真实直播长录、低配置实机及当前连续预览的实播收益不在本次打包验证范围。
 
 
-## 待发布：1.6.1 功能中心入口热修复（2026-11-08）
+## 已发布 v1.6.1：功能中心入口热修复（2026-11-08）
 
 - 更新内容：修复公开 1.6 已加载但在新版关注栏的功能中心缺少比赛二路入口的问题；接入搜索、常用固定和页面导航，保留旧版底部按钮及全部 1.6 功能。
 - 验证：真实公开 ZIP 的隔离装载确认旧包没有注册入口；新包的新安装、1.6 暂存升级及用户数据保留、真实空 Viewer 打开／返回、横竖布局和卸载回归通过；首帧／旧版入口切换专项及根 run.cmd --check-sidebar-navigation 通过。无真实账号或自动发送，真实直播仍待人工验收。
 - 追踪：基于公开 match-sync-v1.6（7904019），仅整合入口适配 048d6f1 与页面协调 593215a；本次提交补充版本与安装包回归。
-- 集成状态：function/match-entry-hotfix，尚未合入 develop；本地候选包，尚未公开发布。
+- 集成状态：修复 [PR #62](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/62) 已合入 develop，发布 [PR #63](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/63) 已合入 main；正式源码为 fc84870，标签 match-sync-v1.6.1，已于 2026-11-08 发布。
+- 公开验证：[Release](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.6.1) 的 ZIP 与商店目录下载校验一致，主程序更新代码实测可检测 1.6 → 1.6.1；保留国内 2.0、海外 1.2、B站 1.1。GitHub latest 下载跳转存在短时旧缓存，版本列表路径已确认可识别新版。
 - 发布注意：插件版本使用数字 1.6.1，安装包为 match_sync-1.6.1.zip；商店清单的版本、大小与 SHA256 必须对应同一安装包。更新后保存并重启，保留旧配置。

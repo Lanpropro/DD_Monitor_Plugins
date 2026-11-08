@@ -12,3 +12,7 @@
 插件更新使用数字版本号 `1.6.1`，旧版插件商店可识别。刷新插件商店即可检测更新，下载后保存并按提示重启。
 
 验证使用隔离配置，不读取真实账号、不自动发送弹幕。覆盖新安装、1.6 暂存升级、功能中心搜索／打开／退出、横竖布局和卸载；真实直播播放仍待人工验收。
+
+源码提交：`fc84870f5b1e1e149c63f1aef5538dfb79a2b247`。
+
+对应修复：[PR #62](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/62)；发布集成：[PR #63](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/63)。
