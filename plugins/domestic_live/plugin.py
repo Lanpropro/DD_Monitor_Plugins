@@ -905,12 +905,15 @@ class DouyuPlatform(NumericLivePlatform):
             if type(room.get("show_status")) is not int or not room.get("room_id"):
                 raise ValueError("Missing room status")
             canonical = self.normalize(f"douyu:{room['room_id']}")
+            display_id = str(room.get('vipId') or '')
+            if not display_id.isdigit() or int(display_id) <= 0:
+                display_id = ''
             return api.RoomInfo(room_id=canonical, uname=room.get("nickname") or f"斗鱼 · {raw}",
                 title=room.get("room_name") or "斗鱼直播间", platform=self.kind,
                 live=room["show_status"] == 1 and not room.get("videoLoop"),
                 face=self._image_url(room.get("owner_avatar") or room.get("avatar_small")),
                 cover_url=self._image_url(room.get("room_pic") or room.get("coverSrc")),
-                extra={"playback_mode": "stream", "live_known": True})
+                extra={"playback_mode": "stream", "live_known": True, "display_room_id": display_id})
         except (requests.RequestException, ValueError, KeyError, TypeError) as error:
             raise RuntimeError("斗鱼房间信息获取失败，请稍后重试") from error
 

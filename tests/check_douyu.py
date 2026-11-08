@@ -29,7 +29,7 @@ def main():
     manager.load()
     platform = manager.platforms["douyu"]
     module = sys.modules[type(platform).__module__]
-    room = {"room_id": 6979222, "show_status": 1, "videoLoop": 0,
+    room = {"room_id": 6979222, "vipId": 6657, "show_status": 1, "videoLoop": 0,
             "nickname": "Machine", "room_name": "6657",
             "owner_avatar": "//apic.douyucdn.cn/avatar.jpg",
             "room_pic": "https://rpic.douyucdn.cn/cover.jpg"}
@@ -38,14 +38,20 @@ def main():
             response({"room": room})]) as get:
         info = platform.room_info("https://www.douyu.com/6657")
         assert info.room_id == "douyu:6979222" and info.live
+        assert info.extra['display_room_id'] == '6657'
         assert info.face and info.cover_url and info.viewers == ""
         assert [call.args[0] for call in get.call_args_list] == [
             "https://www.douyu.com/betard/6657", "https://www.douyu.com/6657",
             "https://www.douyu.com/betard/6979222"]
         assert all(call.kwargs["timeout"] == (4, 8) for call in get.call_args_list)
     with patch.object(module.requests, "get", return_value=response({"room": room})) as get:
-        assert platform.room_info("douyu:6979222").room_id == "douyu:6979222"
+        info = platform.room_info("douyu:6979222")
+        assert info.room_id == "douyu:6979222" and info.extra['display_room_id'] == '6657'
         assert get.call_count == 1
+        assert platform.rooms_status(['douyu:6979222'])['douyu:6979222']['display_room_id'] == '6657'
+    for value in (None, 0, '0', '', -1, 'invalid', True):
+        with patch.object(module.requests, 'get', return_value=response({'room': dict(room, vipId=value)})):
+            assert platform.room_info('douyu:6979222').extra['display_room_id'] == ''
     for page in ('player({roomID: 6979222})', '{"roomId":6979222}',
                  'player({roomID:6979222}); player({roomID:6979222})'):
         with patch.object(module.requests, "get", side_effect=[response(invalid_json=True),
