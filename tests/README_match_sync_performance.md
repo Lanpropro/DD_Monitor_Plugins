@@ -1,5 +1,15 @@
 # 二路插件响应性回归
 
+`check_match_sync_fullscreen_console.py --host <宿主目录>` 用隐藏窗口真实迁移主画面，
+覆盖全屏时两段splitter、排队与迟到尺寸回调、对照开关及退出后恢复三段适配，
+不启动媒体或声音，不改变桌面前台窗口。`check_match_sync_quality_snapshot.py` 使用同样的
+`--host` 参数，验证GUI仅消费捕获线程交付的各路画质档位、主副切换、最高档选择、
+空结果保留已知菜单及丢弃旧解码器回调，不调用平台查询或读取账号。
+画质快照由RoomRow拥有，只在有效information回调更新；不写配置、不创建新线程或TTL缓存。
+探针surface.source_kind记录主路平台类型；render_gap_ms是每个约一秒窗口内最大间隔，
+render_ms/stages_ms来自该窗口最慢轮次，audio_gap_ms是采样时距最后一次供给的时间。
+这些字段不能直接当作所有渲染轮次的平均耗时或音频设备断流时长。
+
 `check_match_sync_live_ui.py --host <宿主目录>` 使用空控件检查直播状态未变化时不重复执行
 侧栏样式、头像占位文字及状态控件更新；启用真实宿主连续圆角QSS转换，比较原始样式
 而不是转换后的字符串，覆盖同数量侧栏卡片替换、卡片更换房间、

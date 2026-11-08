@@ -57,22 +57,24 @@ def check(app, host, module):
             row = viewer.rows['1']
             row.decoder.fps = 60
             calls = []
-            row.platform = SimpleNamespace(kind='bilibili', room_quality_options=lambda _key: calls.append(_key) or [])
+            row.platform = SimpleNamespace(kind='huya', room_quality_options=lambda _key: calls.append(_key) or [])
             viewer.status_ui_due = 0
             base = time.monotonic()
-            with patch.object(viewer, 'render_floating_crops', wraps=viewer.render_floating_crops) as frames:
+            with patch.object(viewer, 'render_floating_crops', wraps=viewer.render_floating_crops) as frames, \
+                    patch.object(viewer, 'sync_picture', wraps=viewer.sync_picture) as metadata:
                 for index in range(125):
                     with patch.object(module.time, 'monotonic', return_value=base + index * .008):
                         viewer.render()
                 assert frames.call_count == 125, 'Do not throttle the playback path'
-            assert len(calls) == 4, len(calls)
+                assert sum(call.kwargs.get('refresh_metadata', True) for call in metadata.call_args_list) == 4
+            assert not calls, 'Continuous playback must not query a platform provider'
             assert viewer.render_timer.interval() == 8
             assert {'metadata_sidebar', 'metadata_picture'} <= dict(viewer.playback_probe.stages).keys()
             # Explicit source information and room changes bypass periodic UI throttling.
             row.title = 'new title'
             viewer.sync_picture()
             assert viewer.picture.room['title'] == 'new title'
-            assert len(calls) == 5
+            assert not calls
             row.volume.setValue(37)
             row.audible.setChecked(False)
             before_controls = len(calls)
@@ -118,7 +120,7 @@ def check(app, host, module):
                     assert emitted[-1]['text'] == '【主播一】 ' + incoming['text']
                     assert plain['text'] == incoming['text'], 'Fallback must not change the chat/replay event'
             return {'passed': True, 'resize_full_rebuilds': 0, 'messages_preserved': 100,
-                    'playback_updates': 125, 'metadata_polls': 4, 'immediate_controls': True,
+                    'playback_updates': 125, 'metadata_refreshes': 4, 'platform_polls': 0, 'immediate_controls': True,
                     'colored_overlay_without_source_prefix': True, 'uncolored_prefix_preserved': True,
                     'replay_overlay_consistent': True, 'sidebar_source_preserved': True}
         finally:

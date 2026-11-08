@@ -915,6 +915,7 @@ class RoomRow(QFrame):
         self.title = room.get("title") or (viewer.sources.get(room_id) or {}).get("title") or ""
         self.quality = int(preferences.get("quality", 10000 if self.platform is not None else 250))
         self.actual_quality = 0
+        self.quality_options = []
         self.record_tracks = tuple(number for number in range(1, 7) if number in preferences.get('record_tracks', []))
         self.pending = deque(maxlen=2000)
         self.color = preferences.get("color", color)
@@ -2089,7 +2090,8 @@ class Viewer(QDialog):
         self.comparison_panel.setVisible(visible)
         self.generation += 1
         height = 240 if visible else 0
-        self.body_split.setSizes([max(1, sizes[0] + sizes[1] - height), height, sizes[2]])
+        if len(sizes) == 3:
+            self.body_split.setSizes([max(1, sizes[0] + sizes[1] - height), height, sizes[2]])
         if visible:
             self.comparison_panel.render(self.live_clock(), self.shifts())
 
@@ -2128,6 +2130,8 @@ class Viewer(QDialog):
         self.queue_console_height()
 
     def queue_console_height(self):
+        if self.body_split.count() != 3:
+            return
         height = self.settings_height
         if height != getattr(self, 'console_content_height', None) or self.settings_panel.height() != height:
             self.console_content_height = height
@@ -2142,6 +2146,9 @@ class Viewer(QDialog):
         if self.settings_panel.isHidden() or self.dragged_row is not None:
             return
         sizes = self.body_split.sizes()
+        # Fullscreen reparents the picture out of this splitter temporarily.
+        if len(sizes) != 3:
+            return
         height = self.console_content_height
         self.body_split.setSizes([max(1, sizes[0] + sizes[2] - height), sizes[1], height])
 
@@ -2582,7 +2589,7 @@ class Viewer(QDialog):
                 row.refresh_status()
             row = self.rows.get(selected)
             if row is not None:
-                options = row.platform.room_quality_options(selected) if row.platform is not None else []
+                options = row.quality_options
                 seed = getattr(row.decoder, "seed", None) or {}
                 known_highest = seed.get("quality", 10000) if seed.get("highest_quality") else 10000
                 highest = next((int(item["qn"]) for item in options if int(item["qn"]) != AUTO_QUALITY), known_highest)
@@ -2683,13 +2690,13 @@ class Viewer(QDialog):
                 tile.title_badge.set_text(row.title or row.label(), "")
                 tile.title_badge.setToolTip(row.title or row.label())
                 tile.stream_badge.set_state(True, "")
-                if row.platform is not None:
-                    options = row.platform.room_quality_options(row.room_id)
-                    if options and tile.quality_options != options:
-                        tile.set_quality_options(options)
+                # Capture workers already deliver the available tiers. GUI
+                # refreshes must not call a platform provider for metadata.
+                if row.quality_options and tile.quality_options != row.quality_options:
+                    tile.set_quality_options(row.quality_options)
                 if tile.quality != row.quality:
                     tile.set_quality(row.quality)
-                if row.platform is not None and tile.actual_quality != row.actual_quality:
+                if tile.actual_quality != row.actual_quality:
                     tile.set_actual_quality(row.actual_quality)
             if tile.volume != row.volume.value():
                 tile.set_volume(row.volume.value())
@@ -2826,6 +2833,7 @@ class Viewer(QDialog):
         dialog.settings = self.context.window.settings
         dialog._fullscreen_tile = self.picture
         dialog._fullscreen_cursor = FullscreenCursor(dialog)
+        self.console_size_timer.stop()
         sizes = self.body_split.sizes()
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -2838,6 +2846,7 @@ class Viewer(QDialog):
             self.body_split.insertWidget(0, self.picture)
             self.body_split.setSizes(sizes)
             self.fullscreen_dialog = None
+            self.queue_console_height()
             self.reparent_floating_crops(self.floating_surface())
             dialog.deleteLater()
         dialog.finished.connect(restore)
@@ -3278,6 +3287,8 @@ class Viewer(QDialog):
     def _information(self, row, worker, info):
         if not self._valid(row, worker):
             return
+        if info.get('quality_options'):
+            row.quality_options = [dict(item) for item in info['quality_options']]
         if info.get("requested_quality") and self._crop_source_policy(row) == 'source':
             row.quality = int(info["requested_quality"])
         if "title" in info:
@@ -3290,16 +3301,9 @@ class Viewer(QDialog):
             if (self._crop_source_policy(row) == 'source' and row.platform is not None and row.platform.kind != "douyu"
                     and not (self.prefer_highest and row.room_id == self.alignment.reference)):
                 row.quality = row.actual_quality
-            if row.room_id == self.main.currentData():
-                self.sync_picture()
-                self.picture.set_quality_options(info.get("quality_options") or [])
-                self.picture.set_actual_quality(row.actual_quality)
             self.changed()
         if row.room_id == self.main.currentData():
             self.sync_picture()
-            options = info.get("quality_options")
-            if options and self.picture.quality_options != options:
-                self.picture.set_quality_options(options)
 
     def _state(self, row, worker, text, chat):
         if self._valid(row, worker, chat):
@@ -3797,6 +3801,7 @@ class Viewer(QDialog):
                                      active=window.isActiveWindow(), canvas_size=(self.canvas.width(), self.canvas.height()),
                                      source_size=getattr(row.decoder, 'video_size', (0, 0)),
                                      main_slot=tuple(self.rows).index(row.room_id),
+                                     source_kind=row.platform.kind if row.platform is not None else 'bilibili',
                                      sync_waiting=self.sync_waiting,
                                      main_started=self.stable_reference_shift is not None,
                                      screen_hz=screen.refreshRate() if screen else 0,

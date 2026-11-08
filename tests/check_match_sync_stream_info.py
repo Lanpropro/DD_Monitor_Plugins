@@ -54,7 +54,7 @@ def check(app, host, module):
                 event = QContextMenuEvent(QContextMenuEvent.Mouse, point,
                                           viewer.canvas.mapToGlobal(point))
                 with patch.object(viewer.picture, 'build_menu', return_value=SimpleNamespace(
-                        exec=lambda *_args: choose_info(menu))):
+                        exec=lambda *_args: choose_info(menu), deleteLater=menu.deleteLater)):
                     app.sendEvent(viewer.canvas, event)
                 app.processEvents()
 
