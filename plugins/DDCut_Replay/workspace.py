@@ -89,6 +89,8 @@ class Preview(QWidget):
 
     def load(self, path):
         self.stop()
+        from .preview_runtime import retain_qt_ui_library
+        retain_qt_ui_library()
         # Reuse the host's bundled libmpv, loader setup and safe embedded options.
         from ddm.player import EMBEDDED_OPTIONS
         import mpv

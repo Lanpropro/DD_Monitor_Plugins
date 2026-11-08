@@ -596,4 +596,6 @@ if __name__ == '__main__':
     app.setQuitOnLastWindowClosed(False)
     QTimer.singleShot(0, checks)
     app.exec()
+    # Destroy Qt's native platform resources while the Python runtime is still live.
+    app.shutdown()
     raise SystemExit(0 if outcome and outcome[0] else 1)
