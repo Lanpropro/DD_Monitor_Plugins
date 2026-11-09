@@ -701,6 +701,63 @@ class InterfaceTests(unittest.TestCase):
                 window.deleteLater()
                 APP.processEvents()
 
+    def test_configuration_cards_open_editor_and_add_new_profile_without_another_window(self):
+        panel = Panel(Options(core=__file__))
+        panel.resize(658, 478)
+        panel.set_profiles([Profile('a', '服务商 A', 'url', 'https://example.invalid/a')], 'a')
+        panel.navigation.setCurrentRow(2)
+        panel.show()
+        try:
+            QTest.qWait(30)
+            self.assertEqual(panel.title.text(), '配置')
+            self.assertEqual(panel.configuration_views.currentIndex(), 0)
+            self.assertFalse(panel.profiles_list.verticalScrollBar().isVisible())
+            card = panel.profiles_list.visualItemRect(panel.profiles_list.item(0))
+            QTest.mouseClick(panel.profiles_list.viewport(), Qt.LeftButton, pos=card.center())
+            self.assertEqual(panel.configuration_views.currentIndex(), 1)
+            self.assertTrue(panel.location.isVisible())
+            self.assertEqual(panel.location.text(), 'https://example.invalid/a')
+            self.assertIs(panel.location.window(), panel)
+            panel.back_to_profiles.click()
+            self.assertEqual(panel.configuration_views.currentIndex(), 0)
+            panel.add_profile.click()
+            self.assertEqual(panel.configuration_views.currentIndex(), 1)
+            self.assertEqual(panel.options().profile_id, '')
+            self.assertEqual(panel.location.text(), '')
+        finally:
+            panel.deleteLater()
+            APP.processEvents()
+
+    def test_profile_cards_scroll_internally_and_switch_is_keyboard_operable(self):
+        panel = Panel(Options(core=__file__))
+        panel.resize(658, 478)
+        profiles = [Profile(str(i), f'服务商 {i}', 'url', f'https://example.invalid/{i}') for i in range(12)]
+        panel.set_profiles(profiles, '0')
+        panel.navigation.setCurrentRow(2)
+        panel.show()
+        changes = []
+        panel.autoStartRequested.connect(changes.append)
+        try:
+            QTest.qWait(30)
+            self.assertTrue(panel.profiles_list.verticalScrollBar().isVisible())
+            first = panel.profiles_list.visualItemRect(panel.profiles_list.item(0))
+            second = panel.profiles_list.visualItemRect(panel.profiles_list.item(1))
+            self.assertEqual(first.y(), second.y())
+            self.assertGreater(second.x(), first.x())
+            panel.navigation.setCurrentRow(0)
+            panel.auto_start.setFocus()
+            QTest.keyClick(panel.auto_start, Qt.Key_Space)
+            self.assertEqual(changes, [False])
+            self.assertFalse(panel.auto_start.isChecked())
+            panel.resize(380, 478)
+            QTest.qWait(30)
+            first_card, second_card = panel.dashboard_cards[:2]
+            self.assertEqual(first_card.x(), second_card.x())
+            self.assertGreater(second_card.y(), first_card.y())
+        finally:
+            panel.deleteLater()
+            APP.processEvents()
+
 
 @unittest.skipUnless(args.core, 'Pass --core for actual Mihomo process tests')
 class RealCoreTests(unittest.TestCase):

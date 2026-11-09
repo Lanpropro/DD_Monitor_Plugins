@@ -4,6 +4,7 @@ from PySide6.QtGui import QFont, QPainter, QPen
 from PySide6.QtWidgets import QListView, QStyledItemDelegate, QStyle
 
 from ddm import theme
+from .visuals import surface, symbol
 
 NODE_ROLE = Qt.UserRole + 1
 ACTIVE_ROLE = Qt.UserRole + 2
@@ -96,37 +97,37 @@ class NodeDelegate(QStyledItemDelegate):
         if record is None:
             return
         selected = index.data(ACTIVE_ROLE)
-        rect = QRectF(option.rect).adjusted(3, 3, -3, -3)
+        rect = QRectF(option.rect).adjusted(4, 4, -4, -4)
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing)
         background = theme.ACCENT_SOFT if selected else (
-            theme.CONTENT_HOVER if option.state & QStyle.State_MouseOver else theme.CONTENT)
+            theme.CONTENT_HOVER if option.state & QStyle.State_MouseOver else surface())
         painter.setBrush(theme.qcolor(background))
-        painter.setPen(QPen(theme.qcolor(theme.ACCENT if selected else theme.BORDER), 1))
-        painter.drawRoundedRect(rect, 9, 9)
+        painter.setPen(QPen(theme.qcolor(theme.ACCENT if selected else theme.BORDER_STRONG), 1))
+        painter.drawRoundedRect(rect, 15, 15)
         title = QFont(option.font)
-        title.setBold(selected)
+        title.setPixelSize(theme.FONT_BODY)
+        title.setWeight(QFont.DemiBold if selected else QFont.Medium)
         painter.setFont(title)
         painter.setPen(theme.qcolor(theme.TEXT1))
-        text_rect = rect.adjusted(12, 9, -32, -58)
+        text_rect = rect.adjusted(14, 10, -35, -56)
         text = painter.fontMetrics().elidedText(record['name'], Qt.ElideRight, int(text_rect.width()))
         painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter, text)
         if selected:
-            painter.setPen(theme.qcolor(theme.ACCENT))
-            painter.drawText(rect.adjusted(0, 9, -12, -58), Qt.AlignRight | Qt.AlignVCenter, '✓')
+            symbol(painter, 'check', QRectF(rect.right() - 29, rect.top() + 12, 17, 17), theme.ACCENT)
         caption = QFont(option.font)
         caption.setPixelSize(theme.FONT_CAPTION)
         painter.setFont(caption)
         painter.setPen(theme.qcolor(theme.TEXT2))
         protocol = painter.fontMetrics().elidedText(record['type'], Qt.ElideRight, int(rect.width() - 24))
-        painter.drawText(rect.adjusted(12, 36, -12, -32), Qt.AlignLeft | Qt.AlignVCenter, protocol)
+        painter.drawText(rect.adjusted(14, 37, -14, -30), Qt.AlignLeft | Qt.AlignVCenter, protocol)
         color = theme.ERROR if record['state'] in ('failed', 'timeout') else (
             theme.SUCCESS if record['state'] == 'ready' and record['delay'] < 250 else theme.TEXT2)
         color = theme.qcolor(color)
         if theme.is_light() and record['state'] in ('failed', 'timeout', 'ready'):
             color = color.darker(125)
         painter.setPen(color)
-        painter.drawText(rect.adjusted(12, 61, -12, -8), Qt.AlignLeft | Qt.AlignVCenter, delay_text(record))
+        painter.drawText(rect.adjusted(14, 62, -14, -7), Qt.AlignLeft | Qt.AlignVCenter, delay_text(record))
         if option.state & QStyle.State_HasFocus:
             painter.setBrush(Qt.NoBrush)
             painter.setPen(QPen(theme.qcolor(theme.ACCENT), 1, Qt.DotLine))
