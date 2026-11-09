@@ -113,6 +113,20 @@ class Service:
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_dns_reasons_are_specific_and_do_not_misclassify_hostnames(self):
+        from check_proxy_plugin.core import dns_reason
+        for line, reason in (
+            ('dns resolve failed: ipv6 disabled', 'ipv6-disabled'),
+            ('dns resolve failed: ip version error', 'ip-version'),
+            ('dial error: lookup private.invalid: no such host password=secret', 'nxdomain'),
+            ('all DNS requests failed: context deadline exceeded', 'timeout'),
+            ("dns resolve failed: couldn't find ip", 'no-address'),
+        ):
+            self.assertEqual(error_category(line), 'dns')
+            self.assertEqual(dns_reason(line), reason)
+            self.assertNotIn('secret', dns_reason(line))
+        self.assertEqual(error_category('dial dnshost.private.invalid error: TLS handshake failed'), 'tls')
+
     def test_core_error_categories_never_return_raw_sensitive_details(self):
         for line, expected in (
             ('level=warning msg="dial error: lookup private.example: no such host secret=fixture-secret"', 'dns'),
@@ -1074,7 +1088,8 @@ class RealCoreTests(unittest.TestCase):
                     offset += length + 1
                 qtype = struct.unpack('!H', data[offset + 1:offset + 3])[0]
                 queries.append('.'.join(labels))
-                answer = (b'\xc0\x0c' + struct.pack('!HHIH', 1, 1, 30, 4) + b'\x7f\x00\x00\x01') if qtype == 1 else b''
+                answer = (b'\xc0\x0c' + struct.pack('!HHIH', 1, 1, 30, 4) + b'\x7f\x00\x00\x01') if (
+                    qtype == 1 and labels[0] == 'node') else b''
                 header = data[:2] + struct.pack('!HHHHH', 0x8180, 1, int(bool(answer)), 0, 0)
                 server_socket.sendto(header + data[12:offset + 5] + answer, self.client_address)
         server = socketserver.UDPServer(('127.0.0.1', 0), DnsHandler)
@@ -1099,6 +1114,13 @@ class RealCoreTests(unittest.TestCase):
             import psutil
             connections = psutil.Process(self.controller.core.process.processId()).net_connections(kind='inet')
             self.assertFalse(any(connection.laddr.port in (53, 1053) for connection in connections))
+            self.controller.stop()
+            empty_profile = profile.replace('node.fixture.invalid', 'empty.fixture.invalid')
+            with patch('check_proxy_plugin.core.core_config', side_effect=fixture_config):
+                self.start(profile=empty_profile)
+            response = requests.get('http://fixture.invalid/live', timeout=5)
+            self.assertEqual(response.status_code, 502)
+            wait_for(lambda: self.controller.core.last_dns_reason == 'no-address')
         finally:
             server.shutdown()
             server.server_close()

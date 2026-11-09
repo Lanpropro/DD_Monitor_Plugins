@@ -11,6 +11,10 @@ ERRORS = {'dns': '节点域名解析失败', 'tls': 'TLS 握手或证书失败',
           'refused': '连接被拒绝', 'unreachable': '网络不可达', 'timeout': '连接超时',
           'connection': '节点连接失败', 'unknown': '内核未提供具体原因'}
 MAX_SNAPSHOT = 512 * 1024
+DNS_REASONS = {'ipv6-disabled': '内核禁用了 IPv6 解析', 'ip-version': '节点地址与指定的 IP 版本不匹配',
+               'nxdomain': '解析器报告域名不存在', 'timeout': 'DNS 查询超时',
+               'refused': 'DNS 请求被拒绝', 'server-failed': 'DNS 上游返回服务错误',
+               'no-address': '未取得可用的 IP 地址', 'unknown': '未提供更细的 DNS 原因'}
 
 
 def connection_rows(data):

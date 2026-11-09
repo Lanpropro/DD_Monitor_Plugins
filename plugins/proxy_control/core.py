@@ -24,7 +24,8 @@ def error_category(line):
     if not any(marker in text for marker in ('error', 'failed', 'failure')):
         return ''
     for kind, markers in (
-        ('dns', ('dns', 'lookup', "couldn't find ip", 'no such host')),
+        ('dns', ('dns resolve', 'dns query', 'all dns', 'lookup', "couldn't find ip", 'no such host',
+                 'ipv6 disabled', 'ip version error')),
         ('tls', ('tls', 'x509', 'certificate', 'handshake')),
         ('authentication', ('authentication', 'password', 'unauthorized')),
         ('dependency', ('dialer-proxy', 'proxy not found', 'proxy not exist')),
@@ -35,6 +36,22 @@ def error_category(line):
         if any(marker in text for marker in markers):
             return kind
     return 'connection'
+
+
+def dns_reason(line):
+    text = line.casefold()
+    for reason, markers in (
+        ('ipv6-disabled', ('ipv6 disabled',)),
+        ('ip-version', ('ip version error',)),
+        ('nxdomain', ('nxdomain', 'no such host', 'name does not exist')),
+        ('timeout', ('timeout', 'timed out', 'deadline exceeded')),
+        ('refused', ('refused',)),
+        ('server-failed', ('servfail', 'server misbehaving', 'server failure')),
+        ('no-address', ("couldn't find ip", 'no ip address', 'empty answer')),
+    ):
+        if any(marker in text for marker in markers):
+            return reason
+    return 'unknown'
 
 
 class Core(QObject):
@@ -84,6 +101,7 @@ class Core(QObject):
         process.setProcessEnvironment(env)
         self._output = b''
         self.last_diagnostic = ''
+        self.last_dns_reason = ''
         process.setProcessChannelMode(QProcess.MergedChannels)
         process.readyReadStandardOutput.connect(lambda: self._read_output(process))
         process.errorOccurred.connect(lambda error: self._failure(process, '代理内核无法启动，请检查程序路径')
@@ -100,7 +118,13 @@ class Core(QObject):
         lines = data.split(b'\n')
         self._output = lines.pop()[-8192:]
         for line in lines:
-            kind = error_category(line.decode('utf-8', errors='replace'))
+            decoded = line.decode('utf-8', errors='replace')
+            kind = error_category(decoded)
+            if kind == 'dns':
+                reason = dns_reason(decoded)
+                if reason != self.last_dns_reason:
+                    self.last_dns_reason = reason
+                    logging.getLogger('ddm.proxy_control').info('proxy dns diagnostic reason=%s', reason)
             if kind and kind != self.last_diagnostic:
                 self.last_diagnostic = kind
                 self.diagnostic.emit(kind)

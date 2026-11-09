@@ -17,7 +17,7 @@ from .latency import Latency
 from .prepare_core import URL, ASSET
 from .profiles import Profile, load_profiles, save_profiles
 from .metadata import display_name
-from .connections import ConnectionMonitor, ERRORS
+from .connections import ConnectionMonitor, ERRORS, DNS_REASONS
 
 
 class Controller(QObject):
@@ -286,11 +286,14 @@ class Controller(QObject):
 
     def _probe_finished(self, reachable, code):
         kind = self.core.last_diagnostic or 'unknown'
+        reason = self.core.last_dns_reason or 'unknown'
         logging.getLogger('ddm.proxy_control').info('proxy connection diagnostic reachable=%s http=%d kind=%s',
                                                    reachable, code, kind)
         self._release_test_core()
         self.testingChanged.emit(False)
         explanation = ERRORS[kind]
+        if kind == 'dns':
+            explanation += '（' + DNS_REASONS[reason] + '）'
         self._status('目标地址可连接，但内核未返回有效延迟' if reachable else
                      f'延迟测试失败；当前预选节点诊断：{explanation}。不据此判定全部节点不可用')
 
