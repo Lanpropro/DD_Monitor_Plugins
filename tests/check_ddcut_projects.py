@@ -20,6 +20,8 @@ from PySide6.QtTest import QTest
 
 project = importlib.import_module('ddcut_ranges_test.project')
 engine = importlib.import_module('ddcut_ranges_test.project_media')
+audio_preview = importlib.import_module('ddcut_ranges_test.project_audio')
+audio_preview.AudioClock.output_options = {'ao': 'null'}
 
 
 class ProjectTests(unittest.TestCase):
@@ -250,17 +252,24 @@ class ProjectTests(unittest.TestCase):
                 until(lambda: not editor.waves)
                 self.assertTrue(editor.document.data['media'][str(self.audio)]['peaks'])
                 # Wait for the actual shared renderer before checking the preview player.
-                until(lambda: editor.loaded_key is not None and not editor.pending_preview and editor.preview_job is None, timeout=30)
+                until(lambda: editor.runtime is not None and editor.runtime.ready and not editor.runtime.error, timeout=30)
                 if args.native:
                     until(lambda: editor.preview.core is not None and editor.preview.core.time_pos is not None)
-                    until(lambda: editor.resume is None)
+                    until(lambda: editor.runtime.ready)
                     editor.seek(.5)
                     until(lambda: abs(editor.preview.position()-.5) < .1)
                     frame = self.root/'native-project.png'
-                    editor.preview.core.command('screenshot-to-file', str(frame), 'video')
+                    editor.preview.core.command('screenshot-to-file', str(frame), 'window')
                     picture = QImage(str(frame))
                     self.assertGreater(picture.width(), 0)
-                    self.assertGreater(picture.pixelColor(300, 300).red(), 150)
+                    canvas = editor.stage.frame()
+                    if args.screenshots:
+                        picture.save(str(args.screenshots/'native-project-preview.png'))
+                    self.assertGreater(picture.pixelColor(round(canvas.left()+canvas.width()*.7),
+                        round(canvas.top()+canvas.height()*.8)).red(), 150,
+                        str((canvas.getRect(),picture.size(),editor.position,
+                            editor.runtime.project['clips'][0]['source'],
+                            editor.runtime.last_frame.pixelColor(round(editor.runtime.last_frame.width()*.7),round(editor.runtime.last_frame.height()*.8)).getRgb())))
                     if args.screenshots:
                         shutil.copyfile(frame, args.screenshots/frame.name)
                 for size in ((920, 600), (1440, 900)):
@@ -292,11 +301,15 @@ class ProjectTests(unittest.TestCase):
                 editor.duplicate()
                 self.assertEqual(len(editor.document.data['clips']), 4)
                 if args.native:
-                    until(lambda: not editor.preview_dirty and editor.preview_job is None and editor.resume is None, timeout=30)
+                    until(lambda: not editor.preview_dirty and not editor.runtime.error, timeout=30)
                     editor.seek(7.7)
+                    until(lambda: not editor.preview_dirty, timeout=30)
+                    audio_clock = editor.runtime.clock
                     editor.toggle_play()
-                    until(lambda: editor.preview_begin == 8 and editor.playing and editor.position > 8.1, timeout=30)
+                    until(lambda: editor.playing and editor.position > 8.1, timeout=30)
                     editor.toggle_play()
+                    self.assertIs(editor.runtime.clock, audio_clock)
+                    self.assertFalse(any(job.kind == 'project_preview' for job in hub.jobs))
                     self.assertFalse(editor.playing)
                 editor.history(False)
                 view.project_editor.shutdown_preview()
@@ -406,7 +419,7 @@ class ProjectTests(unittest.TestCase):
             view.open_project_document(doc)
             editor = view.project_editor
             def ready():
-                until(lambda: editor.loaded_key is not None and not editor.preview_dirty and editor.preview_job is None and editor.resume is None, timeout=30)
+                until(lambda: editor.runtime is not None and not editor.preview_dirty and not editor.runtime.error, timeout=30)
             ready()
             editor.seek(.5)
             until(lambda: abs(editor.preview.position()-.5) < .06)

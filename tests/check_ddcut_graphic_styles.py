@@ -127,9 +127,9 @@ class StyleTests(unittest.TestCase):
             stored = deepcopy(editor.selected()[0]['text_style'])
             until(lambda: editor.preview.core is not None and not editor.preview_dirty, timeout=30)
             if args.native:
-                until(lambda: editor.resume is None and editor.preview.core.time_pos is not None)
+                until(lambda: editor.runtime.ready and editor.preview.core.time_pos is not None)
                 frame = self.root/'styled-native.png'
-                editor.preview.core.command('screenshot-to-file', str(frame), 'video')
+                editor.preview.core.command('screenshot-to-file', str(frame), 'window')
                 image = QImage(str(frame))
                 yellow = sum(image.pixelColor(x,y).red()>130 and image.pixelColor(x,y).green()>100 and image.pixelColor(x,y).blue()<100
                              for x in range(0,image.width(),2) for y in range(0,image.height(),2))
@@ -158,7 +158,7 @@ class StyleTests(unittest.TestCase):
                 self.assertAlmostEqual(draft['x']+draft['w']/2, .5)
                 self.assertAlmostEqual(draft['y']+draft['h']/2, .5)
                 stage.pointer('up', frame.center())
-                until(lambda: not editor.preview_dirty and editor.resume is None, timeout=30)
+                until(lambda: not editor.preview_dirty and editor.runtime.ready, timeout=30)
                 core = editor.preview.core
                 frame = stage.frame()
                 core.command('mouse', round(frame.center().x()), round(frame.center().y()))

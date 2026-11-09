@@ -121,7 +121,6 @@ class ProjectStage(QObject):
             self.editor.playing = False
             if self.preview.core:
                 self.preview.core.pause = True
-                self.editor.position = self.editor.preview_begin+self.preview.position()
             current = self.current()
             mode = 'move'
             corner = None
@@ -191,6 +190,7 @@ class ProjectStage(QObject):
     def cancel(self):
         self.drag = None
         self.signature = None
+        self.update()
 
     def nudge(self, direction, pixels=1):
         item = self.current()
@@ -209,6 +209,8 @@ class ProjectStage(QObject):
     def update(self):
         core = self.preview.core
         item = self.drag['draft'] if self.drag else self.current()
+        if self.editor.runtime and self.editor.runtime.ready:
+            self.editor.runtime.refresh_frame(item if self.drag else None)
         if core is None or core is not self.core or self.editor.playing or self.editor.preview_dirty or item is None:
             if self.visible:
                 self.clear()

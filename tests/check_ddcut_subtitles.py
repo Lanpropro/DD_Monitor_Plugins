@@ -198,7 +198,7 @@ assert not any(name.startswith('PySide6') for name in sys.modules)
             with patch.object(ui.QFileDialog, 'getOpenFileName', return_value=(str(path), '')):
                 panel.import_srt()
             self.assertEqual(len(doc.data['subtitles']), 2)
-            until(lambda: editor.loaded_key and not editor.preview_dirty and not editor.preview_job and editor.resume is None, timeout=30)
+            until(lambda: editor.runtime is not None and not editor.preview_dirty and not editor.runtime.error, timeout=30)
             for size in ((920, 600), (1280, 900)):
                 host.resize(*size)
                 app.processEvents()
@@ -207,15 +207,17 @@ assert not any(name.startswith('PySide6') for name in sys.modules)
                 editor.seek(1)
                 until(lambda: abs(editor.preview.position()-1) < .1)
                 picture = self.root/'native-caption.png'
-                editor.preview.core.command('screenshot-to-file', str(picture), 'video')
+                editor.preview.core.command('screenshot-to-file', str(picture), 'window')
                 frame = QImage(str(picture))
                 if args.screenshots:
                     shutil.copyfile(picture, args.screenshots/picture.name)
                 # Thin 13px Chinese glyphs need not contain many fully white pixels.
                 # Check actual glyph coverage and its bottom placement against the red source.
-                marked = [(x, y) for y in range(frame.height()) for x in range(frame.width()) if frame.pixelColor(x, y).red() < 180]
+                canvas = editor.stage.frame().adjusted(2,2,-2,-2)
+                marked = [(x, y) for y in range(round(canvas.top()),round(canvas.bottom()))
+                          for x in range(round(canvas.left()),round(canvas.right())) if frame.pixelColor(x, y).red() < 180]
                 self.assertGreater(len(marked), 100)
-                self.assertTrue(all(y > frame.height()*.4 for x, y in marked))
+                self.assertTrue(all(y > canvas.top()+canvas.height()*.4 for x, y in marked))
             editor.leave()
             view.review({**self.media_info[str(self.red)], 'created_at': 0})
             view.export_scope.setCurrentIndex(view.export_scope.findData('full'))

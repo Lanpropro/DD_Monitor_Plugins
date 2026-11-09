@@ -1,7 +1,5 @@
 """Embedded project editor: external file bin, preview, inspector and timeline."""
 from copy import deepcopy
-import hashlib
-import json
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal, QSize
@@ -14,6 +12,7 @@ from .project import (add_layer, anchor_at, append_clip, duplicate_item, duratio
 from .project_media import inspect_file, render_project, waveform
 from .project_timeline import ProjectTimeline
 from .project_stage import ProjectStage
+from .project_preview import ProjectPreview
 from .subtitle_panel import SubtitlePanel
 from .subtitles import placed_cues, set_cue
 from .encoding_widgets import EncodingOptions
@@ -31,14 +30,10 @@ class ProjectEditor(QWidget):
         self.workspace, self.hub = workspace, workspace.hub
         self.document = None
         self.selected_id = ''
+        self.runtime = None
         self.position, self.playing = 0, False
         self.imports, self.waves = [], []
-        self.preview_job = None
-        self.pending_preview = None
-        self.loaded_key = None
-        self.preview_dirty = True
-        self.resume = None
-        self.preview_begin, self.preview_end = 0, 0
+        self._preview_pending, self._force_preview = False, False
         box = QVBoxLayout(self)
         box.setContentsMargins(0, 0, 0, 0)
         row = QHBoxLayout()
@@ -268,7 +263,7 @@ class ProjectEditor(QWidget):
     def open_document(self, document):
         self.shutdown_preview()
         self.document = document
-        self.position, self.selected_id, self.loaded_key = 0, '', None
+        self.position, self.selected_id = 0, ''
         self.refresh()
         self.request_preview()
 
@@ -686,81 +681,81 @@ class ProjectEditor(QWidget):
                 project_path=str(self.document.path)))
             self.workspace.toggle_tasks(True)
 
+    @property
+    def position(self):
+        return self.runtime.position if self.runtime else self._position
+
+    @position.setter
+    def position(self, value):
+        self._position = value
+
+    @property
+    def playing(self):
+        return self.runtime.want_play if self.runtime else self._playing
+
+    @playing.setter
+    def playing(self, value):
+        if self.runtime:
+            self.runtime.play(value)
+        else:
+            self._playing = bool(value)
+
+    @property
+    def preview_dirty(self):
+        return self._preview_pending or self.runtime is None or not self.runtime.ready
+
     def request_preview(self, force=False):
         if not self.document or not self.isVisible():
             return
-        self.playing = False
-        if self.preview.core:
-            self.preview.core.pause = True
-        data = self.document.data
-        if not data['clips']:
-            self.preview.stop()
-            self.preview_hint.setText('从左侧外部文件添加主视频片段。')
-            return
-        self.position = min(self.position, max(0, duration(data)-.02))
-        begin = max(0, int(self.position//8)*8)
-        self.preview_dirty = True
-        key = hashlib.sha256((json.dumps(data, sort_keys=True, ensure_ascii=False)+f'/{begin}').encode()).hexdigest()
-        self.pending_preview = (key, begin, self.position, False, deepcopy(data))
-        self.preview_hint.setText('工程已修改，正在更新当前位置的预览…')
-        self.debounce.start(0 if force else 600)
+        self._preview_pending = True
+        self._force_preview |= force
+        self.debounce.start(0)
 
     def launch_preview(self):
-        if not self.pending_preview or not self.isVisible():
+        if not self.document or not self.isVisible():
             return
-        if self.preview_job and not self.preview_job.future.done():
-            self.hub.cancel(self.preview_job)
-            self.debounce.start(200)
+        if not self.document.data['clips']:
+            self.shutdown_preview()
+            self.preview_hint.setText('从左侧外部文件添加主视频片段。')
             return
-        key, begin, position, playing, data = self.pending_preview
-        self.pending_preview = None
-        target = self.hub.root/'project_previews'/(key+'.mp4')
-        if target.is_file():
-            self.load_preview(target, key, begin, position, playing)
-            return
-        self.preview_request = key, begin, position, playing
-        self.preview_job = self.hub.submit('工程预览：'+data['title'], 'project_preview', render_project,
-            self.workspace.service.options()['ffmpeg'], data, target, self.hub.root/'work',
-            begin=begin, length=8, preview=True, project_path=str(self.document.path))
-
-    def load_preview(self, path, key, begin, position, playing):
-        self.stage.clear()
-        self.preview.load(str(path))
-        self.stage.attach()
-        self.preview.chat.enabled = False
-        self.loaded_key, self.preview_begin = key, begin
-        self.preview_dirty = False
-        self.preview_end = min(duration(self.document.data), begin+8)
-        self.resume = position-begin, playing
-        self.preview_hint.setText('工程预览已更新；跨预览段时会等待下一段合成。')
+        try:
+            if self.runtime is None:
+                self.runtime = ProjectPreview(self)
+                self.runtime.stamp = self._position
+                self.runtime.want_play = self._playing
+            self.runtime.set_project(self.document.data, force=self._force_preview)
+        except Exception as error:
+            if self.runtime:
+                if self.runtime.clock:
+                    self.runtime.clock.core.pause = True
+                self.runtime.error, self.runtime.ready, self.runtime.want_play = str(error), False, False
+            self.preview_hint.setText('预览失败：'+str(error))
+        finally:
+            self._preview_pending, self._force_preview = False, False
 
     def seek(self, position):
-        self.position = max(0, min(duration(self.document.data), position))
-        self.timeline.position = self.position
+        if not self.document:
+            return
+        position = max(0, min(duration(self.document.data),position))
+        if self.runtime:
+            self.runtime.seek(position)
+        else:
+            self._position = position
+            self.request_preview()
+        self.timeline.position = position
         self.timeline.update()
         self.guard(self.stage.update)
-        if self.preview.core and self.preview_begin <= position < self.preview_end and not self.preview_dirty:
-            self.preview.seek(position-self.preview_begin)
-        else:
-            self.request_preview(force=True)
 
     def toggle_play(self):
-        if self.preview_job and not self.pending_preview and self.preview_dirty:
-            key, begin, position, playing = self.preview_request
-            self.preview_request = key, begin, position, not playing
-            return
-        if self.pending_preview or not self.preview.core or self.preview_dirty:
-            self.request_preview(force=True)
-            if self.pending_preview:
-                key, begin, pos, _, data = self.pending_preview
-                self.pending_preview = key, begin, pos, True, data
-            return
-        self.playing = not self.playing
-        self.preview.core.pause = not self.playing
+        if self.runtime:
+            self.runtime.play(not self.runtime.want_play)
+        else:
+            self._playing = True
+            self.request_preview()
 
     def set_mute(self, value):
-        if self.preview.core:
-            self.preview.core.mute = value
+        if self.runtime:
+            self.runtime.set_mute(value)
 
     def tick(self):
         while self.imports and self.imports[0][0].future.done():
@@ -793,34 +788,15 @@ class ProjectEditor(QWidget):
                         self.timeline.reflow()
                 elif job.state != 'done':
                     self.status.setText(job.message)
-        if self.preview_job and self.preview_job.future.done():
-            job, self.preview_job = self.preview_job, None
-            if not self.pending_preview and self.isVisible():
-                if job.state == 'done':
-                    self.guard(lambda: self.load_preview(job.output, *self.preview_request))
-                elif job.state == 'failed':
-                    self.preview_hint.setText('预览失败：'+job.message)
         if not self.isVisible() or not self.document:
             return
-        if self.preview.core:
-            if self.resume is not None and self.preview.core.time_pos is not None:
-                position, playing = self.resume
-                self.resume = None
-                self.preview.seek(position)
-                self.preview.core.mute = self.muted.isChecked()
-                self.preview.core.pause = not playing
-                self.playing = playing
-            if self.playing:
-                self.position = self.preview_begin+self.preview.position()
-                if self.preview.core.eof_reached or self.position >= self.preview_end-.02:
-                    if self.preview_end < duration(self.document.data)-.02:
-                        self.position = self.preview_end
-                        self.request_preview(force=True)
-                        if self.pending_preview:
-                            key, begin, pos, _, data = self.pending_preview
-                            self.pending_preview = key, begin, pos, True, data
-                    else:
-                        self.playing = False
+        if self.runtime:
+            if self.runtime.error:
+                self.preview_hint.setText('预览失败：'+self.runtime.error)
+            elif not self.runtime.ready:
+                self.preview_hint.setText('正在准备当前位置的声音与画面…')
+            else:
+                self.preview_hint.setText('实时工程预览 · 画面与声音按工程时间同步')
         self.timeline.position = self.position
         self.timeline.update()
         self.clock.setText(timecode(self.position)+' / '+timecode(duration(self.document.data)))
@@ -829,14 +805,16 @@ class ProjectEditor(QWidget):
 
     def shutdown_preview(self):
         self.debounce.stop()
-        self.pending_preview = None
+        self._preview_pending, self._force_preview = False, False
         self.stage.clear()
+        if self.runtime:
+            self._position = self.runtime.position
+            self.runtime.close()
         self.preview.stop()
-        self.resume = None
-        self.playing = False
-        if self.preview_job:
-            self.hub.cancel(self.preview_job)
-            self.preview_job = None
+        if self.runtime:
+            self.runtime.deleteLater()
+            self.runtime = None
+        self._playing = False
 
     def leave(self):
         self.shutdown_preview()
