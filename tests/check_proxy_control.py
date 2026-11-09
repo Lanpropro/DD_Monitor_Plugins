@@ -17,6 +17,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 from types import SimpleNamespace
 import unittest
 import wave
@@ -177,12 +178,12 @@ class ConfigurationTests(unittest.TestCase):
                 controller.stop(announce=False)
                 controller.deleteLater()
 
-    def test_mixed_port_skips_tcp_candidate_with_occupied_udp_port(self):
+    def test_mixed_port_skips_udp_candidate_with_occupied_tcp_port(self):
         port = free_port(udp=True)
         candidates = []
         class CandidateSocket(socket.socket):
             def bind(self, address):
-                if self.type == socket.SOCK_STREAM and address[1] == 0:
+                if self.type == socket.SOCK_DGRAM and address[1] == 0:
                     if not candidates:
                         address = (address[0], port)
                     super().bind(address)
@@ -190,7 +191,7 @@ class ConfigurationTests(unittest.TestCase):
                     return
                 super().bind(address)
 
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as occupied:
+        with socket.socket() as occupied:
             occupied.bind(('127.0.0.1', port))
             with patch('check_proxy_plugin.core.socket.socket', CandidateSocket):
                 available = free_port(udp=True)
@@ -199,6 +200,18 @@ class ConfigurationTests(unittest.TestCase):
             self.assertNotEqual(available, port)
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
                 probe.bind(('127.0.0.1', available))
+
+    def test_mixed_port_avoids_fixed_udp_probes_rejected_by_windows(self):
+        class RestrictedUDP(socket.socket):
+            def bind(self, address):
+                if self.type == socket.SOCK_DGRAM and address[1] != 0:
+                    raise PermissionError('fixture: fixed UDP candidates denied')
+                super().bind(address)
+        with patch('check_proxy_plugin.core.socket.socket', RestrictedUDP):
+            port = free_port(udp=True)
+        with socket.socket() as tcp, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
+            tcp.bind(('127.0.0.1', port))
+            udp.bind(('127.0.0.1', port))
 
     def test_latency_defaults_match_flclash(self):
         config = core_config(10001, 10002, 'fixture-key')
@@ -586,7 +599,7 @@ class LatencyTests(unittest.TestCase):
                     self.send_header('Content-Length', str(len(body)))
                     self.end_headers()
                     self.wfile.write(body)
-                except (BrokenPipeError, ConnectionResetError):
+                except ConnectionError:
                     pass
                 finally:
                     with owner.lock:
@@ -1759,6 +1772,17 @@ class RealCoreTests(unittest.TestCase):
         self.core_trace = []
         self.core_failure = {}
         core = self.controller.core
+        start_core = core.start
+        def capture_start(*values, **options):
+            try:
+                return start_core(*values, **options)
+            except (OSError, ValueError) as error:
+                frame = traceback.extract_tb(error.__traceback__)[-1]
+                self.core_failure = dict(exception=type(error).__name__, errno=getattr(error, 'errno', None),
+                    winerror=getattr(error, 'winerror', None), file=Path(frame.filename).name,
+                    line=frame.lineno, function=frame.name)
+                raise
+        core.start = capture_start
         read_output, failure = core._read_output, core._failure
         def capture_output(process):
             self.core_trace.append(bytes(process.peek(8192)).decode('utf-8', errors='replace'))

@@ -16,13 +16,16 @@ from .profile_settings import merge_resolution
 
 def free_port(udp=False):
     for _ in range(32):
-        with socket.socket() as sock:
+        # Windows may reserve a UDP range independently of TCP. Let the UDP
+        # allocator avoid those ranges instead of testing 32 TCP candidates
+        # that can all land inside the same unavailable UDP range.
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM if udp else socket.SOCK_STREAM) as sock:
             sock.bind(('127.0.0.1', 0))
             port = sock.getsockname()[1]
             if udp:
-                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as datagram:
+                with socket.socket() as stream:
                     try:
-                        datagram.bind(('127.0.0.1', port))
+                        stream.bind(('127.0.0.1', port))
                     except OSError:
                         continue
             return port
