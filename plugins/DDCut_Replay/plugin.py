@@ -29,6 +29,7 @@ class DDCutReplay(api.Plugin):
         self.preview_server = None
         self._ticks = 0
         self.capture_mode = 'original'
+        self.inputs = None
 
     def on_load(self, context):
         self.context = context
@@ -73,6 +74,9 @@ class DDCutReplay(api.Plugin):
         if self.service is not None:
             self.preview_server = ArchiveServer()
             self.hub = TaskHub(Path(config.data_root()) / 'ddcut_replay')
+            from .rtmp_inputs import RtmpInputs, InputRecordingService
+            self.inputs = RtmpInputs(self.service,self.hub)
+            self.service = InputRecordingService(self.service,self.inputs)
             self.capture_mode = self.hub.preferences.get('capture_mode', 'original')
             if hasattr(self.service, 'register_backend'):
                 if self.capture_mode == 'original':
@@ -153,6 +157,10 @@ class DDCutReplay(api.Plugin):
 
     def poll(self):
         self._ticks += 1
+        if self.inputs:
+            self.inputs.poll()
+        if self.workspace and hasattr(self.workspace,'rtmp_page'):
+            self.workspace.rtmp_page.refresh()
         changed = False
         for job in self.hub.jobs:
             if job.delivered or job.future is None or not job.future.done():
@@ -210,6 +218,8 @@ class DDCutReplay(api.Plugin):
             self.workspace.deleteLater()
             self.workspace = None
         if self.hub:
+            if self.inputs:
+                self.inputs.close()
             self.hub.close()
         if self.preview_server:
             self.preview_server.close()

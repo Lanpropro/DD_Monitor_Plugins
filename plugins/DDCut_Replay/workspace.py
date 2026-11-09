@@ -155,6 +155,7 @@ class Workspace(QWidget):
         self.task_button = button('后台任务', self.toggle_tasks, header)
         self.projects_button = button('剪辑工程', self.show_projects, header)
         button('封面制作', self.open_cover, header)
+        button('RTMP输入', self.show_inputs, header)
         self.task_button.setCheckable(True)
         self.capture_switch = QCheckBox('仅录制切片素材')
         self.capture_switch.setChecked(getattr(owner, 'capture_mode', 'clip') == 'clip')
@@ -171,6 +172,9 @@ class Workspace(QWidget):
         self.build_library()
         self.build_review()
         self.build_projects()
+        from .rtmp_page import RtmpPage
+        self.rtmp_page = RtmpPage(self)
+        self.library_review.addWidget(self.rtmp_page)
         self.build_tasks()
         self.content.setStretchFactor(0, 1)
         self.status = QLabel()
@@ -697,6 +701,15 @@ class Workspace(QWidget):
         elif origin is self.listing:
             self.show_library()
 
+    def show_inputs(self):
+        self.cover_editor.shutdown()
+        self.preview.stop()
+        self.current, self.live_source = None, None
+        self.project_editor.shutdown_preview()
+        self.filters.hide()
+        self.library_review.setCurrentWidget(self.rtmp_page)
+        self.rtmp_page.refresh()
+
     def show_projects(self):
         self.cover_editor.shutdown()
         self.preview.stop()
@@ -1156,7 +1169,7 @@ class Workspace(QWidget):
         entry = self.source()
         if not entry:
             return
-        if getattr(self.owner, 'capture_mode', 'clip') == 'original':
+        if getattr(self.owner, 'capture_mode', 'clip') == 'original' and not entry['source_id'].startswith('rtmp:'):
             self.report('原版录制中；停止后可回看完整录像。')
             return
         if hasattr(self.service, 'live_recording'):
@@ -1178,10 +1191,10 @@ class Workspace(QWidget):
             self.report(error)
 
     def open_current_recording(self):
-        if self.library_review.currentWidget() in (self.project_page, self.project_editor, self.cover_editor):
+        if self.library_review.currentWidget() in (self.project_page, self.project_editor, self.cover_editor,self.rtmp_page):
             return
         entry = self.source() if self.sources.count() else None
-        if entry is not None and getattr(self.owner, 'capture_mode', 'clip') == 'original':
+        if entry is not None and getattr(self.owner, 'capture_mode', 'clip') == 'original' and not entry['source_id'].startswith('rtmp:'):
             self.report('原版录制中；停止后可在本页回看完整录像。')
             return
         if entry is not None:
