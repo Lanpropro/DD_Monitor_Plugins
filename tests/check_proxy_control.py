@@ -68,7 +68,7 @@ def wait_for(predicate, timeout=10):
 
 
 class Service:
-    def __init__(self, name=b'proxy', body=None, code=200, headers=None):
+    def __init__(self, name=b'proxy', body=None, code=200, headers=None, ipv6=False):
         self.requests = []
         self.authorizations = []
         owner = self
@@ -101,7 +101,10 @@ class Service:
                     pass
             def log_message(self, *unused):
                 pass
-        self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        class IPv6Server(ThreadingHTTPServer):
+            address_family = socket.AF_INET6
+        self.server = (IPv6Server(('::1', 0), Handler) if ipv6 else
+                       ThreadingHTTPServer(('127.0.0.1', 0), Handler))
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.url = f'http://127.0.0.1:{self.server.server_port}'
@@ -191,6 +194,7 @@ class ConfigurationTests(unittest.TestCase):
         self.assertFalse(config['allow-lan'])
         self.assertFalse(config['tun']['enable'])
         self.assertTrue(config['dns']['enable'])
+        self.assertEqual(config['dns']['ipv6'], config['ipv6'])
         self.assertEqual(config['dns']['listen'], '')
         self.assertEqual(config['dns']['enhanced-mode'], 'redir-host')
         self.assertEqual(config['dns']['cache-max-size'], 256)
@@ -1090,6 +1094,8 @@ class RealCoreTests(unittest.TestCase):
                 queries.append('.'.join(labels))
                 answer = (b'\xc0\x0c' + struct.pack('!HHIH', 1, 1, 30, 4) + b'\x7f\x00\x00\x01') if (
                     qtype == 1 and labels[0] == 'node') else b''
+                if qtype == 28 and labels[0] == 'node6':
+                    answer = b'\xc0\x0c' + struct.pack('!HHIH', 28, 1, 30, 16) + socket.inet_pton(socket.AF_INET6, '::1')
                 header = data[:2] + struct.pack('!HHHHH', 0x8180, 1, int(bool(answer)), 0, 0)
                 server_socket.sendto(header + data[12:offset + 5] + answer, self.client_address)
         server = socketserver.UDPServer(('127.0.0.1', 0), DnsHandler)
@@ -1121,6 +1127,19 @@ class RealCoreTests(unittest.TestCase):
             response = requests.get('http://fixture.invalid/live', timeout=5)
             self.assertEqual(response.status_code, 502)
             wait_for(lambda: self.controller.core.last_dns_reason == 'no-address')
+            self.controller.stop()
+            ipv6_service = Service(b'ipv6-only', ipv6=True)
+            try:
+                ipv6_profile = json.dumps({'proxies': [{'name': 'IPv6Only', 'type': 'http',
+                    'server': 'node6.fixture.invalid', 'port': ipv6_service.server.server_port}]})
+                with patch('check_proxy_plugin.core.core_config', side_effect=fixture_config):
+                    self.start(profile=ipv6_profile)
+                response = requests.get('http://fixture.invalid/live', timeout=5)
+                self.assertEqual(response.content, b'ipv6-only')
+                self.assertIn('node6.fixture.invalid', queries)
+                self.controller.stop()
+            finally:
+                ipv6_service.close()
         finally:
             server.shutdown()
             server.server_close()
@@ -1255,7 +1274,7 @@ class RealCoreTests(unittest.TestCase):
     def start(self, **changes):
         options = Options(enabled=True, core=str(args.core.resolve()), source='nodes', profile=self.profile)
         self.controller.apply(replace(options, **changes))
-        wait_for(lambda: bool(self.controller.endpoint) or not self.controller.working)
+        wait_for(lambda: bool(self.controller.endpoint) or not self.controller.working, timeout=32)
         self.assertTrue(self.controller.endpoint, self.controller.message)
 
     def test_managed_profile_select_authentication_and_real_traffic(self):

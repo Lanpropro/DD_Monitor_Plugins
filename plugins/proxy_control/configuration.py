@@ -68,7 +68,7 @@ def core_config(mixed_port, api_port, secret, routing='rule'):
               'mode': routing, 'log-level': 'warning', 'ipv6': True,
               'find-process-mode': 'off', 'tun': {'enable': False},
               'dns': {'enable': True, 'listen': '', 'enhanced-mode': 'redir-host',
-                      'ipv6': False, 'cache-algorithm': 'lru', 'cache-max-size': 256,
+                      'ipv6': True, 'cache-algorithm': 'lru', 'cache-max-size': 256,
                       'default-nameserver': ['223.5.5.5', '119.29.29.29'],
                       'nameserver': ['223.5.5.5', '119.29.29.29'],
                       'proxy-server-nameserver': ['223.5.5.5', '119.29.29.29'],
