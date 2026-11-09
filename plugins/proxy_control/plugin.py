@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 
+from PySide6.QtCore import QSize
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QToolButton
 from ddm.plugins import Plugin
@@ -84,12 +85,20 @@ class ProxyControl(Plugin):
             self.controller.latency.detail.connect(self.panel.model.set_detail)
             self.controller.testingChanged.connect(self.panel.set_testing)
             self.controller.prepared.connect(self.panel.core.setText)
+            monitor, page = self.controller.connections, self.panel.connections
+            page.activeChanged.connect(monitor.set_active)
+            page.refreshRequested.connect(monitor.refresh)
+            monitor.snapshot.connect(page.set_snapshot)
+            monitor.status.connect(page.state.setText)
+            self.controller.eventsChanged.connect(page.set_events)
+            page.set_events(list(self.controller.events))
             self.panel.set_profiles(self.controller.profiles, self.controller.options.profile_id)
             self.panel.set_nodes(*self.controller.node_snapshot())
             self.panel.set_running(bool(self.controller.endpoint))
             self.panel.set_status(self.controller.message)
             self.panel.set_busy(self.controller.working)
             self.controller._resources()
+            self._entry_icon()
         self.popover.show()
         self.action.setChecked(True)
 
@@ -99,6 +108,9 @@ class ProxyControl(Plugin):
 
     def _entry_icon(self, *_args):
         self.action.setIcon(QIcon(EntryIcon(self.entry)))
+        if self.panel is not None:
+            self.panel.brand.setPixmap(self.action.icon().pixmap(QSize(28, 28)))
+        self.entry.setToolTip('网络代理：运行中（仅本软件）' if self.entry.property('proxyRunning') else '网络代理：未启动')
 
     def on_unload(self):
         if self.controller is not None:

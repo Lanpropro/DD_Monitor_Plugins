@@ -8,7 +8,7 @@ import time
 import logging
 
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, QUrl, Signal, QByteArray
-from PySide6.QtNetwork import QNetworkAccessManager, QNetworkProxy, QNetworkRequest, QNetworkReply
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkProxy, QNetworkRequest, QNetworkReply, QTcpSocket
 
 from .configuration import core_config
 
@@ -42,6 +42,7 @@ class Core(QObject):
     failed = Signal(str)
     selected = Signal(str)
     modeChanged = Signal(str)
+    diagnostic = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -49,6 +50,8 @@ class Core(QObject):
         self.directory = None
         self.reply = None
         self.mode_reply = None
+        self.listener_probe = None
+        self._listener_ready = False
         self.manager = QNetworkAccessManager(self)
         self.manager.setProxy(QNetworkProxy(QNetworkProxy.NoProxy))
         self.timer = QTimer(self)
@@ -69,6 +72,7 @@ class Core(QObject):
         while self.port == mixed:
             self.port = free_port()
         self.endpoint = f'http://127.0.0.1:{mixed}'
+        self.mixed_port = mixed
         self.secret = secrets.token_urlsafe(32)
         config = core_config(mixed, self.port, self.secret, routing or options.routing)
         (directory / 'config.json').write_text(json.dumps(config), encoding='utf-8')
@@ -99,6 +103,7 @@ class Core(QObject):
             kind = error_category(line.decode('utf-8', errors='replace'))
             if kind and kind != self.last_diagnostic:
                 self.last_diagnostic = kind
+                self.diagnostic.emit(kind)
                 logging.getLogger('ddm.proxy_control').info('proxy core diagnostic kind=%s', kind)
 
     def _request(self, method, payload=None, path='/proxies/DDM'):
@@ -121,6 +126,14 @@ class Core(QObject):
             return
         if self.reply is not None:
             return
+        if not self._listener_ready:
+            if self.listener_probe is None:
+                probe = self.listener_probe = QTcpSocket(self)
+                probe.setProxy(QNetworkProxy(QNetworkProxy.NoProxy))
+                probe.connected.connect(lambda: self._listener_checked(probe, True))
+                probe.errorOccurred.connect(lambda _error: self._listener_checked(probe, False))
+                probe.connectToHost('127.0.0.1', self.mixed_port)
+            return
         if self._types_loaded and not self._global_selected:
             reply = self.reply = self._request('PUT', {'name': 'DDM'}, path='/proxies/GLOBAL')
             reply.finished.connect(lambda: self._global_ready(reply))
@@ -128,6 +141,14 @@ class Core(QObject):
         path = '/proxies/DDM' if self._types_loaded else '/providers/proxies/subscription'
         reply = self.reply = self._request('GET', path=path)
         reply.finished.connect(lambda: self._polled(reply))
+
+    def _listener_checked(self, probe, ready):
+        if self.listener_probe is not probe:
+            return
+        self.listener_probe = None
+        self._listener_ready = ready
+        probe.abort()
+        probe.deleteLater()
 
     def _global_ready(self, reply):
         if self.reply is not reply:
@@ -223,6 +244,11 @@ class Core(QObject):
 
     def stop(self):
         self.timer.stop()
+        probe, self.listener_probe = self.listener_probe, None
+        if probe is not None:
+            probe.abort()
+            probe.deleteLater()
+        self._listener_ready = False
         reply, self.mode_reply = self.mode_reply, None
         if reply is not None:
             reply.abort()

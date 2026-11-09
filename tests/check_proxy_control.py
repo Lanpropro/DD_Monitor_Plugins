@@ -9,6 +9,8 @@ import json
 import os
 import shutil
 import socket
+import socketserver
+import struct
 import subprocess
 from pathlib import Path
 import sys
@@ -68,8 +70,15 @@ def wait_for(predicate, timeout=10):
 class Service:
     def __init__(self, name=b'proxy', body=None, code=200, headers=None):
         self.requests = []
+        self.authorizations = []
         owner = self
         class Handler(BaseHTTPRequestHandler):
+            def handle(self):
+                try:
+                    super().handle()
+                except ConnectionResetError:
+                    pass  # The connection snapshot fixture closes its CONNECT socket.
+
             def do_CONNECT(self):
                 owner.requests.append(('CONNECT ' + self.path, self.headers.get('Proxy-Authorization')))
                 self.send_response(200, 'Connection established')
@@ -77,6 +86,7 @@ class Service:
                 self.close_connection = False
 
             def do_GET(self):
+                owner.authorizations.append(self.headers.get('Authorization'))
                 owner.requests.append((self.path, self.headers.get('Proxy-Authorization')))
                 payload = body if body is not None else name
                 self.send_response(code)
@@ -166,6 +176,11 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config['bind-address'], '127.0.0.1')
         self.assertFalse(config['allow-lan'])
         self.assertFalse(config['tun']['enable'])
+        self.assertTrue(config['dns']['enable'])
+        self.assertEqual(config['dns']['listen'], '')
+        self.assertEqual(config['dns']['enhanced-mode'], 'redir-host')
+        self.assertEqual(config['dns']['cache-max-size'], 256)
+        self.assertTrue(config['dns']['proxy-server-nameserver'])
         self.assertEqual(config['external-controller'], '127.0.0.1:10002')
         self.assertEqual(config['secret'], 'random-key')
         self.assertFalse(config['proxy-providers']['subscription']['health-check']['enable'])
@@ -401,7 +416,123 @@ class LatencyTests(unittest.TestCase):
         self.assertFalse(any(values[2] == 'ready' for values in self.events))
 
 
+class ConnectionTests(unittest.TestCase):
+    def test_snapshots_are_authenticated_bounded_and_only_requested_while_visible(self):
+        from check_proxy_plugin.connections import ConnectionMonitor
+        record = {'metadata': {'host': 'fixture.invalid', 'destinationPort': '443', 'network': 'tcp'},
+                  'chains': ['First', 'DDM'], 'rule': 'Match', 'upload': 12, 'download': 1024}
+        service = Service(body=json.dumps({'connections': [record] * 110}).encode())
+        monitor = ConnectionMonitor(SimpleNamespace(port=service.server.server_port, secret='fixture-key'))
+        rows, statuses = [], []
+        monitor.snapshot.connect(lambda *values: rows.append(values))
+        monitor.status.connect(statuses.append)
+        try:
+            monitor.set_running(True)
+            QTest.qWait(40)
+            self.assertFalse(service.requests)
+            monitor.set_active(True)
+            wait_for(lambda: any(total == 110 for _items, total in rows))
+            items, total = rows[-1]
+            self.assertEqual(len(items), 100)
+            self.assertEqual(items[0][0], 'fixture.invalid:443')
+            self.assertEqual(items[0][2], 'First → DDM')
+            self.assertEqual(service.authorizations, ['Bearer fixture-key'])
+            self.assertIn('Match', items[0][4])
+            self.assertIn('前 100', statuses[-1])
+            monitor.set_active(False)
+            self.assertFalse(monitor.timer.isActive())
+            self.assertIsNone(monitor.reply)
+            # Late results cannot restore rows or restart polling.
+            before = len(service.requests)
+            monitor.refresh()
+            QTest.qWait(40)
+            self.assertEqual(len(service.requests), before)
+        finally:
+            monitor.set_active(False)
+            monitor.deleteLater()
+            APP.processEvents()
+            service.close()
+
+    def test_oversized_response_pauses_monitor_and_drops_raw_data(self):
+        from check_proxy_plugin.connections import ConnectionMonitor, MAX_SNAPSHOT
+        service = Service(body=b'x' * (MAX_SNAPSHOT + 8192))
+        monitor = ConnectionMonitor(SimpleNamespace(port=service.server.server_port, secret='fixture-key'))
+        statuses = []
+        monitor.status.connect(statuses.append)
+        try:
+            monitor.set_running(True)
+            monitor.set_active(True)
+            wait_for(lambda: any('512 KiB' in message for message in statuses))
+            self.assertFalse(monitor.timer.isActive())
+            self.assertIsNone(monitor.reply)
+            self.assertFalse(monitor.buffer)
+        finally:
+            monitor.set_active(False)
+            monitor.deleteLater()
+            APP.processEvents()
+            service.close()
+
+    def test_parser_excludes_urls_credentials_and_reports_bad_payload(self):
+        from check_proxy_plugin.connections import connection_rows
+        rows, total = connection_rows({'connections': [{'metadata': {
+            'host': 'https://user:fixture-secret@host.invalid/path?token=private',
+            'destinationPort': '443'}, 'chains': ['First'], 'rule': 'Match'}]})
+        self.assertEqual(total, 1)
+        self.assertNotIn('fixture-secret', str(rows))
+        self.assertNotIn('token', str(rows))
+        with self.assertRaises(ValueError):
+            connection_rows({'connections': None})
+
+
 class InterfaceTests(unittest.TestCase):
+    def test_connections_page_pauses_on_hide_and_retains_bounded_events(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(module.config, 'data_root', return_value=root):
+            window = QWidget()
+            window.resize(1100, 800)
+            plugin = module.ProxyControl()
+            try:
+                plugin.on_load(SimpleNamespace(window=window, register_workspace_control=Mock()))
+                window.show()
+                plugin.toggle()
+                monitor = plugin.controller.connections
+                self.assertFalse(monitor.active)
+                plugin.panel.navigation.setCurrentRow(3)
+                self.assertTrue(monitor.active)
+                self.assertFalse(monitor.timer.isActive())
+                for index in range(80):
+                    plugin.controller._status(f'Fixture event {index}')
+                plugin.controller.core.diagnostic.emit('dns')
+                self.assertEqual(len(plugin.controller.events), 64)
+                self.assertIn('节点域名解析失败', plugin.panel.connections.events.toPlainText())
+                plugin.popover.hide()
+                self.assertFalse(monitor.active)
+                self.assertIsNone(monitor.reply)
+                self.assertEqual(len(plugin.controller.events), 64)
+            finally:
+                plugin.on_unload()
+                window.deleteLater()
+                APP.processEvents()
+
+    def test_running_icon_has_a_distinct_silhouette_and_brand_matches(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(module.config, 'data_root', return_value=root):
+            window = QWidget()
+            plugin = module.ProxyControl()
+            try:
+                plugin.on_load(SimpleNamespace(window=window, register_workspace_control=Mock()))
+                stopped = plugin.entry.icon().pixmap(28, 28).toImage()
+                plugin.toggle()
+                plugin.controller.runningChanged.emit(True)
+                running = plugin.entry.icon().pixmap(28, 28).toImage()
+                alpha = lambda image: sum(image.pixelColor(x, y).alpha() > 180
+                                          for x in range(28) for y in range(28))
+                self.assertGreater(alpha(running), alpha(stopped) * 1.4)
+                self.assertEqual(plugin.panel.brand.pixmap().toImage(), running)
+                self.assertIn('运行中', plugin.entry.toolTip())
+            finally:
+                plugin.on_unload()
+                window.deleteLater()
+                APP.processEvents()
+
     def test_rail_icon_distinguishes_open_and_running_and_clears_on_hide(self):
         from ddm import theme
         with tempfile.TemporaryDirectory() as root, patch.object(module.config, 'data_root', return_value=root):
@@ -461,7 +592,7 @@ class InterfaceTests(unittest.TestCase):
         finally:
             panel.deleteLater()
             APP.processEvents()
-    def test_popover_renders_three_pages_in_both_host_themes(self):
+    def test_popover_renders_four_pages_and_clips_child_surfaces_in_both_host_themes(self):
         from ddm import theme
         previous = theme.mode()
         window = QWidget()
@@ -484,7 +615,11 @@ class InterfaceTests(unittest.TestCase):
                 self.assertFalse(popover.grab().isNull())
                 self.assertIn(theme.SIDEBAR, panel.styleSheet())
                 self.assertIn(theme.ACCENT, panel.styleSheet())
-                for page in range(3):
+                self.assertFalse(popover.mask().contains(QPoint(0, 0)))
+                self.assertTrue(popover.mask().contains(popover.rect().center()))
+                self.assertTrue(popover.property('customControlSurface'))
+                self.assertEqual(panel.pages.count(), 4)
+                for page in range(4):
                     panel.navigation.setCurrentRow(page)
                     APP.processEvents()
                     self.assertFalse(popover.grab().isNull())
@@ -901,6 +1036,69 @@ class InterfaceTests(unittest.TestCase):
 
 @unittest.skipUnless(args.core, 'Pass --core for actual Mihomo process tests')
 class RealCoreTests(unittest.TestCase):
+    def test_connections_snapshot_shows_actual_core_route_and_stops_with_service(self):
+        self.start()
+        monitor = self.controller.connections
+        snapshots = []
+        monitor.snapshot.connect(lambda *values: snapshots.append(values))
+        connection = socket.create_connection(('127.0.0.1', urlsplit(self.controller.endpoint).port), timeout=3)
+        try:
+            connection.sendall(b'CONNECT fixture.invalid:443 HTTP/1.1\r\nHost: fixture.invalid:443\r\n\r\n')
+            self.assertIn(b'200', connection.recv(4096))
+            monitor.set_active(True)
+            wait_for(lambda: any(total > 0 for _rows, total in snapshots))
+            row = next(row for row in snapshots[-1][0] if 'fixture.invalid' in row[0])
+            self.assertIn('First', row[2])
+            self.assertTrue(row[4])
+            self.controller.stop()
+            self.assertFalse(monitor.timer.isActive())
+            self.assertIsNone(monitor.reply)
+            self.assertFalse(snapshots[-1][0])
+        finally:
+            connection.close()
+
+    def test_named_proxy_server_resolves_through_internal_dns_without_dns_listener(self):
+        from check_proxy_plugin.configuration import core_config as make_config
+        queries = []
+        class DnsHandler(socketserver.BaseRequestHandler):
+            def handle(self):
+                data, server_socket = self.request
+                offset, labels = 12, []
+                while data[offset]:
+                    length = data[offset]
+                    labels.append(data[offset + 1:offset + 1 + length].decode())
+                    offset += length + 1
+                qtype = struct.unpack('!H', data[offset + 1:offset + 3])[0]
+                queries.append('.'.join(labels))
+                answer = (b'\xc0\x0c' + struct.pack('!HHIH', 1, 1, 30, 4) + b'\x7f\x00\x00\x01') if qtype == 1 else b''
+                header = data[:2] + struct.pack('!HHHHH', 0x8180, 1, int(bool(answer)), 0, 0)
+                server_socket.sendto(header + data[12:offset + 5] + answer, self.client_address)
+        server = socketserver.UDPServer(('127.0.0.1', 0), DnsHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        def fixture_config(*args, **kwargs):
+            config = make_config(*args, **kwargs)
+            upstream = [f'udp://127.0.0.1:{server.server_address[1]}']
+            config['dns']['nameserver'] = upstream
+            config['dns']['proxy-server-nameserver'] = upstream
+            return config
+        profile = json.dumps({'proxies': [{'name': 'NamedNode', 'type': 'http', 'server': 'node.fixture.invalid',
+                             'port': self.first.server.server_port}]})
+        try:
+            with patch('check_proxy_plugin.core.core_config', side_effect=fixture_config):
+                self.start(profile=profile)
+            with socket.create_connection(('127.0.0.1', urlsplit(self.controller.endpoint).port), timeout=.5):
+                pass
+            response = requests.get('http://fixture.invalid/live', timeout=5)
+            self.assertEqual(response.content, b'first')
+            self.assertIn('node.fixture.invalid', queries)
+            import psutil
+            connections = psutil.Process(self.controller.core.process.processId()).net_connections(kind='inet')
+            self.assertFalse(any(connection.laddr.port in (53, 1053) for connection in connections))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
     def test_all_failed_latency_classifies_core_connection_error_without_enabling_proxy(self):
         profile = json.dumps({'proxies': [{'name': 'First', 'type': 'http',
                              'server': '127.0.0.1', 'port': free_port()}]})

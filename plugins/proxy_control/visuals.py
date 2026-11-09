@@ -31,6 +31,11 @@ def symbol(painter, name, rect, color):
             painter.drawRoundedRect(QRectF(4, y, 16, 6), 1.5, 1.5)
             painter.drawPoint(7, y + 3)
             painter.drawLine(11, y + 3, 17, y + 3)
+    elif name == 'connections':
+        painter.drawRoundedRect(QRectF(2, 8, 7, 8), 2, 2)
+        painter.drawRoundedRect(QRectF(15, 8, 7, 8), 2, 2)
+        painter.drawLine(9, 10, 15, 10)
+        painter.drawLine(9, 14, 15, 14)
     elif name == 'check':
         path = QPainterPath()
         path.moveTo(5, 12)

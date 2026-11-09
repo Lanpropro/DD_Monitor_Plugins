@@ -4,6 +4,8 @@ from dataclasses import replace
 import sys
 import logging
 from uuid import uuid4
+from collections import deque
+from datetime import datetime
 
 from PySide6.QtCore import QObject, QProcess, QTimer, Signal
 
@@ -15,6 +17,7 @@ from .latency import Latency
 from .prepare_core import URL, ASSET
 from .profiles import Profile, load_profiles, save_profiles
 from .metadata import display_name
+from .connections import ConnectionMonitor, ERRORS
 
 
 class Controller(QObject):
@@ -29,6 +32,7 @@ class Controller(QObject):
     routingChanged = Signal(str)
     testingChanged = Signal(bool)
     targetChanged = Signal(str)
+    eventsChanged = Signal(object)
 
     def __init__(self, directory, parent=None):
         super().__init__(parent)
@@ -47,6 +51,10 @@ class Controller(QObject):
         save_profiles(self.directory, self.profiles)
         save_options(self.directory, self.options)
         self.core = Core(self)
+        self.events = deque(maxlen=64)
+        self.connections = ConnectionMonitor(self.core, self)
+        self.runningChanged.connect(self.connections.set_running)
+        self.core.diagnostic.connect(lambda kind: self._event('连接错误：' + ERRORS[kind]))
         self.core.ready.connect(self._ready)
         self.core.failed.connect(self._failed)
         self.core.selected.connect(self._selected)
@@ -282,10 +290,7 @@ class Controller(QObject):
                                                    reachable, code, kind)
         self._release_test_core()
         self.testingChanged.emit(False)
-        explanation = {'dns': '节点域名解析失败', 'tls': 'TLS 握手或证书失败',
-                       'authentication': '节点鉴权失败', 'dependency': '节点引用的代理不存在',
-                       'refused': '连接被拒绝', 'unreachable': '网络不可达', 'timeout': '连接超时',
-                       'connection': '节点连接失败', 'unknown': '内核未提供具体原因'}[kind]
+        explanation = ERRORS[kind]
         self._status('目标地址可连接，但内核未返回有效延迟' if reachable else
                      f'延迟测试失败；当前预选节点诊断：{explanation}。不据此判定全部节点不可用')
 
@@ -379,7 +384,12 @@ class Controller(QObject):
 
     def _status(self, message):
         self.message = message
+        self._event(message)
         self.status.emit(message)
+
+    def _event(self, message):
+        self.events.append(datetime.now().strftime('%H:%M:%S') + '  ' + message)
+        self.eventsChanged.emit(list(self.events))
 
     def _trace(self, event):
         logging.getLogger('ddm.proxy_control').info('proxy event=%s mode=%s running=%s profiles=%d nodes=%d',
@@ -405,6 +415,7 @@ class Controller(QObject):
             self.resources.emit('内核进程已退出')
 
     def stop(self, announce=True):
+        self.connections.set_running(False)
         self.timer.stop()
         self.probe.cancel()
         self._test_names = None

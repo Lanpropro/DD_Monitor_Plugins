@@ -1,9 +1,10 @@
 """A bounded in-window panel anchored to the plugin rail button."""
-from PySide6.QtCore import QEvent, QPoint, Qt, Signal
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import QEvent, QPoint, QRectF, Qt, Signal
+from PySide6.QtGui import QKeySequence, QPainter, QPen, QRegion, QShortcut
 from PySide6.QtWidgets import QApplication, QFrame, QVBoxLayout, QWidget
 
 from ddm import theme
+from ddm.corner_geometry import continuous_path
 
 
 class Popover(QFrame):
@@ -15,6 +16,7 @@ class Popover(QFrame):
         self.setAttribute(Qt.WA_DontCreateNativeAncestors)
         self.setAttribute(Qt.WA_NativeWindow)
         self.setObjectName('ProxyPopover')
+        self.setProperty('customControlSurface', True)
         self.setMinimumSize(0, 0)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(1, 1, 1, 1)
@@ -28,8 +30,22 @@ class Popover(QFrame):
         self.hide()
 
     def refresh_theme(self, *_args):
-        self.setStyleSheet(f'#ProxyPopover {{background: {theme.SIDEBAR}; '
-                          f'border: 1px solid {theme.BORDER_STRONG}; border-radius: 12px;}}')
+        self.setStyleSheet('#ProxyPopover {background: transparent; border: none;}')
+        self.update()
+
+    def resizeEvent(self, event):
+        # Clip the native child and its opaque descendants, not just its QSS fill.
+        path = continuous_path(self.rect(), theme.RADIUS_LG)
+        self.setMask(QRegion(path.toFillPolygon().toPolygon()))
+        super().resizeEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setBrush(theme.qcolor(theme.SIDEBAR))
+        painter.setPen(QPen(theme.qcolor(theme.BORDER_STRONG), 1))
+        painter.drawPath(continuous_path(QRectF(self.rect()).adjusted(.5, .5, -.5, -.5), theme.RADIUS_LG))
+        painter.end()
 
     def _place(self):
         window = self.parentWidget()

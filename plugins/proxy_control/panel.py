@@ -17,6 +17,7 @@ from .configuration import Options
 from .node_list import NodeDelegate, NodeModel, NodeView
 from .visuals import NavigationDelegate, ProfileDelegate, ProfileList, icon, surface
 from .regions import display_node_name
+from .connection_page import ConnectionPage
 
 
 class Panel(QWidget):
@@ -54,7 +55,7 @@ class Panel(QWidget):
         rail_box = QVBoxLayout(rail)
         rail_box.setContentsMargins(8, 16, 8, 12)
         rail_box.setSpacing(16)
-        brand = QLabel()
+        brand = self.brand = QLabel()
         brand.setObjectName('ProxyBrand')
         brand.setPixmap(QIcon(str(Path(__file__).with_name('proxy.svg'))).pixmap(28, 28))
         brand.setFixedSize(44, 44)
@@ -66,7 +67,7 @@ class Panel(QWidget):
         self.navigation.setMouseTracking(True)
         self.navigation.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.navigation.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        for label, name in [('总览', 'overview'), ('代理', 'nodes'), ('配置', 'folder')]:
+        for label, name in [('总览', 'overview'), ('代理', 'nodes'), ('配置', 'folder'), ('连接', 'connections')]:
             item = QListWidgetItem(label)
             item.setData(Qt.UserRole, name)
             self.navigation.addItem(item)
@@ -100,6 +101,8 @@ class Panel(QWidget):
         self._build_dashboard(options)
         self._build_nodes()
         self._build_settings(options)
+        self.connections = ConnectionPage()
+        self.pages.addWidget(self.connections)
         self.navigation.currentRowChanged.connect(self._page_changed)
         self.navigation.setCurrentRow(0)
         self.status = QLabel('在“配置”中添加服务商订阅，即可启动代理')
@@ -411,7 +414,7 @@ class Panel(QWidget):
 
     def _page_changed(self, index):
         self.pages.setCurrentIndex(index)
-        self.title.setText(['总览', '代理', '配置'][index])
+        self.title.setText(['总览', '代理', '配置', '连接'][index])
 
     def _visibility(self):
         source = self.source.currentData()
@@ -622,6 +625,11 @@ class Panel(QWidget):
 #ProxyPanel {{background: {theme.BG}; color: {theme.TEXT1}; font-family: {theme.FONT_FAMILY}; font-size: {theme.FONT_CONTROL}px;}}
 #ProxyPanel QFrame#ProxyRail {{background: {theme.SIDEBAR}; border-right: 1px solid {theme.BORDER};}}
 #ProxyPanel QWidget#ProxyContent {{background: {theme.BG};}}
+#ProxyPanel QWidget#ProxyConnections {{background: {theme.BG};}}
+#ProxyPanel QTreeWidget#ProxyConnectionList {{background: {surface()}; color: {theme.TEXT1}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 10px; outline: none;}}
+#ProxyPanel QTreeWidget#ProxyConnectionList::item {{padding: 5px 3px;}}
+#ProxyPanel QTreeWidget#ProxyConnectionList::item:selected {{background: {theme.ACCENT_SOFT}; color: {theme.TEXT1};}}
+#ProxyPanel QHeaderView::section {{background: {surface()}; color: {theme.TEXT2}; border: none; border-bottom: 1px solid {theme.BORDER}; padding: 4px;}}
 #ProxyPanel QLabel {{background: transparent; border: none; font-weight: 400;}}
 #ProxyPanel QLabel#ProxyBrand {{background: {surface()}; border-radius: 14px;}}
 #ProxyPanel QLabel#ProxyTitle {{font-size: 22px; font-weight: 600;}}
