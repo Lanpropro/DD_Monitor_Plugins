@@ -42,7 +42,7 @@ spec = importlib.util.spec_from_file_location('check_proxy_plugin', ROOT / 'plug
 module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
-from check_proxy_plugin.configuration import Options, TEST_TARGETS, core_config, load_options, save_options, subscription_url
+from check_proxy_plugin.configuration import Options, TEST_TARGETS, USER_AGENTS, core_config, load_options, save_options, subscription_url
 from check_proxy_plugin.environment import Environment, KEYS
 from check_proxy_plugin.controller import Controller
 from check_proxy_plugin.network import Download
@@ -120,6 +120,24 @@ class Service:
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_flclash_download_preset_advertises_client_and_clash_verge_compatibility(self):
+        agent = dict(USER_AGENTS)['FlClash']
+        service = Service()
+        download = Download()
+        finished = []
+        download.finished.connect(lambda *values: finished.append(values))
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                download.start(service.url, Path(directory) / 'fixture', 1024, user_agent=agent)
+                wait_for(lambda: bool(finished))
+                sent = service.user_agents[-1]
+                self.assertIn('FlClash/v0.8.94', sent)
+                self.assertIn('clash-verge', sent.split())
+                self.assertIn('Platform/windows', sent.split())
+            finally:
+                download.cancel()
+                download.deleteLater()
+                service.close()
     def test_subscription_quota_handles_missing_unlimited_overage_and_invalid_values(self):
         self.assertEqual(parse_userinfo('upload=-1; download=NaN; total=1e9; expire=abc'), {})
         self.assertEqual(parse_userinfo('total=' + '9' * 100), {})
@@ -1600,6 +1618,14 @@ class InterfaceTests(unittest.TestCase):
 
 @unittest.skipUnless(args.core, 'Pass --core for actual Mihomo process tests')
 class RealCoreTests(unittest.TestCase):
+    def test_vless_nodes_load_with_provider_suffix_and_protocol_intact(self):
+        profile = json.dumps({'proxies': [dict(name='Fixture [V]', type='vless', server='127.0.0.1',
+            port=self.first.server.server_port, uuid='00000000-0000-4000-8000-000000000001')]})
+        self.start(profile=profile)
+        self.assertEqual(self.controller.core.nodes, ['Fixture [V]'])
+        self.assertEqual(self.controller.core.types['Fixture [V]'].casefold(), 'vless')
+        self.assertEqual(display_node_name('Fixture [V]'), 'Fixture [V]')
+
     def test_unified_latency_reuses_connection_for_second_head(self):
         connections = []
         class Handler(BaseHTTPRequestHandler):
