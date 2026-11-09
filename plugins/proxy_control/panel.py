@@ -30,6 +30,7 @@ class Panel(QWidget):
     autoStartRequested = Signal(bool)
     catalogRequested = Signal()
     routingRequested = Signal(str)
+    targetRequested = Signal(str)
 
     def __init__(self, options, parent=None):
         super().__init__(parent)
@@ -245,7 +246,18 @@ class Panel(QWidget):
         self.test.clicked.connect(lambda: self.testRequested.emit(list(self.model.visible)))
         toolbar.addWidget(self.test)
         box.addLayout(toolbar)
-        box.addWidget(self.count)
+        test_options = QHBoxLayout()
+        test_options.addWidget(self.count, 1)
+        test_options.addWidget(QLabel('检测地址'))
+        self.test_target = SelectControl()
+        self.test_target.setMaximumWidth(180)
+        self.test_target.addItem('Google 204', 'google')
+        self.test_target.addItem('YouTube 204', 'youtube')
+        self.test_target.setCurrentIndex(self.test_target.findData(self._saved_options.test_target))
+        self.test_target.setToolTip('默认与 FlClash 一致：Google 204，单节点最多等待 8 秒')
+        self.test_target.activated.connect(lambda index: self.targetRequested.emit(self.test_target.itemData(index)))
+        test_options.addWidget(self.test_target)
+        box.addLayout(test_options)
         self.nodes = NodeView()
         self.nodes.setModel(self.model)
         self.nodes.setItemDelegate(NodeDelegate(self.nodes))
@@ -436,7 +448,8 @@ class Panel(QWidget):
             self.set_status('请先填写订阅地址、配置文件或节点链接，再点击导入按钮。')
             return
         self.applyRequested.emit(replace(self._saved_options, core=self.core.text().strip(),
-                                        auto_start=self.auto_start.isChecked(), routing=self.routing.value()))
+                                        auto_start=self.auto_start.isChecked(), routing=self.routing.value(),
+                                        test_target=self.test_target.currentData()))
 
     def _confirm_import(self):
         if self._busy:
@@ -460,7 +473,8 @@ class Panel(QWidget):
                        node=(self.model.active if self._edit_id == self._saved_options.profile_id else
                              next((profile.node for profile in self._profiles if profile.id == self._edit_id), '')),
                        profile_id=self._edit_id, profile_name=self.profile_name.text().strip() or '我的配置',
-                       auto_start=self.auto_start.isChecked(), routing=self.routing.value())
+                       auto_start=self.auto_start.isChecked(), routing=self.routing.value(),
+                       test_target=self.test_target.currentData())
 
     def _new_profile(self):
         self.configuration_views.setCurrentIndex(1)
@@ -576,6 +590,11 @@ class Panel(QWidget):
         self._testing = running
         self.test.setText('停止测试' if running else '测延迟')
         self.test.setEnabled(running or bool(self.model.visible))
+        self.test_target.setEnabled(not running and not self._busy)
+
+    def set_test_target(self, target):
+        self._saved_options.test_target = target
+        self.test_target.setCurrentIndex(self.test_target.findData(target))
 
     def set_busy(self, busy):
         self._busy = busy
@@ -586,6 +605,7 @@ class Panel(QWidget):
             widget.setEnabled(not busy)
         self.activate_profile.setEnabled(bool(self._profiles) and not busy)
         self.routing.setEnabled(not busy)
+        self.test_target.setEnabled(not busy and not self._testing)
         self.add_subscription.setEnabled(not busy)
         self.quick_node.setEnabled(not busy and bool(self.model.records))
         self.nodes.setEnabled(not busy)

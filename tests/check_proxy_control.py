@@ -20,7 +20,7 @@ import unittest
 import wave
 from unittest.mock import Mock, patch
 from urllib.request import getproxies
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
@@ -44,7 +44,7 @@ from check_proxy_plugin.environment import Environment, KEYS
 from check_proxy_plugin.controller import Controller
 from check_proxy_plugin.network import Download
 from check_proxy_plugin.prepare_core import install, ASSET
-from check_proxy_plugin.core import free_port
+from check_proxy_plugin.core import error_category, free_port
 from check_proxy_plugin.node_list import NodeModel, NODE_ROLE, ACTIVE_ROLE
 from check_proxy_plugin.panel import Panel
 from check_proxy_plugin.latency import Latency
@@ -103,6 +103,15 @@ class Service:
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_core_error_categories_never_return_raw_sensitive_details(self):
+        for line, expected in (
+            ('level=warning msg="dial error: lookup private.example: no such host secret=fixture-secret"', 'dns'),
+            ('level=warning msg="error: x509 certificate failed for fixture-secret"', 'tls'),
+            ('level=warning msg="error: target machine actively refused it"', 'refused'),
+            ('level=info msg="configuration loaded"', ''),
+        ):
+            self.assertEqual(error_category(line), expected)
+            self.assertNotIn('fixture-secret', error_category(line))
     def test_region_flags_follow_names_and_taiwan_always_uses_china(self):
         for name in ('台湾 01', '台灣 02', '台北 03', 'TW04', 'Taiwan 05', '🇹🇼 06', '🇺🇸台湾 07'):
             with self.subTest(name=name):
@@ -329,6 +338,9 @@ class LatencyTests(unittest.TestCase):
         self.active, self.peak = 0, 0
         self.lock = threading.Lock()
         self.auth = []
+        self.queries = []
+        self.details = []
+        self.latency.detail.connect(lambda *values: self.details.append(values))
         owner = self
         class Api(BaseHTTPRequestHandler):
             def do_GET(self):
@@ -336,6 +348,7 @@ class LatencyTests(unittest.TestCase):
                     owner.active += 1
                     owner.peak = max(owner.peak, owner.active)
                     owner.auth.append(self.headers.get('Authorization'))
+                    owner.queries.append(parse_qs(urlsplit(self.path).query))
                 try:
                     threading.Event().wait(.08)
                     failed = '/Bad/' in unquote(urlsplit(self.path).path)
@@ -373,6 +386,9 @@ class LatencyTests(unittest.TestCase):
         self.assertLessEqual(self.peak, 2)
         self.assertEqual(set(self.auth), {'Bearer fixture-key'})
         self.assertNotIn('fixture-secret', str(finished))
+        self.assertEqual(self.queries[0]['url'], ['https://www.gstatic.com/generate_204'])
+        self.assertEqual(self.queries[0]['timeout'], ['8000'])
+        self.assertIn(('Bad', '检测失败（503）'), self.details)
 
     def test_cancel_stops_queued_requests_and_ignores_late_replies(self):
         self.latency.start(self.server.server_port, 'fixture-key', ['First', 'Second', 'Third'])
@@ -885,6 +901,49 @@ class InterfaceTests(unittest.TestCase):
 
 @unittest.skipUnless(args.core, 'Pass --core for actual Mihomo process tests')
 class RealCoreTests(unittest.TestCase):
+    def test_all_failed_latency_classifies_core_connection_error_without_enabling_proxy(self):
+        profile = json.dumps({'proxies': [{'name': 'First', 'type': 'http',
+                             'server': '127.0.0.1', 'port': free_port()}]})
+        self.start(profile=profile)
+        self.controller.stop()
+        original = {key: os.environ.get(key) for key in KEYS}
+        start = self.controller.latency.start
+        def local_start(port, secret, names, **_options):
+            start(port, secret, names, target='http://fixture.invalid/probe')
+        with patch.object(self.controller.latency, 'start', side_effect=local_start), \
+                self.assertLogs('ddm.proxy_control', level='INFO') as logs:
+            self.controller.test_nodes(['First'])
+            wait_for(lambda: self.controller.core.process is None and
+                     '当前预选节点诊断' in self.controller.message, timeout=15)
+        self.assertIn('连接被拒绝', self.controller.message)
+        self.assertIn('不据此判定全部节点不可用', self.controller.message)
+        self.assertFalse(self.controller.endpoint)
+        self.assertEqual({key: os.environ.get(key) for key in KEYS}, original)
+        self.assertTrue(any('kind=refused' in line for line in logs.output))
+        self.assertNotIn('fixture.invalid', str(logs.output))
+
+    def test_diagnostic_probe_can_be_cancelled_without_late_restart(self):
+        profile = json.dumps({'proxies': [{'name': 'First', 'type': 'http',
+                             'server': '127.0.0.1', 'port': free_port()}]})
+        self.start(profile=profile)
+        self.controller.stop()
+        cancelled = []
+        def cancel_probe(_reply):
+            cancelled.append(True)
+            self.controller.cancel_tests()
+        self.controller.probe.manager.finished.connect(cancel_probe)
+        start = self.controller.latency.start
+        def local_start(port, secret, names, **_options):
+            start(port, secret, names, target='http://fixture.invalid/probe')
+        with patch.object(self.controller.latency, 'start', side_effect=local_start):
+            self.controller.test_nodes(['First'])
+            wait_for(lambda: bool(cancelled))
+        QTest.qWait(100)
+        self.assertIsNone(self.controller.core.process)
+        self.assertIsNone(self.controller.probe.reply)
+        self.assertFalse(self.controller.working)
+        self.assertFalse(self.controller.endpoint)
+        self.assertIn('诊断已取消', self.controller.message)
     def test_latency_works_while_stopped_without_enabling_proxy_and_releases_core(self):
         self.start()
         self.controller.stop()
@@ -894,7 +953,7 @@ class RealCoreTests(unittest.TestCase):
         self.controller.runningChanged.connect(running.append)
         self.controller.testingChanged.connect(testing.append)
         start = self.controller.latency.start
-        def local_start(port, secret, names):
+        def local_start(port, secret, names, **_options):
             start(port, secret, names, target='http://fixture.invalid/probe')
         with patch.object(self.controller.latency, 'start', side_effect=local_start), \
                 patch.object(self.controller.environment, 'apply') as apply:
@@ -937,7 +996,7 @@ class RealCoreTests(unittest.TestCase):
                 self.controller.cancel_tests()
         self.controller.latency.result.connect(cancel_after_result)
         start = self.controller.latency.start
-        def local_start(port, secret, names):
+        def local_start(port, secret, names, **_options):
             start(port, secret, names, target='http://fixture.invalid/probe')
         with patch.object(self.controller.latency, 'start', side_effect=local_start):
             self.controller.test_nodes(['First', 'Second'])

@@ -6,6 +6,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 MAX_PROFILE = 4 * 1024 * 1024
+TEST_TARGETS = {'google': 'https://www.gstatic.com/generate_204',
+                'youtube': 'https://www.youtube.com/generate_204'}
 DOMESTIC_DOMAINS = ('bilibili.com', 'biliapi.net', 'biliapi.com', 'bilivideo.com', 'bilivideo.cn',
                     'hdslb.com', 'acgvideo.com', 'huya.com', 'huyacdn.com', 'msstatic.com',
                     'douyu.com', 'douyucdn.cn', 'douyuscdn.com', 'douyin.com', 'douyincdn.com',
@@ -38,8 +40,11 @@ class Options:
     profile_name: str = '我的配置'
     auto_start: bool = True
     routing: str = 'rule'
+    test_target: str = 'google'
 
     def validate(self):
+        if self.test_target not in TEST_TARGETS:
+            raise ValueError('请选择有效的检测地址')
         if self.routing not in ('rule', 'global', 'direct'):
             raise ValueError('请选择规则、全局或直连模式')
         if self.source == 'url':
@@ -60,7 +65,7 @@ class Options:
 def core_config(mixed_port, api_port, secret, routing='rule'):
     config = {'mixed-port': mixed_port, 'bind-address': '127.0.0.1', 'allow-lan': False,
               'external-controller': f'127.0.0.1:{api_port}', 'secret': secret,
-              'mode': routing, 'log-level': 'silent', 'ipv6': True,
+              'mode': routing, 'log-level': 'warning', 'ipv6': True,
               'find-process-mode': 'off', 'tun': {'enable': False}, 'dns': {'enable': False},
               'profile': {'store-selected': False, 'store-fake-ip': False},
               'rules': [f'DOMAIN-SUFFIX,{domain},DIRECT' for domain in DOMESTIC_DOMAINS] +

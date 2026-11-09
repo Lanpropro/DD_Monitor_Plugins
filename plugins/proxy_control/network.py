@@ -24,6 +24,46 @@ def qt_proxy(address):
                          unquote(parts.username or ''), unquote(parts.password or ''))
 
 
+class ConnectionProbe(QObject):
+    """One bounded HEAD request through the temporary core, without global routing."""
+    finished = Signal(bool, int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.manager = QNetworkAccessManager(self)
+        self.reply = None
+
+    def start(self, endpoint, target):
+        self.cancel()
+        self.manager.setProxy(qt_proxy(endpoint))
+        request = QNetworkRequest(QUrl(target))
+        request.setTransferTimeout(10000)
+        reply = self.reply = self.manager.head(request)
+        reply.setReadBufferSize(2048)
+        reply.finished.connect(lambda: self._finished(reply))
+
+    def _finished(self, reply):
+        if self.reply is not reply:
+            return
+        code = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute) or 0
+        reachable = reply.error() == QNetworkReply.NoError and 200 <= code < 400
+        # Let the core's pipe deliver its sanitized connection error first.
+        QTimer.singleShot(40, lambda: self._complete(reply, reachable, code))
+
+    def _complete(self, reply, reachable, code):
+        if self.reply is not reply:
+            return
+        self.reply = None
+        reply.deleteLater()
+        self.finished.emit(reachable, code)
+
+    def cancel(self):
+        reply, self.reply = self.reply, None
+        if reply is not None:
+            reply.abort()
+            reply.deleteLater()
+
+
 class Download(QObject):
     finished = Signal(object, str)
 

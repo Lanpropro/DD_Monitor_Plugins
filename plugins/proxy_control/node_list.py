@@ -46,7 +46,7 @@ class NodeModel(QAbstractListModel):
         if role == Qt.DisplayRole:
             return name
         if role == Qt.ToolTipRole:
-            return display_node_name(name)
+            return display_node_name(name) + ('\n' + record['detail'] if record.get('detail') else '')
         if role == Qt.AccessibleTextRole:
             return f'{display_node_name(name)}，{record["type"]}，{delay_text(record)}' + ('，已选择' if name == self.active else '')
         if role == NODE_ROLE:
@@ -80,15 +80,22 @@ class NodeModel(QAbstractListModel):
         if name not in self.records:
             return
         self.records[name].update(delay=delay, state=state)
+        if state in ('testing', 'idle', 'ready'):
+            self.records[name].pop('detail', None)
         if name in self.visible:
             index = self.index(self.visible.index(name))
             self.dataChanged.emit(index, index, [NODE_ROLE, Qt.AccessibleTextRole])
+
+    def set_detail(self, name, detail):
+        if name in self.records:
+            self.records[name]['detail'] = detail
 
 
 def delay_text(record):
     if record['state'] == 'ready':
         return f'{record["delay"]} ms'
-    return {'idle': '未测试', 'testing': '测试中…', 'failed': '不可用', 'timeout': '超时'}.get(record['state'], '未测试')
+    return {'idle': '未测试', 'testing': '测试中…', 'failed': record.get('detail', '测试失败'),
+            'timeout': '超时'}.get(record['state'], '未测试')
 
 
 class NodeDelegate(QStyledItemDelegate):

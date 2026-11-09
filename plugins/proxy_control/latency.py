@@ -6,11 +6,13 @@ from urllib.parse import quote, urlencode
 
 from PySide6.QtCore import QObject, QUrl, Signal
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkProxy, QNetworkRequest, QNetworkReply
+from .configuration import TEST_TARGETS
 
 
 class Latency(QObject):
     result = Signal(str, object, str)
     running = Signal(bool)
+    detail = Signal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -20,9 +22,10 @@ class Latency(QObject):
         self.pending = deque()
         self.testing = False
 
-    def start(self, port, secret, names, target='https://www.youtube.com/generate_204'):
+    def start(self, port, secret, names, target=TEST_TARGETS['google'], timeout_ms=8000):
         self.stop()
         self.port, self.secret, self.target = port, secret, target
+        self.timeout_ms = timeout_ms
         self.pending = deque(dict.fromkeys(names))
         self.testing = bool(self.pending)
         self.running.emit(self.testing)
@@ -31,11 +34,11 @@ class Latency(QObject):
     def _next(self):
         while self.pending and len(self.active) < 2:
             name = self.pending.popleft()
-            query = urlencode({'url': self.target, 'timeout': 3000})
+            query = urlencode({'url': self.target, 'timeout': self.timeout_ms})
             request = QNetworkRequest(QUrl(f'http://127.0.0.1:{self.port}/providers/proxies/subscription/'
                                           f'{quote(name, safe="")}/healthcheck?{query}'))
             request.setRawHeader(b'Authorization', ('Bearer ' + self.secret).encode())
-            request.setTransferTimeout(4500)
+            request.setTransferTimeout(self.timeout_ms + 2000)
             reply = self.manager.get(request)
             reply.setReadBufferSize(2048)
             self.active[reply] = name
@@ -50,7 +53,8 @@ class Latency(QObject):
         if name is None:
             return
         delay = None
-        state = 'timeout' if reply.error() == QNetworkReply.TimeoutError else 'failed'
+        code = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute) or 0
+        state = 'timeout' if reply.error() == QNetworkReply.TimeoutError or code == 504 else 'failed'
         if reply.error() == QNetworkReply.NoError:
             try:
                 value = json.loads(bytes(reply.readAll())).get('delay')
@@ -59,8 +63,11 @@ class Latency(QObject):
             except (ValueError, AttributeError):
                 pass
         if state != 'ready':
+            detail = ('测试超时' if state == 'timeout' else
+                      {401: '内核鉴权失败', 404: '节点接口未找到', 503: '检测失败（503）'}.get(code, '测试失败'))
+            self.detail.emit(name, detail)
             logging.getLogger('ddm.proxy_control').info('proxy latency error http=%s transport=%s',
-                reply.attribute(QNetworkRequest.HttpStatusCodeAttribute) or 0, reply.error().value)
+                code, reply.error().value)
         reply.deleteLater()
         self.result.emit(name, delay, state)
         self._next()

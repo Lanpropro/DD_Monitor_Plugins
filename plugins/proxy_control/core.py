@@ -5,6 +5,7 @@ import secrets
 import socket
 import tempfile
 import time
+import logging
 
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, QUrl, Signal, QByteArray
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkProxy, QNetworkRequest, QNetworkReply
@@ -16,6 +17,24 @@ def free_port():
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         return sock.getsockname()[1]
+
+
+def error_category(line):
+    text = line.casefold()
+    if not any(marker in text for marker in ('error', 'failed', 'failure')):
+        return ''
+    for kind, markers in (
+        ('dns', ('dns', 'lookup', "couldn't find ip", 'no such host')),
+        ('tls', ('tls', 'x509', 'certificate', 'handshake')),
+        ('authentication', ('authentication', 'password', 'unauthorized')),
+        ('dependency', ('dialer-proxy', 'proxy not found', 'proxy not exist')),
+        ('refused', ('connection refused', 'actively refused')),
+        ('unreachable', ('network is unreachable', 'no route to host')),
+        ('timeout', ('timeout', 'timed out', 'deadline exceeded')),
+    ):
+        if any(marker in text for marker in markers):
+            return kind
+    return 'connection'
 
 
 class Core(QObject):
@@ -41,7 +60,7 @@ class Core(QObject):
         self._global_selected = False
         self.current = ''
 
-    def start(self, options, root, environment, profile=b''):
+    def start(self, options, root, environment, profile=b'', routing=None):
         self.stop()
         self.preferred_node = options.node
         self.directory = tempfile.TemporaryDirectory(prefix='session-', dir=root)
@@ -51,7 +70,7 @@ class Core(QObject):
             self.port = free_port()
         self.endpoint = f'http://127.0.0.1:{mixed}'
         self.secret = secrets.token_urlsafe(32)
-        config = core_config(mixed, self.port, self.secret, options.routing)
+        config = core_config(mixed, self.port, self.secret, routing or options.routing)
         (directory / 'config.json').write_text(json.dumps(config), encoding='utf-8')
         (directory / 'nodes.txt').write_bytes(profile)
         process = self.process = QProcess(self)
@@ -59,14 +78,28 @@ class Core(QObject):
         for key, value in environment.items():
             env.insert(key, value)
         process.setProcessEnvironment(env)
-        process.setStandardOutputFile(QProcess.nullDevice())
-        process.setStandardErrorFile(QProcess.nullDevice())
+        self._output = b''
+        self.last_diagnostic = ''
+        process.setProcessChannelMode(QProcess.MergedChannels)
+        process.readyReadStandardOutput.connect(lambda: self._read_output(process))
         process.errorOccurred.connect(lambda error: self._failure(process, '代理内核无法启动，请检查程序路径')
                                      if error == QProcess.FailedToStart else None)
         process.finished.connect(lambda _code, _status: self._failure(process, '代理内核已退出，已恢复原有代理'))
         self.deadline = time.monotonic() + 30
         process.start(options.core, ['-d', str(directory), '-f', str(directory / 'config.json')])
         self.timer.start()
+
+    def _read_output(self, process):
+        if self.process is not process:
+            return
+        data = self._output + bytes(process.readAllStandardOutput())
+        lines = data.split(b'\n')
+        self._output = lines.pop()[-8192:]
+        for line in lines:
+            kind = error_category(line.decode('utf-8', errors='replace'))
+            if kind and kind != self.last_diagnostic:
+                self.last_diagnostic = kind
+                logging.getLogger('ddm.proxy_control').info('proxy core diagnostic kind=%s', kind)
 
     def _request(self, method, payload=None, path='/proxies/DDM'):
         request = QNetworkRequest(QUrl(f'http://127.0.0.1:{self.port}{path}'))
