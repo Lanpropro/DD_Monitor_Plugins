@@ -7,16 +7,16 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QFrame,
                                QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QPlainTextEdit,
-                               QPushButton, QScrollArea, QStackedWidget,
+                               QPushButton, QScrollArea, QSizePolicy, QStackedWidget,
                                QVBoxLayout, QWidget)
 
 from ddm import theme
 from ddm.ui import SegmentedControl, SelectControl, ToggleSwitch
 
 from .configuration import Options, DEFAULT_USER_AGENT, USER_AGENTS
-from .node_list import NodeDelegate, NodeModel, NodeView
-from .visuals import NavigationDelegate, ProfileDelegate, ProfileList, icon, surface
-from .regions import display_node_name
+from .node_list import NodeChoiceDelegate, NodeDelegate, NodeModel, NodeView
+from .visuals import NavigationDelegate, ProfileDelegate, ProfileList, icon, surface, translucent
+from .regions import display_node_name, flag_icon, region_code
 from .connection_page import ConnectionPage
 from .latency import MAX_CONCURRENT
 from .traffic import quota, expiry_text
@@ -157,17 +157,13 @@ class Panel(QWidget):
         self.apply = QPushButton('启动代理')
         self.apply.setObjectName('ProxyStart')
         self.apply.clicked.connect(self._start)
-        self.stop = QPushButton('停止')
-        self.stop.setEnabled(False)
-        self.stop.clicked.connect(self.stopRequested)
         actions.addWidget(self.apply, 1)
-        actions.addWidget(self.stop)
         service.addLayout(actions)
         settings = card('快捷设置', 'settings', 0, 1)
         restore_row = QHBoxLayout()
-        restore_row.addWidget(QLabel('启动时恢复'), 1)
-        self.auto_start = ToggleSwitch('启动时恢复代理')
-        self.auto_start.setToolTip('仅恢复退出前仍在运行的代理；点击停止后，下次不会自动连接')
+        restore_row.addWidget(QLabel('下次启动自动连接'), 1)
+        self.auto_start = ToggleSwitch('下次启动自动连接代理')
+        self.auto_start.setToolTip('开启后，退出软件时代理仍在运行，下次启动才自动连接。手动暂停后不会自动连接。')
         self.auto_start.setChecked(options.auto_start)
         self.auto_start.clicked.connect(self.autoStartRequested)
         restore_row.addWidget(self.auto_start)
@@ -186,6 +182,8 @@ class Panel(QWidget):
         self.quick_profile.setObjectName('ProxyInline')
         self.quick_profile.setPlaceholderText('先在配置页添加服务商')
         self.quick_profile.setMinimumWidth(0)
+        self.quick_profile.setMinimumContentsLength(14)
+        self.quick_profile.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.quick_profile.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.activate_profile = QPushButton('使用配置')
         self.activate_profile.setEnabled(False)
@@ -197,6 +195,11 @@ class Panel(QWidget):
         self.quick_node.setObjectName('ProxyInline')
         self.quick_node.setPlaceholderText('启动服务后可选择节点')
         self.quick_node.setMinimumWidth(0)
+        self.quick_node.setMinimumContentsLength(14)
+        self.quick_node.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.quick_node.setItemDelegate(NodeChoiceDelegate(self.model, self.quick_node))
+        self.quick_node.view().setMinimumWidth(280)
+        self.quick_node.setMaxVisibleItems(5)
         self.quick_node.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.quick_node.setEnabled(False)
         self.quick_node.activated.connect(lambda index: self.nodeRequested.emit(self.quick_node.itemData(index)))
@@ -464,6 +467,9 @@ class Panel(QWidget):
             self.core.setText(path)
 
     def _start(self):
+        if self._running or self._busy:
+            self.stopRequested.emit()
+            return
         if not self._saved_options.profile:
             self.navigation.setCurrentRow(2)
             self.configuration_views.setCurrentIndex(1)
@@ -590,7 +596,10 @@ class Panel(QWidget):
         self._filter(self.search.text())
         self.quick_node.clear()
         for name in nodes:
-            self.quick_node.addItem(display_node_name(name), name)
+            self.quick_node.addItem(flag_icon(region_code(name)) if region_code(name) else icon('globe'),
+                                    display_node_name(name), name)
+            self.quick_node.setItemData(self.quick_node.count() - 1,
+                                        display_node_name(name) + ' · ' + (types or {}).get(name, '代理节点'), Qt.ToolTipRole)
         self.quick_node.setCurrentIndex(self.quick_node.findData(selected))
         self.quick_node.setEnabled(bool(nodes) and not self._busy)
         self._visibility()
@@ -603,16 +612,21 @@ class Panel(QWidget):
         for name, record in self.model.records.items():
             delay, state, detail = results.get(name, (None, 'idle', ''))
             if (record['delay'], record['state'], record.get('detail', '')) != (delay, state, detail):
-                self.model.result(name, delay, state)
-                self.model.set_detail(name, detail)
+                self.set_result(name, delay, state, detail)
+        self.quick_node.view().viewport().update()
+
+    def set_result(self, name, delay, state, detail):
+        self.model.result(name, delay, state)
+        self.model.set_detail(name, detail)
+        self.quick_node.view().viewport().update()
 
     def set_running(self, running):
         self._running = running
         self.state.setText('运行中' if running else '未启动')
         self.state.setProperty('online', running)
         self.service_state.setText('运行中' if running else '尚未启动')
-        self.stop.setEnabled(running or self._busy)
-        self.apply.setText('重新载入' if running else '启动代理')
+        self.apply.setText('暂停代理' if running else '开启代理')
+        self.apply.setToolTip('暂停后恢复软件原有网络环境；已建立的连接请重新播放' if running else '开启内置代理，仅作用于本软件')
         self._filter(self.search.text())
         self.refresh_theme()
 
@@ -644,7 +658,8 @@ class Panel(QWidget):
 
     def set_busy(self, busy):
         self._busy = busy
-        self.apply.setEnabled(not busy)
+        self.apply.setEnabled(True)
+        self.apply.setText('取消准备' if busy else ('暂停代理' if self._running else '开启代理'))
         self.import_button.setEnabled(not busy)
         for widget in (self.source, self.location, self.profile, self.browse_profile, self.runtime,
                        self.profiles_list, self.profile_name, self.add_profile, self.agent):
@@ -655,7 +670,6 @@ class Panel(QWidget):
         self.add_subscription.setEnabled(not busy)
         self.quick_node.setEnabled(not busy and bool(self.model.records))
         self.nodes.setEnabled(not busy)
-        self.stop.setEnabled(busy or self._running)
         if busy:
             self.state.setText('准备中…')
             self.service_state.setText('正在准备服务…')
@@ -665,10 +679,10 @@ class Panel(QWidget):
 
     def refresh_theme(self, *_args):
         self.setStyleSheet(f'''
-#ProxyPanel {{background: {theme.BG}; color: {theme.TEXT1}; font-family: {theme.FONT_FAMILY}; font-size: {theme.FONT_CONTROL}px;}}
-#ProxyPanel QFrame#ProxyRail {{background: {theme.SIDEBAR}; border-right: 1px solid {theme.BORDER};}}
-#ProxyPanel QWidget#ProxyContent {{background: {theme.BG};}}
-#ProxyPanel QWidget#ProxyConnections {{background: {theme.BG};}}
+#ProxyPanel {{background: transparent; color: {theme.TEXT1}; font-family: {theme.FONT_FAMILY}; font-size: {theme.FONT_CONTROL}px;}}
+#ProxyPanel QFrame#ProxyRail {{background: {translucent(theme.SIDEBAR, 135)}; border-right: 1px solid {theme.BORDER};}}
+#ProxyPanel QWidget#ProxyContent {{background: transparent;}}
+#ProxyPanel QWidget#ProxyConnections {{background: transparent;}}
 #ProxyPanel QTreeWidget#ProxyConnectionList {{background: {surface()}; color: {theme.TEXT1}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 10px; outline: none;}}
 #ProxyPanel QTreeWidget#ProxyConnectionList::item {{padding: 5px 3px;}}
 #ProxyPanel QTreeWidget#ProxyConnectionList::item:selected {{background: {theme.ACCENT_SOFT}; color: {theme.TEXT1};}}
@@ -679,9 +693,9 @@ class Panel(QWidget):
 #ProxyPanel QLabel#ProxyValue {{font-size: 20px; font-weight: 500;}}
 #ProxyPanel QLabel#ProxyHint {{color: {theme.TEXT2}; font-size: {theme.FONT_CAPTION}px;}}
 #ProxyPanel QLabel#ProxyFooter {{color: {theme.TEXT3}; font-size: 11px;}}
-#ProxyPanel QLabel#ProxyState {{color: {theme.TEXT3}; background: {surface()}; border-radius: 10px; padding: 4px 8px; font-size: 11px;}}
-#ProxyPanel QLabel#ProxyState[online="true"] {{color: {theme.SUCCESS};}}
-#ProxyPanel QFrame#ProxyCard {{background: {surface()}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 16px;}}
+#ProxyPanel QLabel#ProxyState {{color: {theme.TEXT2}; background: {surface()}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 11px; padding: 5px 10px; font-size: 12px; font-weight: 600;}}
+#ProxyPanel QLabel#ProxyState[online="true"] {{color: {theme.SUCCESS}; background: {translucent(theme.SUCCESS, 28)}; border-color: {translucent(theme.SUCCESS, 110)};}}
+#ProxyPanel QFrame#ProxyCard {{background: {translucent(surface(), 165)}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 16px;}}
 #ProxyPanel QListView {{background: transparent; border: none; outline: none;}}
 #ProxyPanel QPushButton {{background: {surface()}; color: {theme.TEXT1}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 13px; padding: 5px 11px; min-height: 18px;}}
 #ProxyPanel QPushButton:hover {{background: {theme.CONTENT_HOVER};}}
@@ -693,14 +707,14 @@ class Panel(QWidget):
 #ProxyPanel QPlainTextEdit, #ProxyPanel QLineEdit {{background: {surface()}; color: {theme.TEXT1}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 12px; padding: 8px 10px;}}
 #ProxyPanel QPlainTextEdit:focus, #ProxyPanel QLineEdit:focus {{border-color: {theme.ACCENT};}}
 #ProxyPanel QComboBox {{background: {surface()}; color: {theme.TEXT1}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 12px; padding: 6px 8px; min-height: 18px;}}
-#ProxyPanel QComboBox#ProxyInline {{background: transparent; border: none; padding: 2px 0;}}
+#ProxyPanel QComboBox#ProxyInline {{background: {translucent(surface(), 190)}; border: 1px solid {theme.BORDER_STRONG}; padding: 6px 24px 6px 8px;}}
 #ProxyPanel QComboBox QLineEdit {{background: transparent; border: none; padding: 0;}}
 #ProxyPanel QComboBox::drop-down {{border: none; width: 20px;}}
 #ProxyPanel QScrollArea, #ProxyPanel QScrollArea > QWidget > QWidget {{background: transparent; border: none;}}
 ''')
         for label, name in self.card_icons:
             label.setPixmap(icon(name).pixmap(18, 18))
-        for button, name in ((self.close_button, 'close'), (self.apply, 'play'), (self.stop, 'stop'),
+        for button, name in ((self.close_button, 'close'), (self.apply, 'stop' if self._running or self._busy else 'play'),
                              (self.test, 'latency'), (self.add_profile, 'plus'),
                              (self.back_to_profiles, 'back'), (self.all_nodes, 'right')):
             button.setIcon(icon(name, theme.ACCENT if button is self.apply else theme.TEXT2))

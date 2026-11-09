@@ -35,6 +35,7 @@ class Controller(QObject):
     targetChanged = Signal(str)
     eventsChanged = Signal(object)
     resultsChanged = Signal(object)
+    resultChanged = Signal(str, object, str, str)
 
     def __init__(self, directory, parent=None):
         super().__init__(parent)
@@ -285,6 +286,9 @@ class Controller(QObject):
     def _begin_tests(self, names):
         names = [name for name in names if name in self.core.nodes]
         self._test_key = self._result_key()
+        for key in list(self._results):
+            if key[0] == self._test_key[0] and key[1:4] != self._test_key[1:4]:
+                del self._results[key]
         self._results[self._test_key] = {}
         self.resultsChanged.emit(self.result_snapshot())
         self._test_stats = {'total': len(names), 'done': 0, 'ready': 0, 'timeout': 0, 'failed': 0}
@@ -315,7 +319,8 @@ class Controller(QObject):
             records = self._results.setdefault(self._test_key, {})
             detail = records.get(name, (None, 'idle', ''))[2] if state in ('failed', 'timeout') else ''
             records[name] = (delay, state, detail)
-            self.resultsChanged.emit(self.result_snapshot())
+            if self._test_key == self._result_key():
+                self.resultChanged.emit(name, delay, state, detail)
         if state not in ('ready', 'timeout', 'failed') or not self._test_stats:
             return
         self._test_stats['done'] += 1

@@ -1,10 +1,11 @@
 """A bounded in-window panel anchored to the plugin rail button."""
 from PySide6.QtCore import QEvent, QPoint, QRectF, Qt, Signal
-from PySide6.QtGui import QKeySequence, QPainter, QPen, QRegion, QShortcut
+from PySide6.QtGui import QColor, QKeySequence, QLinearGradient, QPainter, QPen, QPixmap, QRegion, QShortcut
 from PySide6.QtWidgets import QApplication, QFrame, QVBoxLayout, QWidget
 
 from ddm import theme
 from ddm.corner_geometry import continuous_path
+from .material import background_sample
 
 
 class Popover(QFrame):
@@ -13,6 +14,7 @@ class Popover(QFrame):
     def __init__(self, panel, window, anchor):
         super().__init__(window, Qt.Widget)
         self.anchor = anchor
+        self.backdrop = QPixmap()
         self.setAttribute(Qt.WA_DontCreateNativeAncestors)
         self.setAttribute(Qt.WA_NativeWindow)
         self.setObjectName('ProxyPopover')
@@ -34,6 +36,7 @@ class Popover(QFrame):
         self.update()
 
     def resizeEvent(self, event):
+        self.backdrop = QPixmap()
         # Clip the native child and its opaque descendants, not just its QSS fill.
         path = continuous_path(self.rect(), theme.RADIUS_LG)
         self.setMask(QRegion(path.toFillPolygon().toPolygon()))
@@ -42,9 +45,21 @@ class Popover(QFrame):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setBrush(theme.qcolor(theme.SIDEBAR))
+        path = continuous_path(QRectF(self.rect()).adjusted(.5, .5, -.5, -.5), theme.RADIUS_LG)
+        painter.setClipPath(path)
+        if not self.backdrop.isNull():
+            painter.drawPixmap(self.rect(), self.backdrop)
+        tint = theme.qcolor(theme.SIDEBAR)
+        tint.setAlpha(226 if not self.backdrop.isNull() else 255)
+        painter.fillPath(path, tint)
+        sheen = QLinearGradient(0, 0, self.width(), self.height())
+        sheen.setColorAt(0, QColor(255, 255, 255, 26 if theme.is_light() else 16))
+        sheen.setColorAt(1, QColor(255, 255, 255, 0))
+        painter.fillPath(path, sheen)
+        painter.setClipping(False)
+        painter.setBrush(Qt.NoBrush)
         painter.setPen(QPen(theme.qcolor(theme.BORDER_STRONG), 1))
-        painter.drawPath(continuous_path(QRectF(self.rect()).adjusted(.5, .5, -.5, -.5), theme.RADIUS_LG))
+        painter.drawPath(path)
         painter.end()
 
     def _place(self):
@@ -61,7 +76,18 @@ class Popover(QFrame):
         QApplication.instance().installEventFilter(self)
         super().showEvent(event)
 
+    def show(self):
+        if self.isHidden():
+            self._place()
+            sample = background_sample(self.parentWidget(), self.geometry())
+            super().show()
+            self.backdrop = sample
+            self.update()
+        else:
+            super().show()
+
     def hideEvent(self, event):
+        self.backdrop = QPixmap()
         QApplication.instance().removeEventFilter(self)
         self.hidden.emit()
         super().hideEvent(event)

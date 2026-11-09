@@ -82,6 +82,7 @@ class ProxyControl(Plugin):
             self.controller.selectionChanged.connect(self.panel.select_node)
             self.controller.profilesChanged.connect(self.panel.set_profiles)
             self.controller.resultsChanged.connect(self.panel.set_results)
+            self.controller.resultChanged.connect(self.panel.set_result)
             self.controller.testingChanged.connect(self.panel.set_testing)
             self.controller.prepared.connect(self.panel.core.setText)
             monitor, page = self.controller.connections, self.panel.connections

@@ -11,6 +11,11 @@ def surface():
     return theme.CONTENT if theme.is_light() else theme.mix(theme.BG, theme.CONTENT, .3)
 
 
+def translucent(color, alpha):
+    value = theme.qcolor(color)
+    return f'rgba({value.red()}, {value.green()}, {value.blue()}, {alpha / 255:.3f})'
+
+
 def symbol(painter, name, rect, color):
     painter.save()
     painter.translate(rect.x(), rect.y())

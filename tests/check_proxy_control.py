@@ -722,6 +722,79 @@ class ConnectionTests(unittest.TestCase):
 
 
 class InterfaceTests(unittest.TestCase):
+    def test_overview_has_one_service_action_with_clear_pause_and_cancel_states(self):
+        panel = Panel(Options(profile='fixture', source='nodes'))
+        starts, stops = [], []
+        panel.applyRequested.connect(starts.append)
+        panel.stopRequested.connect(lambda: stops.append(True))
+        try:
+            panel.apply.click()
+            self.assertEqual(len(starts), 1)
+            panel.set_running(True)
+            self.assertEqual(panel.apply.text(), '暂停代理')
+            panel.apply.click()
+            self.assertEqual(len(stops), 1)
+            self.assertEqual(len(starts), 1)
+            panel.set_running(False)
+            panel.set_busy(True)
+            self.assertEqual(panel.apply.text(), '取消准备')
+            panel.apply.click()
+            self.assertEqual(len(stops), 2)
+            self.assertIn('手动暂停后不会自动连接', panel.auto_start.toolTip())
+            self.assertFalse(hasattr(panel, 'stop'))
+        finally:
+            panel.deleteLater()
+
+    def test_glass_samples_only_on_open_and_releases_background_on_hide(self):
+        from PySide6.QtGui import QPixmap
+        from check_proxy_plugin import popover as popover_module
+        window = QWidget()
+        window.resize(1100, 700)
+        panel = Panel(Options())
+        popover = module.Popover(panel, window, QToolButton(window))
+        sample = QPixmap(330, 240)
+        sample.fill(Qt.blue)
+        try:
+            window.show()
+            with patch.object(popover_module, 'background_sample', return_value=sample) as capture:
+                popover.show()
+                APP.processEvents()
+                self.assertFalse(popover.backdrop.isNull())
+                popover.grab()
+                popover.update()
+                APP.processEvents()
+                capture.assert_called_once()
+                popover.hide()
+                self.assertTrue(popover.backdrop.isNull())
+                popover.show()
+                self.assertEqual(capture.call_count, 2)
+                self.assertLessEqual(popover.backdrop.width(), 330)
+        finally:
+            popover.hide()
+            window.deleteLater()
+            APP.processEvents()
+
+    def test_selectors_expand_and_node_popup_reuses_protocol_and_latency_records(self):
+        from check_proxy_plugin.node_list import NodeChoiceDelegate
+        panel = Panel(Options())
+        panel.resize(658, 478)
+        panel.set_profiles([Profile('one', 'A long fixture service name', 'nodes', 'fixture')], 'one')
+        panel.set_nodes(['🇹🇼 台湾 01'], '🇹🇼 台湾 01', {'🇹🇼 台湾 01': 'Shadowsocks'})
+        panel.show()
+        APP.processEvents()
+        try:
+            self.assertGreater(panel.quick_profile.width(), 150)
+            self.assertFalse(panel.quick_node.itemIcon(0).isNull())
+            self.assertEqual(region_code(panel.quick_node.itemData(0)), 'cn')
+            delegate = panel.quick_node.itemDelegate()
+            self.assertIsInstance(delegate, NodeChoiceDelegate)
+            self.assertIs(delegate.nodes, panel.model)
+            panel.set_result('🇹🇼 台湾 01', 42, 'ready', '')
+            self.assertEqual(delegate.nodes.records['🇹🇼 台湾 01']['delay'], 42)
+        finally:
+            panel.hide()
+            panel.deleteLater()
+
     def test_session_results_survive_nodes_refresh_stop_and_isolate_targets_profiles(self):
         with tempfile.TemporaryDirectory() as directory:
             controller = Controller(directory)
@@ -731,6 +804,7 @@ class InterfaceTests(unittest.TestCase):
             controller.nodes.connect(lambda names, selected: (
                 panel.set_nodes(names, selected), panel.set_results(controller.result_snapshot())))
             controller.resultsChanged.connect(panel.set_results)
+            controller.resultChanged.connect(panel.set_result)
             try:
                 panel.set_nodes(['First'], 'First')
                 controller._test_key = controller._result_key()
@@ -780,6 +854,9 @@ class InterfaceTests(unittest.TestCase):
             self.assertFalse(panel.nodes.animation.isActive())
             panel.show()
             self.assertTrue(panel.nodes.animation.isActive())
+            with patch('check_proxy_plugin.node_list.motion_enabled', return_value=False):
+                panel.nodes._animate()
+                self.assertFalse(panel.nodes.animation.isActive())
             panel.set_results({'A': (42, 'ready', '')})
             self.assertFalse(panel.nodes.animation.isActive())
         finally:
@@ -977,7 +1054,7 @@ class InterfaceTests(unittest.TestCase):
                 theme.apply(mode)
                 APP.processEvents()
                 self.assertFalse(popover.grab().isNull())
-                self.assertIn(theme.SIDEBAR, panel.styleSheet())
+                self.assertIn(theme.TEXT1, panel.styleSheet())
                 self.assertIn(theme.ACCENT, panel.styleSheet())
                 self.assertFalse(popover.mask().contains(QPoint(0, 0)))
                 self.assertTrue(popover.mask().contains(popover.rect().center()))

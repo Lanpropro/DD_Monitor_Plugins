@@ -4,6 +4,7 @@ from PySide6.QtGui import QFont, QPainter, QPen
 from PySide6.QtWidgets import QListView, QStyledItemDelegate, QStyle
 
 from ddm import theme
+from ddm.motion import enabled as motion_enabled
 from .visuals import surface, symbol
 from .regions import display_node_name, flag_icon, region_code
 
@@ -32,7 +33,7 @@ class NodeView(QListView):
         model.modelReset.connect(self._animate)
 
     def _animate(self, *_args):
-        moving = self.isVisible() and any(record['state'] == 'testing' for record in self.model().records.values())
+        moving = self.isVisible() and motion_enabled() and any(record['state'] == 'testing' for record in self.model().records.values())
         if moving:
             self.animation.start()
         else:
@@ -180,4 +181,41 @@ class NodeDelegate(QStyledItemDelegate):
             painter.setBrush(Qt.NoBrush)
             painter.setPen(QPen(theme.qcolor(theme.ACCENT), 1, Qt.DotLine))
             painter.drawRoundedRect(rect.adjusted(3, 3, -3, -3), 6, 6)
+        painter.restore()
+
+
+class NodeChoiceDelegate(QStyledItemDelegate):
+    """Use the node page's records in the compact overview selector."""
+    def __init__(self, model, parent):
+        super().__init__(parent)
+        self.nodes = model
+
+    def sizeHint(self, option, index):
+        return QSize(280, 58)
+
+    def paint(self, painter, option, index):
+        record = self.nodes.records.get(index.data(Qt.UserRole))
+        if record is None:
+            return super().paint(painter, option, index)
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(option.rect)
+        if option.state & (QStyle.State_Selected | QStyle.State_MouseOver):
+            painter.fillRect(rect, theme.qcolor(theme.ACCENT_SOFT))
+        flag = QRectF(rect.left() + 10, rect.top() + 11, 24, 18)
+        if record['region']:
+            flag_icon(record['region']).paint(painter, flag.toRect())
+        else:
+            symbol(painter, 'globe', flag, theme.TEXT3)
+        painter.setFont(option.font)
+        painter.setPen(theme.qcolor(theme.TEXT1))
+        text = painter.fontMetrics().elidedText(display_node_name(record['name']), Qt.ElideRight, int(rect.width() - 52))
+        painter.drawText(rect.adjusted(44, 7, -8, -28), Qt.AlignVCenter, text)
+        font = QFont(option.font)
+        font.setPixelSize(theme.FONT_CAPTION)
+        painter.setFont(font)
+        painter.setPen(theme.qcolor(theme.TEXT2))
+        text = record['type'] + ' · ' + delay_text(record)
+        painter.drawText(rect.adjusted(44, 30, -8, -7), Qt.AlignVCenter,
+                         painter.fontMetrics().elidedText(text, Qt.ElideRight, int(rect.width() - 52)))
         painter.restore()
