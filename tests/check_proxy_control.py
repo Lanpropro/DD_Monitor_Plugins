@@ -181,6 +181,10 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config['dns']['enhanced-mode'], 'redir-host')
         self.assertEqual(config['dns']['cache-max-size'], 256)
         self.assertTrue(config['dns']['proxy-server-nameserver'])
+        # Node bootstrap must not depend on reaching an encrypted DNS hostname first.
+        for upstream in config['dns']['proxy-server-nameserver']:
+            socket.inet_pton(socket.AF_INET, upstream)
+        self.assertEqual(config['dns']['nameserver'], config['dns']['proxy-server-nameserver'])
         self.assertEqual(config['external-controller'], '127.0.0.1:10002')
         self.assertEqual(config['secret'], 'random-key')
         self.assertFalse(config['proxy-providers']['subscription']['health-check']['enable'])

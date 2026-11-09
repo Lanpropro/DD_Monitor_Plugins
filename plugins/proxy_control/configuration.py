@@ -70,8 +70,8 @@ def core_config(mixed_port, api_port, secret, routing='rule'):
               'dns': {'enable': True, 'listen': '', 'enhanced-mode': 'redir-host',
                       'ipv6': False, 'cache-algorithm': 'lru', 'cache-max-size': 256,
                       'default-nameserver': ['223.5.5.5', '119.29.29.29'],
-                      'nameserver': ['https://doh.pub/dns-query', 'https://dns.alidns.com/dns-query'],
-                      'proxy-server-nameserver': ['https://doh.pub/dns-query', 'https://dns.alidns.com/dns-query'],
+                      'nameserver': ['223.5.5.5', '119.29.29.29'],
+                      'proxy-server-nameserver': ['223.5.5.5', '119.29.29.29'],
                       'respect-rules': False},
               'profile': {'store-selected': False, 'store-fake-ip': False},
               'rules': [f'DOMAIN-SUFFIX,{domain},DIRECT' for domain in DOMESTIC_DOMAINS] +
