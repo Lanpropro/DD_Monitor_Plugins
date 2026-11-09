@@ -183,8 +183,8 @@ class ConfigurationTests(unittest.TestCase):
         candidates = []
         class CandidateSocket(socket.socket):
             def bind(self, address):
-                if self.type == socket.SOCK_DGRAM and address[1] == 0:
-                    if not candidates:
+                if self.type == socket.SOCK_DGRAM:
+                    if address[1] == 0:
                         address = (address[0], port)
                     super().bind(address)
                     candidates.append(self.getsockname()[1])

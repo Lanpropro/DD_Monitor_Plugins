@@ -15,12 +15,17 @@ from .profile_settings import merge_resolution
 
 
 def free_port(udp=False):
-    for _ in range(32):
+    for attempt in range(32):
         # Windows may reserve a UDP range independently of TCP. Let the UDP
-        # allocator avoid those ranges instead of testing 32 TCP candidates
-        # that can all land inside the same unavailable UDP range.
+        # allocator choose first. On a TCP conflict, spread subsequent probes
+        # beyond its narrow dynamic range; reversing allocators alone can
+        # repeatedly choose a UDP range that Windows excludes for TCP.
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM if udp else socket.SOCK_STREAM) as sock:
-            sock.bind(('127.0.0.1', 0))
+            candidate = 1024 + secrets.randbelow(65536 - 1024) if udp and attempt else 0
+            try:
+                sock.bind(('127.0.0.1', candidate))
+            except OSError:
+                continue
             port = sock.getsockname()[1]
             if udp:
                 with socket.socket() as stream:
