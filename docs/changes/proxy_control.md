@@ -14,6 +14,9 @@
 
 ## 集成与发布状态
 
+本批统一评审入口：[PR #66](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/66)，目标 develop，保留 Draft 等待新界面/交互验收；d0ec111 的已验收功能和本批调整沿用同一 PR，不将旧功能验收视为本批视觉通过。安装后根 run.cmd --check-sidebar-navigation 两项通过（20261110-015001-583890、20261110-015031-324996）。首次 Twitch 采样没有活动播放器，关联 PID 在 12 秒后退出，未收到完整回执；退出原因未确认，故没有实播改善结论，待用户保持 Twitch 播放后重新采集。
+
+
 2026-11-10 本批自动验证收拢：完整专项 90 项通过（117.6 秒，含实际 Mihomo/回环代理/mpv/FFmpeg）；贡献文档 13 项、全部插件包结构/源码一致性/临时安装装载、compileall 和差异检查通过。此前 88/89 项运行中的端口失败已保留在下文并针对性修复，最终未跳过失败用例。开发包已逐文件校验安装，SHA256 `5aed761af680ae8bbad2fcf27f04e7496e986dbcb898294db4c633e6587c777c`，正常经根 run.cmd 重启，未覆盖私人 profiles/preferences/runtime。宿主 08fd6ad0 提供按需 Twitch 播放采样，根诊断 14 项及 HLS 转发回归通过；实际 Twitch 卡顿结论和本批新界面人工验收仍待真实运行，不把回归结果当作性能改善。
 
 
