@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from uuid import uuid4
 from .metadata import display_name
+from .configuration import DEFAULT_USER_AGENT
 
 
 @dataclass(frozen=True)
@@ -15,6 +16,7 @@ class Profile:
     profile: str
     node: str = ''
     nodes: dict = field(default_factory=dict)
+    user_agent: str = DEFAULT_USER_AGENT
 
 
 def load_profiles(directory, options):
@@ -26,7 +28,7 @@ def load_profiles(directory, options):
         profiles = []
     if not profiles and options.profile:
         profiles = [Profile(options.profile_id or uuid4().hex, options.profile_name,
-                            options.source, options.profile, options.node)]
+                            options.source, options.profile, options.node, user_agent=options.user_agent)]
     return [replace(profile, name=display_name(profile.source, profile.profile))
             if profile.name in ('', '我的配置') else profile for profile in profiles]
 

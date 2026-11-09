@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QFrame
 from ddm import theme
 from ddm.ui import SegmentedControl, SelectControl, ToggleSwitch
 
-from .configuration import Options
+from .configuration import Options, DEFAULT_USER_AGENT, USER_AGENTS
 from .node_list import NodeDelegate, NodeModel, NodeView
 from .visuals import NavigationDelegate, ProfileDelegate, ProfileList, icon, surface
 from .regions import display_node_name
@@ -347,6 +347,20 @@ class Panel(QWidget):
         self.browse_profile = QPushButton('选择配置文件…')
         self.browse_profile.clicked.connect(self._profile_file)
         box.addWidget(self.browse_profile)
+        self.agent_label = QLabel('订阅格式（支持自定义 UA）')
+        self.agent_label.setObjectName('ProxyHint')
+        self.agent_label.setWordWrap(True)
+        box.addWidget(self.agent_label)
+        self.agent = SelectControl()
+        self.agent.setEditable(True)
+        self.agent.setAccessibleName('订阅格式／User-Agent')
+        self.agent.lineEdit().setPlaceholderText('选择或输入自定义 User-Agent')
+        self.agent.setMinimumWidth(0)
+        self.agent.setToolTip('通常使用 Mihomo；服务商有要求时选择对应客户端标识，也可直接输入。仅作用于此配置。')
+        for label, value in USER_AGENTS:
+            self.agent.addItem(label, value)
+        self._set_user_agent(options.user_agent)
+        box.addWidget(self.agent)
         self.import_button = QPushButton()
         self.import_button.setObjectName('ProxyStart')
         self.import_button.clicked.connect(self._confirm_import)
@@ -387,6 +401,7 @@ class Panel(QWidget):
         self.profile.textChanged.connect(self._edited)
         self.core.textChanged.connect(self._edited)
         self.profile_name.textChanged.connect(self._edited)
+        self.agent.editTextChanged.connect(self._edited)
         self._visibility()
 
     def _filter(self, text):
@@ -418,6 +433,8 @@ class Panel(QWidget):
 
     def _visibility(self):
         source = self.source.currentData()
+        self.agent_label.setVisible(source == 'url')
+        self.agent.setVisible(source == 'url')
         self.browse_profile.setVisible(source == 'file')
         self.location.setVisible(source != 'nodes')
         self.profile.setVisible(source == 'nodes')
@@ -477,7 +494,17 @@ class Panel(QWidget):
                              next((profile.node for profile in self._profiles if profile.id == self._edit_id), '')),
                        profile_id=self._edit_id, profile_name=self.profile_name.text().strip() or '我的配置',
                        auto_start=self.auto_start.isChecked(), routing=self.routing.value(),
-                       test_target=self.test_target.currentData())
+                       test_target=self.test_target.currentData(), user_agent=self._user_agent())
+
+    def _user_agent(self):
+        text = self.agent.currentText().strip()
+        return next((value for label, value in USER_AGENTS if text == label), text)
+
+    def _set_user_agent(self, value):
+        index = self.agent.findData(value)
+        self.agent.setCurrentIndex(index)
+        if index < 0:
+            self.agent.setEditText(value)
 
     def _new_profile(self):
         self.configuration_views.setCurrentIndex(1)
@@ -488,6 +515,7 @@ class Panel(QWidget):
         self.location.clear()
         self.profile.clear()
         self.source.setCurrentIndex(0)
+        self._set_user_agent(DEFAULT_USER_AGENT)
         self._loading = False
         self._visibility()
         self.import_status.setText('填写配置名称和订阅，点击导入即可保存并启用。')
@@ -505,6 +533,7 @@ class Panel(QWidget):
         self.source.setCurrentIndex(self.source.findData(profile.source))
         self.location.setText(profile.profile if profile.source != 'nodes' else '')
         self.profile.setPlainText(profile.profile if profile.source == 'nodes' else '')
+        self._set_user_agent(profile.user_agent)
         self._loading = False
         self._visibility()
         self.import_status.setText('点击导入按钮，更新并启用此配置。')
@@ -526,7 +555,7 @@ class Panel(QWidget):
                 active_row = row
                 self._saved_options = replace(self._saved_options, profile_id=profile.id,
                                               profile_name=profile.name, source=profile.source,
-                                              profile=profile.profile, node=profile.node)
+                                              profile=profile.profile, node=profile.node, user_agent=profile.user_agent)
         self.quick_profile.setCurrentIndex(active_row)
         self.profiles_list.setCurrentRow(active_row)
         self.profiles_list.blockSignals(False)
@@ -604,7 +633,7 @@ class Panel(QWidget):
         self.apply.setEnabled(not busy)
         self.import_button.setEnabled(not busy)
         for widget in (self.source, self.location, self.profile, self.browse_profile, self.runtime,
-                       self.profiles_list, self.profile_name, self.add_profile):
+                       self.profiles_list, self.profile_name, self.add_profile, self.agent):
             widget.setEnabled(not busy)
         self.activate_profile.setEnabled(bool(self._profiles) and not busy)
         self.routing.setEnabled(not busy)
@@ -651,6 +680,7 @@ class Panel(QWidget):
 #ProxyPanel QPlainTextEdit:focus, #ProxyPanel QLineEdit:focus {{border-color: {theme.ACCENT};}}
 #ProxyPanel QComboBox {{background: {surface()}; color: {theme.TEXT1}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 12px; padding: 6px 8px; min-height: 18px;}}
 #ProxyPanel QComboBox#ProxyInline {{background: transparent; border: none; padding: 2px 0;}}
+#ProxyPanel QComboBox QLineEdit {{background: transparent; border: none; padding: 0;}}
 #ProxyPanel QComboBox::drop-down {{border: none; width: 20px;}}
 #ProxyPanel QScrollArea, #ProxyPanel QScrollArea > QWidget > QWidget {{background: transparent; border: none;}}
 ''')

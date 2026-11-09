@@ -6,6 +6,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 MAX_PROFILE = 4 * 1024 * 1024
+DEFAULT_USER_AGENT = 'clash.meta/1.19.33 DDM-Proxy/0.1'
+USER_AGENTS = [('Mihomo（默认）', DEFAULT_USER_AGENT), ('Clash Verge', 'clash-verge'), ('FlClash', 'FlClash')]
 TEST_TARGETS = {'google': 'https://www.gstatic.com/generate_204',
                 'youtube': 'https://www.youtube.com/generate_204'}
 DOMESTIC_DOMAINS = ('bilibili.com', 'biliapi.net', 'biliapi.com', 'bilivideo.com', 'bilivideo.cn',
@@ -41,8 +43,13 @@ class Options:
     auto_start: bool = True
     routing: str = 'rule'
     test_target: str = 'google'
+    user_agent: str = DEFAULT_USER_AGENT
 
     def validate(self):
+        if self.source == 'url' and (
+                not isinstance(self.user_agent, str) or not self.user_agent.strip() or len(self.user_agent) > 256
+                or any(ord(char) < 32 or ord(char) > 126 for char in self.user_agent)):
+            raise ValueError('请输入 1～256 个可打印 ASCII 字符的 User-Agent，不可包含换行')
         if self.test_target not in TEST_TARGETS:
             raise ValueError('请选择有效的检测地址')
         if self.routing not in ('rule', 'global', 'direct'):
@@ -65,13 +72,10 @@ class Options:
 def core_config(mixed_port, api_port, secret, routing='rule'):
     config = {'mixed-port': mixed_port, 'bind-address': '127.0.0.1', 'allow-lan': False,
               'external-controller': f'127.0.0.1:{api_port}', 'secret': secret,
-              'mode': routing, 'log-level': 'warning', 'ipv6': True,
+              'mode': routing, 'log-level': 'warning', 'ipv6': False,
               'find-process-mode': 'off', 'tun': {'enable': False},
-              'dns': {'enable': True, 'listen': '', 'enhanced-mode': 'redir-host',
-                      'ipv6': True, 'cache-algorithm': 'lru', 'cache-max-size': 256,
-                      'default-nameserver': ['223.5.5.5', '119.29.29.29'],
-                      'nameserver': ['223.5.5.5', '119.29.29.29'],
-                      'proxy-server-nameserver': ['223.5.5.5', '119.29.29.29'],
+              'dns': {'enable': False, 'listen': '', 'enhanced-mode': 'redir-host',
+                      'ipv6': False, 'cache-algorithm': 'lru', 'cache-max-size': 256,
                       'respect-rules': False},
               'profile': {'store-selected': False, 'store-fake-ip': False},
               'rules': [f'DOMAIN-SUFFIX,{domain},DIRECT' for domain in DOMESTIC_DOMAINS] +

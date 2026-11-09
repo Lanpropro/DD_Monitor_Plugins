@@ -48,6 +48,7 @@ class Controller(QObject):
         current = next((profile for profile in self.profiles if profile.id == self.options.profile_id), None)
         if current:
             self.options.profile_name = current.name
+            self.options.user_agent = current.user_agent
         save_profiles(self.directory, self.profiles)
         save_options(self.directory, self.options)
         self.core = Core(self)
@@ -99,7 +100,8 @@ class Controller(QObject):
             if options.source == 'url':
                 self.task = 'profile'
                 self._status('正在更新订阅…')
-                self.download.start(options.profile.strip(), self.directory / 'subscription.txt', MAX_PROFILE)
+                self.download.start(options.profile.strip(), self.directory / 'subscription.txt', MAX_PROFILE,
+                                    user_agent=options.user_agent)
             else:
                 profile = Path(options.profile).read_bytes() if options.source == 'file' else options.profile.encode('utf-8')
                 if len(profile) > MAX_PROFILE:
@@ -128,7 +130,7 @@ class Controller(QObject):
         options.node = preferred
         try:
             record = Profile(options.profile_id, options.profile_name.strip() or '我的配置',
-                             options.source, options.profile, preferred, dict(self.core.types))
+                             options.source, options.profile, preferred, dict(self.core.types), options.user_agent)
             profiles = [record if profile.id == record.id else profile for profile in self.profiles]
             if not any(profile.id == record.id for profile in self.profiles):
                 profiles.append(record)
@@ -186,7 +188,8 @@ class Controller(QObject):
         profile = next((profile for profile in self.profiles if profile.id == identity), None)
         if profile is not None and not self.working:
             self.apply(replace(self.options, source=profile.source, profile=profile.profile,
-                               node=profile.node, profile_id=profile.id, profile_name=profile.name),
+                               node=profile.node, profile_id=profile.id, profile_name=profile.name,
+                               user_agent=profile.user_agent),
                        connect=bool(self.endpoint))
 
     def set_auto_start(self, enabled):

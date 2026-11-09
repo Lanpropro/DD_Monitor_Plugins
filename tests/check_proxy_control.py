@@ -71,6 +71,7 @@ class Service:
     def __init__(self, name=b'proxy', body=None, code=200, headers=None, ipv6=False):
         self.requests = []
         self.authorizations = []
+        self.user_agents = []
         owner = self
         class Handler(BaseHTTPRequestHandler):
             def handle(self):
@@ -87,8 +88,9 @@ class Service:
 
             def do_GET(self):
                 owner.authorizations.append(self.headers.get('Authorization'))
+                owner.user_agents.append(self.headers.get('User-Agent', ''))
                 owner.requests.append((self.path, self.headers.get('Proxy-Authorization')))
-                payload = body if body is not None else name
+                payload = body(self.headers) if callable(body) else (body if body is not None else name)
                 self.send_response(code)
                 self.send_header('Content-Type', 'text/plain')
                 self.send_header('Content-Length', str(len(payload)))
@@ -116,6 +118,36 @@ class Service:
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_profile_user_agents_migrate_and_roundtrip_independently(self):
+        from check_proxy_plugin.configuration import DEFAULT_USER_AGENT
+        with tempfile.TemporaryDirectory() as directory:
+            options = Options(profile='https://fixture.invalid/sub', core=__file__)
+            (Path(directory) / 'profiles.json').write_text(json.dumps([
+                {'id': 'legacy', 'name': 'Legacy', 'source': 'url', 'profile': options.profile}]))
+            profiles = load_profiles(directory, options)
+            self.assertEqual(profiles[0].user_agent, DEFAULT_USER_AGENT)
+            profiles = [replace(profiles[0], user_agent='clash-verge'),
+                        Profile('other', 'Other', 'url', 'https://other.invalid/sub', user_agent='Custom/2.0')]
+            save_profiles(directory, profiles)
+            self.assertEqual(load_profiles(directory, options), profiles)
+        for value in ('', 'abc\r\nInjected: yes', '中文', 'x' * 257):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                Options(core=__file__, source='url', profile='https://fixture.invalid/sub', user_agent=value).validate()
+
+    def test_profile_format_diagnostics_only_contain_counts(self):
+        from check_proxy_plugin.profile_settings import merge_resolution
+        profile = json.dumps({'proxies': [
+            {'name': 'private-name', 'server': 'private.fixture.invalid', 'password': 'fixture-secret'},
+            {'server': '127.0.0.1'}, {'server': '::1'}, {'server': ''}]}).encode()
+        with self.assertLogs('ddm.proxy_control', level='INFO') as logs:
+            merge_resolution(core_config(10001, 10002, 'fixture-key'), profile)
+        text = '\n'.join(logs.output)
+        self.assertIn('format=json nodes=4', text)
+        for key in ('ipv4', 'ipv6', 'domain', 'missing'):
+            self.assertIn(f"'{key}': 1", text)
+        for private in ('private-name', 'private.fixture.invalid', 'fixture-secret'):
+            self.assertNotIn(private, text)
+
     def test_yaml_resolution_and_anchors_are_preserved_without_importing_listeners(self):
         from check_proxy_plugin.profile_settings import merge_resolution
         config = core_config(10001, 10002, 'fixture-key')
@@ -127,6 +159,7 @@ class ConfigurationTests(unittest.TestCase):
   cache-max-size: 999999
   enhanced-mode: fake-ip
 dns: *resolution
+ipv6: true
 hosts:
   fixture.invalid: &address [127.0.0.1]
   alias.fixture.invalid: *address
@@ -142,6 +175,8 @@ external-controller: 0.0.0.0:9090
         self.assertEqual(config['dns']['listen'], '')
         self.assertEqual(config['dns']['cache-max-size'], 256)
         self.assertEqual(config['dns']['enhanced-mode'], 'redir-host')
+        self.assertTrue(config['ipv6'])
+        self.assertTrue(config['dns']['ipv6'])
         self.assertFalse(config['tun']['enable'])
         self.assertFalse(config['allow-lan'])
         self.assertEqual(config['external-controller'], '127.0.0.1:10002')
@@ -255,16 +290,14 @@ external-controller: 0.0.0.0:9090
         self.assertEqual(config['bind-address'], '127.0.0.1')
         self.assertFalse(config['allow-lan'])
         self.assertFalse(config['tun']['enable'])
-        self.assertTrue(config['dns']['enable'])
+        self.assertFalse(config['dns']['enable'])
+        self.assertFalse(config['ipv6'])
         self.assertEqual(config['dns']['ipv6'], config['ipv6'])
         self.assertEqual(config['dns']['listen'], '')
         self.assertEqual(config['dns']['enhanced-mode'], 'redir-host')
         self.assertEqual(config['dns']['cache-max-size'], 256)
-        self.assertTrue(config['dns']['proxy-server-nameserver'])
-        # Node bootstrap must not depend on reaching an encrypted DNS hostname first.
-        for upstream in config['dns']['proxy-server-nameserver']:
-            socket.inet_pton(socket.AF_INET, upstream)
-        self.assertEqual(config['dns']['nameserver'], config['dns']['proxy-server-nameserver'])
+        self.assertNotIn('nameserver', config['dns'])
+        self.assertNotIn('proxy-server-nameserver', config['dns'])
         self.assertEqual(config['external-controller'], '127.0.0.1:10002')
         self.assertEqual(config['secret'], 'random-key')
         self.assertFalse(config['proxy-providers']['subscription']['health-check']['enable'])
@@ -569,6 +602,26 @@ class ConnectionTests(unittest.TestCase):
 
 
 class InterfaceTests(unittest.TestCase):
+    def test_editor_keeps_compatibility_per_profile_and_new_profile_uses_generic_default(self):
+        from check_proxy_plugin.configuration import DEFAULT_USER_AGENT
+        panel = Panel(Options())
+        try:
+            panel.set_profiles([Profile('one', 'One', 'url', 'https://one.invalid', user_agent='clash-verge'),
+                                Profile('two', 'Two', 'url', 'https://two.invalid', user_agent='Custom/2.0')], 'one')
+            panel._edit_profile(0)
+            self.assertEqual(panel.options().user_agent, 'clash-verge')
+            panel._edit_profile(1)
+            self.assertEqual(panel.options().user_agent, 'Custom/2.0')
+            panel._new_profile()
+            self.assertEqual(panel.options().user_agent, DEFAULT_USER_AGENT)
+            panel.agent.setEditText('Provider Client/3.0')
+            self.assertEqual(panel.options().user_agent, 'Provider Client/3.0')
+            panel.set_busy(True)
+            self.assertFalse(panel.agent.isEnabled())
+        finally:
+            panel.deleteLater()
+            APP.processEvents()
+
     def test_connections_page_pauses_on_hide_and_retains_bounded_events(self):
         with tempfile.TemporaryDirectory() as root, patch.object(module.config, 'data_root', return_value=root):
             window = QWidget()
@@ -1120,6 +1173,21 @@ class InterfaceTests(unittest.TestCase):
 
 @unittest.skipUnless(args.core, 'Pass --core for actual Mihomo process tests')
 class RealCoreTests(unittest.TestCase):
+    def test_subscription_requests_clash_format_before_loading_profile(self):
+        profile = json.dumps({'proxies': [{'name': 'NegotiatedNode', 'type': 'http',
+            'server': 'format.fixture.invalid', 'port': self.first.server.server_port}],
+            'hosts': {'format.fixture.invalid': '127.0.0.1'}})
+        def response(headers):
+            return profile.encode() if headers.get('User-Agent', '') == 'clash-verge' else profile.replace(
+                '"hosts": {"format.fixture.invalid": "127.0.0.1"}', '"hosts": {}').encode()
+        subscription = Service(body=response)
+        try:
+            self.start(source='url', profile=subscription.url + '/profile', user_agent='clash-verge')
+            self.assertEqual(requests.get('http://fixture.invalid/live', timeout=5).content, b'first')
+            self.assertEqual(subscription.user_agents[-1], 'clash-verge')
+        finally:
+            subscription.close()
+
     def test_full_profile_hosts_are_used_for_node_resolution(self):
         profile = json.dumps({'proxies': [{'name': 'HostsNode', 'type': 'http',
             'server': 'hosts.fixture.invalid', 'port': self.first.server.server_port}],
@@ -1127,6 +1195,21 @@ class RealCoreTests(unittest.TestCase):
         self.start(profile=profile)
         response = requests.get('http://fixture.invalid/live', timeout=7)
         self.assertEqual(response.content, b'first')
+
+    def test_switching_service_profiles_restores_each_download_identity(self):
+        subscription = Service(body=self.profile.encode())
+        try:
+            self.start(source='url', profile=subscription.url + '/one', profile_name='One', user_agent='clash-verge')
+            first_id = self.controller.options.profile_id
+            self.start(source='url', profile=subscription.url + '/two', profile_name='Two', user_agent='Custom/2.0')
+            self.assertEqual(subscription.user_agents[-1], 'Custom/2.0')
+            self.controller.activate_profile(first_id)
+            wait_for(lambda: not self.controller.working, timeout=32)
+            self.assertTrue(self.controller.endpoint, (self.controller.message, self.core_failure))
+            self.assertEqual(subscription.user_agents, ['clash-verge', 'Custom/2.0', 'clash-verge'])
+            self.assertEqual(self.controller.options.user_agent, 'clash-verge')
+        finally:
+            subscription.close()
 
     def test_connections_snapshot_shows_actual_core_route_and_stops_with_service(self):
         self.start()
@@ -1193,7 +1276,8 @@ class RealCoreTests(unittest.TestCase):
             ipv6_service = Service(b'ipv6-only', ipv6=True)
             try:
                 ipv6_profile = json.dumps({'proxies': [{'name': 'IPv6Only', 'type': 'http',
-                    'server': 'node6.fixture.invalid', 'port': ipv6_service.server.server_port}], 'dns': dns})
+                    'server': 'node6.fixture.invalid', 'port': ipv6_service.server.server_port}],
+                    'dns': dns, 'ipv6': True})
                 self.start(profile=ipv6_profile)
                 response = requests.get('http://fixture.invalid/live', timeout=5)
                 self.assertEqual(response.content, b'ipv6-only')
@@ -1313,6 +1397,21 @@ class RealCoreTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.controller = Controller(self.temp.name)
+        self.core_trace = []
+        self.core_failure = {}
+        core = self.controller.core
+        read_output, failure = core._read_output, core._failure
+        def capture_output(process):
+            self.core_trace.append(bytes(process.peek(8192)).decode('utf-8', errors='replace'))
+            self.core_trace[:] = self.core_trace[-8:]
+            read_output(process)
+        def capture_failure(process, message):
+            self.core_failure = {'listener': core._listener_ready, 'types': core._types_loaded,
+                                 'global': core._global_selected, 'nodes': len(core.nodes),
+                                 'process': str(process.state()) if process else 'none',
+                                 'output': ''.join(self.core_trace)[-4096:]}
+            failure(process, message)
+        core._read_output, core._failure = capture_output, capture_failure
         self.server_process = None
         self.first = Service(b'first')
         self.second = Service(b'second')
@@ -1397,7 +1496,7 @@ class RealCoreTests(unittest.TestCase):
             self.assertEqual(self.controller.node_snapshot()[1], 'Second')
             self.controller.apply(self.controller.options)
             wait_for(lambda: not self.controller.working, timeout=32)
-            self.assertTrue(self.controller.endpoint, self.controller.message)
+            self.assertTrue(self.controller.endpoint, (self.controller.message, self.core_failure))
             self.assertEqual(self.controller.core.current, 'Second')
             self.controller.stop()
             self.assertEqual(self.controller.node_snapshot()[0], ['First', 'Second'])
@@ -1534,6 +1633,8 @@ class RealCoreTests(unittest.TestCase):
 
     def server_core(self):
         mixed, encrypted = free_port(), free_port()
+        while encrypted == mixed:
+            encrypted = free_port()
         directory = Path(self.temp.name) / 'fixture-server'
         directory.mkdir()
         config = {'mixed-port': mixed, 'bind-address': '127.0.0.1', 'allow-lan': False,
@@ -1549,12 +1650,14 @@ class RealCoreTests(unittest.TestCase):
         self.server_process.start(str(args.core.resolve()), ['-d', str(directory), '-f', str(path)])
         self.assertTrue(self.server_process.waitForStarted(3000))
         def listening():
+            if self.server_process.state() == QProcess.NotRunning:
+                self.fail(f'Encrypted fixture core exited before listening: {self.server_process.exitCode()}')
             try:
                 with socket.create_connection(('127.0.0.1', mixed), timeout=0.1):
                     return True
             except OSError:
                 return False
-        wait_for(listening)
+        wait_for(listening, timeout=32)
         return mixed, encrypted
 
     def test_raw_shadowsocks_node_link_really_connects_encrypted_fixture(self):

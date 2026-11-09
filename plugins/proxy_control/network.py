@@ -5,6 +5,7 @@ from urllib.request import getproxies, proxy_bypass
 
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkProxy, QNetworkRequest, QNetworkReply
+from .configuration import DEFAULT_USER_AGENT
 
 
 def current_proxy(url):
@@ -78,7 +79,7 @@ class Download(QObject):
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(self._timeout)
 
-    def start(self, url, destination, limit):
+    def start(self, url, destination, limit, user_agent=DEFAULT_USER_AGENT):
         self.cancel()
         self.profile_title = self.content_disposition = ''
         self.destination = Path(destination)
@@ -88,7 +89,7 @@ class Download(QObject):
         self.limit, self.received = limit, 0
         self.manager.setProxy(qt_proxy(current_proxy(url)))
         request = QNetworkRequest(QUrl(url))
-        request.setRawHeader(b'User-Agent', b'DDM-Proxy/0.1 mihomo')
+        request.setRawHeader(b'User-Agent', user_agent.encode('ascii'))
         request.setTransferTimeout(15000)
         request.setAttribute(QNetworkRequest.RedirectPolicyAttribute, QNetworkRequest.NoLessSafeRedirectPolicy)
         reply = self.reply = self.manager.get(request)
