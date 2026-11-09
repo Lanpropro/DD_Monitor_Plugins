@@ -11,6 +11,7 @@ from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, QUrl,
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkProxy, QNetworkRequest, QNetworkReply, QTcpSocket
 
 from .configuration import core_config
+from .profile_settings import merge_resolution
 
 
 def free_port():
@@ -92,6 +93,8 @@ class Core(QObject):
         self.mixed_port = mixed
         self.secret = secrets.token_urlsafe(32)
         config = core_config(mixed, self.port, self.secret, routing or options.routing)
+        dns_fields, hosts = merge_resolution(config, profile)
+        logging.getLogger('ddm.proxy_control').info('proxy resolution profile dns_fields=%d hosts=%d', dns_fields, hosts)
         (directory / 'config.json').write_text(json.dumps(config), encoding='utf-8')
         (directory / 'nodes.txt').write_bytes(profile)
         process = self.process = QProcess(self)

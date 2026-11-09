@@ -116,6 +116,68 @@ class Service:
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_yaml_resolution_and_anchors_are_preserved_without_importing_listeners(self):
+        from check_proxy_plugin.profile_settings import merge_resolution
+        config = core_config(10001, 10002, 'fixture-key')
+        config['hosts'] = {'base.fixture.invalid': '::1'}
+        profile = b'''resolution: &resolution
+  enable: true
+  nameserver: [udp://127.0.0.1:5353]
+  listen: 0.0.0.0:53
+  cache-max-size: 999999
+  enhanced-mode: fake-ip
+dns: *resolution
+hosts:
+  fixture.invalid: &address [127.0.0.1]
+  alias.fixture.invalid: *address
+tun: {enable: true}
+allow-lan: true
+external-controller: 0.0.0.0:9090
+'''
+        fields, hosts = merge_resolution(config, profile)
+        self.assertEqual((fields, hosts), (2, 2))
+        self.assertEqual(config['hosts']['alias.fixture.invalid'], ['127.0.0.1'])
+        self.assertEqual(config['hosts']['base.fixture.invalid'], '::1')
+        self.assertEqual(config['dns']['proxy-server-nameserver'], ['udp://127.0.0.1:5353'])
+        self.assertEqual(config['dns']['listen'], '')
+        self.assertEqual(config['dns']['cache-max-size'], 256)
+        self.assertEqual(config['dns']['enhanced-mode'], 'redir-host')
+        self.assertFalse(config['tun']['enable'])
+        self.assertFalse(config['allow-lan'])
+        self.assertEqual(config['external-controller'], '127.0.0.1:10002')
+        self.assertNotIn('yaml', sys.modules)
+
+    def test_uri_subscriptions_and_invalid_dns_keep_credentials_out_of_errors(self):
+        from check_proxy_plugin.profile_settings import merge_resolution
+        for profile in (b'ss://fixture-secret@host.invalid:443', b'c3M6Ly9maXh0dXJl',
+                        b'!!python/object/apply:os.system [not-executed]'):
+            config = core_config(10001, 10002, 'fixture-key')
+            self.assertEqual(merge_resolution(config, profile), (0, 0))
+            self.assertNotIn('hosts', config)
+        for profile in (b'dns: [fixture-secret]', b'hosts: &recursive {x: *recursive}'):
+            with self.assertRaises(ValueError) as error:
+                merge_resolution(core_config(10001, 10002, 'fixture-key'), profile)
+            self.assertNotIn('fixture-secret', str(error.exception))
+
+    def test_invalid_downloaded_resolution_config_releases_pending_session(self):
+        service = Service(body=b'dns: [fixture-secret]\nproxies: []')
+        with tempfile.TemporaryDirectory() as directory:
+            controller = Controller(directory)
+            try:
+                controller.apply(Options(core=__file__, source='url', profile=service.url + '/profile'))
+                wait_for(lambda: not controller.working)
+                self.assertIn('DNS', controller.message)
+                self.assertNotIn('fixture-secret', controller.message)
+                self.assertIsNone(controller.core.process)
+                self.assertIsNone(controller.core.directory)
+                self.assertFalse(controller.endpoint)
+                self.assertFalse(list(Path(directory).glob('session-*')))
+            finally:
+                controller.stop(announce=False)
+                controller.deleteLater()
+                APP.processEvents()
+                service.close()
+
     def test_dns_reasons_are_specific_and_do_not_misclassify_hostnames(self):
         from check_proxy_plugin.core import dns_reason
         for line, reason in (
@@ -1058,6 +1120,14 @@ class InterfaceTests(unittest.TestCase):
 
 @unittest.skipUnless(args.core, 'Pass --core for actual Mihomo process tests')
 class RealCoreTests(unittest.TestCase):
+    def test_full_profile_hosts_are_used_for_node_resolution(self):
+        profile = json.dumps({'proxies': [{'name': 'HostsNode', 'type': 'http',
+            'server': 'hosts.fixture.invalid', 'port': self.first.server.server_port}],
+            'hosts': {'hosts.fixture.invalid': '127.0.0.1'}})
+        self.start(profile=profile)
+        response = requests.get('http://fixture.invalid/live', timeout=7)
+        self.assertEqual(response.content, b'first')
+
     def test_connections_snapshot_shows_actual_core_route_and_stops_with_service(self):
         self.start()
         monitor = self.controller.connections
@@ -1080,7 +1150,6 @@ class RealCoreTests(unittest.TestCase):
             connection.close()
 
     def test_named_proxy_server_resolves_through_internal_dns_without_dns_listener(self):
-        from check_proxy_plugin.configuration import core_config as make_config
         queries = []
         class DnsHandler(socketserver.BaseRequestHandler):
             def handle(self):
@@ -1101,17 +1170,11 @@ class RealCoreTests(unittest.TestCase):
         server = socketserver.UDPServer(('127.0.0.1', 0), DnsHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
-        def fixture_config(*args, **kwargs):
-            config = make_config(*args, **kwargs)
-            upstream = [f'udp://127.0.0.1:{server.server_address[1]}']
-            config['dns']['nameserver'] = upstream
-            config['dns']['proxy-server-nameserver'] = upstream
-            return config
+        dns = {'enable': True, 'nameserver': [f'udp://127.0.0.1:{server.server_address[1]}']}
         profile = json.dumps({'proxies': [{'name': 'NamedNode', 'type': 'http', 'server': 'node.fixture.invalid',
-                             'port': self.first.server.server_port}]})
+                             'port': self.first.server.server_port}], 'dns': dns})
         try:
-            with patch('check_proxy_plugin.core.core_config', side_effect=fixture_config):
-                self.start(profile=profile)
+            self.start(profile=profile)
             with socket.create_connection(('127.0.0.1', urlsplit(self.controller.endpoint).port), timeout=.5):
                 pass
             response = requests.get('http://fixture.invalid/live', timeout=5)
@@ -1122,8 +1185,7 @@ class RealCoreTests(unittest.TestCase):
             self.assertFalse(any(connection.laddr.port in (53, 1053) for connection in connections))
             self.controller.stop()
             empty_profile = profile.replace('node.fixture.invalid', 'empty.fixture.invalid')
-            with patch('check_proxy_plugin.core.core_config', side_effect=fixture_config):
-                self.start(profile=empty_profile)
+            self.start(profile=empty_profile)
             response = requests.get('http://fixture.invalid/live', timeout=5)
             self.assertEqual(response.status_code, 502)
             wait_for(lambda: self.controller.core.last_dns_reason == 'no-address')
@@ -1131,9 +1193,8 @@ class RealCoreTests(unittest.TestCase):
             ipv6_service = Service(b'ipv6-only', ipv6=True)
             try:
                 ipv6_profile = json.dumps({'proxies': [{'name': 'IPv6Only', 'type': 'http',
-                    'server': 'node6.fixture.invalid', 'port': ipv6_service.server.server_port}]})
-                with patch('check_proxy_plugin.core.core_config', side_effect=fixture_config):
-                    self.start(profile=ipv6_profile)
+                    'server': 'node6.fixture.invalid', 'port': ipv6_service.server.server_port}], 'dns': dns})
+                self.start(profile=ipv6_profile)
                 response = requests.get('http://fixture.invalid/live', timeout=5)
                 self.assertEqual(response.content, b'ipv6-only')
                 self.assertIn('node6.fixture.invalid', queries)
@@ -1335,7 +1396,9 @@ class RealCoreTests(unittest.TestCase):
             self.controller.select('Second')
             self.assertEqual(self.controller.node_snapshot()[1], 'Second')
             self.controller.apply(self.controller.options)
-            wait_for(lambda: bool(self.controller.endpoint) and self.controller.core.current == 'Second')
+            wait_for(lambda: not self.controller.working, timeout=32)
+            self.assertTrue(self.controller.endpoint, self.controller.message)
+            self.assertEqual(self.controller.core.current, 'Second')
             self.controller.stop()
             self.assertEqual(self.controller.node_snapshot()[0], ['First', 'Second'])
             self.assertEqual(self.controller.node_snapshot()[1], 'Second')

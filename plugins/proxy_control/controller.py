@@ -111,8 +111,12 @@ class Controller(QObject):
 
     def _start_core(self, profile=b''):
         self._status('正在加载代理内核和节点…')
-        self.core.start(self.pending or self.options, self.directory, self.environment.child_environment(), profile,
-                        routing='global' if self.catalog_only else None)
+        try:
+            self.core.start(self.pending or self.options, self.directory, self.environment.child_environment(), profile,
+                            routing='global' if self.catalog_only else None)
+        except (ValueError, OSError) as error:
+            self._failed(str(error) if isinstance(error, ValueError) else '无法准备代理内核的会话资料')
+            return
         self.timer.start()
 
     def _ready(self, endpoint, nodes, selected):

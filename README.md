@@ -56,7 +56,7 @@
 <tr>
 <td colspan="2" valign="top">
 <h3><a href="plugins/proxy_control/README.md">网络代理（开发预览）</a></h3>
-<p>导入订阅与节点，按需启动内置代理内核；左侧抽屉选择节点、搜索与测试延迟。</p>
+<p>导入订阅与节点，按需启动内置代理内核；图标旁面板提供总览、节点测速、配置与连接详情。</p>
 <p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
 <p><a href="plugins/proxy_control/README.md">安装与使用</a> · <a href="plugins/proxy_control/README.md#安装与入口">下载插件：仅本地开发候选，尚未公开发布</a></p>
 </td>
