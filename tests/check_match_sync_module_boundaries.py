@@ -17,10 +17,25 @@ def check(app, host, module):
     from ddm import plugins
     audio = import_module(module.__package__ + '.audio')
     canvas = import_module(module.__package__ + '.canvas')
+    room_widgets = import_module(module.__package__ + '.room_widgets')
+    comparison = import_module(module.__package__ + '.comparison')
+    room_input = import_module(module.__package__ + '.room_input')
+    timing = import_module(module.__package__ + '.playback_timing')
     assert module.AudioFeed is audio.AudioFeed and module.AudioPump is audio.AudioPump
     assert module.Canvas is canvas.Canvas
     assert module.RATE == audio.RATE and module.QImage is canvas.QImage
-    for owned in (audio, canvas):
+    assert module.RoomRow is room_widgets.RoomRow and module.CompactStatus is room_widgets.CompactStatus
+    assert module.ComparisonPanel is comparison.ComparisonPanel
+    assert module.parse_room is room_input.parse_room and module.cache_gap is timing.cache_gap
+    assert module.picture_poll_interval is timing.picture_poll_interval
+    assert room_input.parse_room('https://live.bilibili.com/00123') == '123'
+    try:
+        room_input.parse_room('https://example.invalid/123')
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('Input validation boundary accepted an unrelated host')
+    for owned in (audio, canvas, room_widgets, comparison, room_input, timing):
         source = ast.parse(Path(owned.__file__).read_text(encoding='utf-8'))
         assert not any(isinstance(n, ast.ImportFrom) and n.module == 'viewer' for n in ast.walk(source)), \
             'Owning modules must not import their coordinator'
@@ -74,6 +89,11 @@ def check(app, host, module):
         try:
             assert type(viewer.canvas) is canvas.Canvas and viewer.canvas.parentWidget() is viewer.picture.video
             assert viewer.canvas.paint_probe is viewer.playback_probe
+            assert type(viewer.comparison_panel) is comparison.ComparisonPanel
+            viewer.add_room('1', {'alias': 'fixture'})
+            row = viewer.rows['1']
+            assert type(row) is room_widgets.RoomRow and row.viewer is viewer
+            assert type(row.status) is room_widgets.CompactStatus
             pump = viewer.audio
             assert type(pump) is audio.AudioPump and pump.parent() is viewer
             assert QObject.thread(pump) == app.thread() and pump.thread is None
