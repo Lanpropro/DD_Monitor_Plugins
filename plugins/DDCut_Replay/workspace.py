@@ -1761,7 +1761,9 @@ class Workspace(QWidget):
             progress = f'{int(job.progress*100)}%' if job.kind == 'export' or job.state == 'done' else '—'
             item = QTreeWidgetItem([job.title, STATES.get(job.state, job.state), progress, job.output or job.message])
             item.setData(0, Qt.UserRole, job.id)
-            item.setToolTip(3, job.message)
+            results = job.result.get('outputs', [job.result]) if isinstance(job.result, dict) else []
+            encoders = sorted({row['encoder'] for row in results if row.get('encoder')})
+            item.setToolTip(3, job.message+('\n编码器：'+', '.join(encoders) if encoders else ''))
             self.tasks.addTopLevelItem(item)
             if job.id == selected_id:
                 self.tasks.setCurrentItem(item)

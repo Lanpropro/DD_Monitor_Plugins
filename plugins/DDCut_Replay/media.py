@@ -294,12 +294,19 @@ def export_clip(job, ffmpeg, source, start, end, mode, target, work, burn=False,
         else:
             command += ['-ss', f'{local_start:.6f}', *input_args]
         command += ['-t', f'{end-start:.6f}', '-map', '0:v:0', '-map', '0:a?']
+        encoding_args = video_args(encoding)
+        if mode == 'precise' and not burn and encoding['backend'] == 'auto':
+            from .hardware_encoding import select_video_args
+            source_info = probe(job, ffmpeg, source['path'], work, input_args=input_args)
+            encoding_args = select_video_args(job, ffmpeg, encoding, work,
+                                              source_info['video_width'], source_info['video_height'])
+        encoder = 'copy' if mode == 'copy' else encoding_args[1]
         command += (['-c', 'copy', '-avoid_negative_ts', 'make_zero'] if mode == 'copy' else
-                    [*video_args(encoding), '-c:a', 'aac', '-movflags', '+faststart'])
+                    [*encoding_args, '-c:a', 'aac', '-movflags', '+faststart'])
         command += [str(partial)]
         if burn:
             from .burn import encode_chat
-            encode_chat(job, ffmpeg, source, start, end, local_start, input_args, partial, work, encoding)
+            encoder = encode_chat(job, ffmpeg, source, start, end, local_start, input_args, partial, work, encoding)
         else:
             run_process(job, command, work, duration=end-start)
         actual = probe(job, ffmpeg, partial, work)
@@ -320,7 +327,7 @@ def export_clip(job, ffmpeg, source, start, end, mode, target, work, burn=False,
         published = True
         job.output = str(target)
         return {'requested_start': start, 'requested_end': end, **chat, 'chat_burned': burn or source.get('chat_burned', False),
-                'actual_duration': actual['duration'], 'mode': mode,
+                'actual_duration': actual['duration'], 'mode': mode, 'encoder': encoder,
                 'actual_start': start if mode == 'precise' else None,
                 **{key: source[key] for key in ('cover_path', 'avatar_path') if source.get(key)},
                 'room': source.get('room'), 'source_created_at': source.get('source_created_at'),

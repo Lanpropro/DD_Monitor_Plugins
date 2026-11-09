@@ -8,7 +8,7 @@ from .media import check_cancel, probe, run_process
 
 
 def encode_chat(job, ffmpeg, source, start, end, local_start, input_args, target, work, encoding=None):
-    from .encoding import video_args
+    from .hardware_encoding import select_video_args
     reader = ChatReader()
     events = align_events(reader.read(source['danmaku_path']), source.get('segments', []))
     if source.get('chat_burned') or reader.video_burned:
@@ -50,6 +50,8 @@ def encode_chat(job, ffmpeg, source, start, end, local_start, input_args, target
     command += ['-filter_complex', filters, '-map', '[video]', '-map', '0:a?']
     if info['has_audio']:
         command += ['-af', f'asetpts=PTS-STARTPTS,atrim=start={local_start:.6f}:duration={span:.6f},asetpts=PTS-STARTPTS']
-    command += ['-t', f'{span:.6f}', *video_args(encoding),
+    encoding_args = select_video_args(job, ffmpeg, encoding, work, width, height)
+    command += ['-t', f'{span:.6f}', *encoding_args,
                 '-c:a', 'aac', '-movflags', '+faststart', str(target)]
     run_process(job, command, work, duration=span, frames=frames())
+    return encoding_args[1]

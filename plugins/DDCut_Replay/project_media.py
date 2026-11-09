@@ -18,7 +18,6 @@ from .project import duration, placed_clips, placed_layers, validate
 from .subtitles import placed_cues
 from .subtitle_render import SubtitleGraphics
 from .subtitle_srt import srt_text
-from .encoding import video_args
 from .graphic_style import TEXT_DEFAULTS
 from .graphic_text import draw_text
 
@@ -303,10 +302,12 @@ def render_project(job, ffmpeg, project, target, work, *, begin=0, length=None, 
                 inputs += ['-i', str(subtitle_file)]
                 filters.append(f'[{video}][{input_count}:v]overlay=eof_action=pass:repeatlast=0:format=rgb:alpha=premultiplied[captions]')
                 video = 'captions'
+            from .hardware_encoding import select_video_args
+            encoding_args = select_video_args(job, ffmpeg, None if preview else project.get('encoding'), work, width, height)
             command = [ffmpeg, '-y', '-v', 'error', *inputs, '-filter_complex', ';'.join(filters),
-                       '-map', f'[{video}]', '-map', '[audio]', '-t', f'{span:.6f}', *video_args(None if preview else project.get('encoding')),
+                       '-map', f'[{video}]', '-map', '[audio]', '-t', f'{span:.6f}', *encoding_args,
                        '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-movflags', '+faststart', str(partial)]
-            job.message = '合成工程预览' if preview else '合成剪辑工程'
+            job.message = ('合成工程预览' if preview else '合成剪辑工程')+'（'+encoding_args[1]+'）'
             run_process(job, command, work, duration=span)
             info = probe(job, ffmpeg, partial, work)
             check_cancel(job)
@@ -325,7 +326,7 @@ def render_project(job, ffmpeg, project, target, work, *, begin=0, length=None, 
             published = True
             job.output = str(target)
             return {'output': str(target), 'source': project_path, 'actual_duration': info['duration'],
-                    'mode': 'project', 'danmaku_path': str(chat_target), 'chat_burned': project.get('danmaku', False),
+                    'mode': 'project', 'encoder': encoding_args[1], 'danmaku_path': str(chat_target), 'chat_burned': project.get('danmaku', False),
                     'subtitle_path': str(subtitle_target) if subtitle_written else '',
                     'requested_start': begin, 'requested_end': end}
     finally:
