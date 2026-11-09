@@ -735,6 +735,36 @@ class ConnectionTests(unittest.TestCase):
 
 
 class InterfaceTests(unittest.TestCase):
+    def test_running_badge_keeps_text_contrast_in_both_themes(self):
+        from ddm import theme
+        from PySide6.QtGui import QPalette
+        previous = 'light' if theme.is_light() else 'dark'
+        window = QWidget()
+        window.resize(1000, 700)
+        panel = Panel(Options())
+        popover = module.Popover(panel, window, QToolButton(window))
+        def luminance(color):
+            channels = [value / 255 for value in (color.red(), color.green(), color.blue())]
+            channels = [value / 12.92 if value <= .04045 else ((value + .055) / 1.055)**2.4 for value in channels]
+            return sum(weight * value for weight, value in zip((.2126, .7152, .0722), channels))
+        try:
+            window.show()
+            popover.show()
+            panel.set_running(True)
+            for mode in ('dark', 'light'):
+                theme.apply(mode)
+                APP.processEvents()
+                point = panel.state.mapTo(popover, QPoint(panel.state.width() - 6, panel.state.height() // 2))
+                background = popover.grab().toImage().pixelColor(point)
+                text = panel.state.palette().color(QPalette.WindowText)
+                a, b = sorted((luminance(text), luminance(background)))
+                self.assertGreaterEqual((b + .05) / (a + .05), 4.5, mode)
+        finally:
+            popover.hide()
+            window.deleteLater()
+            APP.processEvents()
+            theme.apply(previous)
+
     def test_overview_has_one_service_action_with_clear_pause_and_cancel_states(self):
         panel = Panel(Options(profile='fixture', source='nodes'))
         starts, stops = [], []

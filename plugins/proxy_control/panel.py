@@ -678,6 +678,8 @@ class Panel(QWidget):
             self.service_state.setText('运行中' if self._running else '尚未启动')
 
     def refresh_theme(self, *_args):
+        status_ink = (theme.qcolor(theme.SUCCESS).darker(145) if theme.is_light()
+                      else theme.qcolor(theme.SUCCESS).lighter(115)).name()
         self.setStyleSheet(f'''
 #ProxyPanel {{background: transparent; color: {theme.TEXT1}; font-family: {theme.FONT_FAMILY}; font-size: {theme.FONT_CONTROL}px;}}
 #ProxyPanel QFrame#ProxyRail {{background: {translucent(theme.SIDEBAR, 135)}; border-right: 1px solid {theme.BORDER};}}
@@ -694,7 +696,7 @@ class Panel(QWidget):
 #ProxyPanel QLabel#ProxyHint {{color: {theme.TEXT2}; font-size: {theme.FONT_CAPTION}px;}}
 #ProxyPanel QLabel#ProxyFooter {{color: {theme.TEXT3}; font-size: 11px;}}
 #ProxyPanel QLabel#ProxyState {{color: {theme.TEXT2}; background: {surface()}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 11px; padding: 5px 10px; font-size: 12px; font-weight: 600;}}
-#ProxyPanel QLabel#ProxyState[online="true"] {{color: {theme.SUCCESS}; background: {translucent(theme.SUCCESS, 28)}; border-color: {translucent(theme.SUCCESS, 110)};}}
+#ProxyPanel QLabel#ProxyState[online="true"] {{color: {status_ink}; background: {translucent(theme.SUCCESS, 28)}; border-color: {translucent(theme.SUCCESS, 110)};}}
 #ProxyPanel QFrame#ProxyCard {{background: {translucent(surface(), 165)}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 16px;}}
 #ProxyPanel QListView {{background: transparent; border: none; outline: none;}}
 #ProxyPanel QPushButton {{background: {surface()}; color: {theme.TEXT1}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 13px; padding: 5px 11px; min-height: 18px;}}
