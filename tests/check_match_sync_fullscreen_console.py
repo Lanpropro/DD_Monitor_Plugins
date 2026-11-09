@@ -27,7 +27,7 @@ def check(app, host, module):
             app.processEvents()
             assert viewer.body_split.count() == 3
             with patch.object(module.QDialog, 'showFullScreen', hidden_fullscreen), \
-                    patch.object(module, 'mark_fullscreen', return_value=True):
+                    patch.object(module.picture_control, 'mark_fullscreen', return_value=True):
                 for _ in range(3):
                     viewer.console_size_timer.start(0)
                     viewer._fullscreen_picture()

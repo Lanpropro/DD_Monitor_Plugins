@@ -210,8 +210,8 @@ def main():
         with patch.object(host_app.QTimer, 'singleShot'):
             window = host_app.MainWindow([], [], layout_id='1x1', state={'plugins_enabled': []})
         stack.enter_context(patch.object(host_app, 'SettingsDialog', Dialog))
-        stack.enter_context(patch.object(module, 'match_scenes', measured(module.match_scenes, 'match')))
-        stack.enter_context(patch.object(module, 'refine_match', measured(module.refine_match, 'refine')))
+        stack.enter_context(patch.object(module.alignment_control, 'match_scenes', measured(module.match_scenes, 'match')))
+        stack.enter_context(patch.object(module.alignment_control, 'refine_match', measured(module.refine_match, 'refine')))
         stack.enter_context(patch.object(module.Viewer, 'render', measured(module.Viewer.render, 'render')))
         stack.enter_context(patch.object(module.RoomRow, 'refresh_status', measured(module.RoomRow.refresh_status, 'row_status')))
         stack.enter_context(patch.object(module.Canvas, 'set_frame', observe_frame))

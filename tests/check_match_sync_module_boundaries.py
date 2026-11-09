@@ -21,6 +21,9 @@ def check(app, host, module):
     comparison = import_module(module.__package__ + '.comparison')
     room_input = import_module(module.__package__ + '.room_input')
     timing = import_module(module.__package__ + '.playback_timing')
+    controller_names = ('source_control', 'chat_control', 'alignment_control', 'picture_control',
+                        'recording_control', 'replay_control', 'presentation', 'floating_control')
+    controllers = [import_module(module.__package__ + '.' + name) for name in controller_names]
     assert module.AudioFeed is audio.AudioFeed and module.AudioPump is audio.AudioPump
     assert module.Canvas is canvas.Canvas
     assert module.RATE == audio.RATE and module.QImage is canvas.QImage
@@ -35,7 +38,8 @@ def check(app, host, module):
         pass
     else:
         raise AssertionError('Input validation boundary accepted an unrelated host')
-    for owned in (audio, canvas, room_widgets, comparison, room_input, timing):
+    assert module.Results is module.alignment_control.Results
+    for owned in (audio, canvas, room_widgets, comparison, room_input, timing, *controllers):
         source = ast.parse(Path(owned.__file__).read_text(encoding='utf-8'))
         assert not any(isinstance(n, ast.ImportFrom) and n.module == 'viewer' for n in ast.walk(source)), \
             'Owning modules must not import their coordinator'
@@ -94,6 +98,11 @@ def check(app, host, module):
             row = viewer.rows['1']
             assert type(row) is room_widgets.RoomRow and row.viewer is viewer
             assert type(row.status) is room_widgets.CompactStatus
+            assert type(viewer.results) is module.alignment_control.Results
+            marker = object()
+            with patch.object(module.source_control, '_valid', return_value=marker) as valid:
+                assert viewer._valid(row, None) is marker
+                valid.assert_called_once_with(viewer, row, None, False)
             pump = viewer.audio
             assert type(pump) is audio.AudioPump and pump.parent() is viewer
             assert QObject.thread(pump) == app.thread() and pump.thread is None
