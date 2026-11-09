@@ -257,7 +257,7 @@ class Panel(QWidget):
         self.test_target.addItem('Google 204', 'google')
         self.test_target.addItem('YouTube 204', 'youtube')
         self.test_target.setCurrentIndex(self.test_target.findData(self._saved_options.test_target))
-        self.test_target.setToolTip('默认与 FlClash 一致：Google 204，单节点最多等待 8 秒')
+        self.test_target.setToolTip('默认 Google 204；使用 FlClash 默认的统一延迟口径，预热后以第二次响应计时；单节点共用 8 秒期限')
         self.test_target.activated.connect(lambda index: self.targetRequested.emit(self.test_target.itemData(index)))
         test_options.addWidget(self.test_target)
         box.addLayout(test_options)

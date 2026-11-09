@@ -118,6 +118,11 @@ class Service:
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_latency_defaults_match_flclash(self):
+        config = core_config(10001, 10002, 'fixture-key')
+        self.assertTrue(config['unified-delay'])
+        self.assertTrue(config['tcp-concurrent'])
+
     def test_profile_user_agents_migrate_and_roundtrip_independently(self):
         from check_proxy_plugin.configuration import DEFAULT_USER_AGENT
         with tempfile.TemporaryDirectory() as directory:
@@ -1178,6 +1183,56 @@ class InterfaceTests(unittest.TestCase):
 
 @unittest.skipUnless(args.core, 'Pass --core for actual Mihomo process tests')
 class RealCoreTests(unittest.TestCase):
+    def test_unified_latency_reuses_connection_for_second_head(self):
+        connections = []
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = 'HTTP/1.1'
+
+            def do_CONNECT(self):
+                self.send_response(200, 'Connection established')
+                self.end_headers()
+                self.close_connection = False
+
+            def do_HEAD(self):
+                connections.append(self.client_address)
+                self.send_response(204)
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+
+            def log_message(self, *unused):
+                pass
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        profile = json.dumps({'proxies': [{'name': 'Probe', 'type': 'http',
+            'server': '127.0.0.1', 'port': server.server_port}]})
+        results = []
+        self.controller.latency.result.connect(lambda *values: results.append(values))
+        try:
+            for unified, expected_heads in ((False, 1), (True, 2)):
+                with self.subTest(unified=unified):
+                    connections.clear()
+                    results.clear()
+                    def config(*args, **kwargs):
+                        value = core_config(*args, **kwargs)
+                        value['unified-delay'] = unified
+                        return value
+                    with patch('check_proxy_plugin.core.core_config', side_effect=config):
+                        self.start(profile=profile)
+                    self.controller.latency.start(self.controller.core.port, self.controller.core.secret,
+                                                  ['Probe'], target='http://fixture.invalid/probe')
+                    wait_for(lambda: not self.controller.latency.testing)
+                    self.assertEqual(results[-1][2], 'ready', results)
+                    self.assertEqual(len(connections), expected_heads)
+                    self.assertEqual(len(set(connections)), 1)
+                    self.controller.stop()
+        finally:
+            self.controller.stop()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
     def test_subscription_requests_clash_format_before_loading_profile(self):
         profile = json.dumps({'proxies': [{'name': 'NegotiatedNode', 'type': 'http',
             'server': 'format.fixture.invalid', 'port': self.first.server.server_port}],

@@ -47,6 +47,8 @@ YAML 解析私有携带 PyYAML 6.0.3 的 16 个纯 Python 文件（源文件约 
 
 已核对 [FlClash 实际测速实现](https://github.com/chen08209/FlClash/blob/main/core/delay.go)：查找节点后调用 Mihomo `URLTest`，带超时和并发限制，区分超时／失败；本插件通过内核健康检查 API 调用同一测试机制，保留最多 2 并发。FlClash Go 层回退超时与 UI 传入值有区别，不能把回退常量等同于所有用户的实际参数。
 
+内核显式开启 `unified-delay` 和 `tcp-concurrent`，与 [FlClash 默认配置](https://github.com/chen08209/FlClash/blob/main/lib/models/clash_config.dart) 对齐。统一延迟先预热，再用第二次响应计时；第二次请求失败时，内核回退首次计时，两次请求共用单节点 8 秒期限，参见 [Mihomo URLTest](https://github.com/MetaCubeX/mihomo/blob/v1.19.33/adapter/adapter.go)。这是测试地址的响应耗时，不能据此推算直播播放延迟；不同网络时刻、缓存和内核版本下仍可能与其他客户端不同。
+
 默认不强制覆写 DNS、不开启 IPv6；未提供 DNS 的配置使用系统解析，有明确配置则保留其解析器及地址族声明，完整配置的 `ipv6: true` 仍可启用 IPv6 节点。关闭 DNS 覆写不等于忽略供应商提供的 DNS。启用内部解析时缓存上限为 256；不监听 DNS 端口、不修改系统 DNS、不启用 fake IP／TUN。此前尝试固定公共 DNS／DoH 及强制开启 IPv6，均未解决真实故障，已按服务商截图要求取消强制覆写；证据与边界见增量记录。混合代理端口确认可连接且节点确认后才接管软件网络。修复后仍需用户真实线路复测，本机 DNS／hosts 夹具不代表海外服务可达。
 
 启动后新建连接使用内置代理，正在播放的直播间需要重新播放。插件不会自动中断直播或录制。成功启动且「启动软件时恢复代理」开启时，重启会恢复内置代理；关闭此项或点击「停止」后，下次启动软件不会自动接管网络。首次安装默认停用。切换服务商仍只运行一个内核，每份配置记住各自确认后的节点。

@@ -73,6 +73,7 @@ def core_config(mixed_port, api_port, secret, routing='rule'):
     config = {'mixed-port': mixed_port, 'bind-address': '127.0.0.1', 'allow-lan': False,
               'external-controller': f'127.0.0.1:{api_port}', 'secret': secret,
               'mode': routing, 'log-level': 'warning', 'ipv6': False,
+              'unified-delay': True, 'tcp-concurrent': True,
               'find-process-mode': 'off', 'tun': {'enable': False},
               'dns': {'enable': False, 'listen': '', 'enhanced-mode': 'redir-host',
                       'ipv6': False, 'cache-algorithm': 'lru', 'cache-max-size': 256,
