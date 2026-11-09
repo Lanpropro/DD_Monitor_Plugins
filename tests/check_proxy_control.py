@@ -41,7 +41,7 @@ spec = importlib.util.spec_from_file_location('check_proxy_plugin', ROOT / 'plug
 module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
-from check_proxy_plugin.configuration import Options, core_config, load_options, save_options, subscription_url
+from check_proxy_plugin.configuration import Options, TEST_TARGETS, core_config, load_options, save_options, subscription_url
 from check_proxy_plugin.environment import Environment, KEYS
 from check_proxy_plugin.controller import Controller
 from check_proxy_plugin.network import Download
@@ -118,6 +118,29 @@ class Service:
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_mixed_port_skips_tcp_candidate_with_occupied_udp_port(self):
+        port = free_port(udp=True)
+        candidates = []
+        class CandidateSocket(socket.socket):
+            def bind(self, address):
+                if self.type == socket.SOCK_STREAM and address[1] == 0:
+                    if not candidates:
+                        address = (address[0], port)
+                    super().bind(address)
+                    candidates.append(self.getsockname()[1])
+                    return
+                super().bind(address)
+
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as occupied:
+            occupied.bind(('127.0.0.1', port))
+            with patch('check_proxy_plugin.core.socket.socket', CandidateSocket):
+                available = free_port(udp=True)
+            self.assertEqual(candidates[0], port)
+            self.assertGreaterEqual(len(candidates), 2)
+            self.assertNotEqual(available, port)
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+                probe.bind(('127.0.0.1', available))
+
     def test_latency_defaults_match_flclash(self):
         config = core_config(10001, 10002, 'fixture-key')
         self.assertTrue(config['unified-delay'])
@@ -468,6 +491,13 @@ class RoutingTests(unittest.TestCase):
 
 
 class LatencyTests(unittest.TestCase):
+    def test_cloudflare_target_preserves_http_scheme_and_total_timeout(self):
+        self.latency.start(self.server.server_port, 'fixture-key', ['Good A'], target=TEST_TARGETS['cloudflare'])
+        wait_for(lambda: not self.latency.testing)
+        self.assertEqual(self.queries[0]['url'], ['http://cp.cloudflare.com/generate_204'])
+        self.assertEqual(self.queries[0]['timeout'], ['8000'])
+        self.assertIn(('Good A', 42, 'ready'), self.events)
+
     def setUp(self):
         self.latency = Latency()
         self.events = []
@@ -607,6 +637,44 @@ class ConnectionTests(unittest.TestCase):
 
 
 class InterfaceTests(unittest.TestCase):
+    def test_changing_target_clears_old_results_and_persists_selection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            controller = Controller(directory)
+            panel = Panel(controller.options)
+            controller.profiles = [Profile('fixture', 'Fixture', 'nodes', 'fixture',
+                                           node='First', nodes={'First': 'Http'})]
+            controller.options.profile_id = 'fixture'
+            panel.set_nodes(['First'], 'First', {'First': 'Http'})
+            panel.targetRequested.connect(controller.set_test_target)
+            controller.targetChanged.connect(panel.set_test_target)
+            controller.nodes.connect(lambda names, selected: panel.set_nodes(
+                names, selected, controller.node_snapshot()[2]))
+            try:
+                panel.model.result('First', 262, 'ready')
+                controller._test_stats = {'total': 1, 'done': 1, 'ready': 1}
+                index = panel.test_target.findData('cloudflare')
+                self.assertGreaterEqual(index, 0)
+                panel.test_target.setCurrentIndex(index)
+                panel.test_target.activated.emit(index)
+                self.assertEqual(load_options(directory).test_target, 'cloudflare')
+                self.assertEqual(panel.model.active, 'First')
+                self.assertEqual(panel.model.records['First']['state'], 'idle')
+                self.assertIsNone(panel.model.records['First']['delay'])
+                self.assertFalse(controller._test_stats)
+                panel.model.result('First', 46, 'ready')
+                controller.set_test_target('cloudflare')
+                self.assertEqual(panel.model.records['First']['delay'], 46)
+                controller.working = True
+                controller.set_test_target('google')
+                self.assertEqual(panel.test_target.currentData(), 'cloudflare')
+                self.assertEqual(panel.model.records['First']['delay'], 46)
+            finally:
+                controller.working = False
+                controller.stop(announce=False)
+                panel.deleteLater()
+                controller.deleteLater()
+                APP.processEvents()
+
     def test_editor_keeps_compatibility_per_profile_and_new_profile_uses_generic_default(self):
         from check_proxy_plugin.configuration import DEFAULT_USER_AGENT
         panel = Panel(Options())
@@ -1407,8 +1475,13 @@ class RealCoreTests(unittest.TestCase):
                 patch.object(self.controller.environment, 'apply') as apply:
             self.controller.test_nodes(['First', 'Second'])
             self.assertTrue(testing[-1])
-            wait_for(lambda: any(value[2] == 'ready' for value in results) and
-                     not self.controller.latency.testing and self.controller.core.process is None)
+            try:
+                # Stopped-mode checks include the core's 30-second start and the 8-second probe budget.
+                wait_for(lambda: any(value[2] == 'ready' for value in results) and
+                         not self.controller.latency.testing and self.controller.core.process is None, timeout=42)
+            except AssertionError:
+                self.fail(str({'message': self.controller.message, 'results': results,
+                               'core_failure': self.core_failure, 'core_trace': self.core_trace}))
             apply.assert_not_called()
         self.assertEqual(len([value for value in results if value[2] == 'ready']), 2)
         self.assertNotIn(True, running)
@@ -1495,7 +1568,7 @@ class RealCoreTests(unittest.TestCase):
         options = Options(enabled=True, core=str(args.core.resolve()), source='nodes', profile=self.profile)
         self.controller.apply(replace(options, **changes))
         wait_for(lambda: bool(self.controller.endpoint) or not self.controller.working, timeout=32)
-        self.assertTrue(self.controller.endpoint, self.controller.message)
+        self.assertTrue(self.controller.endpoint, (self.controller.message, self.core_failure, self.core_trace))
 
     def test_managed_profile_select_authentication_and_real_traffic(self):
         self.start()
@@ -1545,7 +1618,7 @@ class RealCoreTests(unittest.TestCase):
             options = Options(core=str(args.core.resolve()), source='url', profile=subscription.url + '/sub?token=fixture')
             with patch.object(self.controller.environment, 'apply') as apply:
                 self.controller.apply(options, connect=False)
-                wait_for(lambda: not self.controller.working)
+                wait_for(lambda: not self.controller.working, timeout=32)
                 apply.assert_not_called()
             self.assertFalse(self.controller.endpoint)
             self.assertIsNone(self.controller.core.process)
@@ -1692,9 +1765,9 @@ class RealCoreTests(unittest.TestCase):
         self.assertIsNone(self.controller.core.process)
 
     def server_core(self):
-        mixed, encrypted = free_port(), free_port()
+        mixed, encrypted = free_port(udp=True), free_port(udp=True)
         while encrypted == mixed:
-            encrypted = free_port()
+            encrypted = free_port(udp=True)
         directory = Path(self.temp.name) / 'fixture-server'
         directory.mkdir()
         config = {'mixed-port': mixed, 'bind-address': '127.0.0.1', 'allow-lan': False,

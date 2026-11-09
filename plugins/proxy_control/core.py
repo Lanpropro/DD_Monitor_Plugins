@@ -14,10 +14,19 @@ from .configuration import core_config
 from .profile_settings import merge_resolution
 
 
-def free_port():
-    with socket.socket() as sock:
-        sock.bind(('127.0.0.1', 0))
-        return sock.getsockname()[1]
+def free_port(udp=False):
+    for _ in range(32):
+        with socket.socket() as sock:
+            sock.bind(('127.0.0.1', 0))
+            port = sock.getsockname()[1]
+            if udp:
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as datagram:
+                    try:
+                        datagram.bind(('127.0.0.1', port))
+                    except OSError:
+                        continue
+            return port
+    raise OSError('No available loopback TCP/UDP port')
 
 
 def error_category(line):
@@ -86,7 +95,7 @@ class Core(QObject):
         self.preferred_node = options.node
         self.directory = tempfile.TemporaryDirectory(prefix='session-', dir=root)
         directory = Path(self.directory.name)
-        mixed, self.port = free_port(), free_port()
+        mixed, self.port = free_port(udp=True), free_port()
         while self.port == mixed:
             self.port = free_port()
         self.endpoint = f'http://127.0.0.1:{mixed}'

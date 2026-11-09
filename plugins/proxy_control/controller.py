@@ -254,7 +254,13 @@ class Controller(QObject):
 
     def set_test_target(self, target):
         if target in TEST_TARGETS and not self.latency.testing and not self.working and self.probe.reply is None:
+            changed = target != self.options.test_target
             self.options.test_target = target
+            if changed:
+                self._test_stats = {}
+                names, selected, _types = self.node_snapshot()
+                self.nodes.emit(names, selected)
+                self._status('检测地址已切换，请重新测延迟')
             try:
                 save_options(self.directory, self.options)
             except OSError:

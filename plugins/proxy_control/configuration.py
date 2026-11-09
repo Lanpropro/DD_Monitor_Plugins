@@ -9,7 +9,8 @@ MAX_PROFILE = 4 * 1024 * 1024
 DEFAULT_USER_AGENT = 'clash.meta/1.19.33 DDM-Proxy/0.1'
 USER_AGENTS = [('Mihomo（默认）', DEFAULT_USER_AGENT), ('Clash Verge', 'clash-verge'), ('FlClash', 'FlClash')]
 TEST_TARGETS = {'google': 'https://www.gstatic.com/generate_204',
-                'youtube': 'https://www.youtube.com/generate_204'}
+                'youtube': 'https://www.youtube.com/generate_204',
+                'cloudflare': 'http://cp.cloudflare.com/generate_204'}
 DOMESTIC_DOMAINS = ('bilibili.com', 'biliapi.net', 'biliapi.com', 'bilivideo.com', 'bilivideo.cn',
                     'hdslb.com', 'acgvideo.com', 'huya.com', 'huyacdn.com', 'msstatic.com',
                     'douyu.com', 'douyucdn.cn', 'douyuscdn.com', 'douyin.com', 'douyincdn.com',
