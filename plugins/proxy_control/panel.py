@@ -19,6 +19,7 @@ from .visuals import NavigationDelegate, ProfileDelegate, ProfileList, icon, sur
 from .regions import display_node_name
 from .connection_page import ConnectionPage
 from .latency import MAX_CONCURRENT
+from .traffic import quota, expiry_text
 
 
 class Panel(QWidget):
@@ -549,7 +550,11 @@ class Panel(QWidget):
         for row, profile in enumerate(profiles):
             suffix = ' · 当前配置' if profile.id == active else ''
             item = QListWidgetItem(profile.name + suffix)
+            description = '，'.join(part for part in (profile.name, quota(profile.usage)[0], expiry_text(profile.usage)) if part)
+            item.setToolTip(description)
+            item.setData(Qt.AccessibleTextRole, description)
             item.setData(Qt.UserRole, {'name': profile.name, 'active': profile.id == active,
+                                      'usage': profile.usage,
                                       'kind': {'url': '订阅链接', 'file': '本地配置', 'nodes': '节点链接'}[profile.source]})
             self.profiles_list.addItem(item)
             self.quick_profile.addItem(profile.name, profile.id)

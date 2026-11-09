@@ -52,6 +52,7 @@ from check_proxy_plugin.panel import Panel
 from check_proxy_plugin.latency import Latency, MAX_CONCURRENT
 from check_proxy_plugin.profiles import Profile, load_profiles, save_profiles
 from check_proxy_plugin.metadata import display_name
+from check_proxy_plugin.traffic import parse_userinfo, quota, expiry_text
 from check_proxy_plugin.regions import region_code, display_node_name, flag_icon
 from ddm.global_danmaku import request_proxy
 from ddm.hls_proxy import HlsProxy
@@ -118,6 +119,64 @@ class Service:
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_subscription_quota_handles_missing_unlimited_overage_and_invalid_values(self):
+        self.assertEqual(parse_userinfo('upload=-1; download=NaN; total=1e9; expire=abc'), {})
+        self.assertEqual(parse_userinfo('total=' + '9' * 100), {})
+        self.assertIsNone(quota({})[1])
+        self.assertIsNone(quota(parse_userinfo('upload=2; download=3; total=0'))[1])
+        usage = parse_userinfo('upload=10; download=30; total=100; expire=1; unknown=7')
+        self.assertEqual(quota(usage)[1], .6)
+        self.assertIn('已到期', expiry_text(usage))
+        self.assertEqual(quota(dict(usage, total=20))[1], 0)
+        self.assertIn('已超额', quota(dict(usage, total=20))[0])
+        with tempfile.TemporaryDirectory() as directory:
+            profile = Profile('one', 'Fixture', 'url', 'https://fixture.invalid', user_agent='Custom/2', usage=usage)
+            save_profiles(directory, [profile])
+            self.assertEqual(load_profiles(directory, Options())[0], profile)
+            data = json.loads((Path(directory) / 'profiles.json').read_text(encoding='utf-8'))
+            del data[0]['usage']
+            (Path(directory) / 'profiles.json').write_text(json.dumps(data), encoding='utf-8')
+            self.assertEqual(load_profiles(directory, Options())[0].usage, {})
+
+    def test_download_collects_userinfo_only_from_successful_response_and_clears_next_request(self):
+        service = Service(headers={'subscription-userinfo': 'upload=10; download=30; total=100'})
+        download = Download()
+        with tempfile.TemporaryDirectory() as directory:
+            finished = []
+            download.finished.connect(lambda *values: finished.append(values))
+            try:
+                download.start(service.url, Path(directory) / 'profile', 1024)
+                wait_for(lambda: bool(finished))
+                self.assertEqual(quota(parse_userinfo(download.subscription_userinfo))[1], .6)
+                download.start(service.url, Path(directory) / 'profile', 1024)
+                self.assertEqual(download.subscription_userinfo, '')
+            finally:
+                download.cancel()
+                download.deleteLater()
+                service.close()
+
+    def test_profile_commit_preserves_or_replaces_usage_without_losing_node_or_user_agent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            controller = Controller(directory)
+            options = Options(profile_id='one', source='url', profile='https://fixture.invalid', user_agent='Custom/2')
+            controller.options = options
+            usage = {'upload': 1, 'download': 2, 'total': 10}
+            controller.profiles = [Profile('one', 'Fixture', 'url', options.profile, usage=usage)]
+            try:
+                for supplied, expected in ((None, usage), ({}, {}), ({'total': 20}, {'total': 20})):
+                    controller.pending = replace(options)
+                    controller.catalog_only = True
+                    controller._pending_usage = supplied
+                    controller.core.types = {'A': 'Http'}
+                    controller._ready('http://127.0.0.1:1', ['A'], 'A')
+                    profile = load_profiles(directory, options)[0]
+                    self.assertEqual(profile.usage, expected)
+                    self.assertEqual(profile.user_agent, 'Custom/2')
+                    self.assertEqual(profile.node, 'A')
+            finally:
+                controller.stop(announce=False)
+                controller.deleteLater()
+
     def test_mixed_port_skips_tcp_candidate_with_occupied_udp_port(self):
         port = free_port(udp=True)
         candidates = []

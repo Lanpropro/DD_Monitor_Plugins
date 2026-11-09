@@ -17,6 +17,7 @@ class Profile:
     node: str = ''
     nodes: dict = field(default_factory=dict)
     user_agent: str = DEFAULT_USER_AGENT
+    usage: dict = field(default_factory=dict)
 
 
 def load_profiles(directory, options):

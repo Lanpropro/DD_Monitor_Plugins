@@ -73,6 +73,7 @@ class Download(QObject):
         self.manager = QNetworkAccessManager(self)
         self.reply = None
         self.profile_title = self.content_disposition = ''
+        self.subscription_userinfo = ''
         self.stream = None
         self.partial = None
         self.timer = QTimer(self)
@@ -82,6 +83,7 @@ class Download(QObject):
     def start(self, url, destination, limit, user_agent=DEFAULT_USER_AGENT):
         self.cancel()
         self.profile_title = self.content_disposition = ''
+        self.subscription_userinfo = ''
         self.destination = Path(destination)
         self.destination.parent.mkdir(parents=True, exist_ok=True)
         self.partial = self.destination.with_suffix('.download')
@@ -124,6 +126,7 @@ class Download(QObject):
         self.timer.stop()
         self.profile_title = bytes(reply.rawHeader('profile-title')).decode('utf-8', errors='replace')
         self.content_disposition = bytes(reply.rawHeader('Content-Disposition')).decode('utf-8', errors='replace')
+        self.subscription_userinfo = bytes(reply.rawHeader('subscription-userinfo'))[:4096].decode('ascii', errors='replace')
         self.reply = None
         reply.deleteLater()
         self.stream.close()

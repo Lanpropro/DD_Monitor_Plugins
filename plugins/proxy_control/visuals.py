@@ -4,6 +4,7 @@ from PySide6.QtGui import QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QListWidget, QStyle, QStyledItemDelegate
 
 from ddm import theme
+from .traffic import quota, expiry_text
 
 
 def surface():
@@ -131,13 +132,13 @@ class ProfileList(QListWidget):
         result = super().viewportEvent(event)
         if event.type() == QEvent.Resize:
             width = max(1, self.viewport().width() - 2)
-            self.setGridSize(QSize(width // (2 if width >= 440 else 1), 100))
+            self.setGridSize(QSize(width // (2 if width >= 440 else 1), 126))
         return result
 
 
 class ProfileDelegate(QStyledItemDelegate):
     def sizeHint(self, option, index):
-        return QSize(max(1, self.parent().gridSize().width()), 100)
+        return QSize(max(1, self.parent().gridSize().width()), 126)
 
     def paint(self, painter, option, index):
         record = index.data(Qt.UserRole)
@@ -153,12 +154,26 @@ class ProfileDelegate(QStyledItemDelegate):
         painter.setFont(font)
         painter.setPen(theme.qcolor(theme.TEXT1))
         text = painter.fontMetrics().elidedText(record['name'], Qt.ElideRight, int(rect.width() - 55))
-        painter.drawText(rect.adjusted(16, 14, -35, -48), Qt.AlignVCenter, text)
+        painter.drawText(QRectF(rect.left() + 16, rect.top() + 12, rect.width() - 51, 24), Qt.AlignVCenter, text)
         if record['active']:
             symbol(painter, 'check', QRectF(rect.right() - 30, rect.top() + 14, 17, 17), theme.ACCENT)
         font.setPixelSize(theme.FONT_CAPTION)
         font.setWeight(QFont.Normal)
         painter.setFont(font)
         painter.setPen(theme.qcolor(theme.TEXT2))
-        painter.drawText(rect.adjusted(16, 49, -16, -13), Qt.AlignVCenter, record['kind'])
+        usage = record.get('usage') or {}
+        kind = record['kind'] + (' · ' + expiry_text(usage) if expiry_text(usage) else '')
+        painter.drawText(QRectF(rect.left() + 16, rect.top() + 40, rect.width() - 32, 18), Qt.AlignVCenter,
+                         painter.fontMetrics().elidedText(kind, Qt.ElideRight, int(rect.width() - 32)))
+        text, fraction = quota(usage)
+        painter.drawText(QRectF(rect.left() + 16, rect.top() + 66, rect.width() - 32, 18), Qt.AlignVCenter,
+                         painter.fontMetrics().elidedText(text, Qt.ElideRight, int(rect.width() - 32)))
+        if fraction is not None:
+            bar = QRectF(rect.left() + 16, rect.bottom() - 18, rect.width() - 32, 5)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(theme.qcolor(theme.BORDER_STRONG))
+            painter.drawRoundedRect(bar, 2.5, 2.5)
+            if fraction > 0:
+                painter.setBrush(theme.qcolor(theme.ACCENT))
+                painter.drawRoundedRect(QRectF(bar.left(), bar.top(), bar.width() * fraction, bar.height()), 2.5, 2.5)
         painter.restore()

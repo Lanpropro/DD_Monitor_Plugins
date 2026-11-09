@@ -18,6 +18,7 @@ from .prepare_core import URL, ASSET
 from .profiles import Profile, load_profiles, save_profiles
 from .metadata import display_name
 from .connections import ConnectionMonitor, ERRORS, DNS_REASONS
+from .traffic import parse_userinfo
 
 
 class Controller(QObject):
@@ -78,6 +79,7 @@ class Controller(QObject):
         self.probe.finished.connect(self._probe_finished)
         self.task = ''
         self.pending = None
+        self._pending_usage = None
         self.catalog_only = False
         self.installer = None
         self.endpoint = ''
@@ -123,6 +125,7 @@ class Controller(QObject):
             self.stop(announce=False)
             self.catalog_only = not connect
             self.pending = replace(options, enabled=connect)
+            self._pending_usage = None
             if self.pending.profile_name in ('', '我的配置'):
                 self.pending.profile_name = display_name(options.source, options.profile)
             if not self.pending.profile_id:
@@ -161,8 +164,11 @@ class Controller(QObject):
         preferred = options.node if options.node in nodes else selected
         options.node = preferred
         try:
+            previous = next((profile for profile in self.profiles if profile.id == options.profile_id
+                             and profile.source == options.source and profile.profile == options.profile), None)
+            usage = self._pending_usage if self._pending_usage is not None else (previous.usage if previous else {})
             record = Profile(options.profile_id, options.profile_name.strip() or '我的配置',
-                             options.source, options.profile, preferred, dict(self.core.types), options.user_agent)
+                             options.source, options.profile, preferred, dict(self.core.types), options.user_agent, usage)
             profiles = [record if profile.id == record.id else profile for profile in self.profiles]
             if not any(profile.id == record.id for profile in self.profiles):
                 profiles.append(record)
@@ -405,6 +411,7 @@ class Controller(QObject):
             return
         if task == 'profile':
             try:
+                self._pending_usage = parse_userinfo(self.download.subscription_userinfo)
                 if self.pending.profile_name in ('', '我的配置', display_name(self.pending.source, self.pending.profile)):
                     self.pending.profile_name = display_name(self.pending.source, self.pending.profile,
                                                              self.download.profile_title, self.download.content_disposition)
