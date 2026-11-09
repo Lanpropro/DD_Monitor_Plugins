@@ -50,6 +50,7 @@ from check_proxy_plugin.panel import Panel
 from check_proxy_plugin.latency import Latency
 from check_proxy_plugin.profiles import Profile, load_profiles, save_profiles
 from check_proxy_plugin.metadata import display_name
+from check_proxy_plugin.regions import region_code, display_node_name, flag_icon
 from ddm.global_danmaku import request_proxy
 from ddm.hls_proxy import HlsProxy
 
@@ -102,6 +103,16 @@ class Service:
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_region_flags_follow_names_and_taiwan_always_uses_china(self):
+        for name in ('台湾 01', '台灣 02', '台北 03', 'TW04', 'Taiwan 05', '🇹🇼 06', '🇺🇸台湾 07'):
+            with self.subTest(name=name):
+                self.assertEqual(region_code(name), 'cn')
+        for name, code in (('香港 01', 'hk'), ('日本 02', 'jp'), ('SG03', 'sg'),
+                           ('🇺🇸 US 01', 'us'), ('印度尼西亚', 'id'), ('UK 02', 'gb'),
+                           ('自动选择', ''), ('剩余流量 52GB', '')):
+            self.assertEqual(region_code(name), code)
+        self.assertEqual(display_node_name('🇹🇼 台湾 01'), '台湾 01')
+        self.assertFalse(flag_icon('cn').pixmap(24, 18).isNull())
     def test_provider_names_use_metadata_and_never_url_tokens(self):
         title = '示例服务商'
         encoded = 'base64:' + base64.b64encode(title.encode()).decode().rstrip('=')
@@ -375,6 +386,65 @@ class LatencyTests(unittest.TestCase):
 
 
 class InterfaceTests(unittest.TestCase):
+    def test_rail_icon_distinguishes_open_and_running_and_clears_on_hide(self):
+        from ddm import theme
+        with tempfile.TemporaryDirectory() as root, patch.object(module.config, 'data_root', return_value=root):
+            window = QWidget()
+            window.resize(1100, 800)
+            plugin = module.ProxyControl()
+            try:
+                plugin.on_load(SimpleNamespace(window=window, register_workspace_control=Mock()))
+                def colors():
+                    rendered = plugin.entry.icon().pixmap(24, 24).toImage()
+                    return [rendered.pixelColor(x, y) for x in range(24) for y in range(24)
+                            if rendered.pixelColor(x, y).alpha() > 180]
+                def contains(color):
+                    expected = theme.qcolor(color)
+                    return any(abs(value.red() - expected.red()) < 4 and
+                               abs(value.green() - expected.green()) < 4 and
+                               abs(value.blue() - expected.blue()) < 4 for value in colors())
+                self.assertTrue(contains(theme.TEXT2))
+                window.show()
+                plugin.entry.click()
+                self.assertTrue(plugin.entry.isChecked())
+                self.assertTrue(contains(theme.ACCENT))
+                plugin.controller.runningChanged.emit(True)
+                self.assertTrue(contains(theme.ACCENT))
+                self.assertTrue(contains(theme.SUCCESS))
+                plugin.popover.hide()
+                self.assertFalse(plugin.entry.isChecked())
+                self.assertTrue(contains(theme.SUCCESS))
+                plugin.controller.runningChanged.emit(False)
+                self.assertTrue(contains(theme.TEXT2))
+            finally:
+                plugin.on_unload()
+                window.deleteLater()
+                APP.processEvents()
+
+    def test_modes_use_shared_segments_and_flag_display_preserves_node_identifiers(self):
+        from ddm.ui import SegmentedControl, SelectControl, ToggleSwitch
+        panel = Panel(Options())
+        requests = []
+        panel.routingRequested.connect(requests.append)
+        try:
+            self.assertIsInstance(panel.routing, SegmentedControl)
+            self.assertIsInstance(panel.auto_start, ToggleSwitch)
+            self.assertIsInstance(panel.quick_node, SelectControl)
+            self.assertEqual(set(panel.routing.buttons), {'rule', 'global', 'direct'})
+            panel.routing.buttons['global'].click()
+            self.assertEqual(requests, ['global'])
+            self.assertIn('全部经节点', panel.routing_hint.text())
+            panel.set_routing('direct')
+            self.assertEqual(requests, ['global'])
+            self.assertEqual(panel.routing.value(), 'direct')
+            panel.set_nodes(['🇹🇼 台湾 01', '🇯🇵 日本 02'], '🇹🇼 台湾 01')
+            self.assertEqual(panel.model.records['🇹🇼 台湾 01']['region'], 'cn')
+            self.assertEqual(panel.model.index(0).data(), '🇹🇼 台湾 01')
+            self.assertEqual(panel.quick_node.itemData(0), '🇹🇼 台湾 01')
+            self.assertNotIn('🇹🇼', panel.quick_node.itemText(0))
+        finally:
+            panel.deleteLater()
+            APP.processEvents()
     def test_popover_renders_three_pages_in_both_host_themes(self):
         from ddm import theme
         previous = theme.mode()
@@ -799,14 +869,14 @@ class InterfaceTests(unittest.TestCase):
                 panel = plugin.panel
                 self.assertEqual(panel.model.visible, ['First', 'Second'])
                 self.assertEqual(panel.state.text(), '未启动')
-                self.assertFalse(panel.test.isEnabled())
+                self.assertTrue(panel.test.isEnabled())
                 panel.nodeRequested.emit('Second')
                 self.assertEqual(panel.model.active, 'Second')
                 self.assertEqual(load_options(directory).node, 'Second')
                 self.assertIsNone(plugin.controller.core.process)
                 self.assertFalse(plugin.controller.endpoint)
                 panel.routingRequested.emit('global')
-                self.assertEqual(panel.routing.currentData(), 'global')
+                self.assertEqual(panel.routing.value(), 'global')
             finally:
                 plugin.on_unload()
                 window.deleteLater()
@@ -815,6 +885,68 @@ class InterfaceTests(unittest.TestCase):
 
 @unittest.skipUnless(args.core, 'Pass --core for actual Mihomo process tests')
 class RealCoreTests(unittest.TestCase):
+    def test_latency_works_while_stopped_without_enabling_proxy_and_releases_core(self):
+        self.start()
+        self.controller.stop()
+        original = {key: os.environ.get(key) for key in KEYS}
+        results, running, testing = [], [], []
+        self.controller.latency.result.connect(lambda *values: results.append(values))
+        self.controller.runningChanged.connect(running.append)
+        self.controller.testingChanged.connect(testing.append)
+        start = self.controller.latency.start
+        def local_start(port, secret, names):
+            start(port, secret, names, target='http://fixture.invalid/probe')
+        with patch.object(self.controller.latency, 'start', side_effect=local_start), \
+                patch.object(self.controller.environment, 'apply') as apply:
+            self.controller.test_nodes(['First', 'Second'])
+            self.assertTrue(testing[-1])
+            wait_for(lambda: any(value[2] == 'ready' for value in results) and
+                     not self.controller.latency.testing and self.controller.core.process is None)
+            apply.assert_not_called()
+        self.assertEqual(len([value for value in results if value[2] == 'ready']), 2)
+        self.assertNotIn(True, running)
+        self.assertFalse(self.controller.endpoint)
+        self.assertFalse(load_options(self.temp.name).enabled)
+        self.assertEqual({key: os.environ.get(key) for key in KEYS}, original)
+        self.assertIn('2/2', self.controller.message)
+        self.assertFalse(testing[-1])
+        self.assertFalse(self.controller.timer.isActive())
+
+    def test_offline_latency_can_be_cancelled_while_preparing_core(self):
+        self.start()
+        self.controller.stop()
+        self.controller.test_nodes(['First', 'Second'])
+        self.assertIsNotNone(self.controller._test_names)
+        self.controller.cancel_tests()
+        QTest.qWait(150)
+        self.assertIsNone(self.controller._test_names)
+        self.assertIsNone(self.controller.core.process)
+        self.assertFalse(self.controller.working)
+        self.assertFalse(self.controller.latency.testing)
+        self.assertFalse(self.controller.endpoint)
+
+    def test_offline_latency_cancellation_releases_core_and_keeps_completed_results(self):
+        self.start()
+        self.controller.stop()
+        results, lists, cancelled = [], [], []
+        self.controller.latency.result.connect(lambda *values: results.append(values))
+        self.controller.nodes.connect(lambda *values: lists.append(values))
+        def cancel_after_result(name, _delay, state):
+            if name == 'First' and state == 'ready' and not cancelled:
+                cancelled.append(len(lists))
+                self.controller.cancel_tests()
+        self.controller.latency.result.connect(cancel_after_result)
+        start = self.controller.latency.start
+        def local_start(port, secret, names):
+            start(port, secret, names, target='http://fixture.invalid/probe')
+        with patch.object(self.controller.latency, 'start', side_effect=local_start):
+            self.controller.test_nodes(['First', 'Second'])
+            wait_for(lambda: bool(cancelled))
+        self.assertIsNone(self.controller.core.process)
+        self.assertFalse(self.controller.endpoint)
+        self.assertFalse(self.controller.latency.testing)
+        self.assertEqual(len(lists), cancelled[0])
+        self.assertFalse(any(value[0] == 'First' and value[2] == 'idle' for value in results))
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.controller = Controller(self.temp.name)

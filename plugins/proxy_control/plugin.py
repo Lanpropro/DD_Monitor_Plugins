@@ -2,10 +2,10 @@
 import os
 from pathlib import Path
 
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QToolButton
 from ddm.plugins import Plugin
-from ddm import config
+from ddm import config, theme
 
 __path__ = [os.path.dirname(__file__)]
 __package__ = __name__
@@ -13,6 +13,7 @@ __package__ = __name__
 from .controller import Controller
 from .panel import Panel
 from .popover import Popover
+from .entry_icon import EntryIcon
 
 
 class ProxyControl(Plugin):
@@ -32,11 +33,17 @@ class ProxyControl(Plugin):
         self.controller = Controller(Path(config.data_root()) / 'utils/proxy_control', context.window)
         entry = QToolButton(context.window)
         self.entry = entry
-        entry.setText(self.name)
+        self.action = QAction(self.name, context.window)
+        self.action.setCheckable(True)
+        self.action.setIcon(QIcon(str(Path(__file__).with_name('proxy.svg'))))
+        entry.setDefaultAction(self.action)
         entry.setToolTip('导入订阅和节点，启动内置代理')
-        entry.setIcon(QIcon(str(Path(__file__).with_name('proxy.svg'))))
-        entry.clicked.connect(self.toggle)
+        self.action.triggered.connect(self.toggle)
         context.register_workspace_control('proxy', entry, priority=35)
+        self.action.toggled.connect(self._entry_icon)
+        self.controller.runningChanged.connect(self._service_icon)
+        theme.signals().changed.connect(self._entry_icon)
+        self._entry_icon()
         # Restore saved routing before the host begins resolving live rooms.
         if self.controller.options.enabled and self.controller.options.auto_start:
             self.controller.apply(self.controller.options)
@@ -51,7 +58,8 @@ class ProxyControl(Plugin):
             self.panel = Panel(self.controller.options)
             self.popover = Popover(self.panel, self.context.window, self.entry)
             self.panel.hideRequested.connect(self.popover.hide)
-            self.popover.hidden.connect(self.controller.latency.stop)
+            self.popover.hidden.connect(self.controller.cancel_tests)
+            self.popover.hidden.connect(lambda: self.action.setChecked(False))
             self.panel.applyRequested.connect(self.controller.apply)
             self.panel.stopRequested.connect(self.controller.stop)
             self.panel.prepareRequested.connect(self.controller.prepare)
@@ -71,7 +79,7 @@ class ProxyControl(Plugin):
             self.controller.selectionChanged.connect(self.panel.select_node)
             self.controller.profilesChanged.connect(self.panel.set_profiles)
             self.controller.latency.result.connect(self.panel.model.result)
-            self.controller.latency.running.connect(self.panel.set_testing)
+            self.controller.testingChanged.connect(self.panel.set_testing)
             self.controller.prepared.connect(self.panel.core.setText)
             self.panel.set_profiles(self.controller.profiles, self.controller.options.profile_id)
             self.panel.set_nodes(*self.controller.node_snapshot())
@@ -80,9 +88,18 @@ class ProxyControl(Plugin):
             self.panel.set_busy(self.controller.working)
             self.controller._resources()
         self.popover.show()
+        self.action.setChecked(True)
+
+    def _service_icon(self, running):
+        self.entry.setProperty('proxyRunning', running)
+        self._entry_icon()
+
+    def _entry_icon(self, *_args):
+        self.action.setIcon(QIcon(EntryIcon(self.entry)))
 
     def on_unload(self):
         if self.controller is not None:
+            theme.signals().changed.disconnect(self._entry_icon)
             self.controller.stop(announce=False)
         if self.popover is not None:
             self.popover.hide()
@@ -91,6 +108,9 @@ class ProxyControl(Plugin):
                 widget.deleteLater()
         self.panel = self.controller = None
         self.popover = None
+        if getattr(self, 'action', None) is not None:
+            self.action.deleteLater()
+        self.action = self.entry = None
 
 
 plugin = ProxyControl()

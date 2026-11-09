@@ -11,10 +11,12 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QFrame
                                QVBoxLayout, QWidget)
 
 from ddm import theme
+from ddm.ui import SegmentedControl, SelectControl, ToggleSwitch
 
 from .configuration import Options
 from .node_list import NodeDelegate, NodeModel, NodeView
-from .visuals import NavigationDelegate, ProfileDelegate, ProfileList, RestoreSwitch, icon, surface
+from .visuals import NavigationDelegate, ProfileDelegate, ProfileList, icon, surface
+from .regions import display_node_name
 
 
 class Panel(QWidget):
@@ -156,24 +158,25 @@ class Panel(QWidget):
         actions.addWidget(self.stop)
         service.addLayout(actions)
         settings = card('快捷设置', 'settings', 0, 1)
-        self.auto_start = RestoreSwitch('启动时恢复')
+        restore_row = QHBoxLayout()
+        restore_row.addWidget(QLabel('启动时恢复'), 1)
+        self.auto_start = ToggleSwitch('启动时恢复代理')
         self.auto_start.setToolTip('仅恢复退出前仍在运行的代理；点击停止后，下次不会自动连接')
         self.auto_start.setChecked(options.auto_start)
         self.auto_start.clicked.connect(self.autoStartRequested)
-        settings.addWidget(self.auto_start)
-        self.routing = QComboBox()
-        self.routing.setObjectName('ProxyInline')
-        self.routing.setMinimumWidth(0)
-        self.routing.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
-        for label, mode in [('规则 · 国内直播直连', 'rule'), ('全局 · 全部经节点', 'global'),
-                            ('直连 · 不经节点', 'direct')]:
-            self.routing.addItem(label, mode)
-        self.routing.setCurrentIndex(self.routing.findData(options.routing))
+        restore_row.addWidget(self.auto_start)
+        settings.addLayout(restore_row)
+        self.routing = SegmentedControl([('rule', '规则'), ('global', '全局'), ('direct', '直连')], options.routing)
         self.routing.setToolTip('仅作用于本软件。规则模式：内置国内直播域名直连，其余经节点；不导入订阅路由规则。')
-        self.routing.activated.connect(lambda index: self.routingRequested.emit(self.routing.itemData(index)))
+        self.routing.valueChanged.connect(self._request_routing)
         settings.addWidget(self.routing)
+        self.routing_hint = QLabel()
+        self.routing_hint.setObjectName('ProxyHint')
+        self.routing_hint.setWordWrap(True)
+        settings.addWidget(self.routing_hint)
+        self._routing_hint(options.routing)
         provider = card('当前配置', 'folder', 1, 0)
-        self.quick_profile = QComboBox()
+        self.quick_profile = SelectControl()
         self.quick_profile.setObjectName('ProxyInline')
         self.quick_profile.setPlaceholderText('先在配置页添加服务商')
         self.quick_profile.setMinimumWidth(0)
@@ -184,13 +187,13 @@ class Panel(QWidget):
         provider.addWidget(self.quick_profile)
         provider.addWidget(self.activate_profile, 0, Qt.AlignLeft)
         node = card('当前节点', 'nodes', 1, 1)
-        self.quick_node = QComboBox()
+        self.quick_node = SelectControl()
         self.quick_node.setObjectName('ProxyInline')
         self.quick_node.setPlaceholderText('启动服务后可选择节点')
         self.quick_node.setMinimumWidth(0)
         self.quick_node.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.quick_node.setEnabled(False)
-        self.quick_node.activated.connect(lambda index: self.nodeRequested.emit(self.quick_node.itemText(index)))
+        self.quick_node.activated.connect(lambda index: self.nodeRequested.emit(self.quick_node.itemData(index)))
         self.all_nodes = QPushButton('查看全部节点')
         self.all_nodes.clicked.connect(lambda: self.navigation.setCurrentRow(1))
         node.addWidget(self.quick_node)
@@ -312,7 +315,7 @@ class Panel(QWidget):
         source_label = QLabel('导入方式')
         source_label.setObjectName('ProxyHint')
         box.addWidget(source_label)
-        self.source = QComboBox()
+        self.source = SelectControl()
         for name, value in [('订阅地址', 'url'), ('本地 Clash／Mihomo 配置', 'file'), ('节点链接', 'nodes')]:
             self.source.addItem(name, value)
         self.source.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
@@ -382,7 +385,7 @@ class Panel(QWidget):
                             else '还没有节点\n先在配置页添加服务商订阅'))
         self.add_subscription.setVisible(not total)
         self.add_subscription.setText('载入节点' if self._saved_options.profile else '添加订阅')
-        self.test.setEnabled((bool(found) and self._running) or self._testing)
+        self.test.setEnabled(bool(found) or self._testing)
 
     def _node_action(self):
         if self._saved_options.profile:
@@ -433,7 +436,7 @@ class Panel(QWidget):
             self.set_status('请先填写订阅地址、配置文件或节点链接，再点击导入按钮。')
             return
         self.applyRequested.emit(replace(self._saved_options, core=self.core.text().strip(),
-                                        auto_start=self.auto_start.isChecked(), routing=self.routing.currentData()))
+                                        auto_start=self.auto_start.isChecked(), routing=self.routing.value()))
 
     def _confirm_import(self):
         if self._busy:
@@ -457,7 +460,7 @@ class Panel(QWidget):
                        node=(self.model.active if self._edit_id == self._saved_options.profile_id else
                              next((profile.node for profile in self._profiles if profile.id == self._edit_id), '')),
                        profile_id=self._edit_id, profile_name=self.profile_name.text().strip() or '我的配置',
-                       auto_start=self.auto_start.isChecked(), routing=self.routing.currentData())
+                       auto_start=self.auto_start.isChecked(), routing=self.routing.value())
 
     def _new_profile(self):
         self.configuration_views.setCurrentIndex(1)
@@ -519,7 +522,7 @@ class Panel(QWidget):
 
     def select_node(self, name):
         self.model.select(name)
-        self.quick_node.setCurrentIndex(self.quick_node.findText(self.model.active))
+        self.quick_node.setCurrentIndex(self.quick_node.findData(self.model.active))
         self._saved_options.node = self.model.active
 
     def set_status(self, message):
@@ -533,8 +536,9 @@ class Panel(QWidget):
         self.model.set_nodes(nodes, selected, types)
         self._filter(self.search.text())
         self.quick_node.clear()
-        self.quick_node.addItems(nodes)
-        self.quick_node.setCurrentIndex(self.quick_node.findText(selected))
+        for name in nodes:
+            self.quick_node.addItem(display_node_name(name), name)
+        self.quick_node.setCurrentIndex(self.quick_node.findData(selected))
         self.quick_node.setEnabled(bool(nodes) and not self._busy)
         self._visibility()
         if nodes and self._importing and self._busy:
@@ -554,12 +558,24 @@ class Panel(QWidget):
 
     def set_routing(self, mode):
         self._saved_options.routing = mode
-        self.routing.setCurrentIndex(self.routing.findData(mode))
+        self.routing.blockSignals(True)
+        self.routing.setValue(mode)
+        self.routing.blockSignals(False)
+        self._routing_hint(mode)
+
+    def _routing_hint(self, mode):
+        self.routing_hint.setText({'rule': '国内直播域名直连，其余代理',
+                                  'global': '本软件接入流量全部经节点',
+                                  'direct': '本软件接入流量直接连接'}[mode])
+
+    def _request_routing(self, mode):
+        self._routing_hint(mode)
+        self.routingRequested.emit(mode)
 
     def set_testing(self, running):
         self._testing = running
         self.test.setText('停止测试' if running else '测延迟')
-        self.test.setEnabled(running or (self._running and bool(self.model.visible)))
+        self.test.setEnabled(running or bool(self.model.visible))
 
     def set_busy(self, busy):
         self._busy = busy

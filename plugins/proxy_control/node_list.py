@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QListView, QStyledItemDelegate, QStyle
 
 from ddm import theme
 from .visuals import surface, symbol
+from .regions import display_node_name, flag_icon, region_code
 
 NODE_ROLE = Qt.UserRole + 1
 ACTIVE_ROLE = Qt.UserRole + 2
@@ -42,10 +43,12 @@ class NodeModel(QAbstractListModel):
             return None
         name = self.visible[index.row()]
         record = self.records[name]
-        if role in (Qt.DisplayRole, Qt.ToolTipRole):
+        if role == Qt.DisplayRole:
             return name
+        if role == Qt.ToolTipRole:
+            return display_node_name(name)
         if role == Qt.AccessibleTextRole:
-            return f'{name}，{record["type"]}，{delay_text(record)}' + ('，已选择' if name == self.active else '')
+            return f'{display_node_name(name)}，{record["type"]}，{delay_text(record)}' + ('，已选择' if name == self.active else '')
         if role == NODE_ROLE:
             return record
         if role == ACTIVE_ROLE:
@@ -55,7 +58,7 @@ class NodeModel(QAbstractListModel):
     def set_nodes(self, nodes, active, types=None):
         self.beginResetModel()
         self.records = {name: {'name': name, 'type': (types or {}).get(name, '代理节点'),
-                               'delay': None, 'state': 'idle'} for name in nodes}
+                               'region': region_code(name), 'delay': None, 'state': 'idle'} for name in nodes}
         self.active = active
         self.visible = [name for name in nodes if self.query in name.casefold()]
         self.endResetModel()
@@ -110,8 +113,13 @@ class NodeDelegate(QStyledItemDelegate):
         title.setWeight(QFont.DemiBold if selected else QFont.Medium)
         painter.setFont(title)
         painter.setPen(theme.qcolor(theme.TEXT1))
-        text_rect = rect.adjusted(14, 10, -35, -56)
-        text = painter.fontMetrics().elidedText(record['name'], Qt.ElideRight, int(text_rect.width()))
+        flag_rect = QRectF(rect.left() + 14, rect.top() + 13, 24, 18)
+        if record['region']:
+            flag_icon(record['region']).paint(painter, flag_rect.toRect())
+        else:
+            symbol(painter, 'globe', flag_rect, theme.TEXT3)
+        text_rect = rect.adjusted(46, 10, -35, -56)
+        text = painter.fontMetrics().elidedText(display_node_name(record['name']), Qt.ElideRight, int(text_rect.width()))
         painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter, text)
         if selected:
             symbol(painter, 'check', QRectF(rect.right() - 29, rect.top() + 12, 17, 17), theme.ACCENT)

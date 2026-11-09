@@ -1,7 +1,7 @@
 """Paint the compact client navigation, switches and service profile cards."""
 from PySide6.QtCore import QEvent, QRectF, QSize, Qt
 from PySide6.QtGui import QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import QAbstractButton, QListWidget, QStyle, QStyledItemDelegate
+from PySide6.QtWidgets import QListWidget, QStyle, QStyledItemDelegate
 
 from ddm import theme
 
@@ -71,6 +71,10 @@ def symbol(painter, name, rect, color):
     elif name == 'latency':
         painter.drawArc(QRectF(3, 3, 18, 18), 25 * 16, 310 * 16)
         painter.drawLine(12, 12, 17, 7)
+    elif name == 'globe':
+        painter.drawEllipse(QRectF(3, 3, 18, 18))
+        painter.drawEllipse(QRectF(8, 3, 8, 18))
+        painter.drawLine(3, 12, 21, 12)
     painter.restore()
 
 
@@ -104,38 +108,6 @@ class NavigationDelegate(QStyledItemDelegate):
         painter.setPen(theme.qcolor(color))
         painter.drawText(rect.adjusted(0, 42, 0, -9), Qt.AlignCenter, index.data())
         painter.restore()
-
-
-class RestoreSwitch(QAbstractButton):
-    def __init__(self, text, parent=None):
-        super().__init__(parent)
-        self.setText(text)
-        self.setCheckable(True)
-        self.setFocusPolicy(Qt.StrongFocus)
-        self.setCursor(Qt.PointingHandCursor)
-
-    def sizeHint(self):
-        return QSize(170, 30)
-
-    def hitButton(self, position):
-        return self.rect().contains(position)
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(theme.qcolor(theme.TEXT1 if self.isEnabled() else theme.TEXT3))
-        painter.drawText(self.rect().adjusted(0, 0, -53, 0), Qt.AlignVCenter, self.text())
-        track = QRectF(self.width() - 44, (self.height() - 25) / 2, 42, 25)
-        painter.setPen(QPen(theme.qcolor(theme.ACCENT if self.isChecked() else theme.BORDER_STRONG), 1.5))
-        painter.setBrush(theme.qcolor(theme.ACCENT_SOFT if self.isChecked() else surface()))
-        painter.drawRoundedRect(track, 12.5, 12.5)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(theme.qcolor(theme.ACCENT if self.isChecked() else theme.TEXT3))
-        painter.drawEllipse(QRectF(track.x() + (21 if self.isChecked() else 4), track.y() + 4, 17, 17))
-        if self.hasFocus():
-            painter.setBrush(Qt.NoBrush)
-            painter.setPen(QPen(theme.qcolor(theme.ACCENT), 1, Qt.DotLine))
-            painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 5, 5)
 
 
 class ProfileList(QListWidget):

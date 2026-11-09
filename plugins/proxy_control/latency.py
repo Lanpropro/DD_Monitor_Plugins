@@ -1,6 +1,7 @@
 """User-triggered latency checks through the core API, at most two in flight."""
 from collections import deque
 import json
+import logging
 from urllib.parse import quote, urlencode
 
 from PySide6.QtCore import QObject, QUrl, Signal
@@ -40,7 +41,7 @@ class Latency(QObject):
             self.active[reply] = name
             self.result.emit(name, None, 'testing')
             reply.finished.connect(lambda reply=reply: self._finished(reply))
-        if not self.pending and not self.active:
+        if self.testing and not self.pending and not self.active:
             self.testing = False
             self.running.emit(False)
 
@@ -57,11 +58,15 @@ class Latency(QObject):
                     delay, state = value, 'ready'
             except (ValueError, AttributeError):
                 pass
+        if state != 'ready':
+            logging.getLogger('ddm.proxy_control').info('proxy latency error http=%s transport=%s',
+                reply.attribute(QNetworkRequest.HttpStatusCodeAttribute) or 0, reply.error().value)
         reply.deleteLater()
         self.result.emit(name, delay, state)
         self._next()
 
     def stop(self):
+        was_testing = self.testing
         active, self.active = self.active, {}
         self.pending.clear()
         for reply, name in active.items():
@@ -69,4 +74,5 @@ class Latency(QObject):
             reply.deleteLater()
             self.result.emit(name, None, 'idle')
         self.testing = False
-        self.running.emit(False)
+        if was_testing:
+            self.running.emit(False)

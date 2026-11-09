@@ -27,6 +27,7 @@ class Controller(QObject):
     runningChanged = Signal(bool)
     selectionChanged = Signal(str)
     routingChanged = Signal(str)
+    testingChanged = Signal(bool)
 
     def __init__(self, directory, parent=None):
         super().__init__(parent)
@@ -52,6 +53,11 @@ class Controller(QObject):
         self.download = Download(self)
         self.download.finished.connect(self._downloaded)
         self.latency = Latency(self)
+        self._test_names = None
+        self._testing_offline = False
+        self._test_stats = {}
+        self.latency.running.connect(self._testing_changed)
+        self.latency.result.connect(self._test_result)
         self.task = ''
         self.pending = None
         self.catalog_only = False
@@ -120,11 +126,17 @@ class Controller(QObject):
         self.profilesChanged.emit(self.profiles, record.id)
         if self.catalog_only:
             self.catalog_only = False
-            self.core.stop()
-            self.timer.stop()
+            if self._test_names is None:
+                self.core.stop()
+                self.timer.stop()
             self.nodes.emit(nodes, preferred)
             self.runningChanged.emit(False)
             self._busy(False)
+            if self._test_names is not None:
+                names, self._test_names = self._test_names, None
+                self._testing_offline = True
+                self._begin_tests(names)
+                return
             self._status(f'已载入 {len(nodes)} 个节点，可先选择节点再启动代理')
             self._resources()
             self._trace('catalog-ready')
@@ -195,11 +207,57 @@ class Controller(QObject):
         self._trace('mode')
 
     def test_nodes(self, names):
-        if self.latency.testing:
+        if self.latency.testing or self._test_names is not None:
+            self.cancel_tests()
+            return
+        names = list(dict.fromkeys(name for name in names if name in self.node_snapshot()[0]))
+        if not names:
+            self._status('当前没有可测试的节点，请先载入配置')
+            return
+        if self.endpoint:
+            self._begin_tests(names)
+        elif not self.working:
+            self.apply(self.options, connect=False)
+            if self.working:
+                self._test_names = names
+                self.testingChanged.emit(True)
+                self._status('正在准备节点延迟测试，不启用软件代理…')
+                self._trace('latency-prepare')
+
+    def _begin_tests(self, names):
+        names = [name for name in names if name in self.core.nodes]
+        self._test_stats = {'total': len(names), 'done': 0, 'ready': 0, 'timeout': 0, 'failed': 0}
+        self._status(f'正在测试 0/{len(names)} 个节点，最多同时测试 2 个…')
+        self._trace('latency-start')
+        self.latency.start(self.core.port, self.core.secret, names)
+
+    def _test_result(self, _name, _delay, state):
+        if state not in ('ready', 'timeout', 'failed') or not self._test_stats:
+            return
+        self._test_stats['done'] += 1
+        self._test_stats[state] += 1
+        stats = self._test_stats
+        self._status(f'已测试 {stats["done"]}/{stats["total"]}：可用 {stats["ready"]}，'
+                     f'超时 {stats["timeout"]}，失败 {stats["failed"]}')
+
+    def _testing_changed(self, testing):
+        if not testing and self._testing_offline:
+            self._testing_offline = False
+            self.core.stop()
+            self.timer.stop()
+            self._resources()
+        self.testingChanged.emit(testing)
+        if not testing and self._test_stats:
+            logging.getLogger('ddm.proxy_control').info('proxy latency summary %s', self._test_stats)
+
+    def cancel_tests(self):
+        if self._test_names is not None:
+            self.stop(announce=False)
+            self._status('延迟测试已取消，软件代理保持未启动')
+        elif self.latency.testing:
+            offline = self._testing_offline
             self.latency.stop()
-        elif self.core.process is not None and self.endpoint:
-            self.latency.start(self.core.port, self.core.secret,
-                               [name for name in names if name in self.core.nodes])
+            self._status('延迟测试已取消，软件代理保持未启动' if offline else '延迟测试已取消')
 
     def _selected(self, name):
         if name:
@@ -301,7 +359,10 @@ class Controller(QObject):
 
     def stop(self, announce=True):
         self.timer.stop()
+        self._test_names = None
+        self._testing_offline = False
         self.latency.stop()
+        self.testingChanged.emit(False)
         self.download.cancel()
         self.task = ''
         self.pending = None
