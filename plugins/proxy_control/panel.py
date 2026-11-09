@@ -351,7 +351,7 @@ class Panel(QWidget):
         self.agent_label.setObjectName('ProxyHint')
         self.agent_label.setWordWrap(True)
         box.addWidget(self.agent_label)
-        self.agent = SelectControl()
+        self.agent = QComboBox()
         self.agent.setEditable(True)
         self.agent.setAccessibleName('订阅格式／User-Agent')
         self.agent.lineEdit().setPlaceholderText('选择或输入自定义 User-Agent')

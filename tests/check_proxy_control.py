@@ -614,11 +614,16 @@ class InterfaceTests(unittest.TestCase):
             self.assertEqual(panel.options().user_agent, 'Custom/2.0')
             panel._new_profile()
             self.assertEqual(panel.options().user_agent, DEFAULT_USER_AGENT)
-            panel.agent.setEditText('Provider Client/3.0')
+            panel.navigation.setCurrentRow(2)
+            panel.show()
+            panel.agent.setFocus()
+            QTest.keyClick(panel.agent.lineEdit(), Qt.Key_A, Qt.ControlModifier)
+            QTest.keyClicks(panel.agent.lineEdit(), 'Provider Client/3.0')
             self.assertEqual(panel.options().user_agent, 'Provider Client/3.0')
             panel.set_busy(True)
             self.assertFalse(panel.agent.isEnabled())
         finally:
+            panel.hide()
             panel.deleteLater()
             APP.processEvents()
 
