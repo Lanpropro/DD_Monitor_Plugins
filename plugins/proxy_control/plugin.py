@@ -59,6 +59,7 @@ class ProxyControl(Plugin):
             self.panel = Panel(self.controller.options)
             self.popover = Popover(self.panel, self.context.window, self.entry)
             self.panel.hideRequested.connect(self.popover.hide)
+            self.popover.hidden.connect(lambda: self.controller.menu_visible(False))
             self.popover.hidden.connect(self.controller.cancel_tests)
             self.popover.hidden.connect(lambda: self.action.setChecked(False))
             self.panel.applyRequested.connect(self.controller.apply)
@@ -77,12 +78,10 @@ class ProxyControl(Plugin):
             self.controller.runningChanged.connect(self.panel.set_running)
             self.controller.routingChanged.connect(self.panel.set_routing)
             self.controller.targetChanged.connect(self.panel.set_test_target)
-            self.controller.nodes.connect(lambda nodes, selected: self.panel.set_nodes(
-                nodes, selected, self.controller.node_snapshot()[2]))
+            self.controller.nodes.connect(self._nodes_changed)
             self.controller.selectionChanged.connect(self.panel.select_node)
             self.controller.profilesChanged.connect(self.panel.set_profiles)
-            self.controller.latency.result.connect(self.panel.model.result)
-            self.controller.latency.detail.connect(self.panel.model.set_detail)
+            self.controller.resultsChanged.connect(self.panel.set_results)
             self.controller.testingChanged.connect(self.panel.set_testing)
             self.controller.prepared.connect(self.panel.core.setText)
             monitor, page = self.controller.connections, self.panel.connections
@@ -94,6 +93,7 @@ class ProxyControl(Plugin):
             page.set_events(list(self.controller.events))
             self.panel.set_profiles(self.controller.profiles, self.controller.options.profile_id)
             self.panel.set_nodes(*self.controller.node_snapshot())
+            self.panel.set_results(self.controller.result_snapshot())
             self.panel.set_running(bool(self.controller.endpoint))
             self.panel.set_status(self.controller.message)
             self.panel.set_busy(self.controller.working)
@@ -101,6 +101,11 @@ class ProxyControl(Plugin):
             self._entry_icon()
         self.popover.show()
         self.action.setChecked(True)
+        self.controller.menu_visible(True)
+
+    def _nodes_changed(self, nodes, selected):
+        self.panel.set_nodes(nodes, selected, self.controller.node_snapshot()[2])
+        self.panel.set_results(self.controller.result_snapshot())
 
     def _service_icon(self, running):
         self.entry.setProperty('proxyRunning', running)

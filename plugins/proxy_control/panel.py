@@ -18,6 +18,7 @@ from .node_list import NodeDelegate, NodeModel, NodeView
 from .visuals import NavigationDelegate, ProfileDelegate, ProfileList, icon, surface
 from .regions import display_node_name
 from .connection_page import ConnectionPage
+from .latency import MAX_CONCURRENT
 
 
 class Panel(QWidget):
@@ -245,7 +246,7 @@ class Panel(QWidget):
         self.count.setObjectName('ProxyHint')
         self.test = QPushButton('测延迟')
         self.test.setEnabled(False)
-        self.test.setToolTip('测试当前搜索结果中的节点，最多同时测试 2 个')
+        self.test.setToolTip(f'测试当前搜索结果中的节点，最多同时测试 {MAX_CONCURRENT} 个，其余排队；收起后取消未完成项')
         self.test.clicked.connect(lambda: self.testRequested.emit(list(self.model.visible)))
         toolbar.addWidget(self.test)
         box.addLayout(toolbar)
@@ -592,6 +593,13 @@ class Panel(QWidget):
             self.search.clear()
             self.navigation.setCurrentRow(1)
         self.refresh_theme()
+
+    def set_results(self, results):
+        for name, record in self.model.records.items():
+            delay, state, detail = results.get(name, (None, 'idle', ''))
+            if (record['delay'], record['state'], record.get('detail', '')) != (delay, state, detail):
+                self.model.result(name, delay, state)
+                self.model.set_detail(name, detail)
 
     def set_running(self, running):
         self._running = running

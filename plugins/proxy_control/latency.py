@@ -1,4 +1,4 @@
-"""User-triggered latency checks through the core API, at most two in flight."""
+"""Bounded batch latency checks, matching FlClash 0.8.94's core limit."""
 from collections import deque
 import json
 import logging
@@ -7,6 +7,8 @@ from urllib.parse import quote, urlencode
 from PySide6.QtCore import QObject, QUrl, Signal
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkProxy, QNetworkRequest, QNetworkReply
 from .configuration import TEST_TARGETS
+
+MAX_CONCURRENT = 50
 
 
 class Latency(QObject):
@@ -18,6 +20,7 @@ class Latency(QObject):
         super().__init__(parent)
         self.manager = QNetworkAccessManager(self)
         self.manager.setProxy(QNetworkProxy(QNetworkProxy.NoProxy))
+        self.managers = [self.manager]
         self.active = {}
         self.pending = deque()
         self.testing = False
@@ -29,24 +32,40 @@ class Latency(QObject):
         self.pending = deque(dict.fromkeys(names))
         self.testing = bool(self.pending)
         self.running.emit(self.testing)
+        for name in self.pending:
+            self.result.emit(name, None, 'queued')
         self._next()
 
     def _next(self):
-        while self.pending and len(self.active) < 2:
+        while self.pending and len(self.active) < MAX_CONCURRENT:
+            # Qt permits six HTTP/1 requests per host per manager. Keep that
+            # transport queue separate from our explicit, cancellable queue.
+            manager = next((item for item in self.managers if
+                            sum(reply.manager() is item for reply in self.active) < 6), None)
+            if manager is None:
+                manager = QNetworkAccessManager(self)
+                manager.setProxy(QNetworkProxy(QNetworkProxy.NoProxy))
+                self.managers.append(manager)
             name = self.pending.popleft()
             query = urlencode({'url': self.target, 'timeout': self.timeout_ms})
             request = QNetworkRequest(QUrl(f'http://127.0.0.1:{self.port}/providers/proxies/subscription/'
                                           f'{quote(name, safe="")}/healthcheck?{query}'))
             request.setRawHeader(b'Authorization', ('Bearer ' + self.secret).encode())
             request.setTransferTimeout(self.timeout_ms + 2000)
-            reply = self.manager.get(request)
+            reply = manager.get(request)
             reply.setReadBufferSize(2048)
             self.active[reply] = name
             self.result.emit(name, None, 'testing')
             reply.finished.connect(lambda reply=reply: self._finished(reply))
         if self.testing and not self.pending and not self.active:
             self.testing = False
+            self._release_managers()
             self.running.emit(False)
+
+    def _release_managers(self):
+        for manager in self.managers[1:]:
+            manager.deleteLater()
+        self.managers = [self.manager]
 
     def _finished(self, reply):
         name = self.active.pop(reply, None)
@@ -75,11 +94,14 @@ class Latency(QObject):
     def stop(self):
         was_testing = self.testing
         active, self.active = self.active, {}
-        self.pending.clear()
+        pending, self.pending = self.pending, deque()
         for reply, name in active.items():
             reply.abort()
             reply.deleteLater()
             self.result.emit(name, None, 'idle')
+        for name in pending:
+            self.result.emit(name, None, 'idle')
+        self._release_managers()
         self.testing = False
         if was_testing:
             self.running.emit(False)

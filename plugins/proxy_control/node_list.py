@@ -1,5 +1,5 @@
 """A virtualized node list; paint visible rows without per-node widgets."""
-from PySide6.QtCore import QAbstractListModel, QModelIndex, QRectF, QSize, Qt
+from PySide6.QtCore import QAbstractListModel, QElapsedTimer, QModelIndex, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QFont, QPainter, QPen
 from PySide6.QtWidgets import QListView, QStyledItemDelegate, QStyle
 
@@ -20,6 +20,31 @@ class NodeView(QListView):
         self.setResizeMode(QListView.Adjust)
         self.setMovement(QListView.Static)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.clock = QElapsedTimer()
+        self.clock.start()
+        self.animation = QTimer(self)
+        self.animation.setInterval(50)
+        self.animation.timeout.connect(self.viewport().update)
+
+    def setModel(self, model):
+        super().setModel(model)
+        model.dataChanged.connect(self._animate)
+        model.modelReset.connect(self._animate)
+
+    def _animate(self, *_args):
+        moving = self.isVisible() and any(record['state'] == 'testing' for record in self.model().records.values())
+        if moving:
+            self.animation.start()
+        else:
+            self.animation.stop()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._animate()
+
+    def hideEvent(self, event):
+        self.animation.stop()
+        super().hideEvent(event)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -94,7 +119,7 @@ class NodeModel(QAbstractListModel):
 def delay_text(record):
     if record['state'] == 'ready':
         return f'{record["delay"]} ms'
-    return {'idle': '未测试', 'testing': '测试中…', 'failed': record.get('detail', '测试失败'),
+    return {'idle': '未测试', 'queued': '排队中', 'testing': '测试中…', 'failed': record.get('detail', '测试失败'),
             'timeout': '超时'}.get(record['state'], '未测试')
 
 
@@ -142,7 +167,15 @@ class NodeDelegate(QStyledItemDelegate):
         if theme.is_light() and record['state'] in ('failed', 'timeout', 'ready'):
             color = color.darker(125)
         painter.setPen(color)
-        painter.drawText(rect.adjusted(14, 62, -14, -7), Qt.AlignLeft | Qt.AlignVCenter, delay_text(record))
+        loading = record['state'] in ('testing', 'queued')
+        if loading:
+            arc = QRectF(rect.left() + 14, rect.top() + 64, 12, 12)
+            angle = (self.parent().clock.elapsed() % 900) * 360 // 900 if record['state'] == 'testing' else 0
+            painter.setPen(QPen(theme.qcolor(theme.ACCENT if record['state'] == 'testing' else theme.TEXT3),
+                                1.6, Qt.SolidLine, Qt.RoundCap))
+            painter.drawArc(arc, -angle * 16, 270 * 16)
+        painter.drawText(rect.adjusted(33 if loading else 14, 62, -14, -7),
+                         Qt.AlignLeft | Qt.AlignVCenter, delay_text(record))
         if option.state & QStyle.State_HasFocus:
             painter.setBrush(Qt.NoBrush)
             painter.setPen(QPen(theme.qcolor(theme.ACCENT), 1, Qt.DotLine))

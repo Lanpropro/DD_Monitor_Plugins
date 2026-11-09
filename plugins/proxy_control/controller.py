@@ -13,7 +13,7 @@ from .configuration import MAX_PROFILE, TEST_TARGETS, Options, load_options, sav
 from .core import Core
 from .environment import Environment
 from .network import ConnectionProbe, Download
-from .latency import Latency
+from .latency import Latency, MAX_CONCURRENT
 from .prepare_core import URL, ASSET
 from .profiles import Profile, load_profiles, save_profiles
 from .metadata import display_name
@@ -33,6 +33,7 @@ class Controller(QObject):
     testingChanged = Signal(bool)
     targetChanged = Signal(str)
     eventsChanged = Signal(object)
+    resultsChanged = Signal(object)
 
     def __init__(self, directory, parent=None):
         super().__init__(parent)
@@ -66,8 +67,13 @@ class Controller(QObject):
         self._test_names = None
         self._testing_offline = False
         self._test_stats = {}
+        self._results = {}
+        self._test_key = None
+        self._menu_visible = False
+        self._auto_test_pending = True
         self.latency.running.connect(self._testing_changed)
         self.latency.result.connect(self._test_result)
+        self.latency.detail.connect(self._test_detail)
         self.probe = ConnectionProbe(self)
         self.probe.finished.connect(self._probe_finished)
         self.task = ''
@@ -80,6 +86,32 @@ class Controller(QObject):
         self.timer = QTimer(self)
         self.timer.setInterval(2000)
         self.timer.timeout.connect(self._resources)
+
+    def _result_key(self):
+        return (self.options.profile_id, self.options.source, self.options.profile,
+                self.options.user_agent, self.options.test_target)
+
+    def result_snapshot(self):
+        return dict(self._results.get(self._result_key(), {}))
+
+    def menu_visible(self, visible):
+        self._menu_visible = visible
+        if visible:
+            self._maybe_auto_test()
+        else:
+            self._auto_test_pending = False
+
+    def _maybe_auto_test(self):
+        if (self._auto_test_pending and self._menu_visible and not self.working
+                and not self.latency.testing and self.node_snapshot()[0]):
+            self._auto_test_pending = False
+            self.test_nodes(self.node_snapshot()[0])
+
+    def _test_detail(self, name, detail):
+        if self._test_key is not None:
+            records = self._results.setdefault(self._test_key, {})
+            delay, state, _ = records.get(name, (None, 'idle', ''))
+            records[name] = (delay, state, detail)
 
     def apply(self, options, connect=True):
         try:
@@ -226,6 +258,7 @@ class Controller(QObject):
         self._trace('mode')
 
     def test_nodes(self, names):
+        self._auto_test_pending = False
         if self.latency.testing or self._test_names is not None or self.probe.reply is not None:
             self.cancel_tests()
             return
@@ -245,8 +278,11 @@ class Controller(QObject):
 
     def _begin_tests(self, names):
         names = [name for name in names if name in self.core.nodes]
+        self._test_key = self._result_key()
+        self._results[self._test_key] = {}
+        self.resultsChanged.emit(self.result_snapshot())
         self._test_stats = {'total': len(names), 'done': 0, 'ready': 0, 'timeout': 0, 'failed': 0}
-        self._status(f'正在测试 0/{len(names)} 个节点，最多同时测试 2 个…')
+        self._status(f'正在测试 0/{len(names)} 个节点，最多同时测试 {MAX_CONCURRENT} 个…')
         self._trace('latency-start')
         target = TEST_TARGETS[self.options.test_target]
         logging.getLogger('ddm.proxy_control').info('proxy latency target=%s timeout_ms=8000', self.options.test_target)
@@ -260,6 +296,7 @@ class Controller(QObject):
                 self._test_stats = {}
                 names, selected, _types = self.node_snapshot()
                 self.nodes.emit(names, selected)
+                self.resultsChanged.emit(self.result_snapshot())
                 self._status('检测地址已切换，请重新测延迟')
             try:
                 save_options(self.directory, self.options)
@@ -267,7 +304,12 @@ class Controller(QObject):
                 self._status('检测地址选项未能保存')
         self.targetChanged.emit(self.options.test_target)
 
-    def _test_result(self, _name, _delay, state):
+    def _test_result(self, name, delay, state):
+        if self._test_key is not None:
+            records = self._results.setdefault(self._test_key, {})
+            detail = records.get(name, (None, 'idle', ''))[2] if state in ('failed', 'timeout') else ''
+            records[name] = (delay, state, detail)
+            self.resultsChanged.emit(self.result_snapshot())
         if state not in ('ready', 'timeout', 'failed') or not self._test_stats:
             return
         self._test_stats['done'] += 1
@@ -415,6 +457,8 @@ class Controller(QObject):
     def _busy(self, busy):
         self.working = busy
         self.busy.emit(busy)
+        if not busy:
+            QTimer.singleShot(0, self._maybe_auto_test)
 
     def _resources(self):
         process = self.core.process

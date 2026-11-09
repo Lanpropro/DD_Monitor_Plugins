@@ -49,7 +49,7 @@ from check_proxy_plugin.prepare_core import install, ASSET
 from check_proxy_plugin.core import error_category, free_port
 from check_proxy_plugin.node_list import NodeModel, NODE_ROLE, ACTIVE_ROLE
 from check_proxy_plugin.panel import Panel
-from check_proxy_plugin.latency import Latency
+from check_proxy_plugin.latency import Latency, MAX_CONCURRENT
 from check_proxy_plugin.profiles import Profile, load_profiles, save_profiles
 from check_proxy_plugin.metadata import display_name
 from check_proxy_plugin.regions import region_code, display_node_name, flag_icon
@@ -507,6 +507,8 @@ class LatencyTests(unittest.TestCase):
         self.auth = []
         self.queries = []
         self.details = []
+        self.release = threading.Event()
+        self.release.set()
         self.latency.detail.connect(lambda *values: self.details.append(values))
         owner = self
         class Api(BaseHTTPRequestHandler):
@@ -517,6 +519,7 @@ class LatencyTests(unittest.TestCase):
                     owner.auth.append(self.headers.get('Authorization'))
                     owner.queries.append(parse_qs(urlsplit(self.path).query))
                 try:
+                    owner.release.wait(5)
                     threading.Event().wait(.08)
                     failed = '/Bad/' in unquote(urlsplit(self.path).path)
                     body = json.dumps({'error': 'fixture-secret'} if failed else {'delay': 42}).encode()
@@ -531,11 +534,14 @@ class LatencyTests(unittest.TestCase):
                         owner.active -= 1
             def log_message(self, *unused):
                 pass
-        self.server = ThreadingHTTPServer(('127.0.0.1', 0), Api)
+        class BatchServer(ThreadingHTTPServer):
+            request_queue_size = 128
+        self.server = BatchServer(('127.0.0.1', 0), Api)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
 
     def tearDown(self):
+        self.release.set()
         self.latency.stop()
         self.latency.deleteLater()
         self.server.shutdown()
@@ -550,7 +556,7 @@ class LatencyTests(unittest.TestCase):
         self.assertEqual(len(finished), 4)
         self.assertIn(('Bad', None, 'failed'), finished)
         self.assertIn(('Good/B', 42, 'ready'), finished)
-        self.assertLessEqual(self.peak, 2)
+        self.assertLessEqual(self.peak, MAX_CONCURRENT)
         self.assertEqual(set(self.auth), {'Bearer fixture-key'})
         self.assertNotIn('fixture-secret', str(finished))
         self.assertEqual(self.queries[0]['url'], ['https://www.gstatic.com/generate_204'])
@@ -559,13 +565,33 @@ class LatencyTests(unittest.TestCase):
 
     def test_cancel_stops_queued_requests_and_ignores_late_replies(self):
         self.latency.start(self.server.server_port, 'fixture-key', ['First', 'Second', 'Third'])
-        self.assertLessEqual(len(self.latency.active), 2)
+        self.assertLessEqual(len(self.latency.active), MAX_CONCURRENT)
         self.latency.stop()
         QTest.qWait(150)
         self.assertFalse(self.latency.active)
         self.assertFalse(self.latency.pending)
         self.assertFalse(self.latency.testing)
         self.assertFalse(any(values[2] == 'ready' for values in self.events))
+
+    def test_large_batch_has_explicit_queue_and_fifty_request_limit(self):
+        names = [f'Fixture {i}' for i in range(120)]
+        self.latency.start(self.server.server_port, 'fixture-key', names)
+        self.assertEqual(len(self.latency.active), 50)
+        self.assertEqual(len(self.latency.pending), 70)
+        self.assertEqual(len(self.latency.managers), 9)
+        self.assertEqual(sum(event[2] == 'queued' for event in self.events), 120)
+        self.latency.stop()
+        self.assertEqual(len(self.latency.managers), 1)
+        self.assertEqual(sum(event[2] == 'idle' for event in self.events), 120)
+
+    def test_transport_really_runs_more_than_six_requests(self):
+        self.release.clear()
+        self.latency.start(self.server.server_port, 'fixture-key', [f'Good {i}' for i in range(12)])
+        wait_for(lambda: self.peak > 6)
+        self.release.set()
+        wait_for(lambda: not self.latency.testing)
+        self.assertGreater(self.peak, 6)
+        self.assertLessEqual(self.peak, MAX_CONCURRENT)
 
 
 class ConnectionTests(unittest.TestCase):
@@ -637,6 +663,70 @@ class ConnectionTests(unittest.TestCase):
 
 
 class InterfaceTests(unittest.TestCase):
+    def test_session_results_survive_nodes_refresh_stop_and_isolate_targets_profiles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            controller = Controller(directory)
+            controller.options = Options(profile_id='one', source='nodes', profile='fixture')
+            controller.profiles = [Profile('one', 'Fixture', 'nodes', 'fixture', 'First', {'First': 'Http'})]
+            panel = Panel(controller.options)
+            controller.nodes.connect(lambda names, selected: (
+                panel.set_nodes(names, selected), panel.set_results(controller.result_snapshot())))
+            controller.resultsChanged.connect(panel.set_results)
+            try:
+                panel.set_nodes(['First'], 'First')
+                controller._test_key = controller._result_key()
+                controller._test_result('First', 42, 'ready')
+                controller.stop(announce=False)
+                self.assertEqual(panel.model.records['First']['delay'], 42)
+                controller.set_test_target('cloudflare')
+                self.assertEqual(panel.model.records['First']['state'], 'idle')
+                controller.options.test_target = 'google'
+                self.assertEqual(controller.result_snapshot()['First'][0], 42)
+                controller.options.profile_id = 'two'
+                self.assertFalse(controller.result_snapshot())
+            finally:
+                controller.stop(announce=False)
+                controller.deleteLater()
+                panel.deleteLater()
+
+    def test_first_menu_test_waits_for_nodes_and_never_repeats_after_cancel(self):
+        with tempfile.TemporaryDirectory() as directory:
+            controller = Controller(directory)
+            try:
+                with patch.object(controller, 'test_nodes') as test:
+                    controller.menu_visible(True)
+                    test.assert_not_called()
+                    controller.options.profile_id = 'one'
+                    controller.profiles = [Profile('one', 'Fixture', 'nodes', 'fixture', nodes={'A': 'Http'})]
+                    controller._maybe_auto_test()
+                    test.assert_called_once_with(['A'])
+                    controller.menu_visible(False)
+                    controller.menu_visible(True)
+                    controller._maybe_auto_test()
+                    test.assert_called_once()
+            finally:
+                controller.stop(announce=False)
+                controller.deleteLater()
+
+    def test_node_spinner_has_one_clock_and_stops_when_hidden(self):
+        panel = Panel(Options())
+        panel.set_nodes(['A', 'B'], 'A')
+        panel.navigation.setCurrentRow(1)
+        panel.show()
+        APP.processEvents()
+        try:
+            panel.set_results({'A': (None, 'testing', ''), 'B': (None, 'queued', '')})
+            self.assertTrue(panel.nodes.animation.isActive())
+            panel.hide()
+            self.assertFalse(panel.nodes.animation.isActive())
+            panel.show()
+            self.assertTrue(panel.nodes.animation.isActive())
+            panel.set_results({'A': (42, 'ready', '')})
+            self.assertFalse(panel.nodes.animation.isActive())
+        finally:
+            panel.hide()
+            panel.deleteLater()
+
     def test_changing_target_clears_old_results_and_persists_selection(self):
         with tempfile.TemporaryDirectory() as directory:
             controller = Controller(directory)

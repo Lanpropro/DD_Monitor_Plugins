@@ -29,7 +29,7 @@
 
 订阅地址和配置路径使用单行输入，节点链接保留多行输入；订阅地址只清理首尾空白，中间的空格或换行会给出明确提示，不擅自拼接多条链接。配置页显示就近的导入确认按钮；总览「启动代理／重新载入」用于载入当前已保存资料，空资料只引导前往配置，不提交后台请求。编辑后会清除旧错误并提示修改尚未确认。
 
-「测延迟」在代理停止时也可点击：临时加载一个内核执行测试，全程不应用软件代理环境，完成或取消后释放；代理已运行时复用当前内核。只在用户点击时测试当前搜索结果，经官方内核代理集合接口请求页面上选择的检测地址。默认使用 Google `https://www.gstatic.com/generate_204`、单节点最多等待 8 秒；也可选择 YouTube 204 或 Cloudflare HTTP（`http://cp.cloudflare.com/generate_204`）。每次最多 2 个请求，界面显示准备状态、逐节点结果和完成／成功／超时／失败计数；再次点击或收起面板取消队列及在途请求，已完成结果保留，迟到结果不更新新会话。切换检测地址清除旧数值与汇总，保留当前节点选择，避免把不同目标的结果混在一起。
+「测延迟」在代理停止时也可点击：临时加载一个内核执行测试，全程不应用软件代理环境，完成或取消后释放；代理已运行时复用当前内核。首次打开菜单自动测试一次（没有节点时等待本次展开期间载入）；也可手动测试当前搜索结果，经官方内核代理集合接口请求页面上选择的检测地址。默认使用 Google `https://www.gstatic.com/generate_204`、单节点最多等待 8 秒；也可选择 YouTube 204 或 Cloudflare HTTP（`http://cp.cloudflare.com/generate_204`）。每次最多 50 个在途请求，其余显示排队；卡片用一个共享时钟绘制转圈，隐藏停止刷新，界面显示准备状态、逐节点结果和完成／成功／超时／失败计数；再次点击或收起面板取消队列及在途请求，已完成结果保留，迟到结果不更新新会话。切换检测地址清除旧数值与汇总，保留当前节点选择，避免把不同目标的结果混在一起。
 
 与 FlClash 比较时需确认当前分组的检测地址。以实际核对的 0.8.94 为例，[分组测试](https://github.com/chen08209/FlClash/blob/v0.8.94/lib/views/proxies/common.dart) 与 [地址选择](https://github.com/chen08209/FlClash/blob/v0.8.94/lib/providers/state.dart) 会优先采用分组 URL，再回退应用默认值；因此即使没有手动修改设置，也可能并非测试 Google。插件使用用户在节点页明确选择的地址，不自动导入订阅的分组与路由。HTTP 与 HTTPS、不同目标站点的数值不可直接比较；Cloudflare HTTP 供匹配使用相同地址的客户端，不保证更低延迟或所有线路兼容。
 
@@ -47,7 +47,7 @@
 
 YAML 解析私有携带 PyYAML 6.0.3 的 16 个纯 Python 文件（源文件约 209 KiB，MIT），无 C 扩展或额外服务；只在 YAML 会话载入时加载，文档提取后释放，尚未测量其真实宿主 RSS 增量。JSON 用标准库，URI／Base64 交由核心处理。来源与固定摘要见 `vendor/README.md`，不修改宿主依赖。错误的 DNS／hosts 会结束待加载会话并恢复网络，避免订阅异步回调中的异常让界面一直显示准备中。
 
-已核对 [FlClash 实际测速实现](https://github.com/chen08209/FlClash/blob/main/core/delay.go)：查找节点后调用 Mihomo `URLTest`，带超时和并发限制，区分超时／失败；本插件通过内核健康检查 API 调用同一测试机制，保留最多 2 并发。FlClash Go 层回退超时与 UI 传入值有区别，不能把回退常量等同于所有用户的实际参数。
+已核对 [FlClash 实际测速实现](https://github.com/chen08209/FlClash/blob/main/core/delay.go)：查找节点后调用 Mihomo `URLTest`，带超时和并发限制，区分超时／失败；本插件通过内核健康检查 API 调用同一测试机制，采用 v0.8.94 的 [core/common.go](https://github.com/chen08209/FlClash/blob/v0.8.94/core/common.go) 中 50 项并发上限。FlClash Go 层回退超时与 UI 传入值有区别，不能把回退常量等同于所有用户的实际参数。
 
 内核显式开启 `unified-delay` 和 `tcp-concurrent`，与 [FlClash 默认配置](https://github.com/chen08209/FlClash/blob/main/lib/models/clash_config.dart) 对齐。统一延迟先预热，再用第二次响应计时；第二次请求失败时，内核回退首次计时，两次请求共用单节点 8 秒期限，参见 [Mihomo URLTest](https://github.com/MetaCubeX/mihomo/blob/v1.19.33/adapter/adapter.go)。这是测试地址的响应耗时，不能据此推算直播播放延迟；不同网络时刻、缓存和内核版本下仍可能与其他客户端不同。
 
@@ -91,7 +91,7 @@ python prepare_core.py --directory C:/DDM-runtime/proxy-control
 
 它不是 TUN／VPN，不接管操作系统流量，也不能强制改写不读取这些设置、显式禁用代理的第三方插件，或独立浏览器登录页面的网络行为。已建立的连接不会热切换。原有系统代理／环境代理不属于插件管理的进程，不会被插件结束。
 
-导入配置时只使用节点内容，用户配置中的 TUN、LAN 监听、系统 DNS、控制 API 和路由规则不直接套用。插件自行生成回环监听、随机控制口和临时鉴权 Key。默认不启用健康检查轮询、GEO 数据库或系统服务；延迟测试只在用户触发时执行。首版由用户手动选节点，不自动挑选最快节点；未知格式会显示加载失败，不发送给在线订阅转换网站。
+导入配置时只使用节点内容，用户配置中的 TUN、LAN 监听、系统 DNS、控制 API 和路由规则不直接套用。插件自行生成回环监听、随机控制口和临时鉴权 Key。默认不启用健康检查轮询、GEO 数据库或系统服务；延迟测试在首次展开菜单或用户点击时执行。首版由用户手动选节点，不自动挑选最快节点；未知格式会显示加载失败，不发送给在线订阅转换网站。
 
 订阅最多 4 MiB，内核下载最多 48 MiB，网络读取缓冲 64 KiB，下载最多等待 60 秒。内核最多等待 30 秒载入节点。临时会话文件在停止后清理；程序、订阅缓存和个人设置保留在数据目录 `utils/proxy_control/`，其中 `profiles.json` 保存命名配置、`preferences.json` 保存当前配置和启动选项，不要纳入 Git 或分享。
 
@@ -145,3 +145,5 @@ git diff --check
 Mihomo 为 GPL-3.0，固定版本来源为 [v1.19.33](https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.33)；内核独立下载和运行，其源码和许可归上游。原创插件代码沿用仓库 LICENSE。Qt、Requests、mpv、FFmpeg 等沿用宿主依赖和各自许可。
 
 旗帜使用 [flag-icons](https://github.com/lipis/flag-icons) 的原始 4:3 SVG 子集，固定源码版本与 MIT 许可证随 `flags/README.md`、`flags/LICENSE.txt` 提供；未包含 `tw.svg`。
+
+测速结果由控制器按配置身份及检测目标保存在应用会话内；启停、收起或节点列表刷新后恢复，不跨软件重启保存。再次测试清除此配置/目标的旧结果；配置或目标不同不混用。HTTP 请求每份响应缓冲 2 KiB，最多九个按需 Qt 网络管理器，测试结束/取消释放额外管理器，无常驻后台检测。
