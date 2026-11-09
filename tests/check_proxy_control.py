@@ -774,18 +774,98 @@ class InterfaceTests(unittest.TestCase):
             panel.apply.click()
             self.assertEqual(len(starts), 1)
             panel.set_running(True)
-            self.assertEqual(panel.apply.text(), '暂停代理')
+            self.assertEqual(panel.apply.accessibleName(), '暂停代理')
+            self.assertEqual(panel.apply.text(), '')
             panel.apply.click()
             self.assertEqual(len(stops), 1)
             self.assertEqual(len(starts), 1)
             panel.set_running(False)
             panel.set_busy(True)
-            self.assertEqual(panel.apply.text(), '取消准备')
+            self.assertEqual(panel.apply.accessibleName(), '取消准备')
             panel.apply.click()
             self.assertEqual(len(stops), 2)
             self.assertIn('手动暂停后不会自动连接', panel.auto_start.toolTip())
             self.assertFalse(hasattr(panel, 'stop'))
         finally:
+            panel.deleteLater()
+
+    def test_power_action_changes_color_and_accessible_intent_in_both_themes(self):
+        from ddm import theme
+        previous = 'light' if theme.is_light() else 'dark'
+        panel = Panel(Options())
+        try:
+            for mode in ('dark', 'light'):
+                theme.apply(mode)
+                panel.set_running(False)
+                off = panel.apply.icon().pixmap(32, 32).toImage()
+                self.assertEqual(panel.apply.accessibleName(), '开启代理')
+                self.assertEqual(panel.apply.property('serviceState'), 'off')
+                panel.set_running(True)
+                on = panel.apply.icon().pixmap(32, 32).toImage()
+                self.assertNotEqual(off, on)
+                self.assertEqual(panel.apply.property('serviceState'), 'on')
+                self.assertIn('暂停代理', panel.apply.toolTip())
+                red = sum(on.pixelColor(x, y).red() > on.pixelColor(x, y).blue() * 1.4
+                          and on.pixelColor(x, y).alpha() > 128 for x in range(32) for y in range(32))
+                self.assertGreater(red, 20)
+                panel.set_busy(True)
+                self.assertEqual(panel.apply.accessibleName(), '取消准备')
+                panel.set_busy(False)
+        finally:
+            panel.deleteLater()
+            APP.processEvents()
+            theme.apply(previous)
+
+    def test_configuration_menu_returns_to_list_on_tab_return_or_repeated_click(self):
+        panel = Panel(Options(core=__file__))
+        panel.set_profiles([Profile('one', 'Fixture', 'nodes', 'fixture')], 'one')
+        panel.resize(658, 478)
+        panel.show()
+        try:
+            panel.navigation.setCurrentRow(2)
+            panel._edit_profile(0)
+            panel.location.setText('unconfirmed fixture')
+            self.assertEqual(panel.configuration_views.currentIndex(), 1)
+            panel.navigation.setCurrentRow(1)
+            panel.navigation.setCurrentRow(2)
+            self.assertEqual(panel.configuration_views.currentIndex(), 0)
+            panel._edit_profile(0)
+            item = panel.navigation.item(2)
+            QTest.mouseClick(panel.navigation.viewport(), Qt.LeftButton,
+                            pos=panel.navigation.visualItemRect(item).center())
+            self.assertEqual(panel.configuration_views.currentIndex(), 0)
+            panel._edit_profile(0)
+            panel.navigation.itemActivated.emit(item)
+            self.assertEqual(panel.configuration_views.currentIndex(), 0)
+            panel.add_profile.click()
+            self.assertEqual(panel.configuration_views.currentIndex(), 1)
+        finally:
+            panel.hide()
+            panel.deleteLater()
+
+    def test_overview_and_editor_controls_fill_their_sections_in_wide_and_narrow_windows(self):
+        panel = Panel(Options(core=__file__))
+        panel.set_profiles([Profile('one', 'Fixture', 'url', 'https://fixture.invalid')], 'one')
+        panel.show()
+        try:
+            for width in (658, 380):
+                panel.resize(width, 478)
+                panel.navigation.setCurrentRow(0)
+                QTest.qWait(30)
+                self.assertEqual(panel.quick_node.width(), panel.routing.width())
+                self.assertEqual(panel.quick_node.width(), panel.quick_profile.width())
+                panel.navigation.setCurrentRow(2)
+                panel._edit_profile(0)
+                APP.processEvents()
+                self.assertEqual(panel.editor_card.objectName(), 'ProxyCard')
+                self.assertEqual(panel.source.width(), panel.profile_name.width())
+                self.assertEqual(panel.agent.width(), panel.profile_name.width())
+                self.assertEqual(panel.source.height(), panel.location.height())
+                self.assertEqual(panel.agent.height(), panel.location.height())
+                self.assertLessEqual(panel.editor_card.width(), panel.configuration_views.width())
+                self.assertIn('手动暂停后不恢复', panel.auto_start_hint.text())
+        finally:
+            panel.hide()
             panel.deleteLater()
 
     def test_glass_samples_only_on_open_and_releases_background_on_hide(self):

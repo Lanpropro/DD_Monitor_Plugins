@@ -74,6 +74,9 @@ def symbol(painter, name, rect, color):
         painter.drawPath(path)
     elif name == 'stop':
         painter.drawRoundedRect(QRectF(6, 6, 12, 12), 2, 2)
+    elif name == 'power':
+        painter.drawArc(QRectF(4, 4, 16, 16), 130 * 16, 280 * 16)
+        painter.drawLine(12, 2, 12, 11)
     elif name == 'settings':
         for x, y in ((5, 8), (12, 16), (19, 10)):
             painter.drawLine(x, 3, x, 21)

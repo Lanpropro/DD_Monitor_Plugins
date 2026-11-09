@@ -106,6 +106,8 @@ class Panel(QWidget):
         self.connections = ConnectionPage()
         self.pages.addWidget(self.connections)
         self.navigation.currentRowChanged.connect(self._page_changed)
+        self.navigation.itemClicked.connect(self._navigation_clicked)
+        self.navigation.itemActivated.connect(self._navigation_clicked)
         self.navigation.setCurrentRow(0)
         self.status = QLabel('在“配置”中添加服务商订阅，即可启动代理')
         self.status.setObjectName('ProxyFooter')
@@ -154,21 +156,29 @@ class Panel(QWidget):
         self.service_state.setObjectName('ProxyValue')
         service.addWidget(self.service_state)
         actions = QHBoxLayout()
-        self.apply = QPushButton('启动代理')
-        self.apply.setObjectName('ProxyStart')
+        self.apply = QPushButton()
+        self.apply.setObjectName('ProxyPower')
+        self.apply.setFixedSize(40, 40)
         self.apply.clicked.connect(self._start)
-        actions.addWidget(self.apply, 1)
+        actions.addWidget(self.apply, 0, Qt.AlignLeft)
+        actions.addStretch()
         service.addLayout(actions)
         settings = card('快捷设置', 'settings', 0, 1)
         restore_row = QHBoxLayout()
-        restore_row.addWidget(QLabel('下次启动自动连接'), 1)
-        self.auto_start = ToggleSwitch('下次启动自动连接代理')
+        restore_row.addWidget(QLabel('启动软件时自动连接'), 1)
+        self.auto_start = ToggleSwitch('启动软件时自动连接代理')
         self.auto_start.setToolTip('开启后，退出软件时代理仍在运行，下次启动才自动连接。手动暂停后不会自动连接。')
         self.auto_start.setChecked(options.auto_start)
         self.auto_start.clicked.connect(self.autoStartRequested)
         restore_row.addWidget(self.auto_start)
         settings.addLayout(restore_row)
+        self.auto_start_hint = QLabel('仅恢复退出前仍开启的代理；手动暂停后不恢复。')
+        self.auto_start_hint.setObjectName('ProxyHint')
+        self.auto_start_hint.setWordWrap(True)
+        settings.addWidget(self.auto_start_hint)
         self.routing = SegmentedControl([('rule', '规则'), ('global', '全局'), ('direct', '直连')], options.routing)
+        self.routing.setMinimumWidth(0)
+        self.routing.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.routing.setToolTip('仅作用于本软件。规则模式：内置国内直播域名直连，其余经节点；不导入订阅路由规则。')
         self.routing.valueChanged.connect(self._request_routing)
         settings.addWidget(self.routing)
@@ -319,24 +329,36 @@ class Panel(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         content = QWidget()
-        box = QVBoxLayout(content)
-        box.setContentsMargins(0, 0, 0, 0)
+        content.setObjectName('ProxyEditor')
+        outer = QVBoxLayout(content)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(12)
+        self.editor_card = QFrame()
+        self.editor_card.setObjectName('ProxyCard')
+        box = QVBoxLayout(self.editor_card)
+        box.setContentsMargins(14, 12, 14, 12)
         box.setSpacing(10)
         self.back_to_profiles = QPushButton('配置列表')
         self.back_to_profiles.setObjectName('ProxyLink')
         self.back_to_profiles.clicked.connect(lambda: self.configuration_views.setCurrentIndex(0))
-        box.addWidget(self.back_to_profiles, 0, Qt.AlignLeft)
+        outer.addWidget(self.back_to_profiles, 0, Qt.AlignLeft)
+        outer.addWidget(self.editor_card)
+        outer.addStretch()
         name_label = QLabel('配置名称')
         name_label.setObjectName('ProxyHint')
         box.addWidget(name_label)
         self.profile_name = QLineEdit(options.profile_name if options.profile else '')
         self.profile_name.setPlaceholderText('留空自动识别服务商名称')
+        self.profile_name.setMinimumWidth(0)
+        self.profile_name.setFixedHeight(theme.CONTROL_HEIGHT)
         self.profile_name.setToolTip('优先读取订阅提供的名称；未提供时显示订阅域名，也可手动命名')
         box.addWidget(self.profile_name)
         source_label = QLabel('导入方式')
         source_label.setObjectName('ProxyHint')
         box.addWidget(source_label)
         self.source = SelectControl()
+        self.source.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.source.setMinimumWidth(0)
         for name, value in [('订阅地址', 'url'), ('本地 Clash／Mihomo 配置', 'file'), ('节点链接', 'nodes')]:
             self.source.addItem(name, value)
         self.source.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
@@ -345,6 +367,7 @@ class Panel(QWidget):
         box.addWidget(self.source)
         self.location = QLineEdit(options.profile if options.source != 'nodes' else '')
         self.location.setMinimumWidth(0)
+        self.location.setFixedHeight(theme.CONTROL_HEIGHT)
         self.location.returnPressed.connect(self._confirm_import)
         box.addWidget(self.location)
         self.profile = QPlainTextEdit(options.profile if options.source == 'nodes' else '')
@@ -362,6 +385,8 @@ class Panel(QWidget):
         self.agent.setAccessibleName('订阅格式／User-Agent')
         self.agent.lineEdit().setPlaceholderText('选择或输入自定义 User-Agent')
         self.agent.setMinimumWidth(0)
+        self.agent.setFixedHeight(theme.CONTROL_HEIGHT)
+        self.agent.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.agent.setToolTip('通常使用 Mihomo；服务商有要求时选择对应客户端标识，也可直接输入。仅作用于此配置。')
         for label, value in USER_AGENTS:
             self.agent.addItem(label, value)
@@ -378,13 +403,14 @@ class Panel(QWidget):
         self.advanced = QPushButton('内核设置')
         self.advanced.setObjectName('ProxyLink')
         self.advanced.setCheckable(True)
-        box.addWidget(self.advanced)
+        box.addWidget(self.advanced, 0, Qt.AlignLeft)
         self.runtime = QWidget()
         runtime = QVBoxLayout(self.runtime)
         runtime.setContentsMargins(0, 0, 0, 0)
         runtime.addWidget(QLabel('内核程序'))
         self.core = QLineEdit(options.core)
         self.core.setMinimumWidth(0)
+        self.core.setFixedHeight(theme.CONTROL_HEIGHT)
         runtime.addWidget(self.core)
         choose = QPushButton('选择内核程序…')
         choose.clicked.connect(self._core_file)
@@ -396,7 +422,6 @@ class Panel(QWidget):
         self.advanced.toggled.connect(self._advanced)
         self._advanced(self.advanced.isChecked())
         box.addWidget(self.runtime)
-        box.addStretch()
         scroll.setWidget(content)
         self.configuration_views.addWidget(scroll)
         self.configuration_views.setCurrentIndex(1 if not options.profile else 0)
@@ -434,8 +459,14 @@ class Panel(QWidget):
         self.advanced.setIcon(icon('down' if checked else 'right'))
 
     def _page_changed(self, index):
+        if index == 2:
+            self.configuration_views.setCurrentIndex(0 if self._profiles else 1)
         self.pages.setCurrentIndex(index)
         self.title.setText(['总览', '代理', '配置', '连接'][index])
+
+    def _navigation_clicked(self, item):
+        if self.navigation.row(item) == 2:
+            self.configuration_views.setCurrentIndex(0 if self._profiles else 1)
 
     def _visibility(self):
         source = self.source.currentData()
@@ -625,8 +656,6 @@ class Panel(QWidget):
         self.state.setText('运行中' if running else '未启动')
         self.state.setProperty('online', running)
         self.service_state.setText('运行中' if running else '尚未启动')
-        self.apply.setText('暂停代理' if running else '开启代理')
-        self.apply.setToolTip('暂停后恢复软件原有网络环境；已建立的连接请重新播放' if running else '开启内置代理，仅作用于本软件')
         self._filter(self.search.text())
         self.refresh_theme()
 
@@ -659,7 +688,7 @@ class Panel(QWidget):
     def set_busy(self, busy):
         self._busy = busy
         self.apply.setEnabled(True)
-        self.apply.setText('取消准备' if busy else ('暂停代理' if self._running else '开启代理'))
+        self._service_button()
         self.import_button.setEnabled(not busy)
         for widget in (self.source, self.location, self.profile, self.browse_profile, self.runtime,
                        self.profiles_list, self.profile_name, self.add_profile, self.agent):
@@ -680,6 +709,8 @@ class Panel(QWidget):
     def refresh_theme(self, *_args):
         status_ink = (theme.qcolor(theme.SUCCESS).darker(145) if theme.is_light()
                       else theme.qcolor(theme.SUCCESS).lighter(115)).name()
+        stop_ink = (theme.qcolor(theme.ERROR).darker(120) if theme.is_light()
+                    else theme.qcolor(theme.ERROR).lighter(110)).name()
         self.setStyleSheet(f'''
 #ProxyPanel {{background: transparent; color: {theme.TEXT1}; font-family: {theme.FONT_FAMILY}; font-size: {theme.FONT_CONTROL}px;}}
 #ProxyPanel QFrame#ProxyRail {{background: {translucent(theme.SIDEBAR, 135)}; border-right: 1px solid {theme.BORDER};}}
@@ -704,25 +735,48 @@ class Panel(QWidget):
 #ProxyPanel QPushButton:disabled {{color: {theme.TEXT3};}}
 #ProxyPanel QPushButton#ProxyStart {{background: {theme.ACCENT_SOFT}; border: 1px solid transparent; color: {theme.ACCENT}; border-radius: 15px; padding: 6px 13px;}}
 #ProxyPanel QPushButton#ProxyStart:hover {{border-color: {theme.ACCENT};}}
+#ProxyPanel QPushButton#ProxyPower {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT}; border: 1px solid {translucent(theme.ACCENT, 90)}; border-radius: 20px; padding: 0; min-height: 0;}}
+#ProxyPanel QPushButton#ProxyPower:hover {{border-color: {theme.ACCENT};}}
+#ProxyPanel QPushButton#ProxyPower[serviceState="on"] {{background: {translucent(theme.ERROR, 28)}; color: {stop_ink}; border-color: {translucent(theme.ERROR, 120)};}}
+#ProxyPanel QPushButton#ProxyPower[serviceState="on"]:hover {{background: {translucent(theme.ERROR, 46)}; border-color: {theme.ERROR};}}
+#ProxyPanel QPushButton#ProxyPower[serviceState="busy"] {{background: {surface()}; color: {theme.TEXT2}; border-color: {theme.BORDER_STRONG};}}
 #ProxyPanel QPushButton#ProxyClose {{background: transparent; border: none; padding: 0;}}
 #ProxyPanel QPushButton#ProxyLink {{background: transparent; border: none; color: {theme.TEXT2}; padding: 3px 0;}}
 #ProxyPanel QPlainTextEdit, #ProxyPanel QLineEdit {{background: {surface()}; color: {theme.TEXT1}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 12px; padding: 8px 10px;}}
 #ProxyPanel QPlainTextEdit:focus, #ProxyPanel QLineEdit:focus {{border-color: {theme.ACCENT};}}
-#ProxyPanel QComboBox {{background: {surface()}; color: {theme.TEXT1}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 12px; padding: 6px 8px; min-height: 18px;}}
+#ProxyPanel QComboBox {{background: {surface()}; color: {theme.TEXT1}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 12px; padding: 6px 8px; min-height: {theme.CONTROL_HEIGHT - 14}px;}}
 #ProxyPanel QComboBox#ProxyInline {{background: {translucent(surface(), 190)}; border: 1px solid {theme.BORDER_STRONG}; padding: 6px 24px 6px 8px;}}
 #ProxyPanel QComboBox QLineEdit {{background: transparent; border: none; padding: 0;}}
 #ProxyPanel QComboBox::drop-down {{border: none; width: 20px;}}
+#ProxyPanel QWidget#ProxyEditor QLineEdit, #ProxyPanel QWidget#ProxyEditor QPlainTextEdit, #ProxyPanel QWidget#ProxyEditor QComboBox {{border-radius: {theme.RADIUS_MD}px;}}
 #ProxyPanel QScrollArea, #ProxyPanel QScrollArea > QWidget > QWidget {{background: transparent; border: none;}}
 ''')
         for label, name in self.card_icons:
             label.setPixmap(icon(name).pixmap(18, 18))
-        for button, name in ((self.close_button, 'close'), (self.apply, 'stop' if self._running or self._busy else 'play'),
+        for button, name in ((self.close_button, 'close'),
                              (self.test, 'latency'), (self.add_profile, 'plus'),
                              (self.back_to_profiles, 'back'), (self.all_nodes, 'right')):
-            button.setIcon(icon(name, theme.ACCENT if button is self.apply else theme.TEXT2))
+            button.setIcon(icon(name, theme.TEXT2))
             button.setIconSize(QSize(16, 16))
+        self._service_button()
         self._advanced(self.advanced.isChecked())
         self.navigation.viewport().update()
         self.profiles_list.viewport().update()
         self.auto_start.update()
         self.nodes.viewport().update()
+
+    def _service_button(self):
+        action = '取消准备' if self._busy else ('暂停代理' if self._running else '开启代理')
+        state = 'busy' if self._busy else ('on' if self._running else 'off')
+        self.apply.setAccessibleName(action)
+        self.apply.setToolTip(action + ('：恢复软件原有网络环境，已有连接请重新播放' if state == 'on' else
+                                       '：仅作用于本软件' if state == 'off' else '：停止本次准备'))
+        self.apply.setProperty('serviceState', state)
+        color = theme.TEXT2 if self._busy else (theme.ERROR if self._running else theme.ACCENT)
+        if self._running and not self._busy:
+            color = (theme.qcolor(color).darker(120) if theme.is_light() else theme.qcolor(color).lighter(110)).name()
+        self.apply.setIcon(icon('close' if self._busy else 'power', color))
+        self.apply.setIconSize(QSize(22, 22))
+        self.apply.style().unpolish(self.apply)
+        self.apply.style().polish(self.apply)
+        self.apply.update()
