@@ -57,6 +57,10 @@ def main():
                     assert 'match_sync/fullscreen.py' in names, 'Fullscreen shell integration must ship with the viewer'
                     assert 'match_sync/recording.py' in names, 'The selectable audio track recorder must ship with the viewer'
                     assert 'match_sync/replay_preview.py' in names and 'match_sync/preview_frames.py' in names, 'Continuous timeline preview must ship with its background frame cache'
+                if plugin_id == 'proxy_control':
+                    assert 'proxy_control/popover.py' in names and 'proxy_control/profiles.py' in names
+                    assert 'proxy_control/drawer.py' not in names
+                    assert not any(name.endswith(('preferences.json', 'profiles.json')) for name in names)
                 if plugin_id == 'domestic_live':
                     assert 'domestic_live/douyin_native.js' in names, 'Official native input requires its browser script'
                     assert 'domestic_live/douyin_browser.py' in names

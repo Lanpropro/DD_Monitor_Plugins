@@ -30,9 +30,9 @@ args, remaining = parser.parse_known_args()
 sys.path.insert(0, str(args.host.resolve()))
 os.environ['DDM_NO_SAVE'] = '1'
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
-from PySide6.QtCore import QProcess, Qt
+from PySide6.QtCore import QPoint, QProcess, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout
+from PySide6.QtWidgets import QApplication, QWidget, QToolButton, QVBoxLayout
 import requests
 
 spec = importlib.util.spec_from_file_location('check_proxy_plugin', ROOT / 'plugins/proxy_control/plugin.py')
@@ -48,6 +48,7 @@ from check_proxy_plugin.core import free_port
 from check_proxy_plugin.node_list import NodeModel, NODE_ROLE, ACTIVE_ROLE
 from check_proxy_plugin.panel import Panel
 from check_proxy_plugin.latency import Latency
+from check_proxy_plugin.profiles import Profile, load_profiles, save_profiles
 from ddm.global_danmaku import request_proxy
 from ddm.hls_proxy import HlsProxy
 
@@ -165,6 +166,27 @@ class ConfigurationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 install(archive, Path(root) / 'core.exe')
             self.assertFalse((Path(root) / 'core.exe').exists())
+
+    def test_named_profiles_migrate_legacy_subscription_and_roundtrip_locally(self):
+        with tempfile.TemporaryDirectory() as root:
+            options = Options(profile='https://example.invalid/sub?token=fixture-secret', node='First')
+            save_options(root, options)
+            controller = Controller(root)
+            try:
+                self.assertEqual(len(controller.profiles), 1)
+                legacy = controller.profiles[0]
+                self.assertEqual(legacy.profile, options.profile)
+                self.assertEqual(controller.options.profile_id, legacy.id)
+                profiles = [legacy, Profile('second', '服务商 B', 'nodes', 'ss://fixture', 'Second')]
+                save_profiles(root, profiles)
+                self.assertEqual(load_profiles(root, controller.options), profiles)
+                controller.set_auto_start(False)
+                self.assertFalse(load_options(root).auto_start)
+                self.assertIsNone(controller.core.process)
+            finally:
+                controller.stop(announce=False)
+                controller.deleteLater()
+                APP.processEvents()
 
 
 class RoutingTests(unittest.TestCase):
@@ -328,7 +350,7 @@ class LatencyTests(unittest.TestCase):
 
 
 class InterfaceTests(unittest.TestCase):
-    def test_drawer_renders_rows_in_both_host_themes_and_keeps_input_pages_separate(self):
+    def test_popover_renders_three_pages_in_both_host_themes(self):
         from ddm import theme
         previous = theme.mode()
         window = QWidget()
@@ -338,24 +360,29 @@ class InterfaceTests(unittest.TestCase):
         layout = QVBoxLayout(container)
         layout.addWidget(QWidget())
         panel = Panel(Options())
-        drawer = module.Drawer(panel, container)
+        anchor = QToolButton(window)
+        popover = module.Popover(panel, window, anchor)
         try:
             panel.set_nodes(['日本 01', '香港 02'], '日本 01', {'日本 01': 'Shadowsocks'})
             panel.model.result('日本 01', 42, 'ready')
             window.show()
-            drawer.show()
+            popover.show()
             for mode in ('dark', 'light'):
                 theme.apply(mode)
                 APP.processEvents()
-                self.assertFalse(drawer.grab().isNull())
-                self.assertIn(theme.SIDEBAR, drawer.styleSheet())
+                self.assertFalse(popover.grab().isNull())
+                self.assertIn(theme.SIDEBAR, panel.styleSheet())
                 self.assertIn(theme.ACCENT, panel.styleSheet())
+                for page in range(3):
+                    panel.navigation.setCurrentRow(page)
+                    APP.processEvents()
+                    self.assertFalse(popover.grab().isNull())
             panel.add_subscription.click()
-            self.assertEqual(panel.tabs.currentIndex(), 1)
+            self.assertEqual(panel.navigation.currentRow(), 2)
             self.assertTrue(panel.location.isVisible())
-            drawer.hide()
+            popover.hide()
         finally:
-            drawer.hide()
+            popover.hide()
             window.deleteLater()
             APP.processEvents()
             theme.apply(previous)
@@ -387,7 +414,7 @@ class InterfaceTests(unittest.TestCase):
                     window.deleteLater()
                     APP.processEvents()
 
-    def test_left_rail_toggles_embedded_drawer_and_restores_live_wall_space(self):
+    def test_left_rail_toggles_popover_without_resizing_live_wall(self):
         with tempfile.TemporaryDirectory() as root, patch.object(module.config, 'data_root', return_value=root):
             window = QWidget()
             window.resize(1200, 900)
@@ -413,13 +440,15 @@ class InterfaceTests(unittest.TestCase):
                 self.assertTrue(panel.isVisible())
                 self.assertFalse(panel.isWindow())
                 self.assertIs(panel.window(), window)
-                self.assertLess(plugin.drawer.width(), container.width() / 2)
-                self.assertGreaterEqual(wall.x(), plugin.drawer.width())
+                self.assertLessEqual(plugin.popover.width(), 660)
+                self.assertLessEqual(plugin.popover.height(), 480)
+                self.assertEqual(layout.getContentsMargins(), (0, 0, 0, 0))
+                self.assertEqual(wall.x(), 0)
                 self.assertTrue(wall.isVisible())
                 self.assertFalse(hasattr(panel, 'address'))
                 self.assertFalse(hasattr(panel, 'mode'))
-                self.assertEqual(panel.tabs.currentIndex(), 0)
-                panel.tabs.setCurrentIndex(1)
+                self.assertEqual(panel.navigation.currentRow(), 0)
+                panel.navigation.setCurrentRow(2)
                 self.assertTrue(panel.location.isVisible())
                 panel.location.setText('retained')
                 with patch.object(plugin.controller, 'stop') as stop:
@@ -434,7 +463,7 @@ class InterfaceTests(unittest.TestCase):
                     panel.location.setFocus()
                     QTest.qWait(30)
                     QTest.keyClick(panel.location, Qt.Key_Escape)
-                    self.assertFalse(plugin.drawer.isVisible())
+                    self.assertFalse(plugin.popover.isVisible())
                     stop.assert_not_called()
                 context.show_workspace.assert_not_called()
             finally:
@@ -442,7 +471,7 @@ class InterfaceTests(unittest.TestCase):
                 window.deleteLater()
                 APP.processEvents()
 
-    def test_drawer_resizes_with_content_and_unload_restores_original_margins(self):
+    def test_popover_stays_within_resized_window_and_preserves_layout_margins(self):
         with tempfile.TemporaryDirectory() as root, patch.object(module.config, 'data_root', return_value=root):
             window = QWidget()
             container = window._content = QWidget(window)
@@ -455,10 +484,11 @@ class InterfaceTests(unittest.TestCase):
             window.show()
             plugin.on_load(context)
             plugin.toggle()
-            container.resize(700, 500)
+            window.resize(500, 380)
             APP.processEvents()
-            self.assertEqual(plugin.drawer.height(), 500)
-            self.assertLess(plugin.drawer.width(), 700)
+            self.assertLessEqual(plugin.popover.height(), 364)
+            self.assertLessEqual(plugin.popover.width(), 484)
+            self.assertTrue(window.rect().contains(plugin.popover.geometry()))
             plugin.on_unload()
             self.assertEqual(layout.getContentsMargins(), (4, 5, 6, 7))
             window.deleteLater()
@@ -493,7 +523,7 @@ class InterfaceTests(unittest.TestCase):
         panel.show()
         try:
             panel.apply.click()
-            self.assertEqual(panel.tabs.currentIndex(), 1)
+            self.assertEqual(panel.navigation.currentRow(), 2)
             self.assertFalse(requests)
             self.assertFalse(panel.apply.isVisible())
             panel.import_button.click()
@@ -511,7 +541,7 @@ class InterfaceTests(unittest.TestCase):
 
     def test_import_progress_failure_retry_and_success_follow_controller_signal_order(self):
         panel = Panel(Options(core=__file__))
-        panel.tabs.setCurrentIndex(1)
+        panel.navigation.setCurrentRow(2)
         panel.location.setText('https://example.invalid/sub')
         requests = []
         panel.applyRequested.connect(requests.append)
@@ -530,7 +560,7 @@ class InterfaceTests(unittest.TestCase):
             panel.set_nodes([], '')
             panel.set_busy(False)
             panel.set_status('下载失败，请重试')
-            self.assertEqual(panel.tabs.currentIndex(), 1)
+            self.assertEqual(panel.navigation.currentRow(), 2)
             self.assertEqual(panel.import_status.text(), '下载失败，请重试')
             self.assertEqual(panel.location.text(), 'https://example.invalid/sub')
             self.assertTrue(panel.import_button.isEnabled())
@@ -542,11 +572,11 @@ class InterfaceTests(unittest.TestCase):
             panel.set_nodes(['First', 'Second'], 'First')
             panel.set_busy(False)
             panel.set_status('已导入 2 个节点，代理已启动')
-            self.assertEqual(panel.tabs.currentIndex(), 0)
+            self.assertEqual(panel.navigation.currentRow(), 1)
             self.assertEqual(panel.count.text(), '2 个节点')
             self.assertIn('2 个节点', panel.import_status.text())
             self.assertFalse(panel._importing)
-            self.assertEqual(panel.import_button.text(), '更新订阅并重启')
+            self.assertEqual(panel.import_button.text(), '导入订阅并启动')
         finally:
             panel.deleteLater()
             APP.processEvents()
@@ -569,6 +599,107 @@ class InterfaceTests(unittest.TestCase):
         finally:
             panel.deleteLater()
             APP.processEvents()
+
+    def test_popover_is_anchored_and_outside_click_retains_draft_without_stopping(self):
+        window = QWidget()
+        window.resize(1100, 800)
+        anchor = QToolButton(window)
+        anchor.setGeometry(12, 210, 30, 30)
+        panel = Panel(Options())
+        popover = module.Popover(panel, window, anchor)
+        anchor.clicked.connect(lambda: popover.hide() if popover.isVisible() else popover.show())
+        stops = []
+        panel.stopRequested.connect(lambda: stops.append(True))
+        window.show()
+        try:
+            anchor.click()
+            self.assertEqual(popover.x(), anchor.geometry().right() + 9)
+            self.assertEqual(popover.y(), anchor.y() - 8)
+            self.assertFalse(popover.isWindow())
+            panel.navigation.setCurrentRow(2)
+            panel.location.setText('https://example.invalid/draft')
+            QTest.mouseClick(panel.location, Qt.LeftButton)
+            self.assertTrue(popover.isVisible())
+            QTest.mouseClick(window, Qt.LeftButton, pos=QPoint(1050, 750))
+            self.assertFalse(popover.isVisible())
+            anchor.click()
+            self.assertEqual(panel.location.text(), 'https://example.invalid/draft')
+            anchor.click()
+            self.assertFalse(popover.isVisible())
+            self.assertFalse(stops)
+        finally:
+            popover.hide()
+            window.deleteLater()
+            APP.processEvents()
+
+    def test_node_cards_use_two_columns_and_one_column_in_narrow_windows(self):
+        panel = Panel(Options())
+        panel.resize(658, 478)
+        panel.set_nodes([f'Node {number}' for number in range(12)], 'Node 0')
+        panel.navigation.setCurrentRow(1)
+        panel.show()
+        try:
+            QTest.qWait(30)
+            first = panel.nodes.visualRect(panel.model.index(0))
+            second = panel.nodes.visualRect(panel.model.index(1))
+            self.assertEqual(first.y(), second.y())
+            self.assertGreater(second.x(), first.x())
+            panel.resize(380, 478)
+            QTest.qWait(30)
+            self.assertGreater(panel.nodes.visualRect(panel.model.index(1)).y(),
+                               panel.nodes.visualRect(panel.model.index(0)).y())
+            self.assertIsNone(panel.nodes.indexWidget(panel.model.index(0)))
+        finally:
+            panel.deleteLater()
+            APP.processEvents()
+
+    def test_overview_starts_saved_profile_and_keeps_unconfirmed_edits_separate(self):
+        panel = Panel(Options(core=__file__, profile_id='a', profile_name='服务商 A',
+                              profile='https://example.invalid/a'))
+        profiles = [Profile('a', '服务商 A', 'url', 'https://example.invalid/a'),
+                    Profile('b', '服务商 B', 'url', 'https://example.invalid/b')]
+        requests, activations, changes = [], [], []
+        panel.applyRequested.connect(requests.append)
+        panel.profileRequested.connect(activations.append)
+        panel.autoStartRequested.connect(changes.append)
+        try:
+            panel.set_profiles(profiles, 'a')
+            panel.profiles_list.setCurrentRow(1)
+            self.assertEqual(panel.options().profile_id, 'b')
+            self.assertFalse(requests)
+            panel.add_profile.click()
+            panel.location.setText('https://example.invalid/unconfirmed')
+            panel.apply.click()
+            self.assertEqual(requests[-1].profile_id, 'a')
+            self.assertEqual(requests[-1].profile, 'https://example.invalid/a')
+            panel.quick_profile.setCurrentIndex(1)
+            panel.activate_profile.click()
+            self.assertEqual(activations, ['b'])
+            panel.auto_start.click()
+            self.assertEqual(changes, [False])
+            panel.set_nodes(['First', 'Second'], 'First')
+            panel.select_node('Second')
+            self.assertEqual(panel.quick_node.currentText(), 'Second')
+            self.assertEqual(panel.model.active, 'Second')
+        finally:
+            panel.deleteLater()
+            APP.processEvents()
+
+    def test_disabled_auto_start_does_not_launch_core_when_loading_plugin(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(module.config, 'data_root', return_value=root):
+            save_options(Path(root) / 'utils/proxy_control', Options(enabled=True, auto_start=False,
+                         profile='https://example.invalid/sub'))
+            window = QWidget()
+            plugin = module.ProxyControl()
+            try:
+                with patch.object(Controller, 'apply') as apply:
+                    plugin.on_load(SimpleNamespace(window=window, register_workspace_control=Mock()))
+                    apply.assert_not_called()
+                self.assertIsNone(plugin.controller.core.process)
+            finally:
+                plugin.on_unload()
+                window.deleteLater()
+                APP.processEvents()
 
 
 @unittest.skipUnless(args.core, 'Pass --core for actual Mihomo process tests')
@@ -649,14 +780,15 @@ class RealCoreTests(unittest.TestCase):
         self.controller.status.connect(panel.set_status)
         self.controller.busy.connect(panel.set_busy)
         self.controller.nodes.connect(panel.set_nodes)
+        self.controller.profilesChanged.connect(panel.set_profiles)
         try:
-            panel.tabs.setCurrentIndex(1)
+            panel.navigation.setCurrentRow(2)
             panel.location.setText(subscription.url + '/subscription?token=fixture')
             panel.import_button.click()
             self.assertFalse(panel.location.isEnabled())
             wait_for(lambda: bool(self.controller.endpoint) or not self.controller.working)
             self.assertTrue(self.controller.endpoint, self.controller.message)
-            self.assertEqual(panel.tabs.currentIndex(), 0)
+            self.assertEqual(panel.navigation.currentRow(), 1)
             self.assertEqual(panel.model.visible, ['First', 'Second'])
             self.assertIn('已导入 2 个节点', panel.status.text())
             self.assertEqual(panel.status.text(), panel.import_status.text())
@@ -667,6 +799,38 @@ class RealCoreTests(unittest.TestCase):
             panel.deleteLater()
             APP.processEvents()
             subscription.close()
+
+    def test_named_provider_switch_preserves_nodes_and_releases_previous_core(self):
+        self.start(profile_name='服务商 A')
+        first_id = self.controller.options.profile_id
+        self.controller.select('Second')
+        wait_for(lambda: self.controller.core.current == 'Second')
+        self.start(profile_name='服务商 B')
+        second_pid = self.controller.core.process.processId()
+        self.assertEqual(len(self.controller.profiles), 2)
+        self.controller.activate_profile(first_id)
+        wait_for(lambda: self.controller.core.current == 'Second' and not self.controller.working)
+        self.assertEqual(self.controller.options.profile_name, '服务商 A')
+        self.assertEqual(requests.get('http://fixture.invalid/live', timeout=5).content, b'second')
+        import psutil
+        self.assertFalse(psutil.pid_exists(second_pid))
+        self.controller.set_auto_start(False)
+        self.controller.stop()
+        self.assertEqual(load_profiles(self.temp.name, self.controller.options), self.controller.profiles)
+        self.assertFalse(load_options(self.temp.name).auto_start)
+
+    def test_failed_provider_import_keeps_previous_saved_configuration(self):
+        self.start(profile_name='服务商 A')
+        saved = replace(self.controller.options)
+        self.controller.apply(Options(core=str(args.core.resolve()), source='nodes',
+                                      profile='<html>not nodes</html>', profile_name='无效服务商'))
+        self.controller.core.deadline = time.monotonic() + 1
+        wait_for(lambda: not self.controller.working, timeout=5)
+        self.assertEqual(self.controller.options, saved)
+        self.assertEqual(load_options(self.temp.name), saved)
+        self.assertEqual(len(self.controller.profiles), 1)
+        self.assertIsNone(self.controller.pending)
+        self.assertIsNone(self.controller.core.process)
 
     def test_stop_releases_core_and_persists_disabled_state(self):
         original = {key: os.environ.get(key) for key in KEYS}

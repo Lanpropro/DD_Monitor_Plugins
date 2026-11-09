@@ -2,6 +2,7 @@
 from pathlib import Path
 from dataclasses import replace
 import sys
+from uuid import uuid4
 
 from PySide6.QtCore import QObject, QProcess, QTimer, Signal
 
@@ -11,6 +12,7 @@ from .environment import Environment
 from .network import Download
 from .latency import Latency
 from .prepare_core import URL, ASSET
+from .profiles import Profile, load_profiles, save_profiles
 
 
 class Controller(QObject):
@@ -19,6 +21,7 @@ class Controller(QObject):
     nodes = Signal(object, str)
     prepared = Signal(str)
     resources = Signal(str)
+    profilesChanged = Signal(object, str)
 
     def __init__(self, directory, parent=None):
         super().__init__(parent)
@@ -28,6 +31,10 @@ class Controller(QObject):
         self.options = load_options(self.directory)
         if not self.options.core:
             self.options.core = str(self.directory / 'runtime/mihomo.exe')
+        self.profiles = load_profiles(self.directory, self.options)
+        if self.profiles and not self.options.profile_id:
+            self.options.profile_id = self.profiles[0].id
+        save_profiles(self.directory, self.profiles)
         save_options(self.directory, self.options)
         self.core = Core(self)
         self.core.ready.connect(self._ready)
@@ -37,9 +44,10 @@ class Controller(QObject):
         self.download.finished.connect(self._downloaded)
         self.latency = Latency(self)
         self.task = ''
+        self.pending = None
         self.installer = None
         self.endpoint = ''
-        self.message = '在“订阅设置”填写资料，再点击输入框下方的导入按钮'
+        self.message = '在“配置”中添加服务商订阅，即可启动代理'
         self.working = False
         self.timer = QTimer(self)
         self.timer.setInterval(2000)
@@ -53,7 +61,9 @@ class Controller(QObject):
             return
         try:
             self.stop(announce=False)
-            self.options = replace(options, enabled=True)
+            self.pending = replace(options, enabled=True)
+            if not self.pending.profile_id:
+                self.pending.profile_id = uuid4().hex
             self._busy(True)
             if options.source == 'url':
                 self.task = 'profile'
@@ -70,17 +80,27 @@ class Controller(QObject):
 
     def _start_core(self, profile=b''):
         self._status('正在加载代理内核和节点…')
-        self.core.start(self.options, self.directory, self.environment.child_environment(), profile)
+        self.core.start(self.pending or self.options, self.directory, self.environment.child_environment(), profile)
         self.timer.start()
 
     def _ready(self, endpoint, nodes, selected):
+        options = self.pending or self.options
         self.environment.apply(endpoint)
         self.endpoint = endpoint
         try:
-            save_options(self.directory, self.options)
+            record = Profile(options.profile_id, options.profile_name.strip() or '我的配置',
+                             options.source, options.profile, selected)
+            profiles = [record if profile.id == record.id else profile for profile in self.profiles]
+            if not any(profile.id == record.id for profile in self.profiles):
+                profiles.append(record)
+            save_profiles(self.directory, profiles)
+            save_options(self.directory, options)
         except OSError:
             self._failed('无法保存代理设置，请检查数据目录')
             return
+        self.profiles = profiles
+        self.options, self.pending = options, None
+        self.profilesChanged.emit(self.profiles, record.id)
         self.nodes.emit(nodes, selected)
         if self.options.node in nodes and self.options.node != selected:
             self.core.select(self.options.node)
@@ -90,6 +110,21 @@ class Controller(QObject):
 
     def select(self, name):
         self.core.select(name)
+
+    def activate_profile(self, identity):
+        profile = next((profile for profile in self.profiles if profile.id == identity), None)
+        if profile is not None and not self.working:
+            self.apply(replace(self.options, source=profile.source, profile=profile.profile,
+                               node=profile.node, profile_id=profile.id, profile_name=profile.name))
+
+    def set_auto_start(self, enabled):
+        self.options.auto_start = enabled
+        if self.pending is not None:
+            self.pending.auto_start = enabled
+        try:
+            save_options(self.directory, self.options)
+        except OSError:
+            self._status('自动连接设置未能保存，请检查数据目录')
 
     def test_nodes(self, names):
         if self.latency.testing:
@@ -103,6 +138,9 @@ class Controller(QObject):
             self.options.node = name
             try:
                 save_options(self.directory, self.options)
+                self.profiles = [replace(profile, node=name) if profile.id == self.options.profile_id
+                                 else profile for profile in self.profiles]
+                save_profiles(self.directory, self.profiles)
             except OSError:
                 self._status('节点已切换，但设置未能保存')
                 return
@@ -187,6 +225,7 @@ class Controller(QObject):
         self.latency.stop()
         self.download.cancel()
         self.task = ''
+        self.pending = None
         installer, self.installer = self.installer, None
         if installer is not None:
             installer.kill()

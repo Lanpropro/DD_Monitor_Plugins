@@ -29,6 +29,9 @@ class Options:
     source: str = 'url'
     profile: str = ''
     node: str = ''
+    profile_id: str = ''
+    profile_name: str = '我的配置'
+    auto_start: bool = True
 
     def validate(self):
         if self.source == 'url':

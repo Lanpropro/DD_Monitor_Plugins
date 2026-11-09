@@ -1,12 +1,28 @@
 """A virtualized node list; paint visible rows without per-node widgets."""
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QRectF, QSize, Qt
 from PySide6.QtGui import QFont, QPainter, QPen
-from PySide6.QtWidgets import QStyledItemDelegate, QStyle
+from PySide6.QtWidgets import QListView, QStyledItemDelegate, QStyle
 
 from ddm import theme
 
 NODE_ROLE = Qt.UserRole + 1
 ACTIVE_ROLE = Qt.UserRole + 2
+
+
+class NodeView(QListView):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setViewMode(QListView.IconMode)
+        self.setFlow(QListView.LeftToRight)
+        self.setWrapping(True)
+        self.setResizeMode(QListView.Adjust)
+        self.setMovement(QListView.Static)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        width = max(1, self.viewport().width())
+        self.setGridSize(QSize(max(1, (width - 2) // (2 if width >= 400 else 1)), 96))
 
 
 class NodeModel(QAbstractListModel):
@@ -73,14 +89,14 @@ def delay_text(record):
 
 class NodeDelegate(QStyledItemDelegate):
     def sizeHint(self, option, index):
-        return QSize(280, 82)
+        return QSize(max(1, self.parent().gridSize().width()), 96)
 
     def paint(self, painter, option, index):
         record = index.data(NODE_ROLE)
         if record is None:
             return
         selected = index.data(ACTIVE_ROLE)
-        rect = QRectF(option.rect).adjusted(1, 3, -1, -3)
+        rect = QRectF(option.rect).adjusted(3, 3, -3, -3)
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing)
         background = theme.ACCENT_SOFT if selected else (
@@ -92,25 +108,25 @@ class NodeDelegate(QStyledItemDelegate):
         title.setBold(selected)
         painter.setFont(title)
         painter.setPen(theme.qcolor(theme.TEXT1))
-        text_rect = rect.adjusted(13, 12, -42, -40)
+        text_rect = rect.adjusted(12, 9, -32, -58)
         text = painter.fontMetrics().elidedText(record['name'], Qt.ElideRight, int(text_rect.width()))
         painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter, text)
         if selected:
             painter.setPen(theme.qcolor(theme.ACCENT))
-            painter.drawText(rect.adjusted(0, 10, -14, -40), Qt.AlignRight | Qt.AlignVCenter, '✓')
+            painter.drawText(rect.adjusted(0, 9, -12, -58), Qt.AlignRight | Qt.AlignVCenter, '✓')
         caption = QFont(option.font)
         caption.setPixelSize(theme.FONT_CAPTION)
         painter.setFont(caption)
         painter.setPen(theme.qcolor(theme.TEXT2))
-        protocol = painter.fontMetrics().elidedText(record['type'], Qt.ElideRight, int(rect.width() * .48))
-        painter.drawText(rect.adjusted(13, 43, -13, -10), Qt.AlignLeft | Qt.AlignVCenter, protocol)
+        protocol = painter.fontMetrics().elidedText(record['type'], Qt.ElideRight, int(rect.width() - 24))
+        painter.drawText(rect.adjusted(12, 36, -12, -32), Qt.AlignLeft | Qt.AlignVCenter, protocol)
         color = theme.ERROR if record['state'] in ('failed', 'timeout') else (
             theme.SUCCESS if record['state'] == 'ready' and record['delay'] < 250 else theme.TEXT2)
         color = theme.qcolor(color)
         if theme.is_light() and record['state'] in ('failed', 'timeout', 'ready'):
             color = color.darker(125)
         painter.setPen(color)
-        painter.drawText(rect.adjusted(13, 43, -13, -10), Qt.AlignRight | Qt.AlignVCenter, delay_text(record))
+        painter.drawText(rect.adjusted(12, 61, -12, -8), Qt.AlignLeft | Qt.AlignVCenter, delay_text(record))
         if option.state & QStyle.State_HasFocus:
             painter.setBrush(Qt.NoBrush)
             painter.setPen(QPen(theme.qcolor(theme.ACCENT), 1, Qt.DotLine))
