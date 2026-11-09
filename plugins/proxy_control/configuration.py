@@ -6,6 +6,11 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 MAX_PROFILE = 4 * 1024 * 1024
+DOMESTIC_DOMAINS = ('bilibili.com', 'biliapi.net', 'biliapi.com', 'bilivideo.com', 'bilivideo.cn',
+                    'hdslb.com', 'acgvideo.com', 'huya.com', 'huyacdn.com', 'msstatic.com',
+                    'douyu.com', 'douyucdn.cn', 'douyuscdn.com', 'douyin.com', 'douyincdn.com',
+                    'douyinpic.com', 'byteimg.com', 'bytedance.com', 'snssdk.com', 'amemv.com',
+                    'bdxiguastatic.com', 'pstatp.com', 'toutiao.com')
 
 
 def subscription_url(value):
@@ -32,8 +37,11 @@ class Options:
     profile_id: str = ''
     profile_name: str = '我的配置'
     auto_start: bool = True
+    routing: str = 'rule'
 
     def validate(self):
+        if self.routing not in ('rule', 'global', 'direct'):
+            raise ValueError('请选择规则、全局或直连模式')
         if self.source == 'url':
             subscription_url(self.profile)
         elif self.source == 'file':
@@ -49,13 +57,18 @@ class Options:
             raise ValueError('请先点击“准备内核”，或选择已有的 Mihomo 程序')
 
 
-def core_config(mixed_port, api_port, secret):
+def core_config(mixed_port, api_port, secret, routing='rule'):
     config = {'mixed-port': mixed_port, 'bind-address': '127.0.0.1', 'allow-lan': False,
               'external-controller': f'127.0.0.1:{api_port}', 'secret': secret,
-              'mode': 'rule', 'log-level': 'silent', 'ipv6': True,
+              'mode': routing, 'log-level': 'silent', 'ipv6': True,
               'find-process-mode': 'off', 'tun': {'enable': False}, 'dns': {'enable': False},
               'profile': {'store-selected': False, 'store-fake-ip': False},
-              'rules': ['MATCH,DDM']}
+              'rules': [f'DOMAIN-SUFFIX,{domain},DIRECT' for domain in DOMESTIC_DOMAINS] +
+                       ['IP-CIDR,127.0.0.0/8,DIRECT,no-resolve',
+                        'IP-CIDR,10.0.0.0/8,DIRECT,no-resolve',
+                        'IP-CIDR,172.16.0.0/12,DIRECT,no-resolve',
+                        'IP-CIDR,192.168.0.0/16,DIRECT,no-resolve',
+                        'IP-CIDR6,::1/128,DIRECT,no-resolve', 'MATCH,DDM']}
     config['proxy-providers'] = {'subscription': {'type': 'file', 'path': 'nodes.txt',
                                                   'health-check': {'enable': False}}}
     config['proxy-groups'] = [{'name': 'DDM', 'type': 'select', 'use': ['subscription']}]

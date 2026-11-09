@@ -31,6 +31,7 @@ class Download(QObject):
         super().__init__(parent)
         self.manager = QNetworkAccessManager(self)
         self.reply = None
+        self.profile_title = self.content_disposition = ''
         self.stream = None
         self.partial = None
         self.timer = QTimer(self)
@@ -39,6 +40,7 @@ class Download(QObject):
 
     def start(self, url, destination, limit):
         self.cancel()
+        self.profile_title = self.content_disposition = ''
         self.destination = Path(destination)
         self.destination.parent.mkdir(parents=True, exist_ok=True)
         self.partial = self.destination.with_suffix('.download')
@@ -79,6 +81,8 @@ class Download(QObject):
             self._fail(f'下载失败（HTTP {code}），请检查代理或稍后重试')
             return
         self.timer.stop()
+        self.profile_title = bytes(reply.rawHeader('profile-title')).decode('utf-8', errors='replace')
+        self.content_disposition = bytes(reply.rawHeader('Content-Disposition')).decode('utf-8', errors='replace')
         self.reply = None
         reply.deleteLater()
         self.stream.close()

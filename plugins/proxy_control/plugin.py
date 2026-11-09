@@ -40,6 +40,8 @@ class ProxyControl(Plugin):
         # Restore saved routing before the host begins resolving live rooms.
         if self.controller.options.enabled and self.controller.options.auto_start:
             self.controller.apply(self.controller.options)
+        elif self.controller.options.profile and not self.controller.node_snapshot()[0]:
+            self.controller.load_nodes()
 
     def toggle(self):
         if self.popover is not None and self.popover.isVisible():
@@ -57,18 +59,23 @@ class ProxyControl(Plugin):
             self.panel.testRequested.connect(self.controller.test_nodes)
             self.panel.profileRequested.connect(self.controller.activate_profile)
             self.panel.autoStartRequested.connect(self.controller.set_auto_start)
+            self.panel.catalogRequested.connect(self.controller.load_nodes)
+            self.panel.routingRequested.connect(self.controller.set_mode)
             self.controller.status.connect(self.panel.set_status)
             self.controller.resources.connect(self.panel.resources.setText)
             self.controller.busy.connect(self.panel.set_busy)
+            self.controller.runningChanged.connect(self.panel.set_running)
+            self.controller.routingChanged.connect(self.panel.set_routing)
             self.controller.nodes.connect(lambda nodes, selected: self.panel.set_nodes(
-                nodes, selected, self.controller.core.types))
-            self.controller.core.selected.connect(self.panel.select_node)
+                nodes, selected, self.controller.node_snapshot()[2]))
+            self.controller.selectionChanged.connect(self.panel.select_node)
             self.controller.profilesChanged.connect(self.panel.set_profiles)
             self.controller.latency.result.connect(self.panel.model.result)
             self.controller.latency.running.connect(self.panel.set_testing)
             self.controller.prepared.connect(self.panel.core.setText)
             self.panel.set_profiles(self.controller.profiles, self.controller.options.profile_id)
-            self.panel.set_nodes(self.controller.core.nodes, self.controller.core.current, self.controller.core.types)
+            self.panel.set_nodes(*self.controller.node_snapshot())
+            self.panel.set_running(bool(self.controller.endpoint))
             self.panel.set_status(self.controller.message)
             self.panel.set_busy(self.controller.working)
             self.controller._resources()

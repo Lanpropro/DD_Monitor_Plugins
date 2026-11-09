@@ -26,6 +26,8 @@ class Panel(QWidget):
     hideRequested = Signal()
     profileRequested = Signal(str)
     autoStartRequested = Signal(bool)
+    catalogRequested = Signal()
+    routingRequested = Signal(str)
 
     def __init__(self, options, parent=None):
         super().__init__(parent)
@@ -33,6 +35,7 @@ class Panel(QWidget):
         self.setMinimumSize(0, 0)
         self._testing = False
         self._busy = False
+        self._running = False
         self._importing = False
         self._loading = False
         self._saved_options = replace(options)
@@ -158,10 +161,17 @@ class Panel(QWidget):
         self.auto_start.setChecked(options.auto_start)
         self.auto_start.clicked.connect(self.autoStartRequested)
         settings.addWidget(self.auto_start)
-        scope = QLabel('仅代理本软件的连接')
-        scope.setObjectName('ProxyHint')
-        scope.setWordWrap(True)
-        settings.addWidget(scope)
+        self.routing = QComboBox()
+        self.routing.setObjectName('ProxyInline')
+        self.routing.setMinimumWidth(0)
+        self.routing.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        for label, mode in [('规则 · 国内直播直连', 'rule'), ('全局 · 全部经节点', 'global'),
+                            ('直连 · 不经节点', 'direct')]:
+            self.routing.addItem(label, mode)
+        self.routing.setCurrentIndex(self.routing.findData(options.routing))
+        self.routing.setToolTip('仅作用于本软件。规则模式：内置国内直播域名直连，其余经节点；不导入订阅路由规则。')
+        self.routing.activated.connect(lambda index: self.routingRequested.emit(self.routing.itemData(index)))
+        settings.addWidget(self.routing)
         provider = card('当前配置', 'folder', 1, 0)
         self.quick_profile = QComboBox()
         self.quick_profile.setObjectName('ProxyInline')
@@ -250,7 +260,7 @@ class Panel(QWidget):
         self.empty.setWordWrap(True)
         box.addWidget(self.empty, 1)
         self.add_subscription = QPushButton('添加订阅')
-        self.add_subscription.clicked.connect(lambda: self.navigation.setCurrentRow(2))
+        self.add_subscription.clicked.connect(self._node_action)
         box.addWidget(self.add_subscription)
         self.search.textChanged.connect(self._filter)
         self.pages.addWidget(page)
@@ -296,7 +306,8 @@ class Panel(QWidget):
         name_label.setObjectName('ProxyHint')
         box.addWidget(name_label)
         self.profile_name = QLineEdit(options.profile_name if options.profile else '')
-        self.profile_name.setPlaceholderText('配置名称，如服务商名称')
+        self.profile_name.setPlaceholderText('留空自动识别服务商名称')
+        self.profile_name.setToolTip('优先读取订阅提供的名称；未提供时显示订阅域名，也可手动命名')
         box.addWidget(self.profile_name)
         source_label = QLabel('导入方式')
         source_label.setObjectName('ProxyHint')
@@ -366,9 +377,18 @@ class Panel(QWidget):
         self.count.setText(f'{found} / {total} 个节点' if text else f'{total} 个节点')
         self.nodes.setVisible(bool(found))
         self.empty.setVisible(not found)
-        self.empty.setText('没有匹配的节点' if total else '还没有节点\n先在配置页添加服务商订阅并启动')
+        self.empty.setText('没有匹配的节点' if total else
+                           ('已保存配置，但尚未载入节点\n点击下方“载入节点”，无需启动代理' if self._saved_options.profile
+                            else '还没有节点\n先在配置页添加服务商订阅'))
         self.add_subscription.setVisible(not total)
-        self.test.setEnabled(bool(found) or self._testing)
+        self.add_subscription.setText('载入节点' if self._saved_options.profile else '添加订阅')
+        self.test.setEnabled((bool(found) and self._running) or self._testing)
+
+    def _node_action(self):
+        if self._saved_options.profile:
+            self.catalogRequested.emit()
+        else:
+            self.navigation.setCurrentRow(2)
 
     def _advanced(self, checked):
         self.runtime.setVisible(checked)
@@ -413,7 +433,7 @@ class Panel(QWidget):
             self.set_status('请先填写订阅地址、配置文件或节点链接，再点击导入按钮。')
             return
         self.applyRequested.emit(replace(self._saved_options, core=self.core.text().strip(),
-                                        auto_start=self.auto_start.isChecked()))
+                                        auto_start=self.auto_start.isChecked(), routing=self.routing.currentData()))
 
     def _confirm_import(self):
         if self._busy:
@@ -437,7 +457,7 @@ class Panel(QWidget):
                        node=(self.model.active if self._edit_id == self._saved_options.profile_id else
                              next((profile.node for profile in self._profiles if profile.id == self._edit_id), '')),
                        profile_id=self._edit_id, profile_name=self.profile_name.text().strip() or '我的配置',
-                       auto_start=self.auto_start.isChecked())
+                       auto_start=self.auto_start.isChecked(), routing=self.routing.currentData())
 
     def _new_profile(self):
         self.configuration_views.setCurrentIndex(1)
@@ -495,6 +515,7 @@ class Panel(QWidget):
         self.profiles_hint.setText(f'{len(profiles)} 份配置 · 点击卡片编辑' if profiles else '还没有配置，点击下方添加')
         self.configuration_views.setCurrentIndex(0 if profiles else 1)
         self.activate_profile.setEnabled(bool(profiles) and not self._busy)
+        self._filter(self.search.text())
 
     def select_node(self, name):
         self.model.select(name)
@@ -511,25 +532,34 @@ class Panel(QWidget):
     def set_nodes(self, nodes, selected, types=None):
         self.model.set_nodes(nodes, selected, types)
         self._filter(self.search.text())
-        self.state.setText('运行中' if nodes else '未启动')
-        self.state.setProperty('online', bool(nodes))
-        self.stop.setEnabled(bool(nodes))
-        self.apply.setText('重新载入' if nodes else '启动代理')
-        self.service_state.setText('运行中' if nodes else '尚未启动')
         self.quick_node.clear()
         self.quick_node.addItems(nodes)
         self.quick_node.setCurrentIndex(self.quick_node.findText(selected))
-        self.quick_node.setEnabled(bool(nodes))
+        self.quick_node.setEnabled(bool(nodes) and not self._busy)
         self._visibility()
-        if nodes and self._importing:
+        if nodes and self._importing and self._busy:
             self.search.clear()
             self.navigation.setCurrentRow(1)
         self.refresh_theme()
 
+    def set_running(self, running):
+        self._running = running
+        self.state.setText('运行中' if running else '未启动')
+        self.state.setProperty('online', running)
+        self.service_state.setText('运行中' if running else '尚未启动')
+        self.stop.setEnabled(running or self._busy)
+        self.apply.setText('重新载入' if running else '启动代理')
+        self._filter(self.search.text())
+        self.refresh_theme()
+
+    def set_routing(self, mode):
+        self._saved_options.routing = mode
+        self.routing.setCurrentIndex(self.routing.findData(mode))
+
     def set_testing(self, running):
         self._testing = running
         self.test.setText('停止测试' if running else '测延迟')
-        self.test.setEnabled(running or bool(self.model.visible))
+        self.test.setEnabled(running or (self._running and bool(self.model.visible)))
 
     def set_busy(self, busy):
         self._busy = busy
@@ -539,13 +569,17 @@ class Panel(QWidget):
                        self.profiles_list, self.profile_name, self.add_profile):
             widget.setEnabled(not busy)
         self.activate_profile.setEnabled(bool(self._profiles) and not busy)
-        self.stop.setEnabled(busy or bool(self.model.records))
+        self.routing.setEnabled(not busy)
+        self.add_subscription.setEnabled(not busy)
+        self.quick_node.setEnabled(not busy and bool(self.model.records))
+        self.nodes.setEnabled(not busy)
+        self.stop.setEnabled(busy or self._running)
         if busy:
             self.state.setText('准备中…')
             self.service_state.setText('正在准备服务…')
         else:
-            self.state.setText('运行中' if self.model.records else '未启动')
-            self.service_state.setText('运行中' if self.model.records else '尚未启动')
+            self.state.setText('运行中' if self._running else '未启动')
+            self.service_state.setText('运行中' if self._running else '尚未启动')
 
     def refresh_theme(self, *_args):
         self.setStyleSheet(f'''

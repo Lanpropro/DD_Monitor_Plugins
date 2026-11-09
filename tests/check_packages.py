@@ -60,6 +60,7 @@ def main():
                 if plugin_id == 'proxy_control':
                     assert 'proxy_control/popover.py' in names and 'proxy_control/profiles.py' in names
                     assert 'proxy_control/visuals.py' in names
+                    assert 'proxy_control/metadata.py' in names
                     assert 'proxy_control/drawer.py' not in names
                     assert not any(name.endswith(('preferences.json', 'profiles.json')) for name in names)
                 if plugin_id == 'domestic_live':

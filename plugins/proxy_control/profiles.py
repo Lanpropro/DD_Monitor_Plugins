@@ -1,9 +1,10 @@
 """Named local service profiles; keep credentials outside the plugin package."""
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field, replace
 import json
 import os
 from pathlib import Path
 from uuid import uuid4
+from .metadata import display_name
 
 
 @dataclass(frozen=True)
@@ -13,6 +14,7 @@ class Profile:
     source: str
     profile: str
     node: str = ''
+    nodes: dict = field(default_factory=dict)
 
 
 def load_profiles(directory, options):
@@ -25,7 +27,8 @@ def load_profiles(directory, options):
     if not profiles and options.profile:
         profiles = [Profile(options.profile_id or uuid4().hex, options.profile_name,
                             options.source, options.profile, options.node)]
-    return profiles
+    return [replace(profile, name=display_name(profile.source, profile.profile))
+            if profile.name in ('', '我的配置') else profile for profile in profiles]
 
 
 def save_profiles(directory, profiles):

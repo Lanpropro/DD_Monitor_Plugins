@@ -2,6 +2,7 @@
 from pathlib import Path
 from dataclasses import replace
 import sys
+import logging
 from uuid import uuid4
 
 from PySide6.QtCore import QObject, QProcess, QTimer, Signal
@@ -13,6 +14,7 @@ from .network import Download
 from .latency import Latency
 from .prepare_core import URL, ASSET
 from .profiles import Profile, load_profiles, save_profiles
+from .metadata import display_name
 
 
 class Controller(QObject):
@@ -22,6 +24,9 @@ class Controller(QObject):
     prepared = Signal(str)
     resources = Signal(str)
     profilesChanged = Signal(object, str)
+    runningChanged = Signal(bool)
+    selectionChanged = Signal(str)
+    routingChanged = Signal(str)
 
     def __init__(self, directory, parent=None):
         super().__init__(parent)
@@ -34,17 +39,22 @@ class Controller(QObject):
         self.profiles = load_profiles(self.directory, self.options)
         if self.profiles and not self.options.profile_id:
             self.options.profile_id = self.profiles[0].id
+        current = next((profile for profile in self.profiles if profile.id == self.options.profile_id), None)
+        if current:
+            self.options.profile_name = current.name
         save_profiles(self.directory, self.profiles)
         save_options(self.directory, self.options)
         self.core = Core(self)
         self.core.ready.connect(self._ready)
         self.core.failed.connect(self._failed)
         self.core.selected.connect(self._selected)
+        self.core.modeChanged.connect(self._mode_changed)
         self.download = Download(self)
         self.download.finished.connect(self._downloaded)
         self.latency = Latency(self)
         self.task = ''
         self.pending = None
+        self.catalog_only = False
         self.installer = None
         self.endpoint = ''
         self.message = '在“配置”中添加服务商订阅，即可启动代理'
@@ -53,7 +63,7 @@ class Controller(QObject):
         self.timer.setInterval(2000)
         self.timer.timeout.connect(self._resources)
 
-    def apply(self, options):
+    def apply(self, options, connect=True):
         try:
             options.validate()
         except ValueError as error:
@@ -61,10 +71,14 @@ class Controller(QObject):
             return
         try:
             self.stop(announce=False)
-            self.pending = replace(options, enabled=True)
+            self.catalog_only = not connect
+            self.pending = replace(options, enabled=connect)
+            if self.pending.profile_name in ('', '我的配置'):
+                self.pending.profile_name = display_name(options.source, options.profile)
             if not self.pending.profile_id:
                 self.pending.profile_id = uuid4().hex
             self._busy(True)
+            self._trace('connect' if connect else 'catalog')
             if options.source == 'url':
                 self.task = 'profile'
                 self._status('正在更新订阅…')
@@ -85,11 +99,14 @@ class Controller(QObject):
 
     def _ready(self, endpoint, nodes, selected):
         options = self.pending or self.options
-        self.environment.apply(endpoint)
-        self.endpoint = endpoint
+        if not self.catalog_only:
+            self.environment.apply(endpoint)
+            self.endpoint = endpoint
+        preferred = options.node if options.node in nodes else selected
+        options.node = preferred
         try:
             record = Profile(options.profile_id, options.profile_name.strip() or '我的配置',
-                             options.source, options.profile, selected)
+                             options.source, options.profile, preferred, dict(self.core.types))
             profiles = [record if profile.id == record.id else profile for profile in self.profiles]
             if not any(profile.id == record.id for profile in self.profiles):
                 profiles.append(record)
@@ -101,21 +118,48 @@ class Controller(QObject):
         self.profiles = profiles
         self.options, self.pending = options, None
         self.profilesChanged.emit(self.profiles, record.id)
+        if self.catalog_only:
+            self.catalog_only = False
+            self.core.stop()
+            self.timer.stop()
+            self.nodes.emit(nodes, preferred)
+            self.runningChanged.emit(False)
+            self._busy(False)
+            self._status(f'已载入 {len(nodes)} 个节点，可先选择节点再启动代理')
+            self._resources()
+            self._trace('catalog-ready')
+            return
         self.nodes.emit(nodes, selected)
-        if self.options.node in nodes and self.options.node != selected:
-            self.core.select(self.options.node)
+        self.runningChanged.emit(True)
         self._busy(False)
         self._status(f'已导入 {len(nodes)} 个节点，代理已启动；正在播放的直播间请重新播放')
         self._resources()
+        self._trace('ready')
+
+    def node_snapshot(self):
+        if self.endpoint:
+            return self.core.nodes, self.core.current, self.core.types
+        profile = next((profile for profile in self.profiles if profile.id == self.options.profile_id), None)
+        return (list(profile.nodes), profile.node, profile.nodes) if profile else ([], '', {})
+
+    def load_nodes(self):
+        if not self.working and not self.endpoint:
+            self.apply(self.options, connect=False)
 
     def select(self, name):
-        self.core.select(name)
+        if self.working:
+            return
+        if self.endpoint:
+            self.core.select(name)
+        elif name in self.node_snapshot()[0]:
+            self._selected(name)
 
     def activate_profile(self, identity):
         profile = next((profile for profile in self.profiles if profile.id == identity), None)
         if profile is not None and not self.working:
             self.apply(replace(self.options, source=profile.source, profile=profile.profile,
-                               node=profile.node, profile_id=profile.id, profile_name=profile.name))
+                               node=profile.node, profile_id=profile.id, profile_name=profile.name),
+                       connect=bool(self.endpoint))
 
     def set_auto_start(self, enabled):
         self.options.auto_start = enabled
@@ -125,6 +169,30 @@ class Controller(QObject):
             save_options(self.directory, self.options)
         except OSError:
             self._status('自动连接设置未能保存，请检查数据目录')
+
+    def set_mode(self, mode):
+        if mode not in ('rule', 'global', 'direct') or self.working:
+            self.routingChanged.emit(self.options.routing)
+            return
+        if self.endpoint:
+            if not self.core.set_mode(mode):
+                self.routingChanged.emit(self.options.routing)
+        else:
+            self._mode_changed(mode)
+
+    def _mode_changed(self, mode):
+        if mode:
+            self.options.routing = mode
+            try:
+                save_options(self.directory, self.options)
+            except OSError:
+                self._status('模式已切换，但设置未能保存')
+            else:
+                self._status('出站模式已更新；已有直播连接请重新播放后验证')
+        else:
+            self._status('模式切换失败，保留原模式')
+        self.routingChanged.emit(self.options.routing)
+        self._trace('mode')
 
     def test_nodes(self, names):
         if self.latency.testing:
@@ -144,7 +212,8 @@ class Controller(QObject):
             except OSError:
                 self._status('节点已切换，但设置未能保存')
                 return
-            self._status('节点已切换；已有连接请重新播放后验证')
+            self.selectionChanged.emit(name)
+            self._status('节点已切换；已有连接请重新播放后验证' if self.endpoint else '已保存节点选择，启动代理后生效')
         else:
             self._status('节点切换失败，请重试')
 
@@ -168,6 +237,9 @@ class Controller(QObject):
             return
         if task == 'profile':
             try:
+                if self.pending.profile_name in ('', '我的配置', display_name(self.pending.source, self.pending.profile)):
+                    self.pending.profile_name = display_name(self.pending.source, self.pending.profile,
+                                                             self.download.profile_title, self.download.content_disposition)
                 self._start_core(path.read_bytes())
             except OSError:
                 self._failed('无法读取订阅缓存')
@@ -196,11 +268,18 @@ class Controller(QObject):
 
     def _failed(self, message):
         self.stop(announce=False)
+        self._trace('failed')
+        logging.getLogger('ddm.proxy_control').warning('proxy failure=%s', message)
         self._status(message + '；当前使用原有系统／环境代理')
 
     def _status(self, message):
         self.message = message
         self.status.emit(message)
+
+    def _trace(self, event):
+        logging.getLogger('ddm.proxy_control').info('proxy event=%s mode=%s running=%s profiles=%d nodes=%d',
+            event, (self.pending or self.options).routing, bool(self.endpoint),
+            len(self.profiles), len(self.node_snapshot()[0]))
 
     def _busy(self, busy):
         self.working = busy
@@ -226,6 +305,7 @@ class Controller(QObject):
         self.download.cancel()
         self.task = ''
         self.pending = None
+        self.catalog_only = False
         installer, self.installer = self.installer, None
         if installer is not None:
             installer.kill()
@@ -234,8 +314,11 @@ class Controller(QObject):
         self.core.stop()
         self.environment.restore()
         self.endpoint = ''
-        self.nodes.emit([], '')
         self._busy(False)
+        nodes, selected, _types = self.node_snapshot()
+        self.nodes.emit(nodes, selected)
+        self.runningChanged.emit(False)
+        self.routingChanged.emit(self.options.routing)
         self._resources()
         if announce:
             self.options.enabled = False
@@ -245,3 +328,4 @@ class Controller(QObject):
                 self._status('内置代理已停止，但未能保存停用状态')
                 return
             self._status('已停止插件代理，恢复启动插件前的系统／环境代理')
+            self._trace('stopped')

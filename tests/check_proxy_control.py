@@ -49,6 +49,7 @@ from check_proxy_plugin.node_list import NodeModel, NODE_ROLE, ACTIVE_ROLE
 from check_proxy_plugin.panel import Panel
 from check_proxy_plugin.latency import Latency
 from check_proxy_plugin.profiles import Profile, load_profiles, save_profiles
+from check_proxy_plugin.metadata import display_name
 from ddm.global_danmaku import request_proxy
 from ddm.hls_proxy import HlsProxy
 
@@ -64,7 +65,7 @@ def wait_for(predicate, timeout=10):
 
 
 class Service:
-    def __init__(self, name=b'proxy', body=None, code=200):
+    def __init__(self, name=b'proxy', body=None, code=200, headers=None):
         self.requests = []
         owner = self
         class Handler(BaseHTTPRequestHandler):
@@ -80,6 +81,8 @@ class Service:
                 self.send_response(code)
                 self.send_header('Content-Type', 'text/plain')
                 self.send_header('Content-Length', str(len(payload)))
+                for key, value in (headers or {}).items():
+                    self.send_header(key, value)
                 self.end_headers()
                 try:
                     self.wfile.write(payload)
@@ -99,6 +102,27 @@ class Service:
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_provider_names_use_metadata_and_never_url_tokens(self):
+        title = '示例服务商'
+        encoded = 'base64:' + base64.b64encode(title.encode()).decode().rstrip('=')
+        self.assertEqual(display_name('url', 'https://example.invalid/sub?token=fixture-secret', encoded), title)
+        self.assertEqual(display_name('url', 'https://example.invalid/sub?token=fixture-secret'), 'example.invalid')
+        self.assertEqual(display_name('url', 'https://example.invalid/sub', disposition=
+                         "attachment; filename*=UTF-8''%E7%A4%BA%E4%BE%8B.yaml"), '示例')
+
+    def test_empty_configuration_cannot_change_routing_or_start_core(self):
+        with tempfile.TemporaryDirectory() as root:
+            controller = Controller(root)
+            original = {key: os.environ.get(key) for key in KEYS}
+            try:
+                controller.apply(Options(core=__file__))
+                self.assertEqual({key: os.environ.get(key) for key in KEYS}, original)
+                self.assertIsNone(controller.core.process)
+                self.assertFalse(controller.endpoint)
+                self.assertFalse(controller.working)
+            finally:
+                controller.deleteLater()
+                APP.processEvents()
     def test_invalid_subscriptions_are_rejected_without_echoing_credentials(self):
         for value in ('', 'file:///secret', 'http://host:70000',
                       'http://user:secret@host:80/path', 'http://host:80\r\nx:y'):
@@ -125,7 +149,8 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config['external-controller'], '127.0.0.1:10002')
         self.assertEqual(config['secret'], 'random-key')
         self.assertFalse(config['proxy-providers']['subscription']['health-check']['enable'])
-        self.assertEqual(config['rules'], ['MATCH,DDM'])
+        self.assertIn('DOMAIN-SUFFIX,bilibili.com,DIRECT', config['rules'])
+        self.assertEqual(config['rules'][-1], 'MATCH,DDM')
 
     def test_legacy_modes_preserve_subscription_and_remove_manual_proxy_settings(self):
         with tempfile.TemporaryDirectory() as root:
@@ -407,7 +432,8 @@ class InterfaceTests(unittest.TestCase):
                             apply.assert_called_once()
                             self.assertEqual(apply.call_args.args[0].profile, 'fixture-nodes')
                         else:
-                            apply.assert_not_called()
+                            apply.assert_called_once()
+                            self.assertFalse(apply.call_args.kwargs['connect'])
                     self.assertEqual({key: os.environ.get(key) for key in KEYS}, original)
                 finally:
                     plugin.on_unload()
@@ -694,7 +720,8 @@ class InterfaceTests(unittest.TestCase):
             try:
                 with patch.object(Controller, 'apply') as apply:
                     plugin.on_load(SimpleNamespace(window=window, register_workspace_control=Mock()))
-                    apply.assert_not_called()
+                    apply.assert_called_once()
+                    self.assertFalse(apply.call_args.kwargs['connect'])
                 self.assertIsNone(plugin.controller.core.process)
             finally:
                 plugin.on_unload()
@@ -757,6 +784,33 @@ class InterfaceTests(unittest.TestCase):
         finally:
             panel.deleteLater()
             APP.processEvents()
+
+    def test_cached_nodes_can_be_selected_while_service_is_stopped(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(module.config, 'data_root', return_value=root):
+            directory = Path(root) / 'utils/proxy_control'
+            save_options(directory, Options(core=__file__, profile_id='fixture', source='nodes', profile='fixture'))
+            save_profiles(directory, [Profile('fixture', '服务商', 'nodes', 'fixture', 'First',
+                                             {'First': 'Http', 'Second': 'Http'})])
+            window = QWidget()
+            plugin = module.ProxyControl()
+            try:
+                plugin.on_load(SimpleNamespace(window=window, register_workspace_control=Mock()))
+                plugin.toggle()
+                panel = plugin.panel
+                self.assertEqual(panel.model.visible, ['First', 'Second'])
+                self.assertEqual(panel.state.text(), '未启动')
+                self.assertFalse(panel.test.isEnabled())
+                panel.nodeRequested.emit('Second')
+                self.assertEqual(panel.model.active, 'Second')
+                self.assertEqual(load_options(directory).node, 'Second')
+                self.assertIsNone(plugin.controller.core.process)
+                self.assertFalse(plugin.controller.endpoint)
+                panel.routingRequested.emit('global')
+                self.assertEqual(panel.routing.currentData(), 'global')
+            finally:
+                plugin.on_unload()
+                window.deleteLater()
+                APP.processEvents()
 
 
 @unittest.skipUnless(args.core, 'Pass --core for actual Mihomo process tests')
@@ -828,6 +882,79 @@ class RealCoreTests(unittest.TestCase):
             self.assertTrue(subscription.requests)
         finally:
             subscription.close()
+
+    def test_catalog_download_names_provider_without_changing_network_and_retains_nodes(self):
+        title = 'base64:' + base64.b64encode('服务商名称'.encode()).decode()
+        subscription = Service(body=self.profile.encode(), headers={'profile-title': title})
+        original = {key: os.environ.get(key) for key in KEYS}
+        try:
+            options = Options(core=str(args.core.resolve()), source='url', profile=subscription.url + '/sub?token=fixture')
+            with patch.object(self.controller.environment, 'apply') as apply:
+                self.controller.apply(options, connect=False)
+                wait_for(lambda: not self.controller.working)
+                apply.assert_not_called()
+            self.assertFalse(self.controller.endpoint)
+            self.assertIsNone(self.controller.core.process)
+            self.assertEqual({key: os.environ.get(key) for key in KEYS}, original)
+            self.assertEqual(self.controller.options.profile_name, '服务商名称')
+            self.assertEqual(self.controller.node_snapshot()[0], ['First', 'Second'])
+            self.controller.select('Second')
+            self.assertEqual(self.controller.node_snapshot()[1], 'Second')
+            self.controller.apply(self.controller.options)
+            wait_for(lambda: bool(self.controller.endpoint) and self.controller.core.current == 'Second')
+            self.controller.stop()
+            self.assertEqual(self.controller.node_snapshot()[0], ['First', 'Second'])
+            self.assertEqual(self.controller.node_snapshot()[1], 'Second')
+            self.assertFalse(load_options(self.temp.name).enabled)
+            self.assertEqual({key: os.environ.get(key) for key in KEYS}, original)
+            restored = Controller(self.temp.name)
+            try:
+                self.assertEqual(restored.node_snapshot()[0], ['First', 'Second'])
+                self.assertEqual(restored.node_snapshot()[1], 'Second')
+                self.assertIsNone(restored.core.process)
+            finally:
+                restored.deleteLater()
+                APP.processEvents()
+            self.controller.apply(replace(self.controller.options, profile_name='手动命名'), connect=False)
+            wait_for(lambda: not self.controller.working)
+            self.assertEqual(self.controller.options.profile_name, '手动命名')
+        finally:
+            subscription.close()
+
+    def test_rule_global_and_direct_modes_route_actual_requests_and_switch_without_restarting(self):
+        from check_proxy_plugin.configuration import core_config as make_config
+        def fixture_config(*args, **kwargs):
+            config = make_config(*args, **kwargs)
+            config['hosts'] = {'fixture.bilibili.com': '127.0.0.1'}
+            return config
+        target = Service(b'direct-target')
+        try:
+            with patch('check_proxy_plugin.core.core_config', side_effect=fixture_config):
+                self.start()
+            endpoint = self.controller.endpoint
+            pid = self.controller.core.process.processId()
+            domestic = f'http://fixture.bilibili.com:{target.server.server_port}/live'
+            def content(url):
+                return requests.get(url, proxies={'http': endpoint}, timeout=5).content
+            self.assertEqual(content(domestic), b'direct-target')
+            self.assertEqual(content('http://fixture.invalid/live'), b'first')
+            self.controller.set_mode('global')
+            wait_for(lambda: self.controller.options.routing == 'global')
+            self.assertEqual(content(domestic), b'first')
+            self.controller.set_mode('direct')
+            wait_for(lambda: self.controller.options.routing == 'direct')
+            self.assertEqual(content(domestic), b'direct-target')
+            self.assertEqual(self.controller.core.process.processId(), pid)
+            self.assertEqual(load_options(self.temp.name).routing, 'direct')
+            secret = self.controller.core.secret
+            self.controller.core.secret = 'invalid-fixture-secret'
+            self.controller.set_mode('global')
+            wait_for(lambda: self.controller.core.mode_reply is None)
+            self.controller.core.secret = secret
+            self.assertEqual(self.controller.options.routing, 'direct')
+            self.assertEqual(self.controller.core.process.processId(), pid)
+        finally:
+            target.close()
 
     def test_panel_confirmation_downloads_subscription_and_opens_imported_nodes(self):
         subscription = Service(body=self.profile.encode())

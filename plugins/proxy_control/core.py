@@ -22,12 +22,14 @@ class Core(QObject):
     ready = Signal(str, object, str)
     failed = Signal(str)
     selected = Signal(str)
+    modeChanged = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.process = None
         self.directory = None
         self.reply = None
+        self.mode_reply = None
         self.manager = QNetworkAccessManager(self)
         self.manager.setProxy(QNetworkProxy(QNetworkProxy.NoProxy))
         self.timer = QTimer(self)
@@ -36,10 +38,12 @@ class Core(QObject):
         self.nodes = []
         self.types = {}
         self._types_loaded = False
+        self._global_selected = False
         self.current = ''
 
     def start(self, options, root, environment, profile=b''):
         self.stop()
+        self.preferred_node = options.node
         self.directory = tempfile.TemporaryDirectory(prefix='session-', dir=root)
         directory = Path(self.directory.name)
         mixed, self.port = free_port(), free_port()
@@ -47,7 +51,7 @@ class Core(QObject):
             self.port = free_port()
         self.endpoint = f'http://127.0.0.1:{mixed}'
         self.secret = secrets.token_urlsafe(32)
-        config = core_config(mixed, self.port, self.secret)
+        config = core_config(mixed, self.port, self.secret, options.routing)
         (directory / 'config.json').write_text(json.dumps(config), encoding='utf-8')
         (directory / 'nodes.txt').write_bytes(profile)
         process = self.process = QProcess(self)
@@ -69,8 +73,12 @@ class Core(QObject):
         request.setRawHeader(b'Authorization', ('Bearer ' + self.secret).encode())
         request.setHeader(QNetworkRequest.ContentTypeHeader, 'application/json')
         request.setTransferTimeout(2000)
-        reply = self.manager.get(request) if method == 'GET' else self.manager.put(
-            request, QByteArray(json.dumps(payload).encode()))
+        if method == 'GET':
+            reply = self.manager.get(request)
+        elif method == 'PATCH':
+            reply = self.manager.sendCustomRequest(request, b'PATCH', QByteArray(json.dumps(payload).encode()))
+        else:
+            reply = self.manager.put(request, QByteArray(json.dumps(payload).encode()))
         reply.setReadBufferSize(4 * 1024 * 1024)
         return reply
 
@@ -80,9 +88,35 @@ class Core(QObject):
             return
         if self.reply is not None:
             return
+        if self._types_loaded and not self._global_selected:
+            reply = self.reply = self._request('PUT', {'name': 'DDM'}, path='/proxies/GLOBAL')
+            reply.finished.connect(lambda: self._global_ready(reply))
+            return
         path = '/proxies/DDM' if self._types_loaded else '/providers/proxies/subscription'
         reply = self.reply = self._request('GET', path=path)
         reply.finished.connect(lambda: self._polled(reply))
+
+    def _global_ready(self, reply):
+        if self.reply is not reply:
+            return
+        self.reply = None
+        self._global_selected = reply.error() == QNetworkReply.NoError
+        reply.deleteLater()
+
+    def set_mode(self, mode):
+        if self.process is None or self.mode_reply is not None:
+            return False
+        reply = self.mode_reply = self._request('PATCH', {'mode': mode}, path='/configs')
+        reply.finished.connect(lambda: self._mode_changed(reply, mode))
+        return True
+
+    def _mode_changed(self, reply, mode):
+        if self.mode_reply is not reply:
+            return
+        self.mode_reply = None
+        okay = reply.error() == QNetworkReply.NoError
+        reply.deleteLater()
+        self.modeChanged.emit(mode if okay else '')
 
     def _polled(self, reply):
         if self.reply is not reply:
@@ -112,9 +146,25 @@ class Core(QObject):
             self.nodes = nodes
             self.current = result.get('now', '')
             self.timer.stop()
-            self.ready.emit(self.endpoint, nodes, self.current)
+            if self.preferred_node in nodes and self.preferred_node != self.current:
+                pending = self.reply = self._request('PUT', {'name': self.preferred_node})
+                pending.finished.connect(lambda: self._initial_selected(pending))
+            else:
+                self.ready.emit(self.endpoint, nodes, self.current)
         except (ValueError, KeyError, TypeError):
             return
+
+    def _initial_selected(self, reply):
+        if self.reply is not reply:
+            return
+        self.reply = None
+        okay = reply.error() == QNetworkReply.NoError
+        reply.deleteLater()
+        if not okay:
+            self._failure(self.process, '无法选择预设节点，未启用插件代理')
+            return
+        self.current = self.preferred_node
+        self.ready.emit(self.endpoint, self.nodes, self.current)
 
     def select(self, name):
         if self.process is None or name not in self.nodes or self.reply is not None:
@@ -140,6 +190,10 @@ class Core(QObject):
 
     def stop(self):
         self.timer.stop()
+        reply, self.mode_reply = self.mode_reply, None
+        if reply is not None:
+            reply.abort()
+            reply.deleteLater()
         reply, self.reply = self.reply, None
         if reply is not None:
             reply.abort()
@@ -158,4 +212,5 @@ class Core(QObject):
         self.nodes = []
         self.types = {}
         self._types_loaded = False
+        self._global_selected = False
         self.current = ''
