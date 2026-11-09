@@ -20,6 +20,7 @@ import unittest
 import wave
 from unittest.mock import Mock, patch
 from urllib.request import getproxies
+from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
@@ -29,9 +30,9 @@ args, remaining = parser.parse_known_args()
 sys.path.insert(0, str(args.host.resolve()))
 os.environ['DDM_NO_SAVE'] = '1'
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
-from PySide6.QtCore import QProcess
+from PySide6.QtCore import QProcess, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout
 import requests
 
 spec = importlib.util.spec_from_file_location('check_proxy_plugin', ROOT / 'plugins/proxy_control/plugin.py')
@@ -44,6 +45,9 @@ from check_proxy_plugin.controller import Controller
 from check_proxy_plugin.network import Download
 from check_proxy_plugin.prepare_core import install, ASSET
 from check_proxy_plugin.core import free_port
+from check_proxy_plugin.node_list import NodeModel, NODE_ROLE, ACTIVE_ROLE
+from check_proxy_plugin.panel import Panel
+from check_proxy_plugin.latency import Latency
 from ddm.global_danmaku import request_proxy
 from ddm.hls_proxy import HlsProxy
 
@@ -250,7 +254,103 @@ class RoutingTests(unittest.TestCase):
         download.deleteLater()
 
 
+class LatencyTests(unittest.TestCase):
+    def setUp(self):
+        self.latency = Latency()
+        self.events = []
+        self.latency.result.connect(lambda *values: self.events.append(values))
+        self.active, self.peak = 0, 0
+        self.lock = threading.Lock()
+        self.auth = []
+        owner = self
+        class Api(BaseHTTPRequestHandler):
+            def do_GET(self):
+                with owner.lock:
+                    owner.active += 1
+                    owner.peak = max(owner.peak, owner.active)
+                    owner.auth.append(self.headers.get('Authorization'))
+                try:
+                    threading.Event().wait(.08)
+                    failed = '/Bad/' in unquote(urlsplit(self.path).path)
+                    body = json.dumps({'error': 'fixture-secret'} if failed else {'delay': 42}).encode()
+                    self.send_response(503 if failed else 200)
+                    self.send_header('Content-Length', str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                finally:
+                    with owner.lock:
+                        owner.active -= 1
+            def log_message(self, *unused):
+                pass
+        self.server = ThreadingHTTPServer(('127.0.0.1', 0), Api)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.latency.stop()
+        self.latency.deleteLater()
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        APP.processEvents()
+
+    def test_latency_batch_is_authenticated_bounded_and_reports_real_results(self):
+        self.latency.start(self.server.server_port, 'fixture-key', ['Good A', 'Good/B', 'Bad', 'Good D'])
+        wait_for(lambda: not self.latency.testing)
+        finished = [values for values in self.events if values[2] in ('ready', 'failed')]
+        self.assertEqual(len(finished), 4)
+        self.assertIn(('Bad', None, 'failed'), finished)
+        self.assertIn(('Good/B', 42, 'ready'), finished)
+        self.assertLessEqual(self.peak, 2)
+        self.assertEqual(set(self.auth), {'Bearer fixture-key'})
+        self.assertNotIn('fixture-secret', str(finished))
+
+    def test_cancel_stops_queued_requests_and_ignores_late_replies(self):
+        self.latency.start(self.server.server_port, 'fixture-key', ['First', 'Second', 'Third'])
+        self.assertLessEqual(len(self.latency.active), 2)
+        self.latency.stop()
+        QTest.qWait(150)
+        self.assertFalse(self.latency.active)
+        self.assertFalse(self.latency.pending)
+        self.assertFalse(self.latency.testing)
+        self.assertFalse(any(values[2] == 'ready' for values in self.events))
+
+
 class InterfaceTests(unittest.TestCase):
+    def test_drawer_renders_rows_in_both_host_themes_and_keeps_input_pages_separate(self):
+        from ddm import theme
+        previous = theme.mode()
+        window = QWidget()
+        window.resize(1000, 720)
+        container = QWidget(window)
+        container.setGeometry(window.rect())
+        layout = QVBoxLayout(container)
+        layout.addWidget(QWidget())
+        panel = Panel(Options())
+        drawer = module.Drawer(panel, container)
+        try:
+            panel.set_nodes(['日本 01', '香港 02'], '日本 01', {'日本 01': 'Shadowsocks'})
+            panel.model.result('日本 01', 42, 'ready')
+            window.show()
+            drawer.show()
+            for mode in ('dark', 'light'):
+                theme.apply(mode)
+                APP.processEvents()
+                self.assertFalse(drawer.grab().isNull())
+                self.assertIn(theme.SIDEBAR, drawer.styleSheet())
+                self.assertIn(theme.ACCENT, panel.styleSheet())
+            panel.add_subscription.click()
+            self.assertEqual(panel.tabs.currentIndex(), 1)
+            self.assertTrue(panel.profile.isVisible())
+            drawer.hide()
+        finally:
+            drawer.hide()
+            window.deleteLater()
+            APP.processEvents()
+            theme.apply(previous)
+
     def test_legacy_startup_only_resumes_previously_managed_subscriptions(self):
         for mode in ('external', 'system', 'direct', 'managed'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as root, \
@@ -278,12 +378,16 @@ class InterfaceTests(unittest.TestCase):
                     window.deleteLater()
                     APP.processEvents()
 
-    def test_left_rail_toggles_auxiliary_window_without_replacing_live_wall(self):
+    def test_left_rail_toggles_embedded_drawer_and_restores_live_wall_space(self):
         with tempfile.TemporaryDirectory() as root, patch.object(module.config, 'data_root', return_value=root):
             window = QWidget()
             window.resize(1200, 900)
-            wall = QWidget(window)
-            wall.resize(1100, 800)
+            container = window._content = QWidget(window)
+            container.setGeometry(window.rect())
+            layout = QVBoxLayout(container)
+            layout.setContentsMargins(0, 0, 0, 0)
+            wall = QWidget(container)
+            layout.addWidget(wall)
             window.show()
             wall.show()
             entries = []
@@ -298,25 +402,80 @@ class InterfaceTests(unittest.TestCase):
                 button.click()
                 panel = plugin.panel
                 self.assertTrue(panel.isVisible())
-                self.assertFalse(panel.isModal())
+                self.assertFalse(panel.isWindow())
+                self.assertIs(panel.window(), window)
+                self.assertLess(plugin.drawer.width(), container.width() / 2)
+                self.assertGreaterEqual(wall.x(), plugin.drawer.width())
                 self.assertTrue(wall.isVisible())
                 self.assertFalse(hasattr(panel, 'address'))
                 self.assertFalse(hasattr(panel, 'mode'))
-                self.assertTrue(panel.managed.isVisible())
-                self.assertTrue(panel.runtime.isVisible())
+                self.assertEqual(panel.tabs.currentIndex(), 0)
+                panel.tabs.setCurrentIndex(1)
+                self.assertTrue(panel.profile.isVisible())
                 panel.profile.setPlainText('retained')
                 with patch.object(plugin.controller, 'stop') as stop:
                     button.click()
                     self.assertFalse(panel.isVisible())
+                    self.assertEqual(layout.getContentsMargins(), (0, 0, 0, 0))
                     button.click()
                     self.assertEqual(panel.profile.toPlainText(), 'retained')
-                    panel.reject()
+                    panel.close_button.click()
+                    button.click()
+                    window.activateWindow()
+                    panel.profile.setFocus()
+                    QTest.qWait(30)
+                    QTest.keyClick(panel.profile, Qt.Key_Escape)
+                    self.assertFalse(plugin.drawer.isVisible())
                     stop.assert_not_called()
                 context.show_workspace.assert_not_called()
             finally:
                 plugin.on_unload()
                 window.deleteLater()
                 APP.processEvents()
+
+    def test_drawer_resizes_with_content_and_unload_restores_original_margins(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(module.config, 'data_root', return_value=root):
+            window = QWidget()
+            container = window._content = QWidget(window)
+            container.setGeometry(0, 0, 1000, 700)
+            layout = QVBoxLayout(container)
+            layout.setContentsMargins(4, 5, 6, 7)
+            layout.addWidget(QWidget())
+            context = SimpleNamespace(window=window, register_workspace_control=Mock())
+            plugin = module.ProxyControl()
+            window.show()
+            plugin.on_load(context)
+            plugin.toggle()
+            container.resize(700, 500)
+            APP.processEvents()
+            self.assertEqual(plugin.drawer.height(), 500)
+            self.assertLess(plugin.drawer.width(), 700)
+            plugin.on_unload()
+            self.assertEqual(layout.getContentsMargins(), (4, 5, 6, 7))
+            window.deleteLater()
+            APP.processEvents()
+
+    def test_node_list_search_selection_and_delay_updates_do_not_create_row_widgets(self):
+        panel = Panel(Options())
+        panel.set_nodes(['香港 01', '日本 02', '日本 03'], '香港 01', {'日本 02': 'Shadowsocks'})
+        panel.search.setText('日本')
+        self.assertEqual(panel.model.rowCount(), 2)
+        self.assertEqual(panel.model.data(panel.model.index(0)), '日本 02')
+        panel.model.result('日本 02', 123, 'ready')
+        self.assertEqual(panel.model.data(panel.model.index(0), NODE_ROLE)['delay'], 123)
+        panel.model.select('日本 03')
+        self.assertFalse(panel.model.data(panel.model.index(0), ACTIVE_ROLE))
+        self.assertTrue(panel.model.data(panel.model.index(1), ACTIVE_ROLE))
+        self.assertIsNone(panel.nodes.indexWidget(panel.model.index(0)))
+        panel.search.setText('no-match')
+        self.assertEqual(panel.model.rowCount(), 0)
+        self.assertFalse(panel.test.isEnabled())
+        panel.set_testing(True)
+        self.assertTrue(panel.test.isEnabled())
+        panel.set_testing(False)
+        self.assertFalse(panel.test.isEnabled())
+        panel.deleteLater()
+        APP.processEvents()
 
 
 @unittest.skipUnless(args.core, 'Pass --core for actual Mihomo process tests')
@@ -364,6 +523,18 @@ class RealCoreTests(unittest.TestCase):
         import psutil
         self.assertFalse(psutil.pid_exists(pid))
         self.assertFalse(directory.exists())
+
+    def test_core_reports_protocol_and_serves_actual_latency_checks(self):
+        self.start()
+        self.assertEqual(self.controller.core.types['First'], 'Http')
+        results = []
+        self.controller.latency.result.connect(lambda *values: results.append(values))
+        self.controller.latency.start(self.controller.core.port, self.controller.core.secret,
+                                      ['First', 'Second'], target='http://fixture.invalid/probe')
+        wait_for(lambda: not self.controller.latency.testing)
+        successful = [values for values in results if values[2] == 'ready']
+        self.assertEqual(len(successful), 2)
+        self.assertTrue(all(type(values[1]) is int for values in successful))
 
     def test_subscription_download_uses_provider_nodes_without_importing_tun(self):
         subscription = Service(body=self.profile.encode())

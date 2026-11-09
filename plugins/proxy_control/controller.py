@@ -9,6 +9,7 @@ from .configuration import MAX_PROFILE, Options, load_options, save_options
 from .core import Core
 from .environment import Environment
 from .network import Download
+from .latency import Latency
 from .prepare_core import URL, ASSET
 
 
@@ -34,6 +35,7 @@ class Controller(QObject):
         self.core.selected.connect(self._selected)
         self.download = Download(self)
         self.download.finished.connect(self._downloaded)
+        self.latency = Latency(self)
         self.task = ''
         self.installer = None
         self.endpoint = ''
@@ -88,6 +90,13 @@ class Controller(QObject):
 
     def select(self, name):
         self.core.select(name)
+
+    def test_nodes(self, names):
+        if self.latency.testing:
+            self.latency.stop()
+        elif self.core.process is not None and self.endpoint:
+            self.latency.start(self.core.port, self.core.secret,
+                               [name for name in names if name in self.core.nodes])
 
     def _selected(self, name):
         if name:
@@ -175,6 +184,7 @@ class Controller(QObject):
 
     def stop(self, announce=True):
         self.timer.stop()
+        self.latency.stop()
         self.download.cancel()
         self.task = ''
         installer, self.installer = self.installer, None

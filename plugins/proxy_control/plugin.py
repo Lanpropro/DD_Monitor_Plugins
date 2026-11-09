@@ -12,6 +12,7 @@ __package__ = __name__
 
 from .controller import Controller
 from .panel import Panel
+from .drawer import Drawer
 
 
 class ProxyControl(Plugin):
@@ -22,6 +23,7 @@ class ProxyControl(Plugin):
     def __init__(self):
         super().__init__()
         self.controller = self.panel = None
+        self.drawer = None
 
     def on_load(self, context):
         self.context = context
@@ -39,35 +41,45 @@ class ProxyControl(Plugin):
             self.controller.apply(self.controller.options)
 
     def toggle(self):
-        if self.panel is not None and self.panel.isVisible():
-            self.panel.hide()
+        if self.drawer is not None and self.drawer.isVisible():
+            self.drawer.hide()
             return
         if self.panel is None:
-            self.panel = Panel(self.controller.options, self.context.window)
+            container = getattr(self.context.window, '_content', self.context.window)
+            self.panel = Panel(self.controller.options)
+            self.drawer = Drawer(self.panel, container)
+            self.panel.hideRequested.connect(self.drawer.hide)
+            self.drawer.hidden.connect(self.controller.latency.stop)
             self.panel.applyRequested.connect(self.controller.apply)
             self.panel.stopRequested.connect(self.controller.stop)
             self.panel.prepareRequested.connect(self.controller.prepare)
             self.panel.nodeRequested.connect(self.controller.select)
+            self.panel.testRequested.connect(self.controller.test_nodes)
             self.controller.status.connect(self.panel.status.setText)
             self.controller.resources.connect(self.panel.resources.setText)
             self.controller.busy.connect(self.panel.set_busy)
-            self.controller.nodes.connect(self.panel.set_nodes)
+            self.controller.nodes.connect(lambda nodes, selected: self.panel.set_nodes(
+                nodes, selected, self.controller.core.types))
+            self.controller.core.selected.connect(self.panel.model.select)
+            self.controller.latency.result.connect(self.panel.model.result)
+            self.controller.latency.running.connect(self.panel.set_testing)
             self.controller.prepared.connect(self.panel.core.setText)
-            self.panel.set_nodes(self.controller.core.nodes, self.controller.core.current)
+            self.panel.set_nodes(self.controller.core.nodes, self.controller.core.current, self.controller.core.types)
             self.panel.status.setText(self.controller.message)
             self.panel.set_busy(self.controller.working)
             self.controller._resources()
-        self.panel.show()
-        self.panel.raise_()
-        self.panel.activateWindow()
+        self.drawer.show()
 
     def on_unload(self):
         if self.controller is not None:
             self.controller.stop(announce=False)
-        for widget in (self.panel, self.controller):
+        if self.drawer is not None:
+            self.drawer.hide()
+        for widget in (self.drawer, self.controller):
             if widget is not None:
                 widget.deleteLater()
         self.panel = self.controller = None
+        self.drawer = None
 
 
 plugin = ProxyControl()

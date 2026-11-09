@@ -34,6 +34,8 @@ class Core(QObject):
         self.timer.setInterval(250)
         self.timer.timeout.connect(self._poll)
         self.nodes = []
+        self.types = {}
+        self._types_loaded = False
         self.current = ''
 
     def start(self, options, root, environment, profile=b''):
@@ -62,14 +64,14 @@ class Core(QObject):
         process.start(options.core, ['-d', str(directory), '-f', str(directory / 'config.json')])
         self.timer.start()
 
-    def _request(self, method, payload=None):
-        request = QNetworkRequest(QUrl(f'http://127.0.0.1:{self.port}/proxies/DDM'))
+    def _request(self, method, payload=None, path='/proxies/DDM'):
+        request = QNetworkRequest(QUrl(f'http://127.0.0.1:{self.port}{path}'))
         request.setRawHeader(b'Authorization', ('Bearer ' + self.secret).encode())
         request.setHeader(QNetworkRequest.ContentTypeHeader, 'application/json')
         request.setTransferTimeout(2000)
         reply = self.manager.get(request) if method == 'GET' else self.manager.put(
             request, QByteArray(json.dumps(payload).encode()))
-        reply.setReadBufferSize(1024 * 1024)
+        reply.setReadBufferSize(4 * 1024 * 1024)
         return reply
 
     def _poll(self):
@@ -78,7 +80,8 @@ class Core(QObject):
             return
         if self.reply is not None:
             return
-        reply = self.reply = self._request('GET')
+        path = '/proxies/DDM' if self._types_loaded else '/providers/proxies/subscription'
+        reply = self.reply = self._request('GET', path=path)
         reply.finished.connect(lambda: self._polled(reply))
 
     def _polled(self, reply):
@@ -92,6 +95,13 @@ class Core(QObject):
             return
         try:
             result = json.loads(data)
+            if not self._types_loaded:
+                records = result['proxies']
+                if not isinstance(records, list) or not records or len(records) > 4096:
+                    return
+                self.types = {record['name']: record.get('type', '代理节点') for record in records}
+                self._types_loaded = True
+                return
             nodes = result['all']
             # Mihomo supplies this direct placeholder when no provider nodes loaded.
             if nodes == ['COMPATIBLE']:
@@ -146,4 +156,6 @@ class Core(QObject):
             self.directory.cleanup()
             self.directory = None
         self.nodes = []
+        self.types = {}
+        self._types_loaded = False
         self.current = ''
