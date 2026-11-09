@@ -206,3 +206,10 @@ def _observe_buffer_exhaustion(viewer, row, exhausted, eligible, now):
             row.buffer_recovered_since = now
         if now - row.buffer_recovered_since >= 60:
             row.buffer_warning.hide()
+
+
+def _buffer_reserve_changed(viewer):
+    viewer.reserve_seconds = viewer.buffer_reserve.currentData()
+    viewer.late_buffer = LateBuffer(viewer.reserve_seconds)
+    viewer.late_notice.hide()
+    viewer.changed()

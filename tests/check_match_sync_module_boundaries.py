@@ -22,7 +22,8 @@ def check(app, host, module):
     room_input = import_module(module.__package__ + '.room_input')
     timing = import_module(module.__package__ + '.playback_timing')
     controller_names = ('source_control', 'chat_control', 'alignment_control', 'picture_control',
-                        'recording_control', 'replay_control', 'presentation', 'floating_control')
+                        'recording_control', 'replay_control', 'presentation', 'floating_control',
+                        'viewer_ui', 'host_integration', 'console_control', 'session_control')
     controllers = [import_module(module.__package__ + '.' + name) for name in controller_names]
     assert module.AudioFeed is audio.AudioFeed and module.AudioPump is audio.AudioPump
     assert module.Canvas is canvas.Canvas
@@ -94,11 +95,29 @@ def check(app, host, module):
             assert type(viewer.canvas) is canvas.Canvas and viewer.canvas.parentWidget() is viewer.picture.video
             assert viewer.canvas.paint_probe is viewer.playback_probe
             assert type(viewer.comparison_panel) is comparison.ComparisonPanel
+            for timer, interval in ((viewer.crop_repaint_timer, 16), (viewer.buffer_notice_timer, 15000),
+                                    (viewer.removal_timer, 5000), (viewer.render_timer, 33),
+                                    (viewer.match_timer, 500), (viewer.save_timer, 350)):
+                assert timer.parent() is viewer and timer.thread() == app.thread()
+                assert timer.interval() == interval
             viewer.add_room('1', {'alias': 'fixture'})
             row = viewer.rows['1']
             assert type(row) is room_widgets.RoomRow and row.viewer is viewer
             assert type(row.status) is room_widgets.CompactStatus
             assert type(viewer.results) is module.alignment_control.Results
+            # Overrides keep the original QObject receiver and bound QDialog fallback.
+            from PySide6.QtWidgets import QDialog
+            marker_event = QEvent(QEvent.User)
+            with patch.object(module.host_integration, 'eventFilter', return_value=False) as handler:
+                assert viewer.eventFilter(row, marker_event) is False
+                receiver, watched, event = handler.call_args.args
+                assert receiver is viewer and watched is row and event is marker_event
+            with patch.object(module.host_integration, 'eventFilter', return_value=None):
+                assert viewer.eventFilter(row, marker_event) == QDialog.eventFilter(viewer, row, marker_event)
+            with patch.object(module.session_control, 'reject') as handler:
+                viewer.reject()
+                receiver, base = handler.call_args.args
+                assert receiver is viewer and base.__self__ is viewer and base.__name__ == 'reject'
             marker = object()
             with patch.object(module.source_control, '_valid', return_value=marker) as valid:
                 assert viewer._valid(row, None) is marker

@@ -265,3 +265,13 @@ def _stop_row(row):
     row.match_text = "等待画面"
     row.buffer_text = ""
     row.refresh_status()
+
+
+def _add_dragged(viewer, room_id):
+    room = next((item for item in getattr(viewer.context.window, "rooms", [])
+                 if str(item.get("room_id") or "") == room_id), {})
+    if viewer.add_room(room_id, {"alias": room.get("uname") or ""}):
+        if viewer.embedded and not viewer.running:
+            viewer.toggle_running()
+        return True
+    return False
