@@ -1,6 +1,6 @@
 """Auxiliary proxy controls; never replace the live wall."""
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QFormLayout, QGroupBox,
+from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QGroupBox,
                                QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton,
                                QVBoxLayout)
 
@@ -19,24 +19,9 @@ class Panel(QDialog):
         self.setModal(False)
         self.resize(500, 520)
         layout = QVBoxLayout(self)
-        description = QLabel('为本软件选择连接方式。切换后请重新播放直播间，让已有连接使用新设置。')
+        description = QLabel('导入订阅或节点，启动内置代理。启动或切换节点后，请重新播放直播间。')
         description.setWordWrap(True)
         layout.addWidget(description)
-        form = QFormLayout()
-        self.mode = QComboBox()
-        for name, value in [('跟随系统代理', 'system'), ('直接连接', 'direct'),
-                            ('连接现有代理', 'external'), ('内置代理：订阅／节点', 'managed')]:
-            self.mode.addItem(name, value)
-        self.mode.setCurrentIndex(self.mode.findData(options.mode))
-        form.addRow('连接方式', self.mode)
-        layout.addLayout(form)
-        self.external = QGroupBox('已有代理')
-        external = QFormLayout(self.external)
-        self.address = QLineEdit(options.address)
-        self.address.setPlaceholderText('http://127.0.0.1:端口 或 socks5://主机:端口')
-        self.address.setToolTip('支持 user:password@主机:端口；凭据仅保存在本机插件数据目录')
-        external.addRow('代理地址', self.address)
-        layout.addWidget(self.external)
         self.managed = QGroupBox('导入节点')
         managed = QVBoxLayout(self.managed)
         self.source = QComboBox()
@@ -71,33 +56,26 @@ class Panel(QDialog):
         row.addWidget(QLabel('当前节点'))
         row.addWidget(self.nodes, 1)
         layout.addLayout(row)
-        self.status = QLabel('请选择连接方式。订阅、节点与代理设置保留在本机，不写入日志。')
+        self.status = QLabel('导入订阅或节点后，点击“启动代理”')
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         self.resources = QLabel('内核未运行')
         self.resources.setWordWrap(True)
         layout.addWidget(self.resources)
         buttons = QHBoxLayout()
-        self.apply = QPushButton('应用')
+        self.apply = QPushButton('启动代理')
         self.apply.clicked.connect(lambda: self.applyRequested.emit(self.options()))
-        self.stop = QPushButton('停止并恢复原设置')
+        self.stop = QPushButton('停止代理')
         self.stop.clicked.connect(self.stopRequested)
         hide = QPushButton('收起')
         hide.clicked.connect(self.hide)
         for button in (self.apply, self.stop, hide):
             buttons.addWidget(button)
         layout.addLayout(buttons)
-        self.mode.currentIndexChanged.connect(self._visibility)
-        self.address.textChanged.connect(self._visibility)
         self.source.currentIndexChanged.connect(self._visibility)
         self._visibility()
 
     def _visibility(self):
-        mode = self.mode.currentData()
-        self.external.setVisible(mode == 'external')
-        self.managed.setVisible(mode == 'managed')
-        self.runtime.setVisible(mode == 'managed' or (mode == 'external' and
-                                                    self.address.text().lower().startswith('socks')))
         self.browse_profile.setVisible(self.source.currentData() == 'file')
         self.profile.setPlaceholderText({'url': '粘贴服务商提供的订阅地址', 'file': '选择本地节点配置文件',
                                          'nodes': '每行一个节点链接，例如 ss://、vmess://、vless://、trojan://'}
@@ -114,8 +92,7 @@ class Panel(QDialog):
             self.core.setText(path)
 
     def options(self):
-        return Options(mode=self.mode.currentData(), address=self.address.text().strip(),
-                       core=self.core.text().strip(), source=self.source.currentData(),
+        return Options(enabled=True, core=self.core.text().strip(), source=self.source.currentData(),
                        profile=self.profile.toPlainText().strip(), node=self.nodes.currentText())
 
     def set_nodes(self, nodes, selected):

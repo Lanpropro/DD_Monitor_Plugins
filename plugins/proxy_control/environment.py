@@ -19,18 +19,13 @@ class Environment:
             else:
                 self.environ[key] = value
 
-    def apply(self, mode, endpoint=''):
+    def apply(self, endpoint):
         self.restore()
-        if mode == 'system':
-            return
         for key in KEYS:
             self.environ.pop(key, None)
-        if mode == 'direct':
-            self.environ['no_proxy'] = self.environ['NO_PROXY'] = '*'
-        else:
-            for key in ('http_proxy', 'https_proxy', 'all_proxy'):
-                self.environ[key] = self.environ[key.upper()] = endpoint
-            self.environ['no_proxy'] = self.environ['NO_PROXY'] = LOOPBACK
+        for key in ('http_proxy', 'https_proxy', 'all_proxy'):
+            self.environ[key] = self.environ[key.upper()] = endpoint
+        self.environ['no_proxy'] = self.environ['NO_PROXY'] = LOOPBACK
 
     def child_environment(self):
         # Avoid routing the core's own outbound connections back into itself.

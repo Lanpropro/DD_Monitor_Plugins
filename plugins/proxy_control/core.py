@@ -45,10 +45,9 @@ class Core(QObject):
             self.port = free_port()
         self.endpoint = f'http://127.0.0.1:{mixed}'
         self.secret = secrets.token_urlsafe(32)
-        config = core_config(options, mixed, self.port, self.secret)
+        config = core_config(mixed, self.port, self.secret)
         (directory / 'config.json').write_text(json.dumps(config), encoding='utf-8')
-        if options.mode == 'managed':
-            (directory / 'nodes.txt').write_bytes(profile)
+        (directory / 'nodes.txt').write_bytes(profile)
         process = self.process = QProcess(self)
         env = QProcessEnvironment()
         for key, value in environment.items():

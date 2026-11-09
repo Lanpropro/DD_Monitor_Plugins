@@ -1,5 +1,6 @@
 """Coordinate routing, profile downloads, core lifecycle and local preferences."""
 from pathlib import Path
+from dataclasses import replace
 import sys
 
 from PySide6.QtCore import QObject, QProcess, QTimer, Signal
@@ -26,6 +27,7 @@ class Controller(QObject):
         self.options = load_options(self.directory)
         if not self.options.core:
             self.options.core = str(self.directory / 'runtime/mihomo.exe')
+        save_options(self.directory, self.options)
         self.core = Core(self)
         self.core.ready.connect(self._ready)
         self.core.failed.connect(self._failed)
@@ -35,7 +37,7 @@ class Controller(QObject):
         self.task = ''
         self.installer = None
         self.endpoint = ''
-        self.message = '跟随系统代理'
+        self.message = '导入订阅或节点后，点击“启动代理”'
         self.working = False
         self.timer = QTimer(self)
         self.timer.setInterval(2000)
@@ -49,17 +51,9 @@ class Controller(QObject):
             return
         try:
             self.stop(announce=False)
-            self.options = options
-            if not options.needs_core():
-                self.environment.apply(options.mode, options.address.strip())
-                self.endpoint = options.address.strip() if options.mode == 'external' else ''
-                save_options(self.directory, options)
-                self._status('代理已应用；新连接生效，正在播放的直播间请重新播放')
-                return
+            self.options = replace(options, enabled=True)
             self._busy(True)
-            if options.mode == 'external':
-                self._start_core()
-            elif options.source == 'url':
+            if options.source == 'url':
                 self.task = 'profile'
                 self._status('正在更新订阅…')
                 self.download.start(options.profile.strip(), self.directory / 'subscription.txt', MAX_PROFILE)
@@ -78,7 +72,7 @@ class Controller(QObject):
         self.timer.start()
 
     def _ready(self, endpoint, nodes, selected):
-        self.environment.apply('external', endpoint)
+        self.environment.apply(endpoint)
         self.endpoint = endpoint
         try:
             save_options(self.directory, self.options)
@@ -149,7 +143,7 @@ class Controller(QObject):
         if code == 0:
             self.options.core = str(self.directory / 'runtime/mihomo.exe')
             self.prepared.emit(self.options.core)
-            self._status('内核已校验并准备好，填写订阅或节点后点击应用')
+            self._status('内核已校验并准备好，填写订阅或节点后点击“启动代理”')
         else:
             self._status('内核准备失败：下载校验或解压失败，可稍后重试')
 
@@ -168,7 +162,7 @@ class Controller(QObject):
     def _resources(self):
         process = self.core.process
         if process is None or not process.processId():
-            self.resources.emit('内核未运行；系统、直连和 HTTP 代理模式不启动内核')
+            self.resources.emit('内核未运行；启动内置代理时加载，停止后释放')
             return
         try:
             import psutil
@@ -195,4 +189,10 @@ class Controller(QObject):
         self._busy(False)
         self._resources()
         if announce:
+            self.options.enabled = False
+            try:
+                save_options(self.directory, self.options)
+            except OSError:
+                self._status('内置代理已停止，但未能保存停用状态')
+                return
             self._status('已停止插件代理，恢复启动插件前的系统／环境代理')

@@ -19,7 +19,7 @@ from types import SimpleNamespace
 import unittest
 import wave
 from unittest.mock import Mock, patch
-from urllib.request import getproxies, proxy_bypass
+from urllib.request import getproxies
 
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
@@ -38,7 +38,7 @@ spec = importlib.util.spec_from_file_location('check_proxy_plugin', ROOT / 'plug
 module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
-from check_proxy_plugin.configuration import Options, core_config, load_options, save_options, proxy_address
+from check_proxy_plugin.configuration import Options, core_config, load_options, save_options, subscription_url
 from check_proxy_plugin.environment import Environment, KEYS
 from check_proxy_plugin.controller import Controller
 from check_proxy_plugin.network import Download
@@ -94,17 +94,17 @@ class Service:
 
 
 class ConfigurationTests(unittest.TestCase):
-    def test_invalid_proxy_inputs_are_rejected_without_echoing_credentials(self):
-        for value in ('', 'http://host', 'file:///secret', 'socks5://host:70000',
+    def test_invalid_subscriptions_are_rejected_without_echoing_credentials(self):
+        for value in ('', 'file:///secret', 'http://host:70000',
                       'http://user:secret@host:80/path', 'http://host:80\r\nx:y'):
             with self.subTest(value=value), self.assertRaises(ValueError) as error:
-                proxy_address(value)
+                subscription_url(value)
             self.assertNotIn('secret', str(error.exception))
-        self.assertEqual(proxy_address('socks5://user:secret@[::1]:7890').port, 7890)
+        self.assertEqual(subscription_url('https://example.invalid/sub?key=fixture'),
+                         'https://example.invalid/sub?key=fixture')
 
     def test_config_cannot_enable_tun_lan_or_unprotected_controller(self):
-        options = Options(mode='managed', source='nodes', profile='fixture')
-        config = core_config(options, 10001, 10002, 'random-key')
+        config = core_config(10001, 10002, 'random-key')
         self.assertEqual(config['bind-address'], '127.0.0.1')
         self.assertFalse(config['allow-lan'])
         self.assertFalse(config['tun']['enable'])
@@ -113,19 +113,37 @@ class ConfigurationTests(unittest.TestCase):
         self.assertFalse(config['proxy-providers']['subscription']['health-check']['enable'])
         self.assertEqual(config['rules'], ['MATCH,DDM'])
 
-    def test_socks_credentials_are_decoded_only_into_private_core_config(self):
-        config = core_config(Options(mode='external', address='socks5://user:p%40ss@localhost:1234'), 1, 2, 'key')
-        self.assertEqual(config['proxies'][0]['password'], 'p@ss')
-        self.assertEqual(config['proxies'][0]['type'], 'socks5')
-        self.assertNotIn('proxy-providers', config)
+    def test_legacy_modes_preserve_subscription_and_remove_manual_proxy_settings(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'preferences.json'
+            for mode in ('external', 'system', 'direct', 'managed'):
+                with self.subTest(mode=mode):
+                    path.write_text(json.dumps({'mode': mode, 'address': 'socks5://user:secret@localhost:7890',
+                                                'core': 'fixture-core', 'source': 'nodes',
+                                                'profile': 'fixture-nodes', 'node': 'First'}))
+                    controller = Controller(root)
+                    try:
+                        self.assertEqual(controller.options.enabled, mode == 'managed')
+                        self.assertEqual(controller.options.profile, 'fixture-nodes')
+                        self.assertEqual(controller.options.node, 'First')
+                        saved = json.loads(path.read_text())
+                        self.assertNotIn('mode', saved)
+                        self.assertNotIn('address', saved)
+                        self.assertNotIn('secret', path.read_text())
+                        self.assertIsNone(controller.core.process)
+                    finally:
+                        controller.stop(announce=False)
+                        controller.deleteLater()
+                        APP.processEvents()
 
     def test_private_preferences_roundtrip_and_broken_input_falls_back(self):
         with tempfile.TemporaryDirectory() as root:
-            options = Options(mode='managed', profile='https://example.invalid/?token=fixture')
+            options = Options(enabled=True, profile='https://example.invalid/?token=fixture')
             save_options(root, options)
             self.assertEqual(load_options(root), options)
-            (Path(root) / 'preferences.json').write_text('broken')
-            self.assertEqual(load_options(root), Options())
+            for invalid in ('broken', '[]', 'null'):
+                (Path(root) / 'preferences.json').write_text(invalid)
+                self.assertEqual(load_options(root), Options())
 
     def test_core_installer_rejects_unverified_archive(self):
         with tempfile.TemporaryDirectory() as root:
@@ -153,7 +171,7 @@ class RoutingTests(unittest.TestCase):
 
     def test_http_proxy_reaches_requests_urllib_host_relay_and_websocket_resolver(self):
         from urllib.request import urlopen
-        self.controller.apply(Options(mode='external', address=self.service.url))
+        self.controller.environment.apply(self.service.url)
         self.assertIsNone(self.controller.core.process)
         self.assertEqual(request_proxy('wss://example.invalid/ws'), self.service.url)
         self.assertEqual(requests.get('http://example.invalid/live', timeout=3).content, b'proxy')
@@ -167,23 +185,21 @@ class RoutingTests(unittest.TestCase):
             relay._thread.join(timeout=2)
         self.assertTrue(any(path == 'http://example.invalid/stream' for path, _auth in self.service.requests))
 
-    def test_direct_bypasses_system_and_environment_proxy_and_stop_restores_exactly(self):
+    def test_stop_restores_original_environment_exactly(self):
         original = {key: os.environ.get(key) for key in KEYS}
-        self.controller.apply(Options(mode='external', address=self.service.url))
-        self.controller.apply(Options(mode='direct'))
-        self.assertTrue(proxy_bypass('example.invalid'))
-        self.assertIsNone(request_proxy('https://example.invalid/live'))
+        self.controller.environment.apply(self.service.url)
+        self.assertIsNone(request_proxy(self.service.url))
         self.assertEqual(requests.get(self.service.url, timeout=3).content, b'proxy')
         self.controller.stop()
         self.assertEqual({key: os.environ.get(key) for key in KEYS}, original)
 
     def test_invalid_edit_does_not_stop_an_existing_proxy(self):
-        self.controller.apply(Options(mode='external', address=self.service.url))
-        self.controller.apply(Options(mode='external', address='bad value'))
+        self.controller.environment.apply(self.service.url)
+        self.controller.apply(Options(profile='bad value'))
         self.assertEqual(getproxies()['http'], self.service.url)
 
     def test_core_children_never_inherit_proxy_loops(self):
-        self.controller.apply(Options(mode='external', address=self.service.url))
+        self.controller.environment.apply(self.service.url)
         self.assertFalse(set(KEYS).intersection(self.controller.environment.child_environment()))
 
     def test_native_mpv_and_ffmpeg_children_use_the_selected_http_proxy(self):
@@ -195,7 +211,7 @@ class RoutingTests(unittest.TestCase):
         service = Service(body=output.getvalue())
         player = None
         try:
-            self.controller.apply(Options(mode='external', address=service.url))
+            self.controller.environment.apply(service.url)
             player = mpv.MPV(vo='null', ao='null', **EMBEDDED_OPTIONS)
             player.play('http://fixture.invalid/mpv.wav')
             wait_for(lambda: any('mpv.wav' in path for path, _auth in service.requests), timeout=6)
@@ -235,6 +251,33 @@ class RoutingTests(unittest.TestCase):
 
 
 class InterfaceTests(unittest.TestCase):
+    def test_legacy_startup_only_resumes_previously_managed_subscriptions(self):
+        for mode in ('external', 'system', 'direct', 'managed'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as root, \
+                    patch.object(module.config, 'data_root', return_value=root):
+                directory = Path(root) / 'utils/proxy_control'
+                directory.mkdir(parents=True)
+                (directory / 'preferences.json').write_text(json.dumps({
+                    'mode': mode, 'address': 'http://user:fixture-secret@127.0.0.1:7890',
+                    'source': 'nodes', 'profile': 'fixture-nodes', 'node': 'First'}))
+                window = QWidget()
+                context = SimpleNamespace(window=window, register_workspace_control=Mock())
+                plugin = module.ProxyControl()
+                original = {key: os.environ.get(key) for key in KEYS}
+                try:
+                    with patch.object(Controller, 'apply') as apply:
+                        plugin.on_load(context)
+                        if mode == 'managed':
+                            apply.assert_called_once()
+                            self.assertEqual(apply.call_args.args[0].profile, 'fixture-nodes')
+                        else:
+                            apply.assert_not_called()
+                    self.assertEqual({key: os.environ.get(key) for key in KEYS}, original)
+                finally:
+                    plugin.on_unload()
+                    window.deleteLater()
+                    APP.processEvents()
+
     def test_left_rail_toggles_auxiliary_window_without_replacing_live_wall(self):
         with tempfile.TemporaryDirectory() as root, patch.object(module.config, 'data_root', return_value=root):
             window = QWidget()
@@ -257,12 +300,16 @@ class InterfaceTests(unittest.TestCase):
                 self.assertTrue(panel.isVisible())
                 self.assertFalse(panel.isModal())
                 self.assertTrue(wall.isVisible())
-                panel.address.setText('retained')
+                self.assertFalse(hasattr(panel, 'address'))
+                self.assertFalse(hasattr(panel, 'mode'))
+                self.assertTrue(panel.managed.isVisible())
+                self.assertTrue(panel.runtime.isVisible())
+                panel.profile.setPlainText('retained')
                 with patch.object(plugin.controller, 'stop') as stop:
                     button.click()
                     self.assertFalse(panel.isVisible())
                     button.click()
-                    self.assertEqual(panel.address.text(), 'retained')
+                    self.assertEqual(panel.profile.toPlainText(), 'retained')
                     panel.reject()
                     stop.assert_not_called()
                 context.show_workspace.assert_not_called()
@@ -297,7 +344,7 @@ class RealCoreTests(unittest.TestCase):
         self.temp.cleanup()
 
     def start(self, **changes):
-        options = Options(mode='managed', core=str(args.core.resolve()), source='nodes', profile=self.profile)
+        options = Options(enabled=True, core=str(args.core.resolve()), source='nodes', profile=self.profile)
         self.controller.apply(replace(options, **changes))
         wait_for(lambda: bool(self.controller.endpoint) or not self.controller.working)
         self.assertTrue(self.controller.endpoint, self.controller.message)
@@ -330,16 +377,19 @@ class RealCoreTests(unittest.TestCase):
         finally:
             subscription.close()
 
-    def test_switching_back_to_http_releases_core(self):
+    def test_stop_releases_core_and_persists_disabled_state(self):
+        original = {key: os.environ.get(key) for key in KEYS}
         self.start()
         process = self.controller.core.process
-        self.controller.apply(Options(mode='external', address=self.first.url))
+        self.controller.stop()
         self.assertEqual(process.state(), QProcess.NotRunning)
         self.assertIsNone(self.controller.core.process)
-        self.assertEqual(requests.get('http://fixture.invalid/live', timeout=5).content, b'first')
+        self.assertEqual({key: os.environ.get(key) for key in KEYS}, original)
+        self.assertFalse(load_options(self.temp.name).enabled)
+        self.assertEqual(load_options(self.temp.name).profile, self.profile)
 
     def test_invalid_profile_does_not_claim_a_working_proxy(self):
-        self.controller.apply(Options(mode='managed', core=str(args.core.resolve()),
+        self.controller.apply(Options(enabled=True, core=str(args.core.resolve()),
                                       source='nodes', profile='<html>not nodes</html>'))
         self.controller.core.deadline = time.monotonic() + 1
         wait_for(lambda: bool(self.controller.endpoint) or not self.controller.working, timeout=5)
@@ -370,14 +420,6 @@ class RealCoreTests(unittest.TestCase):
                 return False
         wait_for(listening)
         return mixed, encrypted
-
-    def test_external_socks5_really_routes_through_socks(self):
-        mixed, _encrypted = self.server_core()
-        self.start(mode='external', address=f'socks5://127.0.0.1:{mixed}')
-        response = requests.get(self.first.url + '/socks-test',
-                                proxies={'http': self.controller.endpoint}, timeout=5)
-        self.assertEqual(response.content, b'first')
-        self.assertTrue(self.first.requests)
 
     def test_raw_shadowsocks_node_link_really_connects_encrypted_fixture(self):
         _mixed, encrypted = self.server_core()

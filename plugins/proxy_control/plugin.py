@@ -17,7 +17,7 @@ from .panel import Panel
 class ProxyControl(Plugin):
     name = '网络代理'
     version = '0.1'
-    description = '连接现有代理，或使用内置内核导入订阅和节点'
+    description = '使用内置代理内核导入订阅和节点'
 
     def __init__(self):
         super().__init__()
@@ -30,12 +30,13 @@ class ProxyControl(Plugin):
         self.controller = Controller(Path(config.data_root()) / 'utils/proxy_control', context.window)
         entry = QToolButton(context.window)
         entry.setText(self.name)
-        entry.setToolTip('设置本软件的代理连接')
+        entry.setToolTip('导入订阅和节点，启动内置代理')
         entry.setIcon(QIcon(str(Path(__file__).with_name('proxy.svg'))))
         entry.clicked.connect(self.toggle)
         context.register_workspace_control('proxy', entry, priority=35)
         # Restore saved routing before the host begins resolving live rooms.
-        self.controller.apply(self.controller.options)
+        if self.controller.options.enabled:
+            self.controller.apply(self.controller.options)
 
     def toggle(self):
         if self.panel is not None and self.panel.isVisible():

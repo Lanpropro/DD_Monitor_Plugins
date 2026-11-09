@@ -2,7 +2,7 @@
   "id": "proxy_control",
   "name": "网络代理",
   "version": "0.1",
-  "description": "连接已有 HTTP/SOCKS5 代理，或按需启动内核管理订阅与节点。",
+  "description": "导入订阅与节点，按需启动内置代理内核。",
   "author": "Lanpropro",
   "min_app_version": "0.7.2"
 }
