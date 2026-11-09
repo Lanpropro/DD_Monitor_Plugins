@@ -220,10 +220,16 @@ class ConfigurationTests(unittest.TestCase):
                 probe.bind(('127.0.0.1', available))
 
     def test_mixed_port_avoids_fixed_udp_probes_rejected_by_windows(self):
+        available = free_port(udp=True)
         class RestrictedUDP(socket.socket):
             def bind(self, address):
-                if self.type == socket.SOCK_DGRAM and address[1] != 0:
-                    raise PermissionError('fixture: fixed UDP candidates denied')
+                if self.type == socket.SOCK_DGRAM:
+                    if address[1] != 0:
+                        raise PermissionError('fixture: fixed UDP candidates denied')
+                    # This case tests a usable allocator candidate. TCP-conflict
+                    # fallback is covered separately, without denying every
+                    # possible fixed UDP bind as this fixture intentionally does.
+                    address = (address[0], available)
                 super().bind(address)
         with patch('check_proxy_plugin.core.socket.socket', RestrictedUDP):
             port = free_port(udp=True)
