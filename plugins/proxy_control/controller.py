@@ -39,7 +39,7 @@ class Controller(QObject):
         self.task = ''
         self.installer = None
         self.endpoint = ''
-        self.message = '导入订阅或节点后，点击“启动代理”'
+        self.message = '在“订阅设置”填写资料，再点击输入框下方的导入按钮'
         self.working = False
         self.timer = QTimer(self)
         self.timer.setInterval(2000)
@@ -85,7 +85,7 @@ class Controller(QObject):
         if self.options.node in nodes and self.options.node != selected:
             self.core.select(self.options.node)
         self._busy(False)
-        self._status('代理已就绪；新连接生效，正在播放的直播间请重新播放')
+        self._status(f'已导入 {len(nodes)} 个节点，代理已启动；正在播放的直播间请重新播放')
         self._resources()
 
     def select(self, name):
@@ -152,7 +152,7 @@ class Controller(QObject):
         if code == 0:
             self.options.core = str(self.directory / 'runtime/mihomo.exe')
             self.prepared.emit(self.options.core)
-            self._status('内核已校验并准备好，填写订阅或节点后点击“启动代理”')
+            self._status('内核已校验并准备好，请填写资料并点击输入框下方的导入按钮')
         else:
             self._status('内核准备失败：下载校验或解压失败，可稍后重试')
 

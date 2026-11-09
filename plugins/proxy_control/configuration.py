@@ -9,14 +9,15 @@ MAX_PROFILE = 4 * 1024 * 1024
 
 
 def subscription_url(value):
+    value = value.strip()
+    if any(char.isspace() for char in value):
+        raise ValueError('订阅地址必须是完整的一行链接，请去掉中间空格或换行')
     try:
-        parts = urlsplit(value.strip())
+        parts = urlsplit(value)
         if parts.scheme not in ('https', 'http') or not parts.hostname or parts.username or parts.password:
             raise ValueError
-        if any(char.isspace() for char in value):
-            raise ValueError
         parts.port
-        return value.strip()
+        return value
     except ValueError:
         raise ValueError('请输入有效的 HTTP(S) 订阅地址') from None
 

@@ -55,7 +55,7 @@ class ProxyControl(Plugin):
             self.panel.prepareRequested.connect(self.controller.prepare)
             self.panel.nodeRequested.connect(self.controller.select)
             self.panel.testRequested.connect(self.controller.test_nodes)
-            self.controller.status.connect(self.panel.status.setText)
+            self.controller.status.connect(self.panel.set_status)
             self.controller.resources.connect(self.panel.resources.setText)
             self.controller.busy.connect(self.panel.set_busy)
             self.controller.nodes.connect(lambda nodes, selected: self.panel.set_nodes(
@@ -65,7 +65,7 @@ class ProxyControl(Plugin):
             self.controller.latency.running.connect(self.panel.set_testing)
             self.controller.prepared.connect(self.panel.core.setText)
             self.panel.set_nodes(self.controller.core.nodes, self.controller.core.current, self.controller.core.types)
-            self.panel.status.setText(self.controller.message)
+            self.panel.set_status(self.controller.message)
             self.panel.set_busy(self.controller.working)
             self.controller._resources()
         self.drawer.show()

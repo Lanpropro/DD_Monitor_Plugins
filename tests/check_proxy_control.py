@@ -107,6 +107,15 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(subscription_url('https://example.invalid/sub?key=fixture'),
                          'https://example.invalid/sub?key=fixture')
 
+    def test_subscription_trims_outer_whitespace_but_explains_internal_whitespace(self):
+        self.assertEqual(subscription_url(' \nhttps://example.invalid/sub?key=fixture\r\n'),
+                         'https://example.invalid/sub?key=fixture')
+        for whitespace in (' ', '\n', '\r\n', '\t'):
+            with self.subTest(whitespace=whitespace), self.assertRaises(ValueError) as error:
+                subscription_url('https://example.invalid/' + whitespace + '?token=fixture-secret')
+            self.assertIn('空格或换行', str(error.exception))
+            self.assertNotIn('fixture-secret', str(error.exception))
+
     def test_config_cannot_enable_tun_lan_or_unprotected_controller(self):
         config = core_config(10001, 10002, 'random-key')
         self.assertEqual(config['bind-address'], '127.0.0.1')
@@ -343,7 +352,7 @@ class InterfaceTests(unittest.TestCase):
                 self.assertIn(theme.ACCENT, panel.styleSheet())
             panel.add_subscription.click()
             self.assertEqual(panel.tabs.currentIndex(), 1)
-            self.assertTrue(panel.profile.isVisible())
+            self.assertTrue(panel.location.isVisible())
             drawer.hide()
         finally:
             drawer.hide()
@@ -411,20 +420,20 @@ class InterfaceTests(unittest.TestCase):
                 self.assertFalse(hasattr(panel, 'mode'))
                 self.assertEqual(panel.tabs.currentIndex(), 0)
                 panel.tabs.setCurrentIndex(1)
-                self.assertTrue(panel.profile.isVisible())
-                panel.profile.setPlainText('retained')
+                self.assertTrue(panel.location.isVisible())
+                panel.location.setText('retained')
                 with patch.object(plugin.controller, 'stop') as stop:
                     button.click()
                     self.assertFalse(panel.isVisible())
                     self.assertEqual(layout.getContentsMargins(), (0, 0, 0, 0))
                     button.click()
-                    self.assertEqual(panel.profile.toPlainText(), 'retained')
+                    self.assertEqual(panel.location.text(), 'retained')
                     panel.close_button.click()
                     button.click()
                     window.activateWindow()
-                    panel.profile.setFocus()
+                    panel.location.setFocus()
                     QTest.qWait(30)
-                    QTest.keyClick(panel.profile, Qt.Key_Escape)
+                    QTest.keyClick(panel.location, Qt.Key_Escape)
                     self.assertFalse(plugin.drawer.isVisible())
                     stop.assert_not_called()
                 context.show_workspace.assert_not_called()
@@ -476,6 +485,90 @@ class InterfaceTests(unittest.TestCase):
         self.assertFalse(panel.test.isEnabled())
         panel.deleteLater()
         APP.processEvents()
+
+    def test_import_confirmation_is_local_and_empty_start_only_guides_to_settings(self):
+        panel = Panel(Options(core=__file__))
+        requests = []
+        panel.applyRequested.connect(requests.append)
+        panel.show()
+        try:
+            panel.apply.click()
+            self.assertEqual(panel.tabs.currentIndex(), 1)
+            self.assertFalse(requests)
+            self.assertFalse(panel.apply.isVisible())
+            panel.import_button.click()
+            self.assertIn('HTTP(S)', panel.import_status.text())
+            panel.location.setText(' https://example.invalid/sub?token=fixture ')
+            self.assertNotIn('HTTP(S)', panel.status.text())
+            self.assertIn('尚未确认', panel.import_status.text())
+            QTest.keyClick(panel.location, Qt.Key_Return)
+            self.assertEqual(len(requests), 1)
+            self.assertEqual(requests[0].profile, 'https://example.invalid/sub?token=fixture')
+            self.assertEqual(requests[0].source, 'url')
+        finally:
+            panel.deleteLater()
+            APP.processEvents()
+
+    def test_import_progress_failure_retry_and_success_follow_controller_signal_order(self):
+        panel = Panel(Options(core=__file__))
+        panel.tabs.setCurrentIndex(1)
+        panel.location.setText('https://example.invalid/sub')
+        requests = []
+        panel.applyRequested.connect(requests.append)
+        try:
+            panel.import_button.click()
+            # apply() first stops the old core before starting the new download.
+            panel.set_nodes([], '')
+            panel.set_busy(False)
+            panel.set_busy(True)
+            panel.set_status('正在更新订阅…')
+            for widget in (panel.source, panel.location, panel.profile, panel.import_button, panel.runtime):
+                self.assertFalse(widget.isEnabled())
+            panel._confirm_import()
+            self.assertEqual(len(requests), 1)
+            self.assertEqual(panel.import_status.text(), '正在更新订阅…')
+            panel.set_nodes([], '')
+            panel.set_busy(False)
+            panel.set_status('下载失败，请重试')
+            self.assertEqual(panel.tabs.currentIndex(), 1)
+            self.assertEqual(panel.import_status.text(), '下载失败，请重试')
+            self.assertEqual(panel.location.text(), 'https://example.invalid/sub')
+            self.assertTrue(panel.import_button.isEnabled())
+            self.assertEqual(panel.state.text(), '未启动')
+            panel.import_button.click()
+            panel.set_nodes([], '')
+            panel.set_busy(False)
+            panel.set_busy(True)
+            panel.set_nodes(['First', 'Second'], 'First')
+            panel.set_busy(False)
+            panel.set_status('已导入 2 个节点，代理已启动')
+            self.assertEqual(panel.tabs.currentIndex(), 0)
+            self.assertEqual(panel.count.text(), '2 个节点')
+            self.assertIn('2 个节点', panel.import_status.text())
+            self.assertFalse(panel._importing)
+            self.assertEqual(panel.import_button.text(), '更新订阅并重启')
+        finally:
+            panel.deleteLater()
+            APP.processEvents()
+
+    def test_file_and_node_import_keep_the_correct_input_and_validation(self):
+        panel = Panel(Options(core=__file__))
+        requests = []
+        panel.applyRequested.connect(requests.append)
+        try:
+            panel.source.setCurrentIndex(panel.source.findData('file'))
+            panel.location.setText(__file__)
+            panel.import_button.click()
+            self.assertEqual(requests[-1].source, 'file')
+            self.assertEqual(requests[-1].profile, __file__)
+            panel.source.setCurrentIndex(panel.source.findData('nodes'))
+            panel.profile.setPlainText('ss://first\nss://second')
+            panel.import_button.click()
+            self.assertEqual(requests[-1].source, 'nodes')
+            self.assertEqual(requests[-1].profile, 'ss://first\nss://second')
+        finally:
+            panel.deleteLater()
+            APP.processEvents()
 
 
 @unittest.skipUnless(args.core, 'Pass --core for actual Mihomo process tests')
@@ -546,6 +639,33 @@ class RealCoreTests(unittest.TestCase):
             self.assertFalse(config['allow-lan'])
             self.assertTrue(subscription.requests)
         finally:
+            subscription.close()
+
+    def test_panel_confirmation_downloads_subscription_and_opens_imported_nodes(self):
+        subscription = Service(body=self.profile.encode())
+        panel = Panel(Options(core=str(args.core.resolve())))
+        panel.applyRequested.connect(self.controller.apply)
+        panel.stopRequested.connect(self.controller.stop)
+        self.controller.status.connect(panel.set_status)
+        self.controller.busy.connect(panel.set_busy)
+        self.controller.nodes.connect(panel.set_nodes)
+        try:
+            panel.tabs.setCurrentIndex(1)
+            panel.location.setText(subscription.url + '/subscription?token=fixture')
+            panel.import_button.click()
+            self.assertFalse(panel.location.isEnabled())
+            wait_for(lambda: bool(self.controller.endpoint) or not self.controller.working)
+            self.assertTrue(self.controller.endpoint, self.controller.message)
+            self.assertEqual(panel.tabs.currentIndex(), 0)
+            self.assertEqual(panel.model.visible, ['First', 'Second'])
+            self.assertIn('已导入 2 个节点', panel.status.text())
+            self.assertEqual(panel.status.text(), panel.import_status.text())
+            self.assertTrue(panel.location.isEnabled())
+            self.assertEqual(requests.get('http://fixture.invalid/live', timeout=5).content, b'first')
+        finally:
+            self.controller.stop()
+            panel.deleteLater()
+            APP.processEvents()
             subscription.close()
 
     def test_stop_releases_core_and_persists_disabled_state(self):
