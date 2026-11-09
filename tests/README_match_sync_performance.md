@@ -1,5 +1,11 @@
 # 二路插件响应性回归
 
+模块职责及Qt/线程生命周期见[结构说明](../plugins/match_sync/ARCHITECTURE.md)。
+`check_match_sync_module_boundaries.py --host <宿主目录>` 检查canvas/audio模块与Viewer兼容导出为
+同一类、父子关系及定时器不变，并以真实QThread和替身设备反复启动、flush和停止三次，
+不启动真实音频设备、不拉流。供给线程在GUI不处理事件时继续运行只验证既有线程边界，
+不作为实播性能或音质改善的证据。画布与音频类的迁移保持原实现，原专项继续验证行为。
+
 `check_match_sync_fullscreen_console.py --host <宿主目录>` 用隐藏窗口真实迁移主画面，
 覆盖全屏时两段splitter、排队与迟到尺寸回调、对照开关及退出后恢复三段适配，
 不启动媒体或声音，不改变桌面前台窗口。`check_match_sync_quality_snapshot.py` 使用同样的

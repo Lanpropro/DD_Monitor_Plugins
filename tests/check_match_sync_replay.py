@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 
 def check(app, host, module, output=None):
+    from ddm.continuous_corners import source_stylesheet
     from PySide6.QtCore import QPoint, Qt
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QWidget
@@ -217,8 +218,8 @@ def check(app, host, module, output=None):
                 assert bar.mapTo(viewer.picture.bottom, QPoint()).x() > viewer.picture.volume_label.geometry().right()
                 assert bar.width() <= slot.width() - 30, 'Keep visible space around the centered replay controls'
                 assert not bar.back.text() and bar.back.kind == 'live'
-                assert 'background: transparent' in bar.back.styleSheet()
-                assert 'background: transparent' in bar.time_edit.styleSheet()
+                assert 'background: transparent' in source_stylesheet(bar.back.styleSheet())
+                assert 'background: transparent' in source_stylesheet(bar.time_edit.styleSheet())
                 assert not bar.isHidden() and not bar.slider.isHidden(), 'Show the timeline without a toggle'
                 assert bar.start_tick.mapTo(bar, QPoint()).y() > bar.slider.mapTo(bar, QPoint()).y()
                 assert bar.start_tick.mapTo(slot, QPoint(0, bar.start_tick.height())).y() <= slot.height(), 'Do not clip the timestamps'
@@ -229,7 +230,7 @@ def check(app, host, module, output=None):
                 assert not bar.details.isHidden() and '.' in bar.detail_position.text()
                 assert bar.ruler.width() == bar.slider.width()
                 assert bar.ruler.mapTo(viewer.picture, QPoint()).x() == bar.slider.mapTo(viewer.picture, QPoint()).x()
-                assert 'rgba(16, 18, 23, 180)' in bar.details.styleSheet()
+                assert 'rgba(16, 18, 23, 180)' in source_stylesheet(bar.details.styleSheet())
                 assert bar.ruler.duration > 0 and bar.ruler.height() >= 32
                 if output:
                     viewer.grab().save(str(output.with_name(output.stem + '-detail.png')))
