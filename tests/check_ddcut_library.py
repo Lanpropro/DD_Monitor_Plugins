@@ -147,7 +147,7 @@ class LibraryTests(unittest.TestCase):
             host.move(-30000, -30000)
         owner = SimpleNamespace(context=SimpleNamespace(window=host, notify=lambda *a, **k: None), hub=hub,
             service=SimpleNamespace(sources=lambda: [], options=lambda: {'directory': str(self.root)}),
-            preview_server=SimpleNamespace(source_url=lambda path: path), _ticks=0)
+            preview_server=SimpleNamespace(source_url=lambda path: path), _ticks=0, inputs=None, links=None)
         view = ui.Workspace(owner)
         owner.workspace = view
         host.setCentralWidget(view)

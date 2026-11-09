@@ -155,7 +155,7 @@ class Workspace(QWidget):
         self.task_button = button('后台任务', self.toggle_tasks, header)
         self.projects_button = button('剪辑工程', self.show_projects, header)
         button('封面制作', self.open_cover, header)
-        button('RTMP输入', self.show_inputs, header)
+        button('外部输入', self.show_inputs, header)
         self.task_button.setCheckable(True)
         self.capture_switch = QCheckBox('仅录制切片素材')
         self.capture_switch.setChecked(getattr(owner, 'capture_mode', 'clip') == 'clip')

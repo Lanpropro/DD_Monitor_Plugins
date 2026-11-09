@@ -188,3 +188,7 @@ encoding持有纯配置兼容/参数映射；hardware_encoding负责后台实际
 rtmp_capture管理私有asyncio循环、RTMP连接/认证、背压写入FFmpeg和HLS归档，网络线程只操作字节和纯数据；每房间一个监听、最多一位发布者，FFmpeg stdin关闭后等待收尾，超时终止并保留分段。真实媒体时间使用分段和PROGRAM-DATE-TIME，断开归档改VOD，重连新建归档。ACK按实际接收字节发送，响应Ping；PyRTMP reader计数以bit计量，边界转换为byte。
 
 rtmp_inputs在GUI线程拥有房间定义、插件设置、快照索引和封面后台任务；InputRecordingService薄委托扩展现有sources/live_recording，不复制本体录制状态，也不接管原平台的账号/连接。rtmp_page只持有Qt控件和当前选择，同页替换工作区；轮询沿用插件定时器。停用关连接但保留监听，删除只删输入定义；卸载先关闭推流/收取收尾结果，再关闭TaskHub，最后释放原服务。私有PyRTMP/bitstring固定源版本与许可随包保留，无C扩展或运行时安装；旧平台缺少连续回看接口时返回明确提示。
+
+## Windows浏览器快捷添加（2026-11-09）
+
+link_server持有纯链接校验和本机令牌端点，后台只将已校验的直播间链接放进有界队列；不执行外部链接文本。deep_link_windows只管理当前用户ddcut协议及安装所有权，deep_link_relay.ps1通过.NET转交，必要时启动明确的run.cmd/主程序，使用字面参数而非执行URI。DeepLinks在Qt主线程拥有接收状态和唯一添加框，复用本体AddRoomDialog/文件夹/房间解析，确认后才调用原添加入口；普通退出只关端点，停用或已移除插件退出时删除本安装关联。设置沿用TaskHub，默认关闭，不注册bsr，不新增平台账号或自动录制工作流。注册失败回收端点；后台队列不直接操作Qt，卸载先停止插件定时器并关闭添加框和端点。

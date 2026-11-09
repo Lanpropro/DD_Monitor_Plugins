@@ -22,6 +22,7 @@ parser.add_argument('--host', type=Path, required=True)
 parser.add_argument('--format', choices=('ts', 'mp4', 'mkv', 'av1'))
 args, remainder = parser.parse_known_args()
 sys.path.insert(0, str(args.host.resolve()))
+os.environ['PATH'] = str(args.host.resolve()) + os.pathsep + os.environ['PATH']
 os.environ['DDM_NO_SAVE'] = '1'
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtWidgets import QApplication, QMainWindow
@@ -137,7 +138,12 @@ class RecordingTests(unittest.TestCase):
                                 view = plugin.workspace = ui.Workspace(plugin)
                                 view.show()
                                 view.open_current_recording()
-                                wait_for(lambda: view.preview.position() > .1)
+                                try:
+                                    wait_for(lambda: view.preview.position() > .1)
+                                except AssertionError as error:
+                                    raise AssertionError(dict(status=view.status.text(),sources=len(view.sources_data),
+                                        page=view.library_review.indexOf(view.library_review.currentWidget()),
+                                        core=bool(view.preview.core),path=(view.current or {}).get('path'))) from error
                                 original_core = view.preview.core
                                 self.assertTrue(view.preview.core.mute)
                                 view.preview.core.pause = True

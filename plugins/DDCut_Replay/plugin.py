@@ -1,5 +1,6 @@
 """DDCut Replay entry point for the host's single-file loader."""
 import os
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import QTimer, Qt
@@ -30,6 +31,7 @@ class DDCutReplay(api.Plugin):
         self._ticks = 0
         self.capture_mode = 'original'
         self.inputs = None
+        self.links = None
 
     def on_load(self, context):
         self.context = context
@@ -77,6 +79,8 @@ class DDCutReplay(api.Plugin):
             from .rtmp_inputs import RtmpInputs, InputRecordingService
             self.inputs = RtmpInputs(self.service,self.hub)
             self.service = InputRecordingService(self.service,self.inputs)
+            from .deep_links import DeepLinks
+            self.links = DeepLinks(self)
             self.capture_mode = self.hub.preferences.get('capture_mode', 'original')
             if hasattr(self.service, 'register_backend'):
                 if self.capture_mode == 'original':
@@ -159,6 +163,8 @@ class DDCutReplay(api.Plugin):
         self._ticks += 1
         if self.inputs:
             self.inputs.poll()
+        if self.links:
+            self.links.poll()
         if self.workspace and hasattr(self.workspace,'rtmp_page'):
             self.workspace.rtmp_page.refresh()
         changed = False
@@ -213,6 +219,14 @@ class DDCutReplay(api.Plugin):
     def on_unload(self):
         if self.timer:
             self.timer.stop()
+        if self.links:
+            self.links.close()
+            manager = getattr(self.context,'_manager',None)
+            if self.context.name in getattr(manager,'_removed',set()):
+                try:
+                    self.links.set_enabled(False)
+                except (OSError,RuntimeError) as error:
+                    print('DDCut快捷链接清理失败：'+str(error),file=sys.stderr)
         if self.workspace:
             self.workspace.close()
             self.workspace.deleteLater()
