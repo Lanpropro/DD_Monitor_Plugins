@@ -54,6 +54,13 @@ def main():
                     assert manifest['author'] == 'reon-nynes'
                     assert manifest['min_app_version'] == '0.5.1'
                 if plugin_id == 'match_sync':
+                    modules = ('audio', 'canvas', 'room_widgets', 'comparison', 'room_input',
+                               'source_control', 'alignment_control', 'playback_timing', 'chat_control',
+                               'presentation', 'picture_control', 'recording_control', 'replay_control',
+                               'floating_control', 'viewer_ui', 'console_control', 'host_integration',
+                               'session_control', 'chat_panel', 'send_composers', 'chat_clients', 'media_signals')
+                    assert all(f'match_sync/{name}.py' in names for name in modules), \
+                        'The refactored Viewer must ship with every owning module'
                     assert 'match_sync/fullscreen.py' in names, 'Fullscreen shell integration must ship with the viewer'
                     assert 'match_sync/recording.py' in names, 'The selectable audio track recorder must ship with the viewer'
                     assert 'match_sync/replay_preview.py' in names and 'match_sync/preview_frames.py' in names, 'Continuous timeline preview must ship with its background frame cache'

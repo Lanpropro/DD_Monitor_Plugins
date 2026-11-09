@@ -5,9 +5,8 @@ import sys
 import time
 from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QComboBox, QFrame, QLabel, QLineEdit, QPlainTextEdit, QTextEdit, QWidget
 from PySide6.QtGui import QCursor, QKeySequence
-from PySide6.QtCore import QEvent, QTimer, Qt
+from PySide6.QtCore import Qt
 from ddm.widgets import ROOM_MIME
-from .room_widgets import ROW_MIME
 from ddm.dialogs import SHORTCUT_ACTIONS
 from shiboken6 import isValid
 from contextlib import nullcontext
@@ -78,57 +77,6 @@ def _handle_shortcut(viewer, action):
                 target.channel.setCurrentIndex(target.channel.currentIndex() + 1)
 
 
-def eventFilter(viewer, watched, event):
-    kind = event.type()
-    if kind == QEvent.Timer and watched is getattr(viewer, '_native_clip_timer', None):
-        viewer.native_clip_retry_blocks += 1
-        watched.stop()
-        return True
-    if kind in (QEvent.MouseMove, QEvent.HoverMove, QEvent.Enter, QEvent.Leave):
-        probe = getattr(viewer, 'playback_probe', None)
-        if probe is not None and probe.thread is not None:
-            probe.mouse(watched)
-    if kind in (QEvent.ShortcutOverride, QEvent.KeyPress):
-        action = viewer._shortcut_action(watched, event)
-        if action is not None:
-            event.accept()
-            if kind == QEvent.KeyPress and not event.isAutoRepeat():
-                viewer._handle_shortcut(action)
-            return True
-    elif kind == QEvent.Show:
-        if watched is viewer.picture.cover or watched in viewer.hidden_host_widgets:
-            watched.hide()
-    elif (kind in (QEvent.DragEnter, QEvent.DragMove, QEvent.Drop)
-            and getattr(viewer, "controls", None) is not None
-            and isinstance(watched, QWidget)
-            and (watched is viewer.controls.viewport() or watched is viewer.controls.widget()
-                 or viewer.controls.widget().isAncestorOf(watched))
-            and viewer.dragged_row is not None and event.mimeData().hasFormat(ROW_MIME)
-            and bytes(event.mimeData().data(ROW_MIME)).decode('utf-8') == viewer.dragged_row):
-        point = watched.mapTo(viewer.controls.widget(), event.position().toPoint())
-        if kind == QEvent.Drop:
-            viewer.finish_row_drag(point)
-        else:
-            viewer.preview_row_drag(point)
-        event.acceptProposedAction()
-        return True
-    elif kind == QEvent.Resize:
-        if hasattr(viewer, 'controls') and watched is viewer.controls.viewport():
-            viewer.align_room_controls()
-        if watched is viewer.settings_panel and hasattr(viewer, 'send_console'):
-            viewer.send_console.sync_height()
-            viewer.position_removal_notice()
-            viewer.queue_console_height()
-        if watched is viewer.picture.bottom:
-            QTimer.singleShot(0, viewer._layout_restore_control)
-        if viewer.embedded and watched is viewer.parentWidget():
-            viewer.setGeometry(watched.rect())
-    elif kind == QEvent.FocusIn:
-        for key, row in viewer.rows.items():
-            if watched is row.delay:
-                viewer.show_comparison(key)
-                break
-    return None
 
 
 def _switch_stage(viewer, stage):

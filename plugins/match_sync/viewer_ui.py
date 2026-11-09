@@ -7,7 +7,8 @@ from .panels import ConsoleIconButton, ConsoleModeToggle, SettingsPanel, native_
 from PySide6.QtWidgets import QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QSplitter, QVBoxLayout, QWidget
 from PySide6.QtCore import QTimer, Qt
 from .replay import ReplayBar
-from .sending import SendConsole, SendingDanmakuPanel
+from .sending import SendConsole
+from .chat_panel import SendingDanmakuPanel
 from ddm.widgets import Tile, TileButton
 from ddm import theme
 

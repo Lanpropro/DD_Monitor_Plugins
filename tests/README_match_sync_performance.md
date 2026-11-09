@@ -1,5 +1,15 @@
 # 二路插件响应性回归
 
+职责拆分后的模块边界见[架构文档](../plugins/match_sync/ARCHITECTURE.md)。
+`check_match_sync_module_boundaries.py --host <宿主目录>` 同时核对房间/对照控件、业务协调模块、
+弹幕展示/发送组件与媒体协议兼容对象身份、无反向Viewer依赖、Qt父对象和既有定时器间隔。
+`check_match_sync_chat_clients.py --host <宿主目录>` 使用替身接收任务及平台客户端验证Python线程取消、
+信号转发、2000ms等待参数及finished后删除；不连接直播、不读取账号、不发送消息。
+发送专项使用原始CSS并容许等价空白；隐藏Windows快捷键检查使用明确的虚拟鼠标坐标。
+完整回看专项的既有刻度底色像素断言失败保留，不计入通过项；回看预览、时钟及音频由独立专项覆盖。
+这些都是结构和行为回归，不能作为实播性能改善证据。
+
+
 模块职责及Qt/线程生命周期见[结构说明](../plugins/match_sync/ARCHITECTURE.md)。
 `check_match_sync_module_boundaries.py --host <宿主目录>` 检查canvas/audio模块与Viewer兼容导出为
 同一类、父子关系及定时器不变，并以真实QThread和替身设备反复启动、flush和停止三次，

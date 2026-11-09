@@ -14,6 +14,7 @@ from unittest.mock import Mock, patch
 
 
 def check(app, host, diagnostic, media, video):
+    process_control = import_module(media.recording._ensure_job.__module__)
     secret = 'DO_NOT_LOG_PRIVATE_VALUE'
     address = 'https://private.invalid/live?token=' + secret
     trace = diagnostic.StreamAcquisition()
@@ -119,7 +120,7 @@ def check(app, host, diagnostic, media, video):
         return nullcontext(container)
     decoder.preview_frames = SimpleNamespace(submit=Mock())
     with patch.object(media.subprocess, 'Popen', return_value=process) as launch, \
-            patch.object(media.recording, '_adopt_process'), patch.object(media.recording, '_kernel32', None), \
+            patch.object(media.recording, '_adopt_process'), patch.object(process_control, '_kernel32', None), \
             patch.object(media, 'av', SimpleNamespace(open=open_input)), \
             patch.object(media, 'recording_template', return_value=nullcontext()):
         assert decoder._capture('ffmpeg', address, {'Cookie': secret}) == 'eof'
@@ -141,7 +142,7 @@ def check(app, host, diagnostic, media, video):
             patch.object(decoder, 'cancelled', cancelled), \
             patch.object(media.recording, 'ffmpeg_path', return_value='ffmpeg'), \
             patch.object(media.subprocess, 'Popen', return_value=failed_process), \
-            patch.object(media.recording, '_adopt_process'), patch.object(media.recording, '_kernel32', None), \
+            patch.object(media.recording, '_adopt_process'), patch.object(process_control, '_kernel32', None), \
             patch.object(media, 'av', SimpleNamespace(open=Mock(side_effect=RuntimeError('Invalid data found')))):
         decoder._run()
     failed = decoder.acquisition.snapshot()
@@ -183,7 +184,7 @@ def check(app, host, diagnostic, media, video):
         decoder.acquisition = disabled
         quiet_process = SimpleNamespace(**dict(vars(process), stdout=io.BytesIO(b'header'), stderr=None))
         with patch.object(media.subprocess, 'Popen', return_value=quiet_process) as launch, \
-                patch.object(media.recording, '_adopt_process'), patch.object(media.recording, '_kernel32', None), \
+                patch.object(media.recording, '_adopt_process'), patch.object(process_control, '_kernel32', None), \
                 patch.object(media, 'av', SimpleNamespace(open=open_input)), \
                 patch.object(media, 'recording_template', return_value=nullcontext()):
             assert decoder._capture('ffmpeg', address, {}) == 'eof'

@@ -21,6 +21,16 @@ def check(app, host, module):
     comparison = import_module(module.__package__ + '.comparison')
     room_input = import_module(module.__package__ + '.room_input')
     timing = import_module(module.__package__ + '.playback_timing')
+    sending = import_module(module.__package__ + '.sending')
+    chat_panel = import_module(module.__package__ + '.chat_panel')
+    composers = import_module(module.__package__ + '.send_composers')
+    media = import_module(module.__package__ + '.media')
+    clients = import_module(module.__package__ + '.chat_clients')
+    signals = import_module(module.__package__ + '.media_signals')
+    assert sending.SendingDanmakuPanel is chat_panel.SendingDanmakuPanel
+    assert sending.SendRow is composers.SendRow and sending.BatchSend is composers.BatchSend
+    assert media.Chat is clients.Chat and media.PlatformChat is clients.PlatformChat
+    assert media.Events is clients.Events is signals.Events
     controller_names = ('source_control', 'chat_control', 'alignment_control', 'picture_control',
                         'recording_control', 'replay_control', 'presentation', 'floating_control',
                         'viewer_ui', 'host_integration', 'console_control', 'session_control')
@@ -40,7 +50,8 @@ def check(app, host, module):
     else:
         raise AssertionError('Input validation boundary accepted an unrelated host')
     assert module.Results is module.alignment_control.Results
-    for owned in (audio, canvas, room_widgets, comparison, room_input, timing, *controllers):
+    for owned in (audio, canvas, room_widgets, comparison, room_input, timing,
+                  chat_panel, composers, clients, signals, *controllers):
         source = ast.parse(Path(owned.__file__).read_text(encoding='utf-8'))
         assert not any(isinstance(n, ast.ImportFrom) and n.module == 'viewer' for n in ast.walk(source)), \
             'Owning modules must not import their coordinator'
@@ -95,6 +106,13 @@ def check(app, host, module):
             assert type(viewer.canvas) is canvas.Canvas and viewer.canvas.parentWidget() is viewer.picture.video
             assert viewer.canvas.paint_probe is viewer.playback_probe
             assert type(viewer.comparison_panel) is comparison.ComparisonPanel
+            assert type(viewer.panel) is chat_panel.SendingDanmakuPanel
+            assert viewer.panel.parent() is viewer.chat_pane
+            assert viewer.panel._divider_resize.parent() is viewer.panel
+            batch = viewer.send_console.batch_panel
+            assert type(batch) is composers.BatchSend and batch.console is viewer.send_console
+            assert batch.timer.parent() is batch and batch.timer.interval() == 50
+            assert not batch.timer.isActive() and not batch.pending and batch.active is None
             for timer, interval in ((viewer.crop_repaint_timer, 16), (viewer.buffer_notice_timer, 15000),
                                     (viewer.removal_timer, 5000), (viewer.render_timer, 33),
                                     (viewer.match_timer, 500), (viewer.save_timer, 350)):
@@ -108,12 +126,10 @@ def check(app, host, module):
             # Overrides keep the original QObject receiver and bound QDialog fallback.
             from PySide6.QtWidgets import QDialog
             marker_event = QEvent(QEvent.User)
-            with patch.object(module.host_integration, 'eventFilter', return_value=False) as handler:
-                assert viewer.eventFilter(row, marker_event) is False
-                receiver, watched, event = handler.call_args.args
-                assert receiver is viewer and watched is row and event is marker_event
-            with patch.object(module.host_integration, 'eventFilter', return_value=None):
-                assert viewer.eventFilter(row, marker_event) == QDialog.eventFilter(viewer, row, marker_event)
+            assert viewer.eventFilter(row, marker_event) == QDialog.eventFilter(viewer, row, marker_event)
+            with patch.object(module.host_integration, '_shortcut_action', return_value=None) as handler:
+                assert viewer._shortcut_action(row, marker_event) is None
+                handler.assert_called_once_with(viewer, row, marker_event)
             with patch.object(module.session_control, 'reject') as handler:
                 viewer.reject()
                 receiver, base = handler.call_args.args

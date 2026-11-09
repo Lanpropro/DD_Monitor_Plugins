@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import time
-from .media import Chat, PlatformChat
+from .chat_clients import Chat, PlatformChat
 
 def _start_chat(viewer, row):
     viewer.overlay_pending.pop(row.room_id, None)
