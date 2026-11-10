@@ -39,6 +39,13 @@ class FloatingCrop(QWidget):
         self.enhance_timer.setInterval(8)
         self.enhance_timer.timeout.connect(self._refresh_enhancement)
         self.drag = None
+        self._pending_move = None
+        self._move_timer = QTimer(self)
+        self._move_timer.setSingleShot(True)
+        self._move_timer.setTimerType(Qt.PreciseTimer)
+        self._move_timer.setInterval(16)
+        self._move_timer.timeout.connect(self._flush_move)
+        self.installEventFilter(self)
         self.lock_mode = 0
         self.picture_widget = None
         self.tools_visible = False
@@ -201,6 +208,17 @@ class FloatingCrop(QWidget):
             return area.intersected(parent.rect())
         return parent.rect()
 
+    def _cancel_move(self):
+        self._move_timer.stop()
+        self._pending_move = None
+
+    def _flush_move(self):
+        self._move_timer.stop()
+        target, self._pending_move = self._pending_move, None
+        if self.drag is not None and target is not None:
+            self.fit_geometry(*target)
+            self.update()
+
     def lock_rect(self):
         return QRect(self.width() - 60, 8, 24, 24)
 
@@ -208,6 +226,7 @@ class FloatingCrop(QWidget):
         return QRect(self.width() - 88, 8, 24, 24)
 
     def cycle_lock(self):
+        self._cancel_move()
         self.lock_mode = (self.lock_mode + 1) % 3
         self.drag = None
         self.fit_geometry(self.x(), self.y(), self.width())
@@ -216,7 +235,12 @@ class FloatingCrop(QWidget):
         self.update()
 
     def eventFilter(self, watched, event):
+        if watched is self and event.type() in (QEvent.UngrabMouse, QEvent.ParentAboutToChange, QEvent.ParentChange):
+            self._cancel_move()
+            self.drag = None
         if watched in (self.parentWidget(), self.picture_widget) and event.type() in (QEvent.Resize, QEvent.Move):
+            self._cancel_move()
+            self.drag = None
             bounds = self.movement_bounds()
             if self.placement is not None:
                 x, y, width = self.placement
@@ -330,6 +354,7 @@ class FloatingCrop(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
+            self._cancel_move()
             self.tools_visible = True
             if self.close_rect().contains(event.position().toPoint()):
                 self.close()
@@ -367,7 +392,10 @@ class FloatingCrop(QWidget):
                 self.fit_geometry(anchor_x if dx > 0 else anchor_x - width,
                                   anchor_y if dy > 0 else anchor_y - round(width / self.aspect), width)
             else:
-                self.fit_geometry(geometry.x() + delta.x(), geometry.y() + delta.y(), geometry.width())
+                self._pending_move = (geometry.x() + delta.x(), geometry.y() + delta.y(), geometry.width())
+                if not self._move_timer.isActive():
+                    self._move_timer.start()
+                return
         else:
             point = event.position().toPoint()
             action = ('关闭画中画' if self.close_rect().contains(point) else '微调画中画选区' if self.adjust_rect().contains(point)
@@ -379,6 +407,7 @@ class FloatingCrop(QWidget):
         self.update()
 
     def mouseReleaseEvent(self, event):
+        self._flush_move()
         self.drag = None
         self.gesture_finished.emit()
         self.tools_visible = self.underMouse()
@@ -389,6 +418,7 @@ class FloatingCrop(QWidget):
         if self.lock_mode == 2:
             event.accept()
             return
+        self._flush_move()
         width = self.width() * 1.12 ** (event.angleDelta().y() / 120)
         self.fit_geometry(self.x() + (self.width() - width) / 2,
                           self.y() + (self.width() - width) / self.aspect / 2, width)
@@ -396,14 +426,18 @@ class FloatingCrop(QWidget):
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.LeftButton:
+            self._cancel_move()
             self.drag = None
             self.recrop.emit()
 
     def hideEvent(self, event):
+        self._cancel_move()
+        self.drag = None
         super().hideEvent(event)
         self.background_exposed.emit(self.geometry())
 
     def closeEvent(self, event):
+        self._cancel_move()
         self.enhance_timer.stop()
         if self.enhancer is not None:
             self.enhancer.stop()
