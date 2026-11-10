@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .canvas import Canvas
+from .crop_dialog import CropDialog
 from .floating import FloatingCrop
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 from PySide6.QtCore import QPoint, QRectF, Qt, QTimer
@@ -174,7 +175,7 @@ def choose_crop(viewer, row, floating=False):
     if frame is None and frozen is None:
         viewer.notice.setText("请先开始观看，收到画面后再选择对照区域")
         return
-    dialog = QDialog(viewer)
+    dialog = CropDialog(viewer)
     viewer.crop_dialog = dialog
     dialog.crop_row = row
     dialog.setWindowModality(Qt.NonModal)

@@ -5,6 +5,8 @@
 
 2026-11-10框选窗口改为非模态异步：Viewer唯一持有`crop_dialog`，QDialog以Viewer为父对象，使用`show()`及`finished`处理确认/取消，不调用`exec/open`或增加线程。重复打开唤起已有窗口；结束即停取帧定时器并延后释放。来源停止/移除/重连、主路切换及Viewer停止/关闭/拒绝会取消旧框选；确认和异步取帧还校验RoomRow、Decoder、历史缓存及主路身份，避免旧结果应用到新来源。原有精确帧准备16ms定时器只在等待画面时运行，不增加常驻轮询。
 
+`crop_dialog.py`拥有框选窗口壳的鼠标生命周期。Windows标题栏左键拖动仅拦截WM_NCLBUTTONDOWN/HTCAPTION，由Qt全局逻辑坐标移动窗口，避免系统拖动循环延迟播放定时器；不修改原生标题栏外观、关闭/双击/系统菜单或边框缩放。鼠标释放、失去捕获及隐藏清理拖动；拖动时Esc恢复原位置，正常Esc仍取消框选。该标题栏鼠标拖动不提供系统Aero贴靠/摇动；非Windows仍走Qt原有路径。没有额外定时器、线程、截图或播放器实例。
+
 ```mermaid
 flowchart TD
     Plugin[plugin.py 插件与宿主入口] --> Viewer[viewer.py 会话状态与Qt入口]
