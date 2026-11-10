@@ -13,7 +13,7 @@ from types import SimpleNamespace
 def check(app, host, module=None):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
     capture = import_module('diagnose_match_ui_dispatch')
-    from PySide6.QtCore import QEvent, QObject, QTimer
+    from PySide6.QtCore import QEvent, QEventLoop, QObject, QTimer, QTimerEvent
     from PySide6.QtWidgets import QDialog
     from shiboken6 import delete, isValid
     with tempfile.TemporaryDirectory() as directory:
@@ -36,6 +36,34 @@ def check(app, host, module=None):
             else:
                 raise AssertionError('The original exception was hidden')
             assert trace.stack==[]
+            # Wake metadata is captured before delivery, even if Qt deletes both objects.
+            class Viewer(QObject):pass
+            viewer=Viewer()
+            viewer.render_timer=QTimer(viewer)
+            viewer.render_timer.setInterval(7)
+            unrelated=QTimer(viewer)
+            assert trace.dispatch(lambda receiver,event:sentinel,unrelated,QTimerEvent(1)) is sentinel
+            for _ in range(2):
+                tick=QTimerEvent(1)
+                assert trace.dispatch(lambda receiver,event:sentinel,viewer.render_timer,tick) is sentinel
+                delete(tick)
+            tick=QTimerEvent(1)
+            def destroy_timer(receiver,event):
+                delete(receiver);delete(event)
+                return sentinel
+            assert trace.dispatch(destroy_timer,viewer.render_timer,tick) is sentinel
+            class FloatingCrop:
+                drag=None
+            floating=FloatingCrop()
+            for kind,drag in ((QEvent.MouseButtonPress,None),(QEvent.MouseMove,(None,None,None)),
+                              (QEvent.MouseMove,(None,None,(1,-1))),
+                              (QEvent.MouseButtonRelease,(None,None,(1,-1))),(QEvent.Wheel,None)):
+                floating.drag=drag
+                assert trace.dispatch(lambda receiver,event:sentinel,floating,QEvent(kind)) is sentinel
+            class Canvas:
+                paint_probe=object()
+                frame_key=1.25
+            assert trace.dispatch(lambda receiver,event:sentinel,Canvas(),QEvent(QEvent.Paint)) is sentinel
             receiver=QObject();event=QEvent(QEvent.User)
             def destroy(receiver,event):
                 delete(receiver)
@@ -97,6 +125,13 @@ def check(app, host, module=None):
         assert any(r['label']=='QDialog.exec' and r['modal_wait_possible'] for r in slow)
         assert rows[-1]['phase']=='capture-stop' and not trace.worker.is_alive()
         native=[r for r in rows if r['phase']=='caption-native']
+        wakes=[r for r in rows if r['phase']=='render-wake']
+        assert len(wakes)==3 and wakes[0]['gap_ms'] is None and wakes[1]['gap_ms'] is not None
+        assert all(r['interval_ms']==7 for r in wakes) and wakes[1]['thread_cpu_gap_ms'] is not None
+        inputs=[r for r in rows if r['phase']=='floating-input']
+        assert [(r['dragging'],r['resizing']) for r in inputs]==[
+            (False,False),(True,False),(True,True),(True,True),(False,False)]
+        assert next(r for r in rows if r['phase']=='main-paint')['frame_key']==1.25
         if sys.platform=='win32':
             assert [r['point'] for r in native]==['enter','return','enter','return']
             assert native[1]['handled'] is True and native[3]['handled'] is False
@@ -116,14 +151,36 @@ def check(app, host, module=None):
                 assert hasattr(module.floating_control.CropDialog.nativeEvent,'__wrapped__')
                 assert hasattr(module.floating_control.CropDialog.mouseMoveEvent,'__wrapped__')
                 assert hasattr(QWidget.move,'__wrapped__')
+                assert hasattr(module.FloatingCrop.fit_geometry,'__wrapped__')
+                assert hasattr(module.Canvas.show_at,'__wrapped__')
+                assert hasattr(module.Viewer.render,'__wrapped__')
             root_trace.arm()
             live=QObject()
             assert app.sendEvent(live,QEvent(QEvent.User)) in (True,False)
-            root_trace.finish()
             assert 'QObject:User' in root_trace.stats
+            # Actual QTimer deliveries through the root application, not a performance benchmark.
+            timer_host=Viewer()
+            timer_host.render_timer=QTimer(timer_host)
+            timer_host.render_timer.setInterval(7)
+            loop=QEventLoop()
+            ticks=[]
+            def timeout():
+                ticks.append(True)
+                if len(ticks)==3:
+                    timer_host.render_timer.stop()
+                    loop.quit()
+            timer_host.render_timer.timeout.connect(timeout)
+            guard=QTimer();guard.setSingleShot(True);guard.timeout.connect(loop.quit);guard.start(2000)
+            timer_host.render_timer.start();loop.exec();guard.stop()
+            assert len(ticks)==3 and timer_host.render_timer.interval()==7
+            assert timer_host.render_timer in root_trace.wakes
+            root_trace.finish();root_trace.arm()
+            assert not root_trace.wakes
+            root_trace.finish()
         return dict(passed=True,return_exception_preserved=True,deleted_qt_objects_safe=True,
                     nested_spans=True,modal_wait_labelled=True,main_thread_only=True,
                     no_arguments_or_text=True,writer_stopped=True,launcher_opt_in=True,
+                    render_wake_metadata=True,floating_input_boundaries=True,main_paint_metadata=True,
                     root_dispatch_installed=root_trace is not None,live_performance=False)
 
 

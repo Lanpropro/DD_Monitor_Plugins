@@ -1,6 +1,7 @@
 """Prepare an opt-in root launcher for match-viewer Qt dispatch investigation."""
 import argparse
 import functools
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ import queue
 import sys
 import threading
 import time
+import weakref
 
 
 class UiTrace:
@@ -20,6 +22,7 @@ class UiTrace:
         self.sequence = 0
         self.stack = []
         self.stats = {}
+        self.wakes = weakref.WeakKeyDictionary()
         self.dropped = 0
         self.records = queue.Queue(maxsize=2048)
         self.stopped = threading.Event()
@@ -48,6 +51,7 @@ class UiTrace:
         if self.closed:
             return
         self.stats = {}
+        self.wakes.clear()
         self.deadline = time.perf_counter() + 90
         self.enabled = True
         self.emit('capture-start', limit_seconds=90)
@@ -99,9 +103,34 @@ class UiTrace:
     def dispatch(self, notify, receiver, event):
         if not self.enabled or threading.get_ident() != self.main_thread:
             return notify(receiver, event)
+        if time.perf_counter() >= self.deadline:
+            self.finish()
+            return notify(receiver, event)
         # Save only primitive metadata before delivery; either object can be deleted.
         label = type(receiver).__name__ + ':' + event.type().name
+        self.playback_event(receiver, event)
         return self.call(label, notify, receiver, event, category='qt-event')
+
+    def playback_event(self, receiver, event):
+        """Observe delivery, without changing timers or retaining Qt objects."""
+        from PySide6.QtCore import QEvent, QTimer
+        kind = event.type()
+        if kind == QEvent.Timer and isinstance(receiver, QTimer):
+            owner = receiver.parent()
+            if type(owner).__name__ == 'Viewer' and receiver is getattr(owner, 'render_timer', None):
+                now, cpu = time.perf_counter(), time.thread_time()
+                previous = self.wakes.get(receiver)
+                self.wakes[receiver] = (now, cpu)
+                self.emit('render-wake', interval_ms=receiver.interval(),
+                          gap_ms=round((now-previous[0])*1000, 3) if previous else None,
+                          thread_cpu_gap_ms=round((cpu-previous[1])*1000, 3) if previous else None)
+        elif type(receiver).__name__ == 'FloatingCrop' and kind in (
+                QEvent.MouseButtonPress, QEvent.MouseMove, QEvent.MouseButtonRelease, QEvent.Wheel):
+            drag = receiver.drag
+            self.emit('floating-input', event=kind.name, dragging=drag is not None,
+                      resizing=bool(drag is not None and drag[2]))
+        elif kind == QEvent.Paint and type(receiver).__name__ == 'Canvas' and receiver.paint_probe is not None:
+            self.emit('main-paint', frame_key=receiver.frame_key)
 
     def wrap(self, owner, name, label, *, no_args=False):
         original = getattr(owner, name)
@@ -201,6 +230,18 @@ def install(host, directory):
             crop = sys.modules.get(package+'.crop_dialog')
             if crop is not None:
                 trace.wrap_caption(crop.CropDialog)
+            floating = sys.modules[package+'.floating'].FloatingCrop
+            for name in ('mousePressEvent', 'mouseMoveEvent', 'mouseReleaseEvent',
+                         'wheelEvent', 'fit_geometry', 'set_frame', 'paintEvent'):
+                trace.wrap(floating, name, 'FloatingCrop.'+name)
+            canvas = sys.modules[package+'.canvas'].Canvas
+            for name in ('show_at', 'set_frame', 'paintEvent'):
+                trace.wrap(canvas, name, 'Canvas.'+name)
+            trace.wrap(sys.modules[package+'.viewer'].Viewer, 'render', 'Viewer.render', no_args=True)
+            source = Path(sys.modules[package].__file__).parent
+            trace.emit('plugin-source', sha256={name: hashlib.sha256((source/name).read_bytes()).hexdigest()
+                       for name in ('floating.py', 'floating_control.py', 'crop_dialog.py', 'crop_worker.py')},
+                       floating_move_exists=(source/'floating_move.py').exists())
         QApplication.instance().aboutToQuit.connect(trace.close)
         trace.emit('window-ready', shortcut='Ctrl+Alt+F9', capture_active=False)
     host_app.MainWindow.__init__ = initialize
