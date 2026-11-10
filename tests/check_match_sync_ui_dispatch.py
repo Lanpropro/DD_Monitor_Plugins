@@ -54,6 +54,31 @@ def check(app, host, module=None):
             trace.wrap(Owner,'close','owner.close',no_args=True)
             assert Owner().close() is sentinel
             assert Owner.close.__code__.co_argcount==1
+            # Caption metadata is primitive; preserve actual handled returns.
+            import ctypes
+            from ctypes import wintypes
+            class Caption:
+                _caption_drag = None
+                def mouseMoveEvent(self, event):return sentinel
+                def nativeEvent(self, event_type, message):return (True, 17)
+            trace.wrap_caption(Caption)
+            caption=Caption()
+            message=wintypes.MSG();message.message=0x00a1;message.wParam=2
+            pointer=ctypes.addressof(message)
+            assert caption.nativeEvent(b'PRIVATE_VALUE',pointer)==(True,17)
+            assert caption.mouseMoveEvent(sentinel) is sentinel
+            # After a native callback destroys its receiver, never inspect it again.
+            class DeletedCaption:
+                def __init__(self):self._caption_drag = None
+                def mouseMoveEvent(self, event):return sentinel
+                def nativeEvent(self, event_type, message):
+                    del self._caption_drag
+                    return (False,0)
+            trace.wrap_caption(DeletedCaption)
+            assert DeletedCaption().nativeEvent(b'PRIVATE_VALUE',pointer)==(False,0)
+            trace.enabled=False
+            assert caption.nativeEvent(None,None)==(True,17)
+            trace.enabled=True
             # Real Qt nested delivery without media or network; finish remains explicit.
             dialog=QDialog(host)
             QTimer.singleShot(10,dialog.reject)
@@ -71,6 +96,10 @@ def check(app, host, module=None):
         assert parent_row['exclusive_wall_ms']<parent_row['duration_ms']
         assert any(r['label']=='QDialog.exec' and r['modal_wait_possible'] for r in slow)
         assert rows[-1]['phase']=='capture-stop' and not trace.worker.is_alive()
+        native=[r for r in rows if r['phase']=='caption-native']
+        if sys.platform=='win32':
+            assert [r['point'] for r in native]==['enter','return','enter','return']
+            assert native[1]['handled'] is True and native[3]['handled'] is False
         encoded=json.dumps(rows)
         assert 'PRIVATE_VALUE' not in encoded and 'locals' not in encoded and 'objectName' not in encoded
         fake=Path(directory)/'host';fake.mkdir();(fake/'run.cmd').write_text('@echo off\n')
@@ -82,6 +111,11 @@ def check(app, host, module=None):
         # The opt-in application subclass must be present in root integration.
         root_trace=getattr(app,'_match_ui_dispatch_trace',None)
         if root_trace is not None:
+            if module is not None:
+                from PySide6.QtWidgets import QWidget
+                assert hasattr(module.floating_control.CropDialog.nativeEvent,'__wrapped__')
+                assert hasattr(module.floating_control.CropDialog.mouseMoveEvent,'__wrapped__')
+                assert hasattr(QWidget.move,'__wrapped__')
             root_trace.arm()
             live=QObject()
             assert app.sendEvent(live,QEvent(QEvent.User)) in (True,False)

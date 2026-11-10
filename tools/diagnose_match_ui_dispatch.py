@@ -115,6 +115,32 @@ class UiTrace:
                 return self.call(label, original, *args, **kwargs)
         setattr(owner, name, wrapped)
 
+    def wrap_caption(self, owner):
+        self.wrap(owner, 'mouseMoveEvent', 'CropDialog.mouseMoveEvent')
+        original = owner.nativeEvent
+        trace = self
+        messages = {0x00a1: 'caption-press', 0x0231: 'enter-size-move',
+                    0x0232: 'exit-size-move', 0x0215: 'capture-changed'}
+
+        @functools.wraps(original)
+        def native(instance, event_type, message):
+            if not trace.enabled or threading.get_ident() != trace.main_thread or sys.platform != 'win32':
+                return original(instance, event_type, message)
+            from ctypes import wintypes
+            msg = wintypes.MSG.from_address(int(message))
+            name = messages.get(msg.message)
+            if name is None or msg.message == 0x00a1 and msg.wParam != 2:
+                return original(instance, event_type, message)
+            # Save primitives before dispatch; it may destroy the receiver.
+            dragging = instance._caption_drag is not None
+            trace.emit('caption-native', point='enter', message=name, dragging=dragging)
+            result = trace.call('CropDialog.native.'+name, original, instance, event_type, message)
+            if trace.enabled:
+                trace.emit('caption-native', point='return', message=name, handled=bool(result[0]))
+            return result
+
+        owner.nativeEvent = native
+
 
 def install(host, directory):
     sys.path.insert(0, str(Path(host).resolve()))
@@ -133,7 +159,7 @@ def install(host, directory):
     host_app.QApplication = Application
     for name in ('show', 'hide', 'close'):
         trace.wrap(QWidget, name, 'QWidget.'+name, no_args=True)
-    for name in ('setStyleSheet', 'setParent', 'setVisible', 'setWindowFlags'):
+    for name in ('setStyleSheet', 'setParent', 'setVisible', 'setWindowFlags', 'move'):
         trace.wrap(QWidget, name, 'QWidget.'+name)
     trace.wrap(QWindow, 'setParent', 'QWindow.setParent')
     trace.wrap(QDialog, 'exec', 'QDialog.exec', no_args=True)
@@ -172,6 +198,9 @@ def install(host, directory):
                 owner = module.SendConsole if part=='sending' else module
                 for name in names:
                     trace.wrap(owner, name, 'match_sync.'+name)
+            crop = sys.modules.get(package+'.crop_dialog')
+            if crop is not None:
+                trace.wrap_caption(crop.CropDialog)
         QApplication.instance().aboutToQuit.connect(trace.close)
         trace.emit('window-ready', shortcut='Ctrl+Alt+F9', capture_active=False)
     host_app.MainWindow.__init__ = initialize
