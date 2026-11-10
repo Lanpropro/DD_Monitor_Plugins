@@ -9,6 +9,7 @@ from PySide6.QtCore import QTimer, Qt
 from .replay import ReplayBar
 from .sending import SendConsole
 from .chat_panel import SendingDanmakuPanel
+from . import danmaku_settings
 from ddm.widgets import Tile, TileButton
 from ddm import theme
 
@@ -168,7 +169,7 @@ def build_ui(viewer):
         # Canvas is painted by Qt; a native VLC overlay can obscure its backing store.
         if hasattr(viewer.video_danmaku, "set_native_video"):
             viewer.video_danmaku.set_native_video(False)
-        viewer.video_danmaku.apply_settings(settings)
+        danmaku_settings.install(viewer, settings)
         viewer.picture.videoDanmakuChanged.connect(lambda: viewer.overlay_pending.clear())
     viewer.panel.apply_style(settings.get("danmaku_font", ""),
                            int(settings.get("danmaku_font_size") or 13))
@@ -344,12 +345,4 @@ def refresh_appearance(viewer, *_args):
 
 
 def _open_danmaku_settings(viewer):
-    open_settings = getattr(viewer.context.window, 'open_settings', None)
-    if callable(open_settings):
-        open_settings('danmaku')
-        settings = getattr(viewer.context.window, 'settings', {})
-        viewer.video_danmaku.apply_settings(settings)
-        viewer.picture.danmaku_settings_menu.apply_settings(settings)
-        viewer.panel.apply_style(settings.get('danmaku_font', ''),
-                               int(settings.get('danmaku_font_size') or 13))
-        viewer.panel.set_max_blocks(int(settings.get('danmaku_max_blocks') or 3000))
+    viewer.picture.danmaku_settings_menu.open_at(viewer.picture.danmaku_settings_button)
