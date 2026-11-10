@@ -4,7 +4,7 @@ from __future__ import annotations
 from .canvas import Canvas
 from .floating import FloatingCrop
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
-from PySide6.QtCore import QPoint, QRectF, QTimer
+from PySide6.QtCore import QPoint, QRectF, Qt, QTimer
 from PySide6.QtGui import QRegion
 from ddm import theme
 
@@ -137,7 +137,28 @@ def render_floating_crops(viewer, clock, shifts):
             floating.set_frame(None)
 
 
+def close_crop_dialog(viewer, row=None):
+    dialog = viewer.crop_dialog
+    if dialog is not None and (row is None or dialog.crop_row is row):
+        dialog.reject()
+
+
 def choose_crop(viewer, row, floating=False):
+    if viewer.crop_dialog is not None:
+        viewer.crop_dialog.raise_()
+        viewer.crop_dialog.activateWindow()
+        return
+    if viewer.rows.get(row.room_id) is not row:
+        return
+    decoder = row.decoder
+    history = decoder.history if decoder is not None else None
+    reference = viewer.alignment.reference
+
+    def source_valid():
+        return (viewer.rows.get(row.room_id) is row and row.decoder is decoder
+                and (decoder is None or decoder.history is history)
+                and viewer.alignment.reference == reference)
+
     frozen = None
     if row.room_id == viewer.alignment.reference:
         frame = viewer.canvas.frame
@@ -154,6 +175,9 @@ def choose_crop(viewer, row, floating=False):
         viewer.notice.setText("请先开始观看，收到画面后再选择对照区域")
         return
     dialog = QDialog(viewer)
+    viewer.crop_dialog = dialog
+    dialog.crop_row = row
+    dialog.setWindowModality(Qt.NonModal)
     dialog.setWindowTitle(f"{row.label()}：" + ('框选悬浮画面' if floating else '拖选计时器或共同内容，仅用于放大对照'))
     dialog.resize(900, 600)
     canvas = Canvas(selecting=True)
@@ -188,7 +212,10 @@ def choose_crop(viewer, row, floating=False):
         prepare.setInterval(16)
 
         def show_frozen():
-            ready = row.decoder.pictures.get(*frozen, exact=True) if row.decoder is not None else None
+            if not source_valid():
+                dialog.reject()
+                return
+            ready = decoder.pictures.get(*frozen, exact=True)
             if ready is not None:
                 canvas.set_frame(ready)
                 canvas.waiting = False
@@ -196,6 +223,7 @@ def choose_crop(viewer, row, floating=False):
                 prepare.stop()
 
         prepare.timeout.connect(show_frozen)
+        dialog.finished.connect(prepare.stop)
         prepare.start()
     buttons.accepted.connect(dialog.accept)
     buttons.rejected.connect(dialog.reject)
@@ -211,7 +239,12 @@ def choose_crop(viewer, row, floating=False):
     actions.addWidget(reset)
     actions.addWidget(buttons)
     layout.addLayout(actions)
-    if dialog.exec() == QDialog.Accepted and canvas.crop.width() > 0 and canvas.crop.height() > 0:
+    def finished(result):
+        viewer.crop_dialog = None
+        dialog.deleteLater()
+        if (result != QDialog.Accepted or not source_valid()
+                or canvas.crop.width() <= 0 or canvas.crop.height() <= 0):
+            return
         rect = canvas.crop
         if floating:
             viewer.show_floating_crop(row, (rect.x(), rect.y(), rect.width(), rect.height()), canvas.frame)
@@ -220,3 +253,6 @@ def choose_crop(viewer, row, floating=False):
         viewer.comparison_panel.zoom.setChecked(True)
         viewer.show_comparison(row.room_id)
         viewer.changed()
+
+    dialog.finished.connect(finished)
+    dialog.show()

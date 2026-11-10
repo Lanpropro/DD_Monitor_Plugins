@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 from ddm.fullscreen_cursor import FullscreenCursor
 from .engine import LateBuffer
+from .floating_control import close_crop_dialog
 from .panels import MatchSettingsDialog
 from PySide6.QtWidgets import QApplication, QDialog, QVBoxLayout
 from PySide6.QtCore import Qt
@@ -18,6 +19,7 @@ def _main_changed(viewer, *_args):
         row.main_button.setText('主画面' if room_id == selected else '设为主画面')
         row.realign.setEnabled(viewer.automatic.isChecked() and room_id != selected)
     if selected != viewer.alignment.reference:
+        close_crop_dialog(viewer)
         viewer.dismiss_buffer_notice()
         for current in viewer.rows.values():
             current.clear_buffer_warning()

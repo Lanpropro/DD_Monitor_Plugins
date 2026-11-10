@@ -82,6 +82,7 @@ class Viewer(QDialog):
         self.suppressed = {}
         self.embedded = False
         self.floating_crops = {}
+        self.crop_dialog = None
         self.stream_info_dialog = None
         viewer_ui.build_ui(self)
         self.audio = AudioPump(self)

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .engine import LateBuffer, SafetyBuffer
 from .replay import ReplayTimeline
+from .floating_control import close_crop_dialog
 
 
 def toggle_running(viewer):
@@ -48,6 +49,7 @@ def toggle_running(viewer):
 
 
 def stop(viewer):
+    close_crop_dialog(viewer)
     viewer.dismiss_buffer_notice()
     viewer.replay_bar.preview.stop()
     viewer.running = False
@@ -116,6 +118,7 @@ def closeEvent(viewer, event, _base):
 
 
 def reject(viewer, _base):
+    close_crop_dialog(viewer)
     if viewer.embedded:
         viewer.stop()
         if viewer.save_timer.isActive():

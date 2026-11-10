@@ -147,10 +147,9 @@ def check(app, host, module, output=None):
                 if output:
                     output.parent.mkdir(parents=True, exist_ok=True)
                     dialog.grab().save(str(output.with_name('selection.png')))
-                dialog.hide()
-                return QDialog.Accepted
-            with patch.object(module.QDialog, 'exec', select_region):
-                viewer.choose_crop(row, floating=True)
+                dialog.accept()
+            viewer.choose_crop(row, floating=True)
+            select_region(viewer.crop_dialog)
             assert row.room_id in viewer.floating_crops and row.crop == original_crop
             floating = viewer.show_floating_crop(row, (.5, .5, .5, .5), (1, source))
             QTest.qWait(30)
@@ -223,16 +222,16 @@ def check(app, host, module, output=None):
                 assert selecting.crop == floating.crop and selecting.selection_ready, 'Reopen the existing editable crop'
                 selecting.crop = QRectF(.4, .4, .5, .5)
                 adjusted.append(True)
-                return QDialog.Accepted
-            with patch.object(module.QDialog, 'exec', adjust_region):
-                QTest.mouseClick(floating, Qt.LeftButton, pos=floating.adjust_rect().center())
+                dialog.accept()
+            QTest.mouseClick(floating, Qt.LeftButton, pos=floating.adjust_rect().center())
+            adjust_region(viewer.crop_dialog)
             assert adjusted and floating.crop == QRectF(.4, .4, .5, .5)
             assert row.crop == original_crop, 'Fine tuning must not change alignment/comparison crops'
             def cancel_adjustment(dialog):
                 dialog.findChild(module.Canvas).crop = QRectF(0, 0, 1, 1)
-                return QDialog.Rejected
-            with patch.object(module.QDialog, 'exec', cancel_adjustment):
-                QTest.mouseClick(floating, Qt.LeftButton, pos=floating.adjust_rect().center())
+                dialog.reject()
+            QTest.mouseClick(floating, Qt.LeftButton, pos=floating.adjust_rect().center())
+            cancel_adjustment(viewer.crop_dialog)
             assert floating.crop == QRectF(.4, .4, .5, .5), 'Cancel must preserve the applied crop'
             floating.fit_geometry(10, 10, 400)
             anchor = floating.mapTo(host, floating.rect().bottomRight() - QPoint(4, 4))

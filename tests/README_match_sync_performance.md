@@ -281,6 +281,12 @@ Qt 6.11.2 上 `selfcheck_match_sync_retry_rows.py` 的离屏全屏窗口退出�
 
 `python tests/check_match_sync_buffer_notice.py --host <宿主目录> --output <截图路径>` 用缓存范围替身验证耗尽事件、分路计数与时间窗口、提醒冷却及恢复清理，检查暂停／回看／首次缓存／RGB 等待不误计、控制台高度保持及不调用主程序通知。禁网，无真实直播或性能采样，不能作为实播卡顿原因证据。
 
+### 非模态框选窗口
+
+`check_match_sync_crop_dialog.py --host <宿主目录>` 用离线画面替身和真实Qt窗口验证非模态、无嵌套exec、事件继续处理及无WindowBlocked/WindowUnblocked事件；覆盖确认/取消/Esc/关闭、重复请求、来源替换/重连、停止/移除/切主路/父窗口关闭、精确帧准备和定时器释放。`check_match_sync_floating.py` 继续检查原框选手势、浮层和微调确认。它们是功能回归，不是实播改善证据。
+
+人工复验从根`run.cmd`重新加载，在原直播积累约5秒缓存后，连续打开/关闭框选5次，分别试确认、取消和Esc，检查画面及声音；框选期间应可操作控制台，停止/移除对应房间或切主路应关闭旧框选。可复用事件探针入口及Ctrl+Alt+F9记录相同操作，比较绘制间隔和关闭路径，不能以合成功能检查宣称半秒停顿已消除。
+
 ### 回看预览真实采集
 
 `check_match_sync_preview_frames.py --host <宿主目录>` 检查已解码帧的后台缩图/JPEG往返、单待处理项、非等待提交、来源/重连世代、迟到结果丢弃与字节/时间上限。`check_match_sync_preview_metrics.py` 检查数值导出、非等待快照、隐私和禁用。`check_match_sync_replay_preview.py` 的H.264功能夹具覆盖捕获已解码帧预生成后持续200次拖动立即取图、历史偏移、来源隔离、几何设置、主reader目标不变与停止清理。以上均不是实播性能证据。

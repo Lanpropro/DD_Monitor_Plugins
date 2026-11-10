@@ -5,6 +5,7 @@ import time
 from .room_widgets import COLORS, RoomRow
 from .media import Decoder
 from .room_input import parse_room
+from .floating_control import close_crop_dialog
 
 def dismiss_removal_notice(viewer):
     viewer.removal_timer.stop()
@@ -213,6 +214,7 @@ def _state(viewer, row, worker, text, chat):
 
 def _reset(viewer, row, worker):
     if viewer._valid(row, worker):
+        close_crop_dialog(viewer, row)
         row.large_candidate = None
         previous = getattr(row.decoder.history, 'previous', None)
         position = viewer.live_clock() + viewer.shifts().get(row.room_id, 0)
@@ -244,6 +246,7 @@ def _reset(viewer, row, worker):
 
 
 def _stop_row(row):
+    close_crop_dialog(row.viewer, row)
     row.clear_buffer_warning()
     row.alignment_hint, row.hint_pending, row.hint_searching = None, False, False
     if row.decoder is not None:
