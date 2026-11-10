@@ -67,6 +67,14 @@ class StreamAcquisition:
             with self.lock:
                 self.state['phase'] = name
 
+    def quality(self, *, requested=None, actual=None):
+        if self.enabled:
+            with self.lock:
+                if requested is not None:
+                    self.state['requested_quality'] = int(requested)
+                if actual is not None:
+                    self.state['actual_quality'] = int(actual)
+
     def mark(self, name):
         if not self.enabled or self.started is None or name in self.milestones:
             return

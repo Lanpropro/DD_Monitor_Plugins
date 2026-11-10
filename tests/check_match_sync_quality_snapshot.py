@@ -31,9 +31,10 @@ def check(app, host, module):
             assert viewer.picture.quality_options == first, 'Secondary metadata must not replace the main menu'
             second[0]['desc'] = 'changed after delivery'
             assert platform.quality_options[0]['desc'] == '2K', 'Own a snapshot of the delivered metadata'
+            platform.quality = 400
             with patch.object(viewer, '_reload_picture') as reload:
                 viewer.select_main(platform.room_id)
-            assert reload.call_count == 1 and platform.quality == 20000, 'Keep highest-tier selection'
+            assert reload.call_count == 0 and platform.quality == 400, 'Main selection must preserve the chosen quality'
             assert viewer.picture.quality_options == platform.quality_options
             with patch.object(viewer, 'sync_picture', wraps=viewer.sync_picture) as sync:
                 viewer._information(platform, platform.decoder, {'actual_quality': 400})
@@ -53,7 +54,7 @@ def check(app, host, module):
                 viewer.select_main(native.room_id)
             assert viewer.picture.quality_options == first and viewer.picture.actual_quality == 10000
             return dict(passed=True, platform_calls_on_gui=0, native_path=True,
-                        source_switch=True, highest_tier=True, partial_and_stale_events=True,
+                        source_switch=True, selected_quality_preserved=True, partial_and_stale_events=True,
                         empty_keeps_last_known=True, metadata_refreshes_per_event=1)
         finally:
             viewer.close()

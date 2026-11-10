@@ -282,9 +282,6 @@ def main():
             for key in sources:
                 viewer.add_room(key, {'alias': key})
                 viewer.rows[key].show_chat.setChecked(False)
-            # Reference selection normally queries the live platform for its highest tier.
-            # Local fixtures must stay local; capture/decoding remains unmodified.
-            viewer.prefer_highest = False
             viewer.toggle_running()
             viewer.audio.lock = TimedLock(viewer.audio.lock, 'clock_lock_wait_ms')
             for row in viewer.rows.values():

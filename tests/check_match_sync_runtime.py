@@ -40,7 +40,6 @@ def run(app, host, output, sources, module=None, crop_mode=None):
         viewer.show()
         for key in sources:
             viewer.add_room(key, {'alias': key, 'quality': 10000})
-        viewer.prefer_highest = False
         viewer.picture.danmaku_button.setChecked(True)
         viewer.toggle_running()
         events, gaps = [], []

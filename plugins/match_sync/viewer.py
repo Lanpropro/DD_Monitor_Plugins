@@ -80,7 +80,6 @@ class Viewer(QDialog):
         self.offset_repositioning = False
         self.offset_target = None
         self.suppressed = {}
-        self.prefer_highest = False
         self.embedded = False
         self.floating_crops = {}
         self.stream_info_dialog = None

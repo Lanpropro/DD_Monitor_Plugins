@@ -162,7 +162,6 @@ def _start_row(viewer, row):
     policy = viewer._crop_source_policy(row)
     seed['crop_quality_policy'] = policy
     seed['balanced_quality'] = policy == 'balanced'
-    seed["highest_quality"] = viewer.prefer_highest and row.room_id == viewer.alignment.reference
     if policy != 'source':
         seed.pop('url', None)
     row.decoder = Decoder(row.room_id, seed, row.platform)
@@ -195,8 +194,7 @@ def _information(viewer, row, worker, info):
         viewer.update_main_choices()
     if info.get("actual_quality"):
         row.actual_quality = int(info["actual_quality"])
-        if (viewer._crop_source_policy(row) == 'source' and row.platform is not None and row.platform.kind != "douyu"
-                and not (viewer.prefer_highest and row.room_id == viewer.alignment.reference)):
+        if viewer._crop_source_policy(row) == 'source' and row.platform is not None and row.platform.kind != "douyu":
             row.quality = row.actual_quality
         viewer.changed()
     if row.room_id == viewer.main.currentData():

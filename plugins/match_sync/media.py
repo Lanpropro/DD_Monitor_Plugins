@@ -199,7 +199,8 @@ class Decoder:
     def _resolve(self, attempt: int) -> tuple[str, dict]:
         if self.cancelled.is_set():
             raise bili.Cancelled()
-        if self.seed.get("highest_quality") or self.seed.get("balanced_quality"):
+        self.acquisition.quality(requested=self.seed.get('quality', 10000 if self.platform is not None else 250))
+        if self.seed.get("balanced_quality"):
             self.acquisition.phase('quality_options')
             # The host lists tiers from highest to lowest; IDs are platform-specific.
             options = (self.platform.room_quality_options(self.room_id) if self.platform is not None
@@ -208,11 +209,11 @@ class Decoder:
             if self.cancelled.is_set():
                 raise bili.Cancelled()
             tiers = [item for item in options if int(item['qn']) != AUTO_QUALITY]
-            selected = tiers[0] if tiers else {'qn': self.seed.get('quality', 10000)}
-            if tiers and self.seed.get('balanced_quality'):
-                # Prefer 720p; tier IDs are not comparable across platforms.
-                selected = next((item for item in tiers if '720' in str(item.get('desc', ''))), tiers[len(tiers) // 2])
+            # Prefer 720p for secondary floating crops; keep source quality otherwise.
+            selected = (next((item for item in tiers if '720' in str(item.get('desc', ''))), tiers[len(tiers) // 2])
+                        if tiers else {'qn': self.seed.get('quality', 10000)})
             self.seed["quality"] = int(selected['qn'])
+            self.acquisition.quality(requested=self.seed['quality'])
             self.seed.pop("url", None)
             self.events.information.emit({"requested_quality": self.seed["quality"], "quality_options": options})
         # Douyu signed addresses may allow only one consumer; do not reuse the wall's URL.
@@ -238,6 +239,7 @@ class Decoder:
             if self.cancelled.is_set():
                 raise bili.Cancelled()
             url, quality, _channel = result[:3]
+            self.acquisition.quality(actual=quality)
             headers = dict(result[3]) if len(result) > 3 else {}
             self.acquisition.phase('quality_metadata')
             self.events.information.emit({"actual_quality": quality,
@@ -256,6 +258,7 @@ class Decoder:
         url, quality, _profile, headers = bili.play_url(
             self.room_id, self.seed.get("quality", 250), cancelled=self.cancelled.is_set, source_offset=attempt)
         self.acquisition.mark('play_url_ready')
+        self.acquisition.quality(actual=quality)
         self.events.information.emit({"actual_quality": quality})
         self.source_url, self.source_headers = url, headers
         return url, headers

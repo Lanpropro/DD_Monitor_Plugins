@@ -19,7 +19,7 @@
 `check_match_sync_fullscreen_console.py --host <宿主目录>` 用隐藏窗口真实迁移主画面，
 覆盖全屏时两段splitter、排队与迟到尺寸回调、对照开关及退出后恢复三段适配，
 不启动媒体或声音，不改变桌面前台窗口。`check_match_sync_quality_snapshot.py` 使用同样的
-`--host` 参数，验证GUI仅消费捕获线程交付的各路画质档位、主副切换、最高档选择、
+`--host` 参数，验证GUI仅消费捕获线程交付的各路画质档位、主副切换、保留用户所选档位、
 空结果保留已知菜单及丢弃旧解码器回调，不调用平台查询或读取账号。
 画质快照由RoomRow拥有，只在有效information回调更新；不写配置、不创建新线程或TTL缓存。
 探针surface.source_kind记录主路平台类型；render_gap_ms是每个约一秒窗口内最大间隔，
@@ -295,3 +295,6 @@ Qt 6.11.2 上 `selfcheck_match_sync_retry_rows.py` 的离屏全屏窗口退出�
 `check_match_sync_package_entry.py --host <根宿主目录> --archive <match_sync-1.6.1.zip> --previous <公开 match_sync-1.6.zip>` 使用临时插件目录与真实 Qt Sidebar、Viewer，验证新安装、暂存升级、用户数据保留、功能中心搜索／打开／退出、横竖布局与卸载。无直播源、账号或发送；不是实播性能验收。
 
 `check_match_sync_sidebar_entry.py --host <根宿主目录>` 检查首帧、收展与横竖入口放置；顶部横栏通过功能中心访问插件，不要求隐藏的固定图标可见。旧版入口与切换生命周期继续由 `check_match_sync_mode_switch.py` 覆盖。
+
+`check_match_sync_quality_policy.py --host <宿主目录>` 检查切换主路不重选最高档、平台自动及手动档位原样传递、重试不升档、匹配seed复用，以及失败请求档位的去敏诊断。
+播放日志的每路acquisition增加requested_quality和实际返回后的actual_quality，仅保存数值；未返回地址时不伪造实际档位，上一轮失败仍保留请求档位。

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import sys
-from ddm.widgets import AUTO_QUALITY
 from ddm.fullscreen_cursor import FullscreenCursor
 from .engine import LateBuffer
 from .panels import MatchSettingsDialog
@@ -29,7 +28,6 @@ def _main_changed(viewer, *_args):
             current.alignment_hint, current.hint_pending, current.hint_searching = None, False, False
         saved = viewer.shifts() if viewer.alignment.manual_locked else None
         viewer.stable_reference_shift = viewer.independent_shifts.pop(selected, None)
-        viewer.prefer_highest = True
         viewer.alignment.select_reference(selected)
         if saved is not None:
             viewer._save_delay_offsets(saved)
@@ -39,18 +37,6 @@ def _main_changed(viewer, *_args):
             row.match_text = ("手动时间已锁定；勾选自动对齐可解除" if viewer.alignment.manual_locked else
                               "主画面基准" if key == selected else "等待重新确认")
             row.refresh_status()
-        row = viewer.rows.get(selected)
-        if row is not None:
-            options = row.quality_options
-            seed = getattr(row.decoder, "seed", None) or {}
-            known_highest = seed.get("quality", 10000) if seed.get("highest_quality") else 10000
-            highest = next((int(item["qn"]) for item in options if int(item["qn"]) != AUTO_QUALITY), known_highest)
-            reload_needed = row.quality != highest or (not seed.get("highest_quality") and row.actual_quality != highest)
-            row.quality = highest
-            if reload_needed:
-                viewer._reload_picture()
-            elif row.decoder is not None:
-                row.decoder.seed["highest_quality"] = True
     viewer._apply_crop_quality()
     viewer.sync_picture()
     viewer.changed()
@@ -199,7 +185,6 @@ def _picture_setting(viewer, key, value):
 def _quality_changed(viewer, _room, quality):
     row = viewer.rows.get(viewer.main.currentData())
     if row is not None:
-        viewer.prefer_highest = False
         row.quality = quality
         viewer._reload_picture()
         viewer.changed()
