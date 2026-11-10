@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QWidget
 
 from ddm import theme
 from .upscale import CropEnhancer
+from .floating_move import start_native_move
 
 
 class FloatingCrop(QWidget):
@@ -39,6 +40,7 @@ class FloatingCrop(QWidget):
         self.enhance_timer.setInterval(8)
         self.enhance_timer.timeout.connect(self._refresh_enhancement)
         self.drag = None
+        self.native_move = None
         self.lock_mode = 0
         self.picture_widget = None
         self.tools_visible = False
@@ -66,6 +68,8 @@ class FloatingCrop(QWidget):
             self.input_frame = None
             self.frame_key = None
             self.image = QImage()
+            if self.native_move is not None:
+                self.native_move.preview.update()
             self.update()
             return
         if self.input_frame is not None:
@@ -98,6 +102,8 @@ class FloatingCrop(QWidget):
         self.enhanced_area = area if area is not None else QRect()
         if not self.image.isNull():
             self.aspect = self.image.width() * self.crop.width() / max(1, self.image.height() * self.crop.height())
+        if self.native_move is not None:
+            self.native_move.preview.update()
         self.update()
 
     def set_quality_mode(self, mode):
@@ -273,6 +279,9 @@ class FloatingCrop(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
+        self.paint_surface(painter)
+
+    def paint_surface(self, painter):
         self.paint_picture(painter)
         if not self.tools_visible:
             return
@@ -350,6 +359,9 @@ class FloatingCrop(QWidget):
             event.accept()
 
     def mouseMoveEvent(self, event):
+        if self.native_move is not None:
+            event.accept()
+            return
         self.tools_visible = True
         self.hover_point = event.position().toPoint()
         if self.drag is not None:
@@ -367,6 +379,9 @@ class FloatingCrop(QWidget):
                 self.fit_geometry(anchor_x if dx > 0 else anchor_x - width,
                                   anchor_y if dy > 0 else anchor_y - round(width / self.aspect), width)
             else:
+                if start_native_move(self, event):
+                    event.accept()
+                    return
                 self.fit_geometry(geometry.x() + delta.x(), geometry.y() + delta.y(), geometry.width())
         else:
             point = event.position().toPoint()
@@ -404,6 +419,8 @@ class FloatingCrop(QWidget):
         self.background_exposed.emit(self.geometry())
 
     def closeEvent(self, event):
+        if self.native_move is not None:
+            self.native_move.finish(cancel=True, show=False)
         self.enhance_timer.stop()
         if self.enhancer is not None:
             self.enhancer.stop()

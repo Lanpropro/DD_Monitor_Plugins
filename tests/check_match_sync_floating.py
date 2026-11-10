@@ -101,8 +101,10 @@ def check(app, host, module, output=None):
     host.resize(1400, 900)
     host.show()
     picker = import_module(module.__package__ + '.crop_ui').CropPicker
+    floating_module = import_module(module.__package__ + '.floating')
     with tempfile.TemporaryDirectory() as directory, \
-            patch.object(module.floating_control, 'create_picker', side_effect=picker):
+            patch.object(module.floating_control, 'create_picker', side_effect=picker), \
+            patch.object(floating_module, 'start_native_move', return_value=False):
         manager = plugins.PluginManager(window=host, plugins_dir=directory)
         viewer = module.Viewer(plugins.PluginContext(manager, 'floating_check'), {})
         viewer.setWindowFlags(Qt.Widget)
