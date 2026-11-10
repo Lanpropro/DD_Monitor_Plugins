@@ -148,6 +148,7 @@ class RoomRow(QFrame):
                      if str(item.get("room_id") or "") == room_id), {})
         self.title = room.get("title") or (viewer.sources.get(room_id) or {}).get("title") or ""
         self.quality = int(preferences.get("quality", 10000 if self.platform is not None else 250))
+        self.quality_auto = bool(preferences.get('quality_auto', True))
         self.actual_quality = 0
         self.quality_options = []
         self.record_tracks = tuple(number for number in range(1, 7) if number in preferences.get('record_tracks', []))
@@ -543,6 +544,7 @@ class RoomRow(QFrame):
                 "audio_channel": self.channel.currentData(),
                 "record_tracks": list(self.record_tracks),
                 "quality": self.quality,
+                "quality_auto": self.quality_auto,
                 "delay": self.delay.value(),
                 "show_chat": self.show_chat.isChecked(), "crop": list(self.crop)}
 

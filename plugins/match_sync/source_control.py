@@ -159,6 +159,7 @@ def _start_row(viewer, row):
     if seed.get("quality", row.quality) != row.quality:
         seed.pop("url", None)
     seed["quality"] = row.quality
+    seed['highest_quality'] = row.quality_auto and row.room_id == viewer.alignment.reference
     policy = viewer._crop_source_policy(row)
     seed['crop_quality_policy'] = policy
     seed['balanced_quality'] = policy == 'balanced'

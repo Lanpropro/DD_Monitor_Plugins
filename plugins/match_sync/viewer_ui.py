@@ -103,6 +103,11 @@ def build_ui(viewer):
     viewer.main.hide()
     heading.addWidget(viewer.automatic)
     heading.addWidget(viewer.compare)
+    viewer.clock_button = native_console_button(QPushButton('计时器对齐'), '计时器辅助对齐')
+    viewer.clock_button.setObjectName('ChipButton')
+    viewer.clock_button.setToolTip('框选各路游戏计时器并核对翻秒；请先播放至少两路')
+    viewer.clock_button.clicked.connect(lambda: viewer.comparison_panel.open_clock())
+    heading.addWidget(viewer.clock_button)
     heading.addWidget(viewer.late_notice, 1)
     for widget in viewer.add_controls:
         heading.addWidget(widget)

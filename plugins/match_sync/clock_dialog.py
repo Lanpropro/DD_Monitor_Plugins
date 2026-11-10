@@ -371,6 +371,9 @@ class ClockDialog(QDialog):
 
 
 def open_clock_dialog(viewer):
+    if not viewer.running or sum(row.decoder is not None for row in viewer.rows.values()) < 2:
+        viewer.notice.setText('请先播放主画面和至少一路副画面，再使用计时器对齐')
+        return
     dialog = getattr(viewer, 'clock_dialog', None)
     if dialog is not None and dialog.isVisible():
         dialog.raise_()

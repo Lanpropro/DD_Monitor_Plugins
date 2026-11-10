@@ -1,4 +1,4 @@
-"""Main selection preserves quality; providers own auto and explicit tier requests."""
+"""Automatic main quality tries available tiers; explicit selection stays authoritative."""
 import argparse
 from importlib import import_module
 import json
@@ -54,16 +54,66 @@ def check(app, host, module):
         decoder.seed.update(quality=1014000, url='https://private.invalid/retained')
         with patch.object(platform, 'play_url', side_effect=AssertionError('Matching seed must be retained')):
             assert decoder._resolve(0)[0].endswith('/retained')
+        decoder.seed.update(highest_quality=True, quality=250)
+        calls.clear()
+        decoder.acquisition.begin(4)
+        decoder._resolve(0)
+        assert calls == [('metadata', None), ('play', 1014100), ('play', 1014000)], calls
+        assert decoder.seed['quality'] == 1014000 and 'url' not in decoder.seed
+        assert decoder.acquisition.snapshot()['actual_quality'] == 1014000
+        decoder.seed['balanced_quality'] = True
+        calls.clear()
+        decoder._resolve(0)
+        assert [value for kind, value in calls if kind == 'play'] == [1014000], calls
+        decoder.seed.pop('balanced_quality')
+        with patch.object(platform, 'play_url', side_effect=RuntimeError('No supported tier')) as failed:
+            try:
+                decoder._resolve(1)
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError('All-tier failure must remain visible')
+            assert [call.args[1] for call in failed.call_args_list] == [item['qn'] for item in options]
+        with patch.object(platform, 'room_quality_options', side_effect=RuntimeError('metadata unavailable')):
+            decoder.seed['quality'] = 250
+            decoder._resolve(1)
+            assert platform.play_url.call_args.args[1] == 250
+        def interrupted(_room, _quality):
+            decoder.cancelled.set()
+            raise RuntimeError('cancel during acquisition')
+        with patch.object(platform, 'play_url', side_effect=interrupted) as cancelled:
+            try:
+                decoder._resolve(1)
+            except media.bili.Cancelled:
+                pass
+            else:
+                raise AssertionError('Cancellation cannot trigger further tier requests')
+            assert cancelled.call_count == 1
+        decoder.cancelled.clear()
     finally:
         decoder.stop()
         decoder.events.deleteLater()
+    native = module.Decoder('fixture', {'quality': 250, 'highest_quality': True})
+    try:
+        with patch.object(media.bili, 'room_info', return_value={}), \
+                patch.object(media.bili, 'room_quality_options', return_value=[{'qn': 10000}, {'qn': 400}]), \
+                patch.object(media.bili, 'play_url', side_effect=[RuntimeError('restricted'),
+                    ('https://private.invalid/video', 400, {}, {})]) as fetch:
+            native._resolve(0)
+            assert [call.args[1] for call in fetch.call_args_list] == [10000, 400]
+            assert native.seed['quality'] == 400
+    finally:
+        native.stop()
+        native.events.deleteLater()
     host.settings, host.rooms = {}, []
     with tempfile.TemporaryDirectory() as directory:
         viewer = module.Viewer(plugins.PluginContext(
             plugins.PluginManager(window=host, plugins_dir=directory), 'quality_policy'), {})
         try:
-            viewer.add_room('1', {'quality': 1014000})
-            viewer.add_room('2', {'quality': 1004000})
+            viewer.clock_button.click()
+            assert '至少一路副画面' in viewer.notice.text()
+            viewer.add_room('1', {'quality': 1014000, 'quality_auto': False})
+            viewer.add_room('2', {'quality': 1004000, 'quality_auto': False})
             for row in viewer.rows.values():
                 row.quality_options = [dict(item) for item in options]
                 row.platform = platform
@@ -73,11 +123,30 @@ def check(app, host, module):
                 assert not reload.called and [row.quality for row in viewer.rows.values()] == [1014000, 1004000]
                 viewer._quality_changed(None, 1014100)
                 assert viewer.rows['1'].quality == 1014100 and reload.call_count == 1
+                assert not viewer.rows['1'].quality_auto
+                assert not viewer.rows['1'].preferences()['quality_auto']
             with patch.object(module.source_control.Decoder, 'start'), patch.object(viewer, '_start_chat'):
                 viewer._start_row(viewer.rows['1'])
                 assert viewer.rows['1'].decoder.seed['quality'] == 1014100
-                assert 'highest_quality' not in viewer.rows['1'].decoder.seed
+                assert not viewer.rows['1'].decoder.seed['highest_quality']
+                viewer.rows['1'].quality_auto = True
+                viewer._start_row(viewer.rows['1'])
+                assert viewer.rows['1'].decoder.seed['highest_quality']
+            viewer.rows['1'].decoder.seed['highest_quality'] = False
+            viewer.running = True
+            with patch.object(viewer, '_reload_picture') as reload:
+                viewer._main_changed()
+                assert reload.call_count == 1
+                viewer.rows['1'].decoder.seed['highest_quality'] = True
+                viewer._main_changed()
+                assert reload.call_count == 1, 'Do not reconnect an already automatic main source'
+            viewer.running = False
+            with patch.object(viewer.comparison_panel, 'open_clock') as opened:
+                assert not viewer.clock_button.isHidden() and not viewer.compare.isChecked()
+                viewer.clock_button.click()
+                opened.assert_called_once()
             return dict(passed=True, main_preserves_tier=True, provider_auto_and_retry=True,
+                        highest_available_fallback=True, toolbar_clock_entry=True,
                         explicit_hdr_preserved=True, matching_seed_reused=True,
                         failed_tier_in_receipt=True, no_network=True, real_messages=0)
         finally:

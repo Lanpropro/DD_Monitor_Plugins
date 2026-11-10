@@ -200,6 +200,18 @@ class Decoder:
         if self.cancelled.is_set():
             raise bili.Cancelled()
         self.acquisition.quality(requested=self.seed.get('quality', 10000 if self.platform is not None else 250))
+        options = None
+        if self.seed.get('highest_quality') and not self.seed.get('balanced_quality'):
+            self.acquisition.phase('quality_options')
+            try:
+                options = (self.platform.room_quality_options(self.room_id) if self.platform is not None
+                           else bili.room_quality_options(self.room_id))
+            except bili.Cancelled:
+                raise
+            except Exception:
+                options = []
+            self.acquisition.mark('quality_options_ready')
+            self.seed.pop('url', None)
         if self.seed.get("balanced_quality"):
             self.acquisition.phase('quality_options')
             # The host lists tiers from highest to lowest; IDs are platform-specific.
@@ -234,7 +246,7 @@ class Decoder:
             if info:
                 self.events.information.emit(info.as_dict())
             self.acquisition.phase('play_url')
-            result = self.platform.play_url(self.room_id, self.seed.get("quality", 10000))
+            result = self._available_url(lambda quality: self.platform.play_url(self.room_id, quality), options)
             self.acquisition.mark('play_url_ready')
             if self.cancelled.is_set():
                 raise bili.Cancelled()
@@ -243,7 +255,7 @@ class Decoder:
             headers = dict(result[3]) if len(result) > 3 else {}
             self.acquisition.phase('quality_metadata')
             self.events.information.emit({"actual_quality": quality,
-                "quality_options": self.platform.room_quality_options(self.room_id)})
+                "quality_options": options if options is not None else self.platform.room_quality_options(self.room_id)})
             self.acquisition.mark('quality_metadata_ready')
             self.source_url, self.source_headers = url, headers
             return url, headers
@@ -255,13 +267,37 @@ class Decoder:
         if info:
             self.events.information.emit(info)
         self.acquisition.phase('play_url')
-        url, quality, _profile, headers = bili.play_url(
-            self.room_id, self.seed.get("quality", 250), cancelled=self.cancelled.is_set, source_offset=attempt)
+        url, quality, _profile, headers = self._available_url(lambda quality: bili.play_url(
+            self.room_id, quality, cancelled=self.cancelled.is_set, source_offset=attempt), options)
         self.acquisition.mark('play_url_ready')
         self.acquisition.quality(actual=quality)
         self.events.information.emit({"actual_quality": quality})
         self.source_url, self.source_headers = url, headers
         return url, headers
+
+    def _available_url(self, fetch, options):
+        tiers = options if self.seed.get('highest_quality') and not self.seed.get('balanced_quality') else []
+        qualities = list(dict.fromkeys(int(item['qn']) for item in (tiers or [])
+                                      if int(item['qn']) != AUTO_QUALITY))
+        if not qualities:
+            qualities = [self.seed.get('quality', 10000 if self.platform is not None else 250)]
+        for index, quality in enumerate(qualities):
+            if self.cancelled.is_set():
+                raise bili.Cancelled()
+            self.seed['quality'] = quality
+            self.acquisition.quality(requested=quality)
+            try:
+                result = fetch(quality)
+            except bili.Cancelled:
+                raise
+            except Exception:
+                if index == len(qualities) - 1:
+                    raise
+                self.acquisition.mark('quality_fallback')
+                self.events.state.emit('当前档位取流失败，正在尝试下一档画质…')
+                continue
+            self.events.information.emit({'requested_quality': quality})
+            return result
 
     def _run(self) -> None:
         if av is None:

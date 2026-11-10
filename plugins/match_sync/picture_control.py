@@ -38,6 +38,10 @@ def _main_changed(viewer, *_args):
                               "主画面基准" if key == selected else "等待重新确认")
             row.refresh_status()
     viewer._apply_crop_quality()
+    main = viewer.rows.get(selected)
+    if (viewer.running and main is not None and main.quality_auto and main.decoder is not None
+            and not main.decoder.seed.get('highest_quality')):
+        viewer._reload_picture()
     viewer.sync_picture()
     viewer.changed()
 
@@ -186,6 +190,7 @@ def _quality_changed(viewer, _room, quality):
     row = viewer.rows.get(viewer.main.currentData())
     if row is not None:
         row.quality = quality
+        row.quality_auto = False
         viewer._reload_picture()
         viewer.changed()
 

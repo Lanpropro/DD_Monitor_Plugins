@@ -296,7 +296,7 @@ Qt 6.11.2 上 `selfcheck_match_sync_retry_rows.py` 的离屏全屏窗口退出�
 
 `check_match_sync_sidebar_entry.py --host <根宿主目录>` 检查首帧、收展与横竖入口放置；顶部横栏通过功能中心访问插件，不要求隐藏的固定图标可见。旧版入口与切换生命周期继续由 `check_match_sync_mode_switch.py` 覆盖。
 
-`check_match_sync_quality_policy.py --host <宿主目录>` 检查切换主路不重选最高档、平台自动及手动档位原样传递、重试不升档、匹配seed复用，以及失败请求档位的去敏诊断。
+`check_match_sync_quality_policy.py --host <宿主目录>` 检查主路默认最高可用取流、受限档位逐档回退、取消中断后续请求、平台列表失败回退原档位、主路默认策略只重取一次、手动档位优先和持久化、匹配seed复用及失败请求档位的去敏诊断；同时覆盖计时器控制台常驻入口。使用B站/第三方协议替身，不是实播带宽或画质验收。
 播放日志的每路acquisition增加requested_quality和实际返回后的actual_quality，仅保存数值；未返回地址时不伪造实际档位，上一轮失败仍保留请求档位。
 
 

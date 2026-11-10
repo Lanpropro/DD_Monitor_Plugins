@@ -16,7 +16,7 @@ def check(app, host, module):
             plugins.PluginManager(window=host, plugins_dir=directory), 'quality_snapshot'), {})
         try:
             for key in ('1', '2'):
-                viewer.add_room(key, {'alias': key})
+                viewer.add_room(key, {'alias': key, 'quality_auto': False})
                 viewer.rows[key].decoder = module.Decoder(key)
             native, platform = viewer.rows.values()
             provider = Mock(side_effect=AssertionError('GUI queried platform metadata'))
