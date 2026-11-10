@@ -19,7 +19,7 @@ def main():
     from PySide6.QtCore import Qt, QRectF
     from PySide6.QtGui import QImage, QPainter, QColor
     from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout
-    from plugins.match_sync.viewer import Canvas
+    from plugins.match_sync.canvas import Canvas
 
     class Skin(QWidget):
         paints = 0

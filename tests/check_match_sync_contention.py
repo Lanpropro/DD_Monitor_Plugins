@@ -75,7 +75,7 @@ def scheduling_check(module, plugins, host):
     from plugins_user._match_sync.engine import Match, Sample
     now = [100.0]
     with tempfile.TemporaryDirectory() as directory, \
-            patch.object(module, 'Decoder', FakeDecoder), patch.object(module, 'Chat', FakeChat), \
+            patch.object(module.source_control, 'Decoder', FakeDecoder), patch.object(module.chat_control, 'Chat', FakeChat), \
             patch.object(module.AudioPump, 'start', lambda _: None), \
             patch.object(module.time, 'monotonic', side_effect=lambda: now[0]):
         host.settings = {}

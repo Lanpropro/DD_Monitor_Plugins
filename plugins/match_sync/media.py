@@ -1,31 +1,26 @@
-"""FFmpeg frame/PCM capture and cancellable platform chat workers."""
+"""FFmpeg frame/PCM capture and source acquisition."""
 from __future__ import annotations
 
-import asyncio
-import http.cookies
 import subprocess
 import threading
 import time
 from collections import deque
 
-from PySide6.QtCore import QObject, Signal, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage
 
-from ddm import bili, danmaku, recording
+from ddm import bili, recording
 from ddm.auto_quality import AUTO_QUALITY
 from .engine import FPS, Sample, SIGNATURE_BITS, np
 from .video import av, VideoHistory, PictureReader, StreamInput, reformat_frame, recording_template
 from .replay_cache import CACHE_BYTES, CACHE_SECONDS
 from .diagnostics import FrameCadence, StageTimings, StreamAcquisition
 
+# Compatibility exports; internal users import the owning module.
+from .media_signals import Events
+from .chat_clients import PlatformChat, Chat
+
 FRAME_TIMEOUT = 8.0
-
-
-class Events(QObject):
-    information = Signal(dict)
-    state = Signal(str)
-    message = Signal(dict)
-    reset = Signal()
 
 
 def fingerprint(jpeg: bytes, crop=(0.0, 0.0, 1.0, 1.0)) -> tuple[int, float]:
@@ -204,7 +199,20 @@ class Decoder:
     def _resolve(self, attempt: int) -> tuple[str, dict]:
         if self.cancelled.is_set():
             raise bili.Cancelled()
-        if self.seed.get("highest_quality") or self.seed.get("balanced_quality"):
+        self.acquisition.quality(requested=self.seed.get('quality', 10000 if self.platform is not None else 250))
+        options = None
+        if self.seed.get('highest_quality') and not self.seed.get('balanced_quality'):
+            self.acquisition.phase('quality_options')
+            try:
+                options = (self.platform.room_quality_options(self.room_id) if self.platform is not None
+                           else bili.room_quality_options(self.room_id))
+            except bili.Cancelled:
+                raise
+            except Exception:
+                options = []
+            self.acquisition.mark('quality_options_ready')
+            self.seed.pop('url', None)
+        if self.seed.get("balanced_quality"):
             self.acquisition.phase('quality_options')
             # The host lists tiers from highest to lowest; IDs are platform-specific.
             options = (self.platform.room_quality_options(self.room_id) if self.platform is not None
@@ -213,11 +221,11 @@ class Decoder:
             if self.cancelled.is_set():
                 raise bili.Cancelled()
             tiers = [item for item in options if int(item['qn']) != AUTO_QUALITY]
-            selected = tiers[0] if tiers else {'qn': self.seed.get('quality', 10000)}
-            if tiers and self.seed.get('balanced_quality'):
-                # Prefer 720p; tier IDs are not comparable across platforms.
-                selected = next((item for item in tiers if '720' in str(item.get('desc', ''))), tiers[len(tiers) // 2])
+            # Prefer 720p for secondary floating crops; keep source quality otherwise.
+            selected = (next((item for item in tiers if '720' in str(item.get('desc', ''))), tiers[len(tiers) // 2])
+                        if tiers else {'qn': self.seed.get('quality', 10000)})
             self.seed["quality"] = int(selected['qn'])
+            self.acquisition.quality(requested=self.seed['quality'])
             self.seed.pop("url", None)
             self.events.information.emit({"requested_quality": self.seed["quality"], "quality_options": options})
         # Douyu signed addresses may allow only one consumer; do not reuse the wall's URL.
@@ -238,15 +246,16 @@ class Decoder:
             if info:
                 self.events.information.emit(info.as_dict())
             self.acquisition.phase('play_url')
-            result = self.platform.play_url(self.room_id, self.seed.get("quality", 10000))
+            result = self._available_url(lambda quality: self.platform.play_url(self.room_id, quality), options)
             self.acquisition.mark('play_url_ready')
             if self.cancelled.is_set():
                 raise bili.Cancelled()
             url, quality, _channel = result[:3]
+            self.acquisition.quality(actual=quality)
             headers = dict(result[3]) if len(result) > 3 else {}
             self.acquisition.phase('quality_metadata')
             self.events.information.emit({"actual_quality": quality,
-                "quality_options": self.platform.room_quality_options(self.room_id)})
+                "quality_options": options if options is not None else self.platform.room_quality_options(self.room_id)})
             self.acquisition.mark('quality_metadata_ready')
             self.source_url, self.source_headers = url, headers
             return url, headers
@@ -258,12 +267,37 @@ class Decoder:
         if info:
             self.events.information.emit(info)
         self.acquisition.phase('play_url')
-        url, quality, _profile, headers = bili.play_url(
-            self.room_id, self.seed.get("quality", 250), cancelled=self.cancelled.is_set, source_offset=attempt)
+        url, quality, _profile, headers = self._available_url(lambda quality: bili.play_url(
+            self.room_id, quality, cancelled=self.cancelled.is_set, source_offset=attempt), options)
         self.acquisition.mark('play_url_ready')
+        self.acquisition.quality(actual=quality)
         self.events.information.emit({"actual_quality": quality})
         self.source_url, self.source_headers = url, headers
         return url, headers
+
+    def _available_url(self, fetch, options):
+        tiers = options if self.seed.get('highest_quality') and not self.seed.get('balanced_quality') else []
+        qualities = list(dict.fromkeys(int(item['qn']) for item in (tiers or [])
+                                      if int(item['qn']) != AUTO_QUALITY))
+        if not qualities:
+            qualities = [self.seed.get('quality', 10000 if self.platform is not None else 250)]
+        for index, quality in enumerate(qualities):
+            if self.cancelled.is_set():
+                raise bili.Cancelled()
+            self.seed['quality'] = quality
+            self.acquisition.quality(requested=quality)
+            try:
+                result = fetch(quality)
+            except bili.Cancelled:
+                raise
+            except Exception:
+                if index == len(qualities) - 1:
+                    raise
+                self.acquisition.mark('quality_fallback')
+                self.events.state.emit('当前档位取流失败，正在尝试下一档画质…')
+                continue
+            self.events.information.emit({'requested_quality': quality})
+            return result
 
     def _run(self) -> None:
         if av is None:
@@ -516,112 +550,3 @@ class Decoder:
                 self.acquisition.exited(process.returncode)
             if hls_proxy is not None:
                 hls_proxy.stop()
-
-
-class PlatformChat(QObject):
-    """Keep the host platform's QThread alive until it finishes."""
-
-    def __init__(self, room_id, platform, parent):
-        super().__init__(parent)
-        self.events = Events()
-        self.stopped = False
-        self.unavailable = "此平台暂不支持弹幕，直播画面与声音可正常播放"
-        try:
-            self.client = platform.danmaku_client(room_id, self)
-        except (ImportError, AttributeError):
-            self.client = None
-            self.unavailable = "平台弹幕组件不可用，请更新支持多平台弹幕的主程序"
-        if self.client is not None:
-            self.client.status.connect(self.events.state.emit)
-            self.client.message.connect(self.events.message.emit)
-            self.client.finished.connect(self._finished)
-
-    def _finished(self):
-        client, self.client = self.client, None
-        client.deleteLater()
-        if self.stopped:
-            self.deleteLater()
-
-    def start(self):
-        if self.client is None:
-            self.events.state.emit(self.unavailable)
-        else:
-            self.client.start()
-
-    def stop(self):
-        self.stopped = True
-        if self.client is not None:
-            self.client.stop()
-            if self.client.isRunning():
-                self.client.wait(2000)
-        else:
-            self.deleteLater()
-
-
-class Chat:
-    """Reuse the host's Bilibili protocol in a plain Python thread, not a QThread."""
-
-    def __init__(self, room_id: str):
-        self.room_id = room_id
-        self.events = Events()
-        self.cancelled = threading.Event()
-        self.loop = None
-        self.task = None
-        self.thread = None
-
-    def start(self):
-        self.thread = threading.Thread(target=self._run,
-                                       name=f"match-sync-chat-{self.room_id}", daemon=True)
-        self.thread.start()
-
-    def stop(self):
-        self.cancelled.set()
-        loop, task = self.loop, self.task
-        if loop is not None and task is not None and not loop.is_closed():
-            try:
-                loop.call_soon_threadsafe(task.cancel)
-            except RuntimeError:
-                pass
-
-    def _run(self):
-        if danmaku.blivedm is None:
-            self.events.state.emit("弹幕组件不可用")
-            return
-        while not self.cancelled.is_set():
-            try:
-                asyncio.run(self._main())
-            except asyncio.CancelledError:
-                return
-            except Exception:
-                if not self.cancelled.is_set():
-                    self.events.state.emit("弹幕连接失败，正在重试")
-            if self.cancelled.wait(2):
-                return
-
-    async def _main(self):
-        self.loop = asyncio.get_running_loop()
-        self.task = asyncio.current_task()
-        if self.cancelled.is_set():
-            return
-        cookies = http.cookies.SimpleCookie()
-        if bili.SESSION_DATA:
-            cookies["SESSDATA"] = bili.SESSION_DATA
-            cookies["SESSDATA"]["domain"] = "bilibili.com"
-        self.events.state.emit("弹幕连接中…")
-        async with danmaku.aiohttp.ClientSession(
-                timeout=danmaku.aiohttp.ClientTimeout(total=None, connect=15)) as session:
-            session.cookie_jar.update_cookies(cookies)
-            real_id, token, hosts = await asyncio.to_thread(bili.danmaku_conf, self.room_id)
-            if self.cancelled.is_set():
-                return
-            if not hosts:
-                self.events.state.emit("无法取得弹幕服务器")
-                return
-            client = danmaku._Client(real_id or int(self.room_id), session=session,
-                                     hosts=hosts, token=token, on_status=self.events.state.emit)
-            client.set_handler(danmaku._Handler(self.events.message.emit))
-            client.start()
-            try:
-                await client.join()
-            finally:
-                await client.stop_and_close()

@@ -21,7 +21,7 @@ def check(app, host, module):
             pass
         def stop(self):
             pass
-    with tempfile.TemporaryDirectory() as directory, patch.object(module.Decoder, 'start', lambda _self: None), patch.object(module, 'Chat', Chat), patch.object(module.AudioPump, 'start', lambda _self: None):
+    with tempfile.TemporaryDirectory() as directory, patch.object(module.Decoder, 'start', lambda _self: None), patch.object(module.chat_control, 'Chat', Chat), patch.object(module.AudioPump, 'start', lambda _self: None):
         host.settings, host.rooms = {}, []
         viewer = module.Viewer(plugins.PluginContext(plugins.PluginManager(window=host, plugins_dir=directory), 'crop_drag'), {})
         delivered = []

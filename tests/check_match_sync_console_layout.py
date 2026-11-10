@@ -36,7 +36,10 @@ def check(app, host, module, output=None):
             assert first.channel.currentData() == 3, 'Keep existing manual preferences'
             assert second.channel.currentData() == 0, 'New sources use original audio'
             first.audible.setChecked(True)
-            with patch.object(module.QCursor, 'pos', return_value=viewer.picture.mapToGlobal(viewer.picture.rect().center())):
+            # WA_DontShowOnScreen has no stable native global coordinates on Windows.
+            # Use one virtual pointer inside the picture for direct shortcut dispatch.
+            with patch.object(module.QCursor, 'pos', return_value=QPoint(10, 10)), \
+                    patch.object(viewer.picture, 'mapFromGlobal', return_value=viewer.picture.rect().center()):
                 viewer._handle_shortcut('audio_cycle')
                 assert first.channel.currentData() == 4
                 viewer._handle_shortcut('audio_cycle')

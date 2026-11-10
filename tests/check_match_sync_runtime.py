@@ -30,7 +30,7 @@ def run(app, host, output, sources, module=None, crop_mode=None):
         def stop(self):
             pass
 
-    with tempfile.TemporaryDirectory(dir=output.parent) as directory, patch.object(module, 'Chat', Chat):
+    with tempfile.TemporaryDirectory(dir=output.parent) as directory, patch.object(module.chat_control, 'Chat', Chat):
         manager = plugins.PluginManager(window=host, plugins_dir=directory)
         viewer = module.Viewer(plugins.PluginContext(manager, 'runtime_check'), sources)
         if hasattr(host, '_content'):
@@ -40,7 +40,6 @@ def run(app, host, output, sources, module=None, crop_mode=None):
         viewer.show()
         for key in sources:
             viewer.add_room(key, {'alias': key, 'quality': 10000})
-        viewer.prefer_highest = False
         viewer.picture.danmaku_button.setChecked(True)
         viewer.toggle_running()
         events, gaps = [], []
