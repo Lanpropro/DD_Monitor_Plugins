@@ -1,12 +1,15 @@
 """Crop picker shell; caption movement stays in the Qt event loop on Windows."""
 import sys
 
-from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import QApplication, QDialog
 
 
 class CropDialog(QDialog):
+    caption_started = Signal()
+    caption_finished = Signal()
+
     def __init__(self, parent):
         super().__init__(parent)
         self._caption_drag = None
@@ -27,6 +30,7 @@ class CropDialog(QDialog):
                 self._caption_pending = None
                 self._caption_move_timer.stop()
                 self.grabMouse()
+                self.caption_started.emit()
                 return True, 0
         return super().nativeEvent(event_type, message)
 
@@ -42,6 +46,7 @@ class CropDialog(QDialog):
         self._caption_drag = None
         self._caption_pending = None
         self.releaseMouse()
+        self.caption_finished.emit()
 
     def _flush_caption_move(self):
         self._caption_move_timer.stop()
@@ -80,9 +85,12 @@ class CropDialog(QDialog):
 
     def event(self, event):
         if event.type() == QEvent.UngrabMouse:
+            active = self._caption_drag is not None
             self._caption_drag = None
             self._caption_pending = None
             self._caption_move_timer.stop()
+            if active:
+                self.caption_finished.emit()
         return super().event(event)
 
     def hideEvent(self, event):

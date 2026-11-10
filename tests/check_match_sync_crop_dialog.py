@@ -51,7 +51,10 @@ def check(app, host, module):
         observed.events.clear()
 
         def open_crop(floating=False):
-            with patch.object(QDialog, 'exec', side_effect=AssertionError('Crop must return without exec')):
+            from importlib import import_module
+            picker = import_module(module.__package__ + '.crop_ui').CropPicker
+            with patch.object(QDialog, 'exec', side_effect=AssertionError('Crop must return without exec')), \
+                    patch.object(module.floating_control, 'create_picker', side_effect=picker):
                 viewer.choose_crop(row, floating=floating)
             dialog = viewer.crop_dialog
             assert dialog is not None and dialog.isVisible()

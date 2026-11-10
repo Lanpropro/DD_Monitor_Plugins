@@ -100,7 +100,9 @@ def check(app, host, module, output=None):
     host.settings, host.rooms = {}, []
     host.resize(1400, 900)
     host.show()
-    with tempfile.TemporaryDirectory() as directory:
+    picker = import_module(module.__package__ + '.crop_ui').CropPicker
+    with tempfile.TemporaryDirectory() as directory, \
+            patch.object(module.floating_control, 'create_picker', side_effect=picker):
         manager = plugins.PluginManager(window=host, plugins_dir=directory)
         viewer = module.Viewer(plugins.PluginContext(manager, 'floating_check'), {})
         viewer.setWindowFlags(Qt.Widget)

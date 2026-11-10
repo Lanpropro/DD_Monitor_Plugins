@@ -24,7 +24,10 @@ def check(app, host, module):
         image = QImage(320, 180, QImage.Format_RGB32)
         image.fill(Qt.red)
         viewer.canvas.set_frame((1., image))
-        viewer.choose_crop(viewer.rows['1'])
+        from importlib import import_module
+        picker = import_module(module.__package__ + '.crop_ui').CropPicker
+        with patch.object(module.floating_control, 'create_picker', side_effect=picker):
+            viewer.choose_crop(viewer.rows['1'])
         dialog = viewer.crop_dialog
         assert dialog._caption_move_timer.parent() is dialog
         assert dialog._caption_move_timer.interval() == 16 and not dialog._caption_move_timer.isActive()

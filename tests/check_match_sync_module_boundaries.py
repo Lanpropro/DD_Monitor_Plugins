@@ -18,6 +18,10 @@ def check(app, host, module):
     audio = import_module(module.__package__ + '.audio')
     canvas = import_module(module.__package__ + '.canvas')
     crop_dialog = import_module(module.__package__ + '.crop_dialog')
+    crop_ui = import_module(module.__package__ + '.crop_ui')
+    crop_process = import_module(module.__package__ + '.crop_process')
+    crop_protocol = import_module(module.__package__ + '.crop_protocol')
+    crop_worker = import_module(module.__package__ + '.crop_worker')
     room_widgets = import_module(module.__package__ + '.room_widgets')
     comparison = import_module(module.__package__ + '.comparison')
     room_input = import_module(module.__package__ + '.room_input')
@@ -52,7 +56,8 @@ def check(app, host, module):
         raise AssertionError('Input validation boundary accepted an unrelated host')
     assert module.Results is module.alignment_control.Results
     assert module.floating_control.CropDialog is crop_dialog.CropDialog
-    for owned in (audio, canvas, crop_dialog, room_widgets, comparison, room_input, timing,
+    for owned in (audio, canvas, crop_dialog, crop_ui, crop_process, crop_protocol, crop_worker,
+                  room_widgets, comparison, room_input, timing,
                   chat_panel, composers, clients, signals, *controllers):
         source = ast.parse(Path(owned.__file__).read_text(encoding='utf-8'))
         assert not any(isinstance(n, ast.ImportFrom) and n.module == 'viewer' for n in ast.walk(source)), \

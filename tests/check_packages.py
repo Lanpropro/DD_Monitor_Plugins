@@ -54,7 +54,8 @@ def main():
                     assert manifest['author'] == 'reon-nynes'
                     assert manifest['min_app_version'] == '0.5.1'
                 if plugin_id == 'match_sync':
-                    modules = ('audio', 'canvas', 'crop_dialog', 'room_widgets', 'comparison', 'room_input',
+                    modules = ('audio', 'canvas', 'crop_dialog', 'crop_ui', 'crop_process', 'crop_worker', 'crop_protocol',
+                               'room_widgets', 'comparison', 'room_input',
                                'source_control', 'alignment_control', 'playback_timing', 'chat_control',
                                'presentation', 'picture_control', 'recording_control', 'replay_control',
                                'floating_control', 'viewer_ui', 'console_control', 'host_integration',

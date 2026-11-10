@@ -1,12 +1,13 @@
 """Floating control. Session state remains on the Viewer facade."""
 from __future__ import annotations
 
-from .canvas import Canvas
 from .crop_dialog import CropDialog
 from .floating import FloatingCrop
-from PySide6.QtWidgets import QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
-from PySide6.QtCore import QPoint, QRectF, Qt, QTimer
+from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtCore import QPoint, QRectF, QTimer
 from PySide6.QtGui import QRegion
+from .crop_process import create_picker
+from shiboken6 import isValid
 from ddm import theme
 
 def _crop_source_policy(viewer, row):
@@ -175,40 +176,38 @@ def choose_crop(viewer, row, floating=False):
     if frame is None and frozen is None:
         viewer.notice.setText("请先开始观看，收到画面后再选择对照区域")
         return
-    dialog = CropDialog(viewer)
+    crop = (viewer.floating_crops[row.room_id].crop if floating and row.room_id in viewer.floating_crops
+            else QRectF(0, 0, 1, 1) if floating else QRectF(*row.crop))
+    center = viewer.window().frameGeometry().center()
+    snapshot = dict(title=f"{row.label()}：" + ('框选悬浮画面' if floating else '拖选计时器或共同内容，仅用于放大对照'),
+                    crop=[crop.x(), crop.y(), crop.width(), crop.height()], floating=floating,
+                    selection_ready=(floating and row.room_id in viewer.floating_crops) or crop != QRectF(0, 0, 1, 1),
+                    position=[center.x()-450, center.y()-300], theme='light' if theme.is_light() else 'dark',
+                    stylesheet=QApplication.instance().styleSheet(), font=QApplication.instance().font().toString())
+    dialog = create_picker(viewer, snapshot)
     viewer.crop_dialog = dialog
     dialog.crop_row = row
-    dialog.setWindowModality(Qt.NonModal)
-    dialog.setWindowTitle(f"{row.label()}：" + ('框选悬浮画面' if floating else '拖选计时器或共同内容，仅用于放大对照'))
-    dialog.resize(900, 600)
-    canvas = Canvas(selecting=True)
-    canvas.set_frame(frame)
-    canvas.waiting = frame is None
-    canvas.crop = (QRectF(viewer.floating_crops[row.room_id].crop) if floating and row.room_id in viewer.floating_crops
-                   else QRectF(0, 0, 1, 1) if floating else QRectF(*row.crop))
-    canvas.selection_ready = (floating and row.room_id in viewer.floating_crops) or canvas.crop != QRectF(0, 0, 1, 1)
-    reset = QPushButton("使用整个画面")
-    reset.clicked.connect(canvas.reset_selection)
-    buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-    buttons.button(QDialogButtonBox.Ok).setObjectName("MatchSyncCropConfirm")
-    dialog.setStyleSheet(f"""
-            QPushButton {{
-                background: {theme.CONTENT_HOVER}; color: {theme.TEXT1};
-                border: 1px solid {theme.BORDER_STRONG}; border-radius: 6px;
-                padding: 6px 16px;
-            }}
-            QPushButton:hover {{ background: {theme.ELEVATED}; border-color: {theme.ACCENT}; }}
-            QPushButton:pressed {{ background: {theme.CONTENT}; }}
-            QPushButton:focus {{ border: 2px solid {theme.ACCENT}; }}
-            QPushButton#MatchSyncCropConfirm {{ background: #006a92; color: #ffffff; border-color: #006a92; }}
-            QPushButton#MatchSyncCropConfirm:hover {{ background: #007ba8; }}
-            QPushButton#MatchSyncCropConfirm:pressed {{ background: #005778; }}
-            QPushButton:disabled, QPushButton#MatchSyncCropConfirm:disabled {{
-                background: {theme.CONTENT_HOVER}; color: {theme.TEXT3}; border-color: {theme.BORDER};
-            }}
-        """)
+
+    def finished(result):
+        if not isValid(viewer):
+            return
+        viewer.crop_dialog = None
+        if (result != QDialog.Accepted or not source_valid()
+                or dialog.crop.width() <= 0 or dialog.crop.height() <= 0):
+            return
+        rect = dialog.crop
+        if floating:
+            viewer.show_floating_crop(row, (rect.x(), rect.y(), rect.width(), rect.height()), dialog.frame)
+            return
+        row.crop = (rect.x(), rect.y(), rect.width(), rect.height())
+        viewer.comparison_panel.zoom.setChecked(True)
+        viewer.show_comparison(row.room_id)
+        viewer.changed()
+
+    dialog.finished.connect(finished)
+    if hasattr(dialog, 'failed'):
+        dialog.failed.connect(lambda _reason: viewer.notice.setText('框选窗口未能完成，请重试') if isValid(viewer) else None)
     if frame is None:
-        buttons.button(QDialogButtonBox.Ok).setEnabled(False)
         prepare = QTimer(dialog)
         prepare.setInterval(16)
 
@@ -218,42 +217,11 @@ def choose_crop(viewer, row, floating=False):
                 return
             ready = decoder.pictures.get(*frozen, exact=True)
             if ready is not None:
-                canvas.set_frame(ready)
-                canvas.waiting = False
-                buttons.button(QDialogButtonBox.Ok).setEnabled(True)
+                dialog.set_frame(ready)
                 prepare.stop()
 
         prepare.timeout.connect(show_frozen)
         dialog.finished.connect(prepare.stop)
         prepare.start()
-    buttons.accepted.connect(dialog.accept)
-    buttons.rejected.connect(dialog.reject)
-    layout = QVBoxLayout(dialog)
-    hint = QLabel('Ctrl＋滚轮：缩放　滚轮：上下平移　Shift＋滚轮：左右平移'
-                  if floating else "自动匹配始终使用完整画面；框选仅用于放大对照、人工微调偏移。"
-                  "两路请选择相同计时器，框选不会改变自动匹配或读取计时器数字。")
-    hint.setWordWrap(True)
-    layout.addWidget(hint)
-    layout.addWidget(canvas, 1)
-    actions = QHBoxLayout()
-    actions.addStretch(1)
-    actions.addWidget(reset)
-    actions.addWidget(buttons)
-    layout.addLayout(actions)
-    def finished(result):
-        viewer.crop_dialog = None
-        dialog.deleteLater()
-        if (result != QDialog.Accepted or not source_valid()
-                or canvas.crop.width() <= 0 or canvas.crop.height() <= 0):
-            return
-        rect = canvas.crop
-        if floating:
-            viewer.show_floating_crop(row, (rect.x(), rect.y(), rect.width(), rect.height()), canvas.frame)
-            return
-        row.crop = (rect.x(), rect.y(), rect.width(), rect.height())
-        viewer.comparison_panel.zoom.setChecked(True)
-        viewer.show_comparison(row.room_id)
-        viewer.changed()
-
-    dialog.finished.connect(finished)
+    dialog.set_frame(frame)
     dialog.show()
