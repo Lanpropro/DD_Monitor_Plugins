@@ -344,13 +344,14 @@ class ClockDialog(QDialog):
                 readings[key] = ClockReading(value, tuple(stamp for stamp, _image in lane.frames),
                                              lane.strip.currentRow(), self.anchors[key])
             desired, errors = calculate_offsets(readings, self.sample_shifts, self.reference, self.mode.currentData())
+            self.reviewed_readings = readings
             self.proposal = desired
             labels = []
             for key in self.sample_keys:
                 if key != self.reference:
                     delay = desired[self.reference] - desired[key]
                     labels.append(f'{self.lanes[key].included.text()}：偏移 {delay:+.2f}s，采样边界误差约 ±{errors[key]:.2f}s')
-            self.status.setText('；'.join(labels) + '。确认后锁定为手动对齐；可重新开启自动对齐。')
+            self.status.setText('；'.join(labels) + '。确认后手动锁定；断流后自动复核计时器，无法复核时等待确认。')
             self.apply.setEnabled(True)
         except ValueError as error:
             self.status.setText(str(error))
@@ -361,6 +362,8 @@ class ClockDialog(QDialog):
             if self.proposal is None:
                 return
             apply_offsets(self.viewer, self.proposal, self.sample_keys)
+            self.viewer.clock_recovery.arm(self.reviewed_readings,
+                {key: self.lanes[key].region for key in self.sample_keys}, self.mode.currentData())
         except ValueError as error:
             self.status.setText(str(error))
             return

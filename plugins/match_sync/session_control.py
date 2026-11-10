@@ -48,6 +48,7 @@ def toggle_running(viewer):
 
 
 def stop(viewer):
+    viewer.clock_recovery.cancel()
     clock_dialog = getattr(viewer, 'clock_dialog', None)
     if clock_dialog is not None:
         clock_dialog.reject()

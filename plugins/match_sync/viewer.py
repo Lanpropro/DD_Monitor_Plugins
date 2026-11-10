@@ -26,6 +26,7 @@ from .comparison import ComparisonPanel
 from .room_input import parse_room
 from .playback_timing import picture_poll_interval, cache_gap
 from .alignment_control import Results
+from .clock_recovery import ClockRecovery
 from . import viewer_ui, host_integration, console_control, session_control
 from . import source_control, chat_control, alignment_control, playback_timing, picture_control, recording_control, replay_control, presentation, floating_control
 
@@ -107,6 +108,7 @@ class Viewer(QDialog):
         self.save_timer.setSingleShot(True)
         self.save_timer.setInterval(350)
         self.save_timer.timeout.connect(self.save)
+        self.clock_recovery = ClockRecovery(self)
         if initial_room:
             self.add_room(str(initial_room.get("room_id") or ""),
                           {"alias": initial_room.get("uname") or ""})

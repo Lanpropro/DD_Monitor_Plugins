@@ -165,6 +165,7 @@ def _start_row(viewer, row):
     if policy != 'source':
         seed.pop('url', None)
     row.decoder = Decoder(row.room_id, seed, row.platform)
+    viewer.clock_recovery.source_reset(row.room_id)
     row.decoder.set_crop((0, 0, 1, 1))
     decoder = row.decoder
     decoder.events.information.connect(lambda info, r=row, d=decoder: viewer._information(r, d, info))
@@ -213,6 +214,7 @@ def _state(viewer, row, worker, text, chat):
 
 def _reset(viewer, row, worker):
     if viewer._valid(row, worker):
+        viewer.clock_recovery.source_reset(row.room_id)
         row.large_candidate = None
         previous = getattr(row.decoder.history, 'previous', None)
         position = viewer.live_clock() + viewer.shifts().get(row.room_id, 0)

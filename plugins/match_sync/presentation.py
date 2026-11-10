@@ -137,6 +137,8 @@ def _render(viewer, probe):
     if viewer.replay.active:
         viewer.notice.setText('整组回看中；后台继续接收直播并自动对齐')
     viewer._update_sync_health(clock, shifts)
+    if clock_status := viewer.clock_recovery.status_text():
+        viewer.notice.setText(clock_status)
     if probe is not None:
         probe.mark('chat')
     chat_deadline = time.perf_counter() + .004

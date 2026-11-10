@@ -578,9 +578,11 @@ class RoomRow(QFrame):
             button.setEnabled(can_submit_hint)
             button.setToolTip(button.text() + '：' + hint)
         match_text = self.match_text
+        clock_recovery = self.viewer.clock_recovery
+        clock_pending = self.room_id in clock_recovery.pending
         if independent:
             match_text = "独立播放，不参与自动对齐"
-        elif not self.viewer.alignment.automatic:
+        elif not self.viewer.alignment.automatic and not clock_pending:
             match_text = "自动对齐已关闭；手动偏移"
         elif self.room_id == self.viewer.alignment.reference:
             match_text = "主画面基准"
@@ -599,6 +601,9 @@ class RoomRow(QFrame):
             parts.append((QStyle.SP_MediaPause, '已暂停'))
         elif self.decoder is None:
             parts.append((QStyle.SP_MediaStop, '已停止' if self.sync_state == '已停止' else '未开始'))
+        elif clock_pending:
+            parts.append((QStyle.SP_MessageBoxInformation,
+                          '待确认计时器' if clock_recovery.failed else '计时器复核中'))
         elif not self.viewer.alignment.automatic:
             parts.append((QStyle.SP_MediaPlay, '手动偏移' if self.sync_state == '已同步' else '手动偏移 · 等待缓存'))
         elif self.room_id in self.viewer.independent_shifts and self.viewer.alignment.automatic:
@@ -630,7 +635,7 @@ class RoomRow(QFrame):
         for icon, label in parts:
             if icon == 'connected' or label in ('连接异常', '重连中', '连接中'):
                 hints.append(self.video_text)
-            elif icon == 'search' or label in ('已对齐', '待确认对齐'):
+            elif icon == 'search' or label in ('已对齐', '待确认对齐', '待确认计时器', '计时器复核中'):
                 hints.append(match_text)
             elif icon == 'buffer' or label.startswith('缺少 '):
                 hints.append(self.buffer_text.split(' · ')[0])

@@ -21,6 +21,7 @@ def check(app, host, module, output=None):
     capture = import_module(module.__package__ + '.clock_capture')
     ui = import_module(module.__package__ + '.clock_dialog')
     video = import_module(module.__package__ + '.video')
+    recovery = import_module(module.__package__ + '.clock_recovery')
     font_id = QFontDatabase.addApplicationFont('C:/Windows/Fonts/arial.ttf')
     family = QFontDatabase.applicationFontFamilies(font_id)[0] if font_id >= 0 else 'sans-serif'
     assert model.parse_clock('01:29') == 89
@@ -57,6 +58,7 @@ def check(app, host, module, output=None):
         image.fill(Qt.black)
         painter = QPainter(image)
         font = QFont(family, 64)
+        font.setPixelSize(85)  # QImage fixture must not change with the host screen DPI.
         painter.setFont(font)
         painter.setPen(Qt.white)
         painter.drawText(image.rect(), Qt.AlignCenter, model.format_clock(second))
@@ -93,11 +95,23 @@ def check(app, host, module, output=None):
         cancel.set()
         assert capture.capture_band(history, 103, (.2, .25, .6, .5), cancel) == []
         cancel.clear()
-        actual, note = capture.recognize_bands({'a': frames}, cancel)
+        earlier = capture.capture_band(history, 101.5, (.2, .25, .6, .5), cancel)
+        actual, note = capture.recognize_bands({'a': frames, 'earlier': earlier}, cancel)
+        if output:
+            frames[0][1].save(str(output.with_name('first-clock.png')))
+            earlier[0][1].save(str(output.with_name('earlier-clock.png')))
         if sys.platform == 'win32':
             assert not note and actual['a'][0] == 89, (note, actual)
             suggested = model.suggest_transition([stamp for stamp, _ in frames], actual['a'], -1)
             assert suggested is not None, actual
+            assert model.suggest_transition([stamp for stamp, _ in earlier], actual['earlier'], -1) is not None, actual
+            first = recovery.read_clocks({'1': earlier, '2': earlier},
+                {'1': actual['earlier'], '2': actual['earlier']}, {'1': 101.5, '2': 101.2}, -1)
+            second = recovery.read_clocks({'1': frames, '2': frames},
+                {'1': actual['a'], '2': actual['a']}, {'1': 103., '2': 102.7}, -1)
+            recovery.verify_progress(first, second, -1)
+            offsets = recovery.verify_repeat(first, second, -1, {'1': 0., '2': -.3}, '1')
+            assert abs(offsets['2']) < .001, offsets
         else:
             assert note
         with patch.object(capture.os, 'name', 'posix'):
