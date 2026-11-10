@@ -58,7 +58,7 @@ def main():
                                'room_widgets', 'comparison', 'room_input',
                                'source_control', 'alignment_control', 'playback_timing', 'chat_control',
                                'presentation', 'picture_control', 'recording_control', 'replay_control',
-                               'floating_control', 'floating_move', 'viewer_ui', 'console_control', 'host_integration',
+                               'floating_control', 'viewer_ui', 'console_control', 'host_integration',
                                'session_control', 'chat_panel', 'send_composers', 'chat_clients', 'media_signals')
                     assert all(f'match_sync/{name}.py' in names for name in modules), \
                         'The refactored Viewer must ship with every owning module'

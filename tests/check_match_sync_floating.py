@@ -101,10 +101,10 @@ def check(app, host, module, output=None):
     host.resize(1400, 900)
     host.show()
     picker = import_module(module.__package__ + '.crop_ui').CropPicker
-    floating_module = import_module(module.__package__ + '.floating')
     with tempfile.TemporaryDirectory() as directory, \
             patch.object(module.floating_control, 'create_picker', side_effect=picker), \
-            patch.object(floating_module, 'start_native_move', return_value=False):
+            patch('PySide6.QtGui.QWindow.startSystemMove',
+                  side_effect=AssertionError('Floating crop gestures must stay outside the system move loop')):
         manager = plugins.PluginManager(window=host, plugins_dir=directory)
         viewer = module.Viewer(plugins.PluginContext(manager, 'floating_check'), {})
         viewer.setWindowFlags(Qt.Widget)
@@ -378,7 +378,8 @@ def check(app, host, module, output=None):
             return {'passed': True, 'source_resolution': '1920x1080', 'app_wide_drag': True,
                     'wheel_corner_resize': True, 'four_corner_resize': True, 'editable_selection': True,
                     'inline_actions': True, 'fine_tune_button': True, 'replay_source_time': True,
-                    'resize_placement_restored': True, 'cursor_zoom': True, 'burst_repaints_100_to_1': True, 'network_requests': 0}
+                    'resize_placement_restored': True, 'cursor_zoom': True, 'burst_repaints_100_to_1': True,
+                    'system_move_not_called': True, 'network_requests': 0}
         finally:
             row.decoder = None
             viewer.embedded = False

@@ -62,8 +62,6 @@ def floating_surface(viewer):
 
 def reparent_floating_crops(viewer, parent):
     for floating in viewer.floating_crops.values():
-        if floating.native_move is not None:
-            floating.native_move.finish(cancel=True)
         geometry = floating.geometry()
         floating.parentWidget().removeEventFilter(floating)
         floating.setParent(parent)
