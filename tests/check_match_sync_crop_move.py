@@ -26,6 +26,8 @@ def check(app, host, module):
         viewer.canvas.set_frame((1., image))
         viewer.choose_crop(viewer.rows['1'])
         dialog = viewer.crop_dialog
+        assert dialog._caption_move_timer.parent() is dialog
+        assert dialog._caption_move_timer.interval() == 16 and not dialog._caption_move_timer.isActive()
         app.processEvents()
         dialog.move(200, 200)
         initial = dialog.pos()
@@ -46,15 +48,27 @@ def check(app, host, module):
                 assert result == (True, 0), 'Caption presses must not enter the native moving loop'
                 base.assert_not_called()
                 grab.assert_called_once()
+                with patch.object(dialog, 'move', wraps=dialog.move) as moved:
+                    for index in range(200):
+                        send_mouse(QEvent.MouseMove, QPoint(300+index, 220), Qt.NoButton, Qt.LeftButton)
+                    assert moved.call_count == 0, 'Mouse bursts must wait for one scheduled position update'
+                    assert dialog._caption_move_timer.isActive()
+                    dialog._caption_move_timer.timeout.emit()
+                    assert moved.call_count == 1 and dialog.pos() == initial+QPoint(199, 0)
+                    assert not dialog._caption_move_timer.isActive()
                 progressed = []
                 for point in (QPoint(330, 240), QPoint(280, 210), QPoint(-100, -50)):
                     QTimer.singleShot(0, lambda: progressed.append(True))
                     event = send_mouse(QEvent.MouseMove, point, Qt.NoButton, Qt.LeftButton)
+                    dialog._caption_move_timer.timeout.emit()
                     assert event.isAccepted() and dialog.pos() == initial + point-QPoint(300, 220)
                     app.processEvents()
                 assert len(progressed) == 3, 'Qt events continue between caption moves'
-                event = send_mouse(QEvent.MouseButtonRelease, QPoint(-100, -50), Qt.LeftButton, Qt.NoButton)
+                send_mouse(QEvent.MouseMove, QPoint(-90, -40), Qt.NoButton, Qt.LeftButton)
+                event = send_mouse(QEvent.MouseButtonRelease, QPoint(-70, -30), Qt.LeftButton, Qt.NoButton)
                 assert event.isAccepted() and dialog._caption_drag is None
+                assert dialog.pos() == initial+QPoint(-370, -250), 'Release commits its own final global position'
+                assert not dialog._caption_move_timer.isActive() and dialog._caption_pending is None
                 release.assert_called_once()
                 landed = dialog.pos()
 
@@ -65,8 +79,12 @@ def check(app, host, module):
                 assert viewer.crop_dialog is dialog, 'Escape during a move cancels only the move'
 
                 dialog.nativeEvent(b'windows_generic_MSG', ctypes.addressof(message))
+                send_mouse(QEvent.MouseMove, QPoint(400, 300), Qt.NoButton, Qt.LeftButton)
                 app.sendEvent(dialog, QEvent(QEvent.UngrabMouse))
                 assert dialog._caption_drag is None, 'Capture loss must clear drag state'
+                assert not dialog._caption_move_timer.isActive() and dialog._caption_pending is None
+                dialog._caption_move_timer.timeout.emit()
+                assert dialog.pos() == landed
 
                 # Resize borders, double clicks and system menu messages retain Qt behavior.
                 for code, hit in ((0x00a1, 10), (0x00a3, 2), (0x0112, 0xf100)):
@@ -76,13 +94,18 @@ def check(app, host, module):
                     base.assert_called_once()
                 message.message, message.wParam = 0x00a1, 2
                 dialog.nativeEvent(b'windows_generic_MSG', ctypes.addressof(message))
+                send_mouse(QEvent.MouseMove, QPoint(500, 500), Qt.NoButton, Qt.LeftButton)
                 dialog.reject()
                 assert dialog._caption_drag is None and viewer.crop_dialog is None
+                assert not dialog._caption_move_timer.isActive() and dialog._caption_pending is None
+                assert dialog.pos() == landed, 'Closing must discard the pending move'
                 assert release.call_count == 3  # Release, Escape, then hide; UngrabMouse already lost capture.
             QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
             return dict(passed=True, native_caption_consumed=True, qt_event_progress=True,
                         global_position_and_negative_coordinates=True, escape_restores=True,
                         capture_loss_cleanup=True, close_releases_mouse=True,
+                        mouse_burst_200_to_1=True, final_release_position=True,
+                        pending_timer_only=True,
                         native_resize_and_system_controls_preserved=True,
                         actual_native_drag_performed=False, performance_claim=False)
         finally:

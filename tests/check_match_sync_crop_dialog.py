@@ -135,7 +135,7 @@ def check(app, host, module):
                 dialog = open_crop()
             buttons = dialog.findChild(QDialogButtonBox)
             assert not buttons.button(QDialogButtonBox.Ok).isEnabled()
-            prepare = dialog.findChild(QTimer)
+            prepare, = [timer for timer in dialog.findChildren(QTimer) if timer is not dialog._caption_move_timer]
             assert prepare.isActive()
             ready[0] = (1., image)
             prepare.timeout.emit()
@@ -145,7 +145,7 @@ def check(app, host, module):
             ready[0] = None
             with patch.object(viewer, 'live_clock', return_value=1.), patch.object(viewer, 'shifts', return_value={'1': 0}):
                 dialog = open_crop()
-            prepare = dialog.findChild(QTimer)
+            prepare, = [timer for timer in dialog.findChildren(QTimer) if timer is not dialog._caption_move_timer]
             read_count = len(reads)
             decoder.history = SimpleNamespace(previous=None)
             prepare.timeout.emit()
