@@ -1,8 +1,10 @@
 """Connection destinations, selected route, and bounded session event display."""
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QHeaderView, QLabel,
-                               QPlainTextEdit, QPushButton, QTreeWidget, QTreeWidgetItem,
+                               QPlainTextEdit, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
+
+from ddm.ui import ActionButton, HintLabel
 
 
 class ConnectionPage(QWidget):
@@ -16,11 +18,9 @@ class ConnectionPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
         row = QHBoxLayout()
-        self.state = QLabel('代理未启动')
-        self.state.setObjectName('ProxyHint')
-        self.state.setWordWrap(True)
+        self.state = HintLabel('代理未启动')
         row.addWidget(self.state, 1)
-        refresh = QPushButton('刷新')
+        refresh = ActionButton('刷新')
         refresh.clicked.connect(self._refresh)
         row.addWidget(refresh)
         layout.addLayout(row)
@@ -36,7 +36,7 @@ class ConnectionPage(QWidget):
         self.connections.setMinimumHeight(70)
         layout.addWidget(self.connections, 3)
         label = QLabel('最近事件与错误（仅本次会话）')
-        label.setObjectName('ProxyHint')
+        label.setObjectName('SettingsSectionTitle')
         layout.addWidget(label)
         self.events = QPlainTextEdit()
         self.events.setReadOnly(True)

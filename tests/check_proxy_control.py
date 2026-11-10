@@ -759,6 +759,76 @@ class ConnectionTests(unittest.TestCase):
 
 
 class InterfaceTests(unittest.TestCase):
+    def test_shared_settings_controls_keep_host_typography_and_colors_in_both_themes(self):
+        from ddm import theme
+        from ddm.ui import ActionButton, DisclosureButton, HintLabel, SettingsSurface, TitleLabel
+        from PySide6.QtGui import QPalette
+        previous = 'light' if theme.is_light() else 'dark'
+        panel = Panel(Options(core=__file__))
+        try:
+            self.assertTrue(all(isinstance(card, SettingsSurface) for card in panel.dashboard_cards))
+            self.assertIsInstance(panel.editor_card, SettingsSurface)
+            self.assertIsInstance(panel.advanced, DisclosureButton)
+            for mode in ('dark', 'light'):
+                theme.apply(mode)
+                reference = QWidget()
+                layout = QVBoxLayout(reference)
+                pairs = [(panel.title, TitleLabel('Title')),
+                         (panel.auto_start_hint, HintLabel('Hint')),
+                         (panel.test, ActionButton('Action')),
+                         (panel.import_button, ActionButton('Import'))]
+                pairs[-1][1].setObjectName('PrimaryButton')
+                for _actual, expected in pairs:
+                    layout.addWidget(expected)
+                panel.show()
+                reference.show()
+                APP.processEvents()
+                for actual, expected in pairs:
+                    actual.ensurePolished()
+                    expected.ensurePolished()
+                    self.assertIsInstance(actual, type(expected))
+                    self.assertEqual(actual.font(), expected.font(), (mode, actual.objectName()))
+                    role = QPalette.ButtonText if isinstance(actual, ActionButton) else QPalette.WindowText
+                    self.assertEqual(actual.palette().color(role), expected.palette().color(role),
+                                     (mode, actual.objectName(), role))
+                reference.close()
+                reference.deleteLater()
+        finally:
+            panel.close()
+            panel.deleteLater()
+            APP.processEvents()
+            theme.apply(previous)
+
+    def test_shared_disclosure_supports_mouse_and_keyboard_without_changing_draft(self):
+        panel = Panel(Options(core=__file__))
+        panel.resize(658, 478)
+        panel.show()
+        panel.navigation.setCurrentRow(2)
+        panel._new_profile()
+        panel.location.setText('https://example.invalid/unconfirmed')
+        imports = []
+        panel.applyRequested.connect(imports.append)
+        scroll = panel.configuration_views.widget(1)
+        try:
+            self.assertFalse(panel.advanced.isChecked())
+            scroll.ensureWidgetVisible(panel.advanced)
+            APP.processEvents()
+            QTest.mouseClick(panel.advanced, Qt.LeftButton)
+            APP.processEvents()
+            self.assertTrue(panel.runtime.isVisible())
+            self.assertTrue(panel.advanced.isChecked())
+            panel.advanced.setFocus()
+            QTest.keyClick(panel.advanced, Qt.Key_Space)
+            APP.processEvents()
+            self.assertFalse(panel.runtime.isVisible())
+            self.assertFalse(panel.advanced.isChecked())
+            self.assertEqual(panel.location.text(), 'https://example.invalid/unconfirmed')
+            self.assertEqual(imports, [])
+            self.assertGreaterEqual(panel.advanced.width(), panel.location.width())
+        finally:
+            panel.close()
+            panel.deleteLater()
+
     def test_expanded_node_popup_matches_selector_width_for_short_and_long_names(self):
         panel = Panel(Options())
         names = ['香港 01 [D]', '香港 02 [D]'] + ['Long node name ' * 20 + str(i) for i in range(12)]

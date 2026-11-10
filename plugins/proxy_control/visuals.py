@@ -4,11 +4,12 @@ from PySide6.QtGui import QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QListWidget, QStyle, QStyledItemDelegate
 
 from ddm import theme
+from ddm.ui import continuous_path
 from .traffic import quota, expiry_text
 
 
 def surface():
-    return theme.CONTENT if theme.is_light() else theme.mix(theme.BG, theme.CONTENT, .3)
+    return theme.CONTENT
 
 
 def translucent(color, alpha):
@@ -155,9 +156,9 @@ class ProfileDelegate(QStyledItemDelegate):
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(QPen(theme.qcolor(theme.ACCENT if record['active'] else theme.BORDER_STRONG), 1))
         painter.setBrush(theme.qcolor(theme.ACCENT_SOFT if record['active'] else surface()))
-        painter.drawRoundedRect(rect, 15, 15)
+        painter.drawPath(continuous_path(rect, theme.RADIUS_LG))
         font = QFont(option.font)
-        font.setPixelSize(theme.FONT_BODY)
+        font.setPixelSize(theme.FONT_CONTROL)
         font.setWeight(QFont.DemiBold)
         painter.setFont(font)
         painter.setPen(theme.qcolor(theme.TEXT1))

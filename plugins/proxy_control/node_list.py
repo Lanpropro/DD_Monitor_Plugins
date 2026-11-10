@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QListView, QStyledItemDelegate, QStyle
 
 from ddm import theme
 from ddm.motion import enabled as motion_enabled
-from ddm.ui import SelectControl
+from ddm.ui import SelectControl, continuous_path
 from .visuals import surface, symbol
 from .regions import display_node_name, flag_icon, region_code
 
@@ -154,9 +154,9 @@ class NodeDelegate(QStyledItemDelegate):
             theme.CONTENT_HOVER if option.state & QStyle.State_MouseOver else surface())
         painter.setBrush(theme.qcolor(background))
         painter.setPen(QPen(theme.qcolor(theme.ACCENT if selected else theme.BORDER_STRONG), 1))
-        painter.drawRoundedRect(rect, 15, 15)
+        painter.drawPath(continuous_path(rect, theme.RADIUS_LG))
         title = QFont(option.font)
-        title.setPixelSize(theme.FONT_BODY)
+        title.setPixelSize(theme.FONT_CONTROL)
         title.setWeight(QFont.DemiBold if selected else QFont.Medium)
         painter.setFont(title)
         painter.setPen(theme.qcolor(theme.TEXT1))

@@ -7,11 +7,12 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QFrame,
                                QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QPlainTextEdit,
-                               QPushButton, QScrollArea, QSizePolicy, QStackedWidget,
+                               QScrollArea, QSizePolicy, QStackedWidget,
                                QVBoxLayout, QWidget)
 
 from ddm import theme
-from ddm.ui import SegmentedControl, SelectControl, ToggleSwitch
+from ddm.ui import (ActionButton, DisclosureButton, HintLabel, SettingsSurface,
+                    SegmentedControl, SelectControl, TitleLabel, ToggleSwitch)
 
 from .configuration import Options, DEFAULT_USER_AGENT, USER_AGENTS
 from .node_list import NodeChoiceDelegate, NodeDelegate, NodeModel, NodeSelect, NodeView
@@ -82,11 +83,10 @@ class Panel(QWidget):
         layout.setSpacing(14)
         root.addWidget(content, 1)
         header = QHBoxLayout()
-        self.title = QLabel('总览')
-        self.title.setObjectName('ProxyTitle')
+        self.title = TitleLabel('总览')
         self.state = QLabel('未启动')
         self.state.setObjectName('ProxyState')
-        self.close_button = QPushButton()
+        self.close_button = ActionButton()
         self.close_button.setObjectName('ProxyClose')
         self.close_button.setFixedSize(28, 28)
         self.close_button.setAccessibleName('收起网络代理')
@@ -109,9 +109,7 @@ class Panel(QWidget):
         self.navigation.itemClicked.connect(self._navigation_clicked)
         self.navigation.itemActivated.connect(self._navigation_clicked)
         self.navigation.setCurrentRow(0)
-        self.status = QLabel('在“配置”中添加服务商订阅，即可启动代理')
-        self.status.setObjectName('ProxyFooter')
-        self.status.setWordWrap(True)
+        self.status = HintLabel('在“配置”中添加服务商订阅，即可启动代理')
         self.status.setMaximumHeight(36)
         layout.addWidget(self.status)
         theme.signals().changed.connect(self.refresh_theme)
@@ -138,7 +136,7 @@ class Panel(QWidget):
         self.card_icons = []
 
         def card(title, symbol):
-            frame = QFrame()
+            frame = SettingsSurface()
             frame.setObjectName('ProxyCard')
             frame.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
             self.dashboard_cards.append(frame)
@@ -152,17 +150,16 @@ class Panel(QWidget):
             self.card_icons.append((picture, symbol))
             heading.addWidget(picture)
             label = QLabel(title)
-            label.setObjectName('ProxyHint')
+            label.setObjectName('SettingsSectionTitle')
             heading.addWidget(label, 1)
             box.addLayout(heading)
             return box
 
         service = card('代理服务', 'latency')
-        self.service_state = QLabel('尚未启动')
-        self.service_state.setObjectName('ProxyValue')
+        self.service_state = TitleLabel('尚未启动')
         actions = QHBoxLayout()
         actions.addWidget(self.service_state, 1)
-        self.apply = QPushButton()
+        self.apply = ActionButton()
         self.apply.setObjectName('ProxyPower')
         self.apply.setFixedSize(40, 40)
         self.apply.clicked.connect(self._start)
@@ -177,9 +174,7 @@ class Panel(QWidget):
         self.auto_start.clicked.connect(self.autoStartRequested)
         restore_row.addWidget(self.auto_start)
         settings.addLayout(restore_row)
-        self.auto_start_hint = QLabel('仅恢复退出前仍开启的代理；手动暂停后不恢复。')
-        self.auto_start_hint.setObjectName('ProxyHint')
-        self.auto_start_hint.setWordWrap(True)
+        self.auto_start_hint = HintLabel('仅恢复退出前仍开启的代理；手动暂停后不恢复。')
         settings.addWidget(self.auto_start_hint)
         self.routing = SegmentedControl([('rule', '规则'), ('global', '全局'), ('direct', '直连')], options.routing)
         self.routing.setMinimumWidth(0)
@@ -187,9 +182,7 @@ class Panel(QWidget):
         self.routing.setToolTip('仅作用于本软件。规则模式：内置国内直播域名直连，其余经节点；不导入订阅路由规则。')
         self.routing.valueChanged.connect(self._request_routing)
         settings.addWidget(self.routing)
-        self.routing_hint = QLabel()
-        self.routing_hint.setObjectName('ProxyHint')
-        self.routing_hint.setWordWrap(True)
+        self.routing_hint = HintLabel()
         settings.addWidget(self.routing_hint)
         self._routing_hint(options.routing)
         provider = card('当前配置', 'folder')
@@ -200,7 +193,7 @@ class Panel(QWidget):
         self.quick_profile.setMinimumContentsLength(14)
         self.quick_profile.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.quick_profile.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
-        self.activate_profile = QPushButton('使用配置')
+        self.activate_profile = ActionButton('使用配置')
         self.activate_profile.setEnabled(False)
         self.activate_profile.clicked.connect(lambda: self.profileRequested.emit(self.quick_profile.currentData()))
         provider.addWidget(self.quick_profile)
@@ -217,14 +210,12 @@ class Panel(QWidget):
         self.quick_node.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.quick_node.setEnabled(False)
         self.quick_node.activated.connect(lambda index: self.nodeRequested.emit(self.quick_node.itemData(index)))
-        self.all_nodes = QPushButton('查看全部节点')
+        self.all_nodes = ActionButton('查看全部节点')
         self.all_nodes.clicked.connect(lambda: self.navigation.setCurrentRow(1))
         node.addWidget(self.quick_node)
         node.addWidget(self.all_nodes, 0, Qt.AlignLeft)
         resource = card('资源占用', 'overview')
-        self.resources = QLabel('内核未运行')
-        self.resources.setObjectName('ProxyHint')
-        self.resources.setWordWrap(True)
+        self.resources = HintLabel('内核未运行')
         resource.addWidget(self.resources)
         self._arrange_dashboard(2)
         scroll.setWidget(content)
@@ -259,9 +250,8 @@ class Panel(QWidget):
         self.search.setClearButtonEnabled(True)
         toolbar = QHBoxLayout()
         toolbar.addWidget(self.search, 1)
-        self.count = QLabel('0 个节点')
-        self.count.setObjectName('ProxyHint')
-        self.test = QPushButton('测延迟')
+        self.count = HintLabel('0 个节点')
+        self.test = ActionButton('测延迟')
         self.test.setEnabled(False)
         self.test.setToolTip(f'测试当前搜索结果中的节点，最多同时测试 {MAX_CONCURRENT} 个，其余排队；收起后取消未完成项')
         self.test.clicked.connect(lambda: self.testRequested.emit(list(self.model.visible)))
@@ -291,12 +281,10 @@ class Panel(QWidget):
         self.nodes.clicked.connect(lambda index: self.nodeRequested.emit(index.data()))
         self.nodes.activated.connect(lambda index: self.nodeRequested.emit(index.data()))
         box.addWidget(self.nodes, 1)
-        self.empty = QLabel('还没有节点\n先在配置页添加服务商订阅并启动')
-        self.empty.setObjectName('ProxyHint')
+        self.empty = HintLabel('还没有节点\n先在配置页添加服务商订阅并启动')
         self.empty.setAlignment(Qt.AlignCenter)
-        self.empty.setWordWrap(True)
         box.addWidget(self.empty, 1)
-        self.add_subscription = QPushButton('添加订阅')
+        self.add_subscription = ActionButton('添加订阅')
         self.add_subscription.clicked.connect(self._node_action)
         box.addWidget(self.add_subscription)
         self.search.textChanged.connect(self._filter)
@@ -313,8 +301,7 @@ class Panel(QWidget):
         list_box = QVBoxLayout(listing)
         list_box.setContentsMargins(0, 0, 0, 0)
         list_box.setSpacing(12)
-        self.profiles_hint = QLabel('选择配置进行编辑')
-        self.profiles_hint.setObjectName('ProxyHint')
+        self.profiles_hint = HintLabel('选择配置进行编辑')
         list_box.addWidget(self.profiles_hint)
         self.profiles_list = ProfileList()
         self.profiles_list.setObjectName('ProxyProfiles')
@@ -322,8 +309,8 @@ class Panel(QWidget):
         self.profiles_list.currentRowChanged.connect(self._edit_profile)
         self.profiles_list.itemClicked.connect(lambda item: self._edit_profile(self.profiles_list.row(item)))
         list_box.addWidget(self.profiles_list, 1)
-        self.add_profile = QPushButton('添加配置')
-        self.add_profile.setObjectName('ProxyStart')
+        self.add_profile = ActionButton('添加配置')
+        self.add_profile.setObjectName('PrimaryButton')
         self.add_profile.clicked.connect(self._new_profile)
         list_box.addWidget(self.add_profile, 0, Qt.AlignRight)
         self.configuration_views.addWidget(listing)
@@ -336,19 +323,17 @@ class Panel(QWidget):
         outer = QVBoxLayout(content)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(12)
-        self.editor_card = QFrame()
+        self.editor_card = SettingsSurface()
         self.editor_card.setObjectName('ProxyCard')
         box = QVBoxLayout(self.editor_card)
         box.setContentsMargins(14, 12, 14, 12)
         box.setSpacing(10)
-        self.back_to_profiles = QPushButton('配置列表')
-        self.back_to_profiles.setObjectName('ProxyLink')
+        self.back_to_profiles = ActionButton('配置列表')
         self.back_to_profiles.clicked.connect(lambda: self.configuration_views.setCurrentIndex(0))
         outer.addWidget(self.back_to_profiles, 0, Qt.AlignLeft)
         outer.addWidget(self.editor_card)
         outer.addStretch()
         name_label = QLabel('配置名称')
-        name_label.setObjectName('ProxyHint')
         box.addWidget(name_label)
         self.profile_name = QLineEdit(options.profile_name if options.profile else '')
         self.profile_name.setPlaceholderText('留空自动识别服务商名称')
@@ -357,7 +342,6 @@ class Panel(QWidget):
         self.profile_name.setToolTip('优先读取订阅提供的名称；未提供时显示订阅域名，也可手动命名')
         box.addWidget(self.profile_name)
         source_label = QLabel('导入方式')
-        source_label.setObjectName('ProxyHint')
         box.addWidget(source_label)
         self.source = SelectControl()
         self.source.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -376,11 +360,10 @@ class Panel(QWidget):
         self.profile = QPlainTextEdit(options.profile if options.source == 'nodes' else '')
         self.profile.setFixedHeight(130)
         box.addWidget(self.profile)
-        self.browse_profile = QPushButton('选择配置文件…')
+        self.browse_profile = ActionButton('选择配置文件…')
         self.browse_profile.clicked.connect(self._profile_file)
         box.addWidget(self.browse_profile)
         self.agent_label = QLabel('订阅格式（支持自定义 UA）')
-        self.agent_label.setObjectName('ProxyHint')
         self.agent_label.setWordWrap(True)
         box.addWidget(self.agent_label)
         self.agent = QComboBox()
@@ -395,18 +378,15 @@ class Panel(QWidget):
             self.agent.addItem(label, value)
         self._set_user_agent(options.user_agent)
         box.addWidget(self.agent)
-        self.import_button = QPushButton()
-        self.import_button.setObjectName('ProxyStart')
+        self.import_button = ActionButton()
+        self.import_button.setObjectName('PrimaryButton')
         self.import_button.clicked.connect(self._confirm_import)
         box.addWidget(self.import_button, 0, Qt.AlignRight)
-        self.import_status = QLabel('填写后点击上方按钮，下载并载入节点。')
-        self.import_status.setObjectName('ProxyHint')
-        self.import_status.setWordWrap(True)
+        self.import_status = HintLabel('填写后点击上方按钮，下载并载入节点。')
         box.addWidget(self.import_status)
-        self.advanced = QPushButton('内核设置')
-        self.advanced.setObjectName('ProxyLink')
-        self.advanced.setCheckable(True)
-        box.addWidget(self.advanced, 0, Qt.AlignLeft)
+        self.advanced = DisclosureButton()
+        self.advanced.setText('内核设置')
+        box.addWidget(self.advanced)
         self.runtime = QWidget()
         runtime = QVBoxLayout(self.runtime)
         runtime.setContentsMargins(0, 0, 0, 0)
@@ -415,10 +395,10 @@ class Panel(QWidget):
         self.core.setMinimumWidth(0)
         self.core.setFixedHeight(theme.CONTROL_HEIGHT)
         runtime.addWidget(self.core)
-        choose = QPushButton('选择内核程序…')
+        choose = ActionButton('选择内核程序…')
         choose.clicked.connect(self._core_file)
         runtime.addWidget(choose)
-        self.prepare = QPushButton('准备内核（首次下载）')
+        self.prepare = ActionButton('准备内核（首次下载）')
         self.prepare.clicked.connect(self.prepareRequested)
         runtime.addWidget(self.prepare)
         self.advanced.setChecked(not Path(options.core).is_file())
@@ -459,7 +439,6 @@ class Panel(QWidget):
 
     def _advanced(self, checked):
         self.runtime.setVisible(checked)
-        self.advanced.setIcon(icon('down' if checked else 'right'))
 
     def _page_changed(self, index):
         if index == 2:
@@ -719,39 +698,22 @@ class Panel(QWidget):
 #ProxyPanel QFrame#ProxyRail {{background: {translucent(theme.SIDEBAR, 135)}; border-right: 1px solid {theme.BORDER};}}
 #ProxyPanel QWidget#ProxyContent {{background: transparent;}}
 #ProxyPanel QWidget#ProxyConnections {{background: transparent;}}
-#ProxyPanel QTreeWidget#ProxyConnectionList {{background: {surface()}; color: {theme.TEXT1}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 10px; outline: none;}}
+#ProxyPanel QTreeWidget#ProxyConnectionList {{background: {surface()}; color: {theme.TEXT1}; border: 1px solid {theme.BORDER_STRONG}; border-radius: {theme.RADIUS_MD}px; outline: none;}}
 #ProxyPanel QTreeWidget#ProxyConnectionList::item {{padding: 5px 3px;}}
 #ProxyPanel QTreeWidget#ProxyConnectionList::item:selected {{background: {theme.ACCENT_SOFT}; color: {theme.TEXT1};}}
 #ProxyPanel QHeaderView::section {{background: {surface()}; color: {theme.TEXT2}; border: none; border-bottom: 1px solid {theme.BORDER}; padding: 4px;}}
-#ProxyPanel QLabel {{background: transparent; border: none; font-weight: 400;}}
-#ProxyPanel QLabel#ProxyBrand {{background: {surface()}; border-radius: 14px;}}
-#ProxyPanel QLabel#ProxyTitle {{font-size: 22px; font-weight: 600;}}
-#ProxyPanel QLabel#ProxyValue {{font-size: 20px; font-weight: 500;}}
-#ProxyPanel QLabel#ProxyHint {{color: {theme.TEXT2}; font-size: {theme.FONT_CAPTION}px;}}
-#ProxyPanel QLabel#ProxyFooter {{color: {theme.TEXT3}; font-size: 11px;}}
+#ProxyPanel QLabel {{background: transparent; border: none;}}
+#ProxyPanel QLabel#ProxyBrand {{background: {surface()}; border-radius: {theme.RADIUS_LG}px;}}
 #ProxyPanel QLabel#ProxyState {{color: {theme.TEXT2}; background: {surface()}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 11px; padding: 5px 10px; font-size: 12px; font-weight: 600;}}
 #ProxyPanel QLabel#ProxyState[online="true"] {{color: {status_ink}; background: {translucent(theme.SUCCESS, 28)}; border-color: {translucent(theme.SUCCESS, 110)};}}
-#ProxyPanel QFrame#ProxyCard {{background: {translucent(surface(), 165)}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 16px;}}
 #ProxyPanel QListView {{background: transparent; border: none; outline: none;}}
-#ProxyPanel QPushButton {{background: {surface()}; color: {theme.TEXT1}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 13px; padding: 5px 11px; min-height: 18px;}}
-#ProxyPanel QPushButton:hover {{background: {theme.CONTENT_HOVER};}}
-#ProxyPanel QPushButton:disabled {{color: {theme.TEXT3};}}
-#ProxyPanel QPushButton#ProxyStart {{background: {theme.ACCENT_SOFT}; border: 1px solid transparent; color: {theme.ACCENT}; border-radius: 15px; padding: 6px 13px;}}
-#ProxyPanel QPushButton#ProxyStart:hover {{border-color: {theme.ACCENT};}}
 #ProxyPanel QPushButton#ProxyPower {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT}; border: 1px solid {translucent(theme.ACCENT, 90)}; border-radius: 20px; padding: 0; min-height: 38px; max-height: 38px;}}
 #ProxyPanel QPushButton#ProxyPower:hover {{border-color: {theme.ACCENT};}}
 #ProxyPanel QPushButton#ProxyPower[serviceState="on"] {{background: {translucent(theme.ERROR, 28)}; color: {stop_ink}; border-color: {translucent(theme.ERROR, 120)};}}
 #ProxyPanel QPushButton#ProxyPower[serviceState="on"]:hover {{background: {translucent(theme.ERROR, 46)}; border-color: {theme.ERROR};}}
 #ProxyPanel QPushButton#ProxyPower[serviceState="busy"] {{background: {surface()}; color: {theme.TEXT2}; border-color: {theme.BORDER_STRONG};}}
 #ProxyPanel QPushButton#ProxyClose {{background: transparent; border: none; padding: 0;}}
-#ProxyPanel QPushButton#ProxyLink {{background: transparent; border: none; color: {theme.TEXT2}; padding: 3px 0;}}
-#ProxyPanel QPlainTextEdit, #ProxyPanel QLineEdit {{background: {surface()}; color: {theme.TEXT1}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 12px; padding: 8px 10px;}}
-#ProxyPanel QPlainTextEdit:focus, #ProxyPanel QLineEdit:focus {{border-color: {theme.ACCENT};}}
-#ProxyPanel QComboBox {{background: {surface()}; color: {theme.TEXT1}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 12px; padding: 6px 8px; min-height: {theme.CONTROL_HEIGHT - 14}px;}}
-#ProxyPanel QComboBox#ProxyInline {{background: {translucent(surface(), 190)}; border: 1px solid {theme.BORDER_STRONG}; padding: 6px 24px 6px 8px;}}
 #ProxyPanel QComboBox QLineEdit {{background: transparent; border: none; padding: 0;}}
-#ProxyPanel QComboBox::drop-down {{border: none; width: 20px;}}
-#ProxyPanel QWidget#ProxyEditor QLineEdit, #ProxyPanel QWidget#ProxyEditor QPlainTextEdit, #ProxyPanel QWidget#ProxyEditor QComboBox {{border-radius: {theme.RADIUS_MD}px;}}
 #ProxyPanel QScrollArea, #ProxyPanel QScrollArea > QWidget > QWidget {{background: transparent; border: none;}}
 ''')
         for label, name in self.card_icons:
