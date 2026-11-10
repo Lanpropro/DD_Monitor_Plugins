@@ -770,6 +770,37 @@ class ConnectionTests(unittest.TestCase):
 
 
 class InterfaceTests(unittest.TestCase):
+    def test_profile_selectors_ignore_wheel_but_keep_page_scroll_and_keyboard(self):
+        panel = Panel(Options(core=__file__))
+        panel.resize(658, 478)
+        panel.navigation.setCurrentRow(2)
+        panel.compatibility.setChecked(True)
+        panel.advanced.setChecked(True)
+        panel.show()
+        try:
+            for combo in (panel.source, panel.agent):
+                for focused in (False, True):
+                    panel.source.setCurrentIndex(0)
+                    combo.setCurrentIndex(0)
+                    panel.editor_scroll.ensureWidgetVisible(combo)
+                    (combo if focused else panel.import_button).setFocus()
+                    APP.processEvents()
+                    bar = panel.editor_scroll.verticalScrollBar()
+                    before = bar.value()
+                    self.assertLess(before, bar.maximum())
+                    position = combo.mapTo(panel, combo.rect().center())
+                    QTest.wheelEvent(panel.windowHandle(), position, QPoint(0, -120))
+                    APP.processEvents()
+                    self.assertEqual(combo.currentIndex(), 0)
+                    self.assertGreater(bar.value(), before)
+                    combo.setFocus()
+                    QTest.keyClick(combo, Qt.Key_Down)
+                    self.assertEqual(combo.currentIndex(), 1)
+        finally:
+            panel.hide()
+            panel.deleteLater()
+            APP.processEvents()
+
     def test_profile_editor_uses_compact_rows_and_fixed_confirmation_in_both_themes(self):
         from ddm import theme
         previous = theme.mode()

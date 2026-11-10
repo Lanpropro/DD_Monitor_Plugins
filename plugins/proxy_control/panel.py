@@ -225,6 +225,9 @@ class Panel(QWidget):
         self.pages.addWidget(scroll)
 
     def eventFilter(self, watched, event):
+        if event.type() == QEvent.Wheel and watched in (self.source, self.agent):
+            event.ignore()
+            return True
         if watched is self.pages and event.type() == QEvent.Resize and hasattr(self, 'dashboard_cards'):
             columns = 1 if self.pages.width() < 460 else 2
             if columns != self._dashboard_columns:
