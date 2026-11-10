@@ -7,8 +7,8 @@ from .crop_dialog import CropDialog
 
 
 class CropPicker(CropDialog):
-    def __init__(self, parent, snapshot):
-        super().__init__(parent)
+    def __init__(self, parent, snapshot, *, native_caption=False):
+        super().__init__(parent, native_caption=native_caption)
         self.frame = None
         self.setWindowModality(Qt.NonModal)
         self.setWindowTitle(snapshot['title'])

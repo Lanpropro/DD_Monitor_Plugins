@@ -36,7 +36,9 @@ if sys.argv[1:2] == ['--plugin-worker']:
                 info=dict(pid=os.getpid(),size=[image.width(),image.height()],
                           first=list(image.pixelColor(1,1).getRgb()),
                           last=list(image.pixelColor(image.width()-1,image.height()-1).getRgb()),
-                          config_loaded='ddm.app' in sys.modules)
+                          config_loaded='ddm.app' in sys.modules,
+                          native_caption=self._native_caption,
+                          caption_timer_active=self._caption_move_timer.isActive())
                 Path(os.environ['DDM_CROP_TEST_RESULT']).write_text(json.dumps(info))
                 if action=='accept':
                     # Block only this child UI to verify parent event-loop independence.
@@ -122,6 +124,7 @@ def check(app, host, module):
                     report=json.loads(result_file.read_text())
                     assert report['size']==[640,360] and report['first']==[255,0,0,255]
                     assert report['last']==[0,255,0,255] and not report['config_loaded']
+                    assert report['native_caption'] and not report['caption_timer_active']
                 outcomes[action]=dict(result=results[0],exit_code=exit_codes[0],worker_pid=pids[0],launcher_pid=launcher_pids[0])
                 QCoreApplication.sendPostedEvents(None,QEvent.DeferredDelete)
                 assert not isValid(request), 'Supervisor must be released after child exit'
@@ -173,6 +176,7 @@ def check(app, host, module):
         with patch.object(control,'api',SimpleNamespace()):
             fallback=control.create_picker(host,snapshot)
             assert isinstance(fallback,control.CropPicker)
+            assert not fallback._native_caption, 'Older hosts must retain Qt-coalesced caption movement'
             fallback.reject()
         QCoreApplication.sendPostedEvents(None,QEvent.DeferredDelete)
         # Cancellation before startup must never launch a child.
@@ -186,6 +190,7 @@ def check(app, host, module):
                 cancel_crash_and_prestart_cleanup=True,real_streams=0,real_messages_sent=0,
                 hung_real_worker_terminated=True,
                 viewer_result_and_stale_source_gate=True,older_host_compatibility=True,
+                isolated_worker_native_caption=True,
                 live_performance=False)
 
 

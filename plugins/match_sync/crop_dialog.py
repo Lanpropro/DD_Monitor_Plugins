@@ -1,4 +1,4 @@
-"""Crop picker shell; caption movement stays in the Qt event loop on Windows."""
+"""Native worker movement and Qt-coalesced movement for in-process pickers."""
 import sys
 
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
@@ -10,8 +10,9 @@ class CropDialog(QDialog):
     caption_started = Signal()
     caption_finished = Signal()
 
-    def __init__(self, parent):
+    def __init__(self, parent, *, native_caption=False):
         super().__init__(parent)
+        self._native_caption = native_caption
         self._caption_drag = None
         self._caption_pending = None
         self._caption_move_timer = QTimer(self)
@@ -23,7 +24,14 @@ class CropDialog(QDialog):
         if sys.platform == 'win32' and QApplication.platformName() == 'windows':
             from ctypes import wintypes
             msg = wintypes.MSG.from_address(int(message))
-            if msg.message == 0x00a1 and msg.wParam == 2:  # WM_NCLBUTTONDOWN, HTCAPTION
+            if self._native_caption:
+                # Only the isolated worker uses the system move/size loop.
+                # Observe its boundaries without consuming native messages.
+                if msg.message == 0x0231:  # WM_ENTERSIZEMOVE
+                    self.caption_started.emit()
+                elif msg.message == 0x0232:  # WM_EXITSIZEMOVE
+                    self.caption_finished.emit()
+            elif msg.message == 0x00a1 and msg.wParam == 2:  # WM_NCLBUTTONDOWN, HTCAPTION
                 # DefWindowProc would run a native move loop, delaying Qt's
                 # posted playback timers. Keep the native frame, move via Qt.
                 self._caption_drag = (QCursor.pos(), self.pos())

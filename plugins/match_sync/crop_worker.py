@@ -59,7 +59,7 @@ def run():
                         font = QFont()
                         font.fromString(snapshot['font'])
                         app.setFont(font)
-                    dialog = CropPicker(None, snapshot)
+                    dialog = CropPicker(None, snapshot, native_caption=True)
                     self.dialog = dialog
                     dialog.caption_started.connect(lambda: send(dict(kind='gesture', phase='drag-start', time=time.time())))
                     dialog.caption_finished.connect(lambda: send(dict(kind='gesture', phase='drag-end', time=time.time())))

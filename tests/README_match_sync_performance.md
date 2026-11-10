@@ -285,13 +285,15 @@ Qt 6.11.2 上 `selfcheck_match_sync_retry_rows.py` 的离屏全屏窗口退出�
 
 `check_match_sync_crop_process.py`通过实际子进程检查独立PID、共享内存像素、确认/取消/异常及owner退出清理、迟到图片、真实Viewer回调与来源身份门控、旧本体兼容。测试子进程仅由测试目录sitecustomize隐藏并驱动自有控件，不向用户窗口发送输入，不读账号/取流/发弹幕。子进程短暂阻塞时主事件循环仍运行是隔离功能回归，不是实播性能基准。旧crop_dialog/crop_move/floating专项显式选择共享UI，验证原操作没有因移到进程而改变。
 
+独立worker现显式启用Windows原生标题栏移动。crop_process核对真实child的原生路径标记和未活动的合并定时器，旧宿主仍使用Qt接管；crop_move另用合成原生消息验证标题栏/边框/系统菜单及移动缩放起止原样委托、不读取光标或自行移动/抓鼠标，只产生起止诊断信号。该检查没有驱动真实系统拖动循环，实际快速移动、松手/Esc/贴靠/缩放手感及主画面/声音需从根入口人工复验。
+
 人工复验仍从根入口重新加载，同流播放后打开框选、拖动标题栏、确认/取消/Esc，随后停止/删来源/切主路，检查旧框选关闭、主画面/音频持续。日志的“框选进程”条目记录独立PID、shown/image-loaded/drag-start/drag-end/exited及子进程时间，可与主播放记录对齐；仅这些阶段和值，不记录图片、标题或账号。
 
 `check_match_sync_ui_work.py`还验证125次原有播放轮询不重复设置未变化的自动偏移框；双路变化按Qt自身小数舍入/范围/地区格式更新，保留负零、编辑中内容、手动模式及自动写入信号门控。以上是功能回归；实际重绘减少量需在根入口同流采样，比较MainWindow:UpdateRequest、QDoubleSpinBox/QLineEdit:Paint和画面间隔。
 
 可选`tools/diagnose_match_ui_dispatch.py`探针还记录caption-native的caption-press/enter-size-move/exit-size-move/capture-changed及接管返回值，并计时CropDialog.mouseMoveEvent、QWidget.move与其嵌套Qt事件。若手动拖动仍卡，使用生成的根入口、Ctrl+Alt+F9框定复现，区分原生循环残留和同步移动/界面事件开销。探针有额外开销，不能当无探针性能基准；无匹配存活进程的外部观察不算证据。
 
-`check_match_sync_crop_move.py --host <宿主目录>` 检查Windows标题栏按下不进入原生拖动循环，Qt鼠标移动和负坐标、松开/Esc/捕获丢失/关闭的清理，其他原生消息仍回退。用合成原生/Qt事件做功能回归，不能替代真实标题栏拖动或证明播放改善。人工复验请在原直播下拖动框选标题栏3秒、松开，重复3次，检查主画面/声音持续推进；Windows此鼠标拖动不使用系统Aero贴靠，边框缩放仍沿原生路径。
+`check_match_sync_crop_move.py --host <宿主目录>` 的进程内兼容部分检查Windows标题栏按下不进入原生拖动循环，Qt鼠标移动和负坐标、松开/Esc/捕获丢失/关闭的清理，其他原生消息仍回退。用合成原生/Qt事件做功能回归，不能替代真实标题栏拖动或证明播放改善。人工复验请在原直播下拖动框选标题栏3秒、松开，重复3次，检查主画面/声音持续推进；仅旧宿主兼容路径不使用系统Aero贴靠，独立worker现交由系统处理。
 
 该专项还验证200个连续鼠标移动仅保存最后位置，16ms单次定时器一次应用，空闲不运行；松手应用释放时位置，取消/关闭/丢失捕获不留下延后移动。以上仅为位置提交和生命周期功能回归，不是合成性能基准，也不改变主画面帧率。
 
