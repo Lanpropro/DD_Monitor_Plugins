@@ -1,13 +1,12 @@
 """Coordinate routing, profile downloads, core lifecycle and local preferences."""
 from pathlib import Path
 from dataclasses import replace
-import sys
 import logging
 from uuid import uuid4
 from collections import deque
 from datetime import datetime
 
-from PySide6.QtCore import QObject, QProcess, QTimer, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 
 from .configuration import MAX_PROFILE, TEST_TARGETS, Options, load_options, save_options
 from .core import Core
@@ -15,6 +14,7 @@ from .environment import Environment
 from .network import ConnectionProbe, Download
 from .latency import Latency, MAX_CONCURRENT
 from .prepare_core import URL, ASSET
+from .core_install import CoreInstall
 from .profiles import Profile, load_profiles, save_profiles
 from .metadata import display_name
 from .connections import ConnectionMonitor, ERRORS, DNS_REASONS
@@ -424,14 +424,9 @@ class Controller(QObject):
             except OSError:
                 self._failed('无法读取订阅缓存')
         elif task == 'core':
-            installer = self.installer = QProcess(self)
-            installer.setStandardOutputFile(QProcess.nullDevice())
-            installer.setStandardErrorFile(QProcess.nullDevice())
-            installer.errorOccurred.connect(lambda error: self._installed(installer, -1)
-                                            if error == QProcess.FailedToStart else None)
-            installer.finished.connect(lambda code, _status: self._installed(installer, code))
-            installer.start(sys.executable, [str(Path(__file__).with_name('prepare_core.py')),
-                            '--directory', str(self.directory / 'runtime'), '--archive', str(path)])
+            installer = self.installer = CoreInstall(path, self.directory / 'runtime/mihomo.exe', self)
+            installer.finished.connect(lambda: self._installed(installer, installer.code))
+            installer.start()
 
     def _installed(self, installer, code):
         if self.installer is not installer:
@@ -441,8 +436,13 @@ class Controller(QObject):
         self._busy(False)
         if code == 0:
             self.options.core = str(self.directory / 'runtime/mihomo.exe')
-            self.prepared.emit(self.options.core)
+            try:
+                save_options(self.directory, self.options)
+            except OSError:
+                self._status('内核已安装，但路径保存失败，请检查数据目录后重试')
+                return
             self._status('内核已校验并准备好，请填写资料并点击输入框下方的导入按钮')
+            self.prepared.emit(self.options.core)
         else:
             self._status('内核准备失败：下载校验或解压失败，可稍后重试')
 
@@ -500,8 +500,8 @@ class Controller(QObject):
         self.catalog_only = False
         installer, self.installer = self.installer, None
         if installer is not None:
-            installer.kill()
-            installer.waitForFinished(1000)
+            installer.requestInterruption()
+            installer.wait()
             installer.deleteLater()
         self.core.stop()
         self.environment.restore()

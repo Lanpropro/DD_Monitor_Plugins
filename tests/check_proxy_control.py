@@ -33,7 +33,7 @@ args, remaining = parser.parse_known_args()
 sys.path.insert(0, str(args.host.resolve()))
 os.environ['DDM_NO_SAVE'] = '1'
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
-from PySide6.QtCore import QPoint, QProcess, Qt
+from PySide6.QtCore import QPoint, QProcess, QSize, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget, QToolButton, QVBoxLayout
 import requests
@@ -65,6 +65,7 @@ def wait_for(predicate, timeout=10):
     deadline = time.monotonic() + timeout
     while not predicate() and time.monotonic() < deadline:
         QTest.qWait(20)
+        time.sleep(.001)  # Yield the GIL to Python installation and loopback worker threads.
     if not predicate():
         raise AssertionError('Timed out waiting for local proxy operation')
 
@@ -759,6 +760,11 @@ class ConnectionTests(unittest.TestCase):
 
 
 class InterfaceTests(unittest.TestCase):
+    def setUp(self):
+        preparation = patch.object(Controller, 'prepare')
+        self.prepare_core = preparation.start()
+        self.addCleanup(preparation.stop)
+
     def test_shared_settings_controls_keep_host_typography_and_colors_in_both_themes(self):
         from ddm import theme
         from ddm.ui import ActionButton, DisclosureButton, HintLabel, SettingsSurface, TitleLabel
@@ -1245,19 +1251,22 @@ class InterfaceTests(unittest.TestCase):
                 window.deleteLater()
                 APP.processEvents()
 
-    def test_running_icon_has_a_distinct_silhouette_and_brand_matches(self):
+    def test_running_icon_keeps_outline_at_high_dpi_and_brand_matches(self):
         with tempfile.TemporaryDirectory() as root, patch.object(module.config, 'data_root', return_value=root):
             window = QWidget()
             plugin = module.ProxyControl()
             try:
                 plugin.on_load(SimpleNamespace(window=window, register_workspace_control=Mock()))
-                stopped = plugin.entry.icon().pixmap(28, 28).toImage()
                 plugin.toggle()
+                stopped = plugin.entry.icon().pixmap(28, 28).toImage()
                 plugin.controller.runningChanged.emit(True)
                 running = plugin.entry.icon().pixmap(28, 28).toImage()
                 alpha = lambda image: sum(image.pixelColor(x, y).alpha() > 180
                                           for x in range(28) for y in range(28))
-                self.assertGreater(alpha(running), alpha(stopped) * 1.4)
+                self.assertEqual(alpha(running), alpha(stopped))
+                high_dpi = plugin.entry.icon().pixmap(QSize(18, 18), 2.0)
+                self.assertEqual(high_dpi.size(), QSize(36, 36))
+                self.assertEqual(high_dpi.devicePixelRatioF(), 2.0)
                 self.assertEqual(plugin.panel.brand.pixmap().toImage(), running)
                 self.assertIn('运行中', plugin.entry.toolTip())
             finally:
@@ -1289,10 +1298,10 @@ class InterfaceTests(unittest.TestCase):
                 self.assertTrue(contains(theme.ACCENT))
                 plugin.controller.runningChanged.emit(True)
                 self.assertTrue(contains(theme.ACCENT))
-                self.assertTrue(contains(theme.SUCCESS))
+                self.assertTrue(plugin.entry.property('workspaceRunning'))
                 plugin.popover.hide()
                 self.assertFalse(plugin.entry.isChecked())
-                self.assertTrue(contains(theme.SUCCESS))
+                self.assertTrue(plugin.entry.property('workspaceRunning'))
                 plugin.controller.runningChanged.emit(False)
                 self.assertTrue(contains(theme.TEXT2))
             finally:
@@ -1302,6 +1311,7 @@ class InterfaceTests(unittest.TestCase):
 
     def test_rail_running_dot_stays_visible_when_closed_and_clears_on_stop_in_both_themes(self):
         from ddm import theme
+        from ddm.dock_feedback import attach
         previous = 'light' if theme.is_light() else 'dark'
         with tempfile.TemporaryDirectory() as root, patch.object(module.config, 'data_root', return_value=root):
             window = QWidget()
@@ -1309,6 +1319,10 @@ class InterfaceTests(unittest.TestCase):
             plugin = module.ProxyControl()
             try:
                 plugin.on_load(SimpleNamespace(window=window, register_workspace_control=Mock()))
+                plugin.entry.setProperty('dockRail', True)
+                plugin.entry.setFixedSize(34, 34)
+                plugin.entry.setIconSize(QSize(18, 18))
+                attach(plugin.entry)
                 window.show()
                 for mode in ('dark', 'light'):
                     theme.apply(mode)
@@ -1319,14 +1333,15 @@ class InterfaceTests(unittest.TestCase):
                             plugin.popover.hide()
                         APP.processEvents()
                         self.assertEqual(plugin.entry.isChecked(), opened)
-                        for size in (18, 24, 28, 42):
-                            rendered = plugin.entry.icon().pixmap(size, size).toImage()
-                            center = int(size - 1 - max(4, size * .3) / 2)
-                            self.assertEqual(rendered.pixelColor(center, center), theme.qcolor(theme.SUCCESS),
-                                             (mode, opened, size))
+                        rendered = plugin.entry.grab().toImage()
+                        scale = rendered.devicePixelRatio()
+                        self.assertEqual(rendered.pixelColor(round(27.5 * scale), round(6.5 * scale)),
+                                         theme.qcolor(theme.SUCCESS), (mode, opened))
                     plugin.controller.runningChanged.emit(False)
-                    rendered = plugin.entry.icon().pixmap(24, 24).toImage()
-                    self.assertNotEqual(rendered.pixelColor(19, 19), theme.qcolor(theme.SUCCESS))
+                    APP.processEvents()
+                    rendered = plugin.entry.grab().toImage()
+                    self.assertNotEqual(rendered.pixelColor(round(27.5 * scale), round(6.5 * scale)),
+                                        theme.qcolor(theme.SUCCESS))
                     self.assertIn('未启动', plugin.entry.toolTip())
             finally:
                 plugin.on_unload()
@@ -1407,6 +1422,7 @@ class InterfaceTests(unittest.TestCase):
                 directory.mkdir(parents=True)
                 (directory / 'preferences.json').write_text(json.dumps({
                     'mode': mode, 'address': 'http://user:fixture-secret@127.0.0.1:7890',
+                    'core': __file__,
                     'source': 'nodes', 'profile': 'fixture-nodes', 'node': 'First'}))
                 window = QWidget()
                 context = SimpleNamespace(window=window, register_workspace_control=Mock())
@@ -1700,7 +1716,7 @@ class InterfaceTests(unittest.TestCase):
 
     def test_disabled_auto_start_does_not_launch_core_when_loading_plugin(self):
         with tempfile.TemporaryDirectory() as root, patch.object(module.config, 'data_root', return_value=root):
-            save_options(Path(root) / 'utils/proxy_control', Options(enabled=True, auto_start=False,
+            save_options(Path(root) / 'utils/proxy_control', Options(core=__file__, enabled=True, auto_start=False,
                          profile='https://example.invalid/sub'))
             window = QWidget()
             plugin = module.ProxyControl()
@@ -1710,6 +1726,27 @@ class InterfaceTests(unittest.TestCase):
                     apply.assert_called_once()
                     self.assertFalse(apply.call_args.kwargs['connect'])
                 self.assertIsNone(plugin.controller.core.process)
+            finally:
+                plugin.on_unload()
+                window.deleteLater()
+                APP.processEvents()
+
+    def test_missing_core_prepares_on_first_load_and_defers_saved_session_until_ready(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(module.config, 'data_root', return_value=root):
+            directory = Path(root) / 'utils/proxy_control'
+            save_options(directory, Options(enabled=True, auto_start=True, source='nodes', profile='fixture'))
+            window = QWidget()
+            plugin = module.ProxyControl()
+            try:
+                with patch.object(Controller, 'apply') as apply:
+                    plugin.on_load(SimpleNamespace(window=window, register_workspace_control=Mock()))
+                    self.prepare_core.assert_called_once()
+                    apply.assert_not_called()
+                    self.assertIsNone(plugin.controller.core.process)
+                    plugin.controller.prepared.emit('fixture-core')
+                    apply.assert_called_once()
+                    plugin.controller.prepared.emit('fixture-core')
+                    apply.assert_called_once()  # Manual preparation cannot repeat startup restoration.
             finally:
                 plugin.on_unload()
                 window.deleteLater()
@@ -2402,6 +2439,86 @@ class RealCoreTests(unittest.TestCase):
             self.assertIsNone(self.controller.installer)
         finally:
             service.close()
+
+    def test_fresh_plugin_installs_verified_core_without_starting_proxy_and_reuses_it(self):
+        archive = args.core.resolve().parent / ASSET
+        if not archive.is_file():
+            self.skipTest('Official archive is not beside the provided core')
+        service = Service(body=archive.read_bytes())
+        window = QWidget()
+        plugin = module.ProxyControl()
+        original = {key: os.environ.get(key) for key in KEYS}
+        temporary = tempfile.TemporaryDirectory()
+        root = temporary.name
+        try:
+            with patch.object(module.config, 'data_root', return_value=root), \
+                    patch('check_proxy_plugin.controller.URL', service.url + '/core.zip'):
+                context = SimpleNamespace(window=window, register_workspace_control=Mock())
+                plugin.on_load(context)
+                self.assertTrue(plugin.controller.working)
+                wait_for(lambda: not plugin.controller.working, timeout=20)
+                core = Path(plugin.controller.options.core)
+                self.assertTrue(core.is_file(), plugin.controller.message)
+                self.assertEqual(core, Path(root) / 'utils/proxy_control/runtime/mihomo.exe')
+                self.assertEqual(load_options(core.parents[1]).core, str(core))
+                result = subprocess.run([str(core), '-v'], capture_output=True, timeout=5)
+                self.assertEqual(result.returncode, 0)
+                self.assertIn(b'v1.19.33', result.stdout)
+                self.assertIsNone(plugin.controller.core.process)
+                self.assertFalse(plugin.controller.options.enabled)
+                self.assertEqual({key: os.environ.get(key) for key in KEYS}, original)
+                plugin.on_unload()
+                requests_before = len(service.requests)
+                plugin = module.ProxyControl()
+                plugin.on_load(context)
+                APP.processEvents()
+                self.assertFalse(plugin.controller.working)
+                self.assertEqual(len(service.requests), requests_before)
+        finally:
+            plugin.on_unload()
+            window.deleteLater()
+            APP.processEvents()
+            service.close()
+            temporary.cleanup()
+
+    def test_fresh_plugin_rejects_invalid_core_archive_and_allows_retry(self):
+        service = Service(body=b'invalid-archive')
+        window = QWidget()
+        plugin = module.ProxyControl()
+        temporary = tempfile.TemporaryDirectory()
+        root = temporary.name
+        try:
+            with patch.object(module.config, 'data_root', return_value=root), \
+                    patch('check_proxy_plugin.controller.URL', service.url + '/core.zip'):
+                plugin.on_load(SimpleNamespace(window=window, register_workspace_control=Mock()))
+                wait_for(lambda: not plugin.controller.working, timeout=10)
+                self.assertFalse(Path(plugin.controller.options.core).is_file())
+                self.assertIn('内核准备失败', plugin.controller.message)
+                self.assertIsNone(plugin.controller.installer)
+                self.assertIsNone(plugin.controller.core.process)
+                plugin.controller.prepare()
+                self.assertTrue(plugin.controller.working)
+                wait_for(lambda: not plugin.controller.working, timeout=10)
+                self.assertEqual(len(service.requests), 2)
+        finally:
+            plugin.on_unload()
+            window.deleteLater()
+            APP.processEvents()
+            service.close()
+            temporary.cleanup()
+
+    def test_cancelled_core_extraction_preserves_existing_binary_and_removes_partial_file(self):
+        archive = args.core.resolve().parent / ASSET
+        if not archive.is_file():
+            self.skipTest('Official archive is not beside the provided core')
+        with tempfile.TemporaryDirectory() as root:
+            destination = Path(root) / 'mihomo.exe'
+            destination.write_bytes(b'existing-core')
+            partial = destination.with_suffix('.part')
+            with self.assertRaisesRegex(ValueError, 'cancelled'):
+                install(archive, destination, cancelled=partial.exists)
+            self.assertEqual(destination.read_bytes(), b'existing-core')
+            self.assertFalse(partial.exists())
 
 
 if __name__ == '__main__':

@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QSize
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QToolButton
 from ddm.plugins import Plugin
@@ -45,6 +45,13 @@ class ProxyControl(Plugin):
         self.controller.runningChanged.connect(self._service_icon)
         theme.signals().changed.connect(self._entry_icon)
         self._entry_icon()
+        if not Path(self.controller.options.core).is_file():
+            self.controller.prepared.connect(self._restore_session, Qt.SingleShotConnection)
+            self.controller.prepare()
+        else:
+            self._restore_session()
+
+    def _restore_session(self, *_args):
         # Restore saved routing before the host begins resolving live rooms.
         if self.controller.options.enabled and self.controller.options.auto_start:
             self.controller.apply(self.controller.options)
@@ -109,14 +116,15 @@ class ProxyControl(Plugin):
         self.panel.set_results(self.controller.result_snapshot())
 
     def _service_icon(self, running):
-        self.entry.setProperty('proxyRunning', running)
+        self.entry.setProperty('workspaceRunning', running)
+        self.entry.update()
         self._entry_icon()
 
     def _entry_icon(self, *_args):
         self.action.setIcon(QIcon(EntryIcon(self.entry)))
         if self.panel is not None:
             self.panel.brand.setPixmap(self.action.icon().pixmap(QSize(28, 28)))
-        self.entry.setToolTip('网络代理：运行中（仅本软件）' if self.entry.property('proxyRunning') else '网络代理：未启动')
+        self.entry.setToolTip('网络代理：运行中（仅本软件）' if self.entry.property('workspaceRunning') else '网络代理：未启动')
 
     def on_unload(self):
         if self.controller is not None:

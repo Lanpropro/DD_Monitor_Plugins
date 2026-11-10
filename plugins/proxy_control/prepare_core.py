@@ -12,10 +12,12 @@ URL = 'https://github.com/MetaCubeX/mihomo/releases/download/' + VERSION + '/' +
 SHA256 = '7aaf636a4f2172dcd8ec34ac4f52797b059195e5afd6409508c963e545f8864d'
 
 
-def install(archive, destination):
+def install(archive, destination, cancelled=lambda: False):
     digest = hashlib.sha256()
     with Path(archive).open('rb') as stream:
         for chunk in iter(lambda: stream.read(262144), b''):
+            if cancelled():
+                raise ValueError('Core preparation cancelled')
             digest.update(chunk)
     if digest.hexdigest() != SHA256:
         raise ValueError('Official core archive checksum mismatch')
@@ -26,9 +28,17 @@ def install(archive, destination):
         if len(executables) != 1 or executables[0].file_size > 128 * 1024**2:
             raise ValueError('Unexpected core archive contents')
         temporary = destination.with_suffix('.part')
-        with package.open(executables[0]) as source, temporary.open('wb') as target:
-            shutil.copyfileobj(source, target, 262144)
-        temporary.replace(destination)
+        try:
+            with package.open(executables[0]) as source, temporary.open('wb') as target:
+                for chunk in iter(lambda: source.read(262144), b''):
+                    if cancelled():
+                        raise ValueError('Core preparation cancelled')
+                    target.write(chunk)
+            if cancelled():
+                raise ValueError('Core preparation cancelled')
+            temporary.replace(destination)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def main():

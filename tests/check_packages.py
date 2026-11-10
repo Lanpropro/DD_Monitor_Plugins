@@ -60,6 +60,7 @@ def main():
                 if plugin_id == 'proxy_control':
                     assert 'proxy_control/popover.py' in names and 'proxy_control/profiles.py' in names
                     assert 'proxy_control/visuals.py' in names
+                    assert 'proxy_control/core_install.py' in names
                     assert 'proxy_control/metadata.py' in names
                     assert 'proxy_control/regions.py' in names and 'proxy_control/entry_icon.py' in names
                     assert 'proxy_control/connections.py' in names and 'proxy_control/connection_page.py' in names
