@@ -45,6 +45,8 @@ flowchart TD
 
 业务协调模块是显式接收Viewer的函数，不是新的QObject或状态容器。只访问原状态，不在模块间维护镜像。组件通过原Viewer方法回调；实现模块不反向导入Viewer，避免循环依赖。Qt父对象、信号接收者、定时器/异步回调所有者均未更换。
 
+自动偏移框的展示更新仍由presentation协调：每轮计算原有同步偏移，按控件范围及Qt格式转换为实际显示数值，仅在数值变化时setValue，避免QAbstractSpinBox对同值也请求重绘。编辑中的文本和手动模式保持；previous_delay仍同步实际控件值，不增加第二份偏移状态或降低视频轮询频率。
+
 ## 音频和聊天收尾
 
 1. AudioPump仍以Viewer为QObject父对象。GUI的10ms快照刷新保留；AudioFeed无父对象，移入原QThread后创建QAudioSink与10ms PreciseTimer。

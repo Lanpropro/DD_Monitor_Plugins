@@ -51,9 +51,14 @@ def _render(viewer, probe):
         origin = shifts.get(viewer.alignment.reference, 0)
         for key, row in viewer.rows.items():
             if not row.delay.lineEdit().isModified():
-                row.delay.blockSignals(True)
-                row.delay.setValue(origin - shifts[key])
-                row.delay.blockSignals(False)
+                offset = max(row.delay.minimum(), min(row.delay.maximum(), origin - shifts[key]))
+                # Use Qt's displayed rounding (including locale and negative
+                # zero); setValue requests a repaint even for the same value.
+                offset, _ = row.delay.locale().toDouble(row.delay.textFromValue(offset))
+                if row.delay.value() != offset:
+                    row.delay.blockSignals(True)
+                    row.delay.setValue(offset)
+                    row.delay.blockSignals(False)
                 row.previous_delay = row.delay.value()
     viewer._configure_picture_budget()
     for key, current in viewer.rows.items():
