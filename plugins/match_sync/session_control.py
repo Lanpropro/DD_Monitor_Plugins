@@ -48,6 +48,9 @@ def toggle_running(viewer):
 
 
 def stop(viewer):
+    clock_dialog = getattr(viewer, 'clock_dialog', None)
+    if clock_dialog is not None:
+        clock_dialog.reject()
     viewer.dismiss_buffer_notice()
     viewer.replay_bar.preview.stop()
     viewer.running = False

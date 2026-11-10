@@ -33,6 +33,10 @@ class ComparisonPanel(QFrame):
         self.zoom = QCheckBox("放大框选区域")
         self.zoom.setChecked(True)
         heading.addWidget(self.zoom)
+        self.clock_button = QPushButton('计时器对齐')
+        self.clock_button.setToolTip('框选同一游戏计时器，核对翻秒画面后计算偏移')
+        self.clock_button.clicked.connect(lambda: self.open_clock())
+        heading.addWidget(self.clock_button)
         self.close_button = QPushButton("收起对照")
         self.close_button.setObjectName("ChipButton")
         self.close_button.setToolTip("隐藏对照画面，保留已调整的偏移并继续播放。")
@@ -49,6 +53,10 @@ class ComparisonPanel(QFrame):
         layout.addLayout(heading)
         layout.addWidget(scroll, 1)
         self.hide()
+
+    def open_clock(self):
+        from .clock_dialog import open_clock_dialog
+        open_clock_dialog(self.viewer)
 
     def rooms_to_show(self):
         reference, rows = self.viewer.alignment.reference, self.viewer.rows
