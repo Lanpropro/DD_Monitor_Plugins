@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 from types import SimpleNamespace
+from unittest.mock import patch
 
 
 def check(app, host, module=None):
@@ -143,21 +144,53 @@ def check(app, host, module=None):
         boot=(launcher.parent/'sitecustomize.py').read_text(encoding='utf8')
         assert 'diagnose_drag_windows.py' in boot and 'DDM_MATCH_UI_DISPATCH_CAPTURE' in boot
         compile(boot,'sitecustomize.py','exec')
+        focused=capture.UiTrace(Path(directory)/'focused.jsonl',playback_only=True)
+        try:
+            focused.arm()
+            floating=FloatingCrop();floating.drag=(None,None,None)
+            for _ in range(200):
+                assert focused.dispatch(lambda receiver,event:sentinel,floating,QEvent(QEvent.MouseMove)) is sentinel
+            assert not focused.stats and focused.mouse_moves==200
+            focused.dispatch(lambda receiver,event:sentinel,floating,QEvent(QEvent.MouseButtonRelease))
+            with patch.object(capture.time,'perf_counter',side_effect=(1.,1.05,2.,2.08)):
+                focused.native_message(0x200);focused.native_message(0x113)
+                focused.event_loop('about-to-block');focused.event_loop('awake')
+            observer=capture.native_observer(focused)
+            assert observer.nativeEventFilter(b'unknown',None)==(False,0)
+            if sys.platform=='win32':
+                message=wintypes.MSG();message.message=0x200;message.lParam=1234567
+                assert observer.nativeEventFilter(b'windows_generic_MSG',ctypes.addressof(message))==(False,0)
+                assert focused.native_counts['mouse_move']==2
+            focused.finish()
+        finally:
+            focused.close()
+        focus_rows=[json.loads(line) for line in focused.path.read_text(encoding='utf8').splitlines()]
+        assert len([r for r in focus_rows if r['phase']=='floating-input'])==1
+        assert next(r for r in focus_rows if r['phase']=='floating-input')['mouse_moves']==200
+        assert next(r for r in focus_rows if r['phase']=='native-gap')['gap_ms']==50
+        assert next(r for r in focus_rows if r['phase']=='event-loop-gap')['gap_ms']==80
+        assert '1234567' not in json.dumps(focus_rows)
+        launcher=capture.prepare(fake,Path(directory)/'focused-output',playback_only=True)
+        assert 'playback_only=True' in (launcher.parent/'sitecustomize.py').read_text(encoding='utf8')
         # The opt-in application subclass must be present in root integration.
         root_trace=getattr(app,'_match_ui_dispatch_trace',None)
         if root_trace is not None:
             if module is not None:
                 from PySide6.QtWidgets import QWidget
-                assert hasattr(module.floating_control.CropDialog.nativeEvent,'__wrapped__')
-                assert hasattr(module.floating_control.CropDialog.mouseMoveEvent,'__wrapped__')
-                assert hasattr(QWidget.move,'__wrapped__')
+                if not root_trace.playback_only:
+                    assert hasattr(module.floating_control.CropDialog.nativeEvent,'__wrapped__')
+                    assert hasattr(module.floating_control.CropDialog.mouseMoveEvent,'__wrapped__')
+                    assert hasattr(QWidget.move,'__wrapped__')
+                else:
+                    assert not hasattr(QWidget.move,'__wrapped__')
+                    assert not hasattr(module.FloatingCrop.mouseMoveEvent,'__wrapped__')
                 assert hasattr(module.FloatingCrop.fit_geometry,'__wrapped__')
                 assert hasattr(module.Canvas.show_at,'__wrapped__')
                 assert hasattr(module.Viewer.render,'__wrapped__')
             root_trace.arm()
             live=QObject()
             assert app.sendEvent(live,QEvent(QEvent.User)) in (True,False)
-            assert 'QObject:User' in root_trace.stats
+            assert ('QObject:User' in root_trace.stats) is not root_trace.playback_only
             # Actual QTimer deliveries through the root application, not a performance benchmark.
             timer_host=Viewer()
             timer_host.render_timer=QTimer(timer_host)
@@ -174,6 +207,8 @@ def check(app, host, module=None):
             timer_host.render_timer.start();loop.exec();guard.stop()
             assert len(ticks)==3 and timer_host.render_timer.interval()==7
             assert timer_host.render_timer in root_trace.wakes
+            if root_trace.playback_only:
+                assert root_trace.loop_counts and root_trace.native_counts
             root_trace.finish();root_trace.arm()
             assert not root_trace.wakes
             root_trace.finish()
@@ -181,6 +216,7 @@ def check(app, host, module=None):
                     nested_spans=True,modal_wait_labelled=True,main_thread_only=True,
                     no_arguments_or_text=True,writer_stopped=True,launcher_opt_in=True,
                     render_wake_metadata=True,floating_input_boundaries=True,main_paint_metadata=True,
+                    focused_mouse_aggregation=True,native_filter_passthrough=True,loop_boundaries=True,
                     root_dispatch_installed=root_trace is not None,live_performance=False)
 
 

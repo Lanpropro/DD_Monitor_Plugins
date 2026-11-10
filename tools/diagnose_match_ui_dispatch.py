@@ -13,8 +13,9 @@ import weakref
 
 
 class UiTrace:
-    def __init__(self, path):
+    def __init__(self, path, *, playback_only=False):
         self.path = Path(path)
+        self.playback_only = playback_only
         self.main_thread = threading.get_ident()
         self.enabled = False
         self.closed = False
@@ -23,12 +24,16 @@ class UiTrace:
         self.stack = []
         self.stats = {}
         self.wakes = weakref.WeakKeyDictionary()
+        self.mouse_moves = 0
+        self.last_native = self.last_loop = None
+        self.native_counts, self.loop_counts = {}, {}
         self.dropped = 0
         self.records = queue.Queue(maxsize=2048)
         self.stopped = threading.Event()
         self.worker = threading.Thread(target=self._write, name='match-ui-trace-writer', daemon=True)
         self.worker.start()
-        self.emit('installed', automatic_capture=False, threshold_ms=8, limit_seconds=90)
+        self.emit('installed', automatic_capture=False, threshold_ms=8, limit_seconds=90,
+                  playback_only=playback_only)
 
     def emit(self, phase, **fields):
         row = dict(time=time.time(), pid=os.getpid(), phase=phase, **fields)
@@ -52,6 +57,9 @@ class UiTrace:
             return
         self.stats = {}
         self.wakes.clear()
+        self.mouse_moves = 0
+        self.last_native = self.last_loop = None
+        self.native_counts, self.loop_counts = {}, {}
         self.deadline = time.perf_counter() + 90
         self.enabled = True
         self.emit('capture-start', limit_seconds=90)
@@ -60,7 +68,8 @@ class UiTrace:
         if not self.enabled:
             return
         self.enabled = False
-        self.emit('capture-stop', dropped=self.dropped, functions=sorted(
+        self.emit('capture-stop', dropped=self.dropped, mouse_moves=self.mouse_moves,
+                  native_counts=self.native_counts, loop_counts=self.loop_counts, functions=sorted(
             self.stats.values(), key=lambda item: item['total_ms'], reverse=True)[:40])
 
     def close(self):
@@ -109,6 +118,9 @@ class UiTrace:
         # Save only primitive metadata before delivery; either object can be deleted.
         label = type(receiver).__name__ + ':' + event.type().name
         self.playback_event(receiver, event)
+        if self.playback_only and label not in (
+                'MainWindow:UpdateRequest', 'Canvas:Paint', 'FloatingCrop:Paint', 'QTimer:Timer'):
+            return notify(receiver, event)
         return self.call(label, notify, receiver, event, category='qt-event')
 
     def playback_event(self, receiver, event):
@@ -126,11 +138,37 @@ class UiTrace:
                           thread_cpu_gap_ms=round((cpu-previous[1])*1000, 3) if previous else None)
         elif type(receiver).__name__ == 'FloatingCrop' and kind in (
                 QEvent.MouseButtonPress, QEvent.MouseMove, QEvent.MouseButtonRelease, QEvent.Wheel):
+            if kind == QEvent.MouseMove:
+                self.mouse_moves += 1
+                if self.playback_only:
+                    return
             drag = receiver.drag
             self.emit('floating-input', event=kind.name, dragging=drag is not None,
-                      resizing=bool(drag is not None and drag[2]))
+                      resizing=bool(drag is not None and drag[2]), mouse_moves=self.mouse_moves)
         elif kind == QEvent.Paint and type(receiver).__name__ == 'Canvas' and receiver.paint_probe is not None:
             self.emit('main-paint', frame_key=receiver.frame_key)
+
+    def native_message(self, message):
+        if not self.enabled or threading.get_ident() != self.main_thread:
+            return
+        now = time.perf_counter()
+        category = {0x200: 'mouse_move', 0xff: 'raw_input', 0x113: 'timer', 0xf: 'paint'}.get(message, 'other')
+        self.native_counts[category] = self.native_counts.get(category, 0) + 1
+        previous, self.last_native = self.last_native, (now, message)
+        if previous is not None and now-previous[0] >= .025:
+            self.emit('native-gap', gap_ms=round((now-previous[0])*1000, 3),
+                      previous_message=previous[1], message=message,
+                      loop_state=self.last_loop[1] if self.last_loop else None)
+
+    def event_loop(self, point):
+        if not self.enabled:
+            return
+        now = time.perf_counter()
+        previous, self.last_loop = self.last_loop, (now, point)
+        self.loop_counts[point] = self.loop_counts.get(point, 0) + 1
+        if previous is not None and now-previous[0] >= .025:
+            self.emit('event-loop-gap', previous=previous[1], point=point,
+                      gap_ms=round((now-previous[0])*1000, 3))
 
     def wrap(self, owner, name, label, *, no_args=False):
         original = getattr(owner, name)
@@ -171,7 +209,19 @@ class UiTrace:
         owner.nativeEvent = native
 
 
-def install(host, directory):
+def native_observer(trace):
+    from ctypes import wintypes
+    from PySide6.QtCore import QAbstractNativeEventFilter
+    class Observer(QAbstractNativeEventFilter):
+        def nativeEventFilter(self, event_type, message):
+            if (sys.platform == 'win32' and trace.enabled and
+                    bytes(event_type) in (b'windows_generic_MSG', b'windows_dispatcher_MSG')):
+                trace.native_message(int(wintypes.MSG.from_address(int(message)).message))
+            return False, 0
+    return Observer()
+
+
+def install(host, directory, *, playback_only=False):
     sys.path.insert(0, str(Path(host).resolve()))
     from PySide6.QtCore import Qt, QTimer
     from PySide6.QtGui import QKeySequence, QShortcut, QWindow
@@ -180,31 +230,42 @@ def install(host, directory):
     from ddm.dialogs import SettingsDialog
     if QApplication.instance() is not None:
         raise RuntimeError('Install dispatch capture before QApplication construction')
-    trace = UiTrace(Path(directory) / f'qt-ui-dispatch-{os.getpid()}.jsonl')
+    trace = UiTrace(Path(directory) / f'qt-ui-dispatch-{os.getpid()}.jsonl', playback_only=playback_only)
     application_type = host_app.QApplication
     class Application(application_type):
         def notify(self, receiver, event):
             return trace.dispatch(super().notify, receiver, event)
     host_app.QApplication = Application
-    for name in ('show', 'hide', 'close'):
-        trace.wrap(QWidget, name, 'QWidget.'+name, no_args=True)
-    for name in ('setStyleSheet', 'setParent', 'setVisible', 'setWindowFlags', 'move'):
-        trace.wrap(QWidget, name, 'QWidget.'+name)
-    trace.wrap(QWindow, 'setParent', 'QWindow.setParent')
-    trace.wrap(QDialog, 'exec', 'QDialog.exec', no_args=True)
-    for owner, names in ((continuous_corners.SurfaceFilter, ('values', 'eventFilter')),
-                         (theme.ThemeSignals, ('eventFilter',)),
-                         (settings_general.GeneralSettingsPage, ('__init__',)),
-                         (SettingsDialog, ('__init__',)),
-                         (settings_host.SettingsHost, ('close',))):
-        for name in names:
-            trace.wrap(owner, name, owner.__name__+'.'+name, no_args=name=='close')
+    if not playback_only:
+        for name in ('show', 'hide', 'close'):
+            trace.wrap(QWidget, name, 'QWidget.'+name, no_args=True)
+        for name in ('setStyleSheet', 'setParent', 'setVisible', 'setWindowFlags', 'move'):
+            trace.wrap(QWidget, name, 'QWidget.'+name)
+        trace.wrap(QWindow, 'setParent', 'QWindow.setParent')
+        trace.wrap(QDialog, 'exec', 'QDialog.exec', no_args=True)
+        for owner, names in ((continuous_corners.SurfaceFilter, ('values', 'eventFilter')),
+                             (theme.ThemeSignals, ('eventFilter',)),
+                             (settings_general.GeneralSettingsPage, ('__init__',)),
+                             (SettingsDialog, ('__init__',)),
+                             (settings_host.SettingsHost, ('close',))):
+            for name in names:
+                trace.wrap(owner, name, owner.__name__+'.'+name, no_args=name=='close')
     original = host_app.MainWindow.__init__
     @functools.wraps(original)
     def initialize(window, *args, **kwargs):
         original(window, *args, **kwargs)
         window._match_ui_dispatch_trace = trace
         QApplication.instance()._match_ui_dispatch_trace = trace
+        if playback_only:
+            from PySide6.QtCore import QAbstractEventDispatcher
+            dispatcher = QAbstractEventDispatcher.instance()
+            dispatcher.aboutToBlock.connect(lambda: trace.event_loop('about-to-block'))
+            dispatcher.awake.connect(lambda: trace.event_loop('awake'))
+            observer = native_observer(trace)
+            QApplication.instance().installNativeEventFilter(observer)
+            window._match_ui_native_observer = observer
+            QApplication.instance().aboutToQuit.connect(
+                lambda: QApplication.instance().removeNativeEventFilter(observer))
         shortcut = QShortcut(QKeySequence('Ctrl+Alt+F9'), window)
         shortcut.setContext(Qt.ApplicationShortcut)
         shortcut.activated.connect(lambda: trace.finish() if trace.enabled else trace.arm())
@@ -218,24 +279,25 @@ def install(host, directory):
             if plugin.context.name != 'match_sync':
                 continue
             package = type(plugin).__module__
-            for part, names in (('floating_control', ('choose_crop',)),
-                                ('picture_control', ('open_match_settings',)),
-                                ('sending', ('show_chat_actions', 'show_interactions'))):
-                module = sys.modules.get(package+'.'+part)
-                if module is None:
-                    continue
-                owner = module.SendConsole if part=='sending' else module
-                for name in names:
-                    trace.wrap(owner, name, 'match_sync.'+name)
-            crop = sys.modules.get(package+'.crop_dialog')
-            if crop is not None:
-                trace.wrap_caption(crop.CropDialog)
+            if not playback_only:
+                for part, names in (('floating_control', ('choose_crop',)),
+                                    ('picture_control', ('open_match_settings',)),
+                                    ('sending', ('show_chat_actions', 'show_interactions'))):
+                    module = sys.modules.get(package+'.'+part)
+                    if module is None:
+                        continue
+                    owner = module.SendConsole if part=='sending' else module
+                    for name in names:
+                        trace.wrap(owner, name, 'match_sync.'+name)
+                crop = sys.modules.get(package+'.crop_dialog')
+                if crop is not None:
+                    trace.wrap_caption(crop.CropDialog)
             floating = sys.modules[package+'.floating'].FloatingCrop
-            for name in ('mousePressEvent', 'mouseMoveEvent', 'mouseReleaseEvent',
-                         'wheelEvent', 'fit_geometry', 'set_frame', 'paintEvent'):
+            for name in (('fit_geometry',) if playback_only else ('mousePressEvent', 'mouseMoveEvent', 'mouseReleaseEvent',
+                         'wheelEvent', 'fit_geometry', 'set_frame', 'paintEvent')):
                 trace.wrap(floating, name, 'FloatingCrop.'+name)
             canvas = sys.modules[package+'.canvas'].Canvas
-            for name in ('show_at', 'set_frame', 'paintEvent'):
+            for name in (('show_at', 'set_frame') if playback_only else ('show_at', 'set_frame', 'paintEvent')):
                 trace.wrap(canvas, name, 'Canvas.'+name)
             trace.wrap(sys.modules[package+'.viewer'].Viewer, 'render', 'Viewer.render', no_args=True)
             source = Path(sys.modules[package].__file__).parent
@@ -248,7 +310,7 @@ def install(host, directory):
     return trace
 
 
-def prepare(host, directory):
+def prepare(host, directory, *, playback_only=False):
     host, directory = Path(host).resolve(), Path(directory).resolve()
     if not (host/'run.cmd').is_file():
         raise ValueError('Host root run.cmd is required')
@@ -261,7 +323,7 @@ from pathlib import Path
 if os.environ.get('DDM_MATCH_UI_DISPATCH_CAPTURE')=='1' and Path(sys.argv[0]).name=='diagnose_drag_windows.py':
     sys.path.insert(0, {str(tool.parent)!r})
     from diagnose_match_ui_dispatch import install
-    install({str(host)!r}, {str(directory)!r})
+    install({str(host)!r}, {str(directory)!r}, playback_only={playback_only!r})
 '''
     (directory/'sitecustomize.py').write_text(bootstrap, encoding='utf-8')
     command = ('@echo off\nsetlocal\nset "DDM_MATCH_UI_DISPATCH_CAPTURE=1"\n'
@@ -275,8 +337,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--host', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--playback-only', action='store_true')
     args = parser.parse_args()
-    print(prepare(args.host, args.output))
+    print(prepare(args.host, args.output, playback_only=args.playback_only))
 
 
 if __name__ == '__main__':
