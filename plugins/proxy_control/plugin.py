@@ -19,7 +19,7 @@ from .entry_icon import EntryIcon
 
 class ProxyControl(Plugin):
     name = '网络代理'
-    version = '0.1'
+    version = '1.0'
     description = '使用内置代理内核导入订阅和节点'
 
     def __init__(self):

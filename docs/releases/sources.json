@@ -305,13 +305,14 @@
       ]
     },
     {
-      "tag": "proxy-control-v0.1",
-      "file": "RELEASE-proxy-control-v0.1.md",
+      "tag": "proxy-control-v1.0",
+      "file": "RELEASE-proxy-control-v1.0.md",
       "status": "prepared",
       "source_kind": "repository_candidate",
       "last_edit_verified": false,
-      "base_commit": "72619eaf2bb4aa4b9687b80b2732ff3db5a9c024",
-      "sha256": "c1efb175267c51adfc5b34c223cc8eec874cb3ca7bcc994e94238bd777c00dbd"
+      "base_commit": "6a0f4cec30e5f671b83bb91874264b569af5af4f",
+      "sha256": "dfdf658282bd1b5db9cf9eb3cfbf93028ed364e5ad3f9d249f4d796c97616686",
+      "release_gate": "on_hold_due_to_public_host_incompatibility"
     }
   ],
   "tags_without_recoverable_body": [

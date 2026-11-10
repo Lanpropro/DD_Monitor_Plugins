@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 MAX_PROFILE = 4 * 1024 * 1024
-DEFAULT_USER_AGENT = 'clash.meta/1.19.33 DDM-Proxy/0.1'
+DEFAULT_USER_AGENT = 'clash.meta/1.19.33 DDM-Proxy/1.0'
 USER_AGENTS = [('Mihomo（默认）', DEFAULT_USER_AGENT), ('Clash Verge', 'clash-verge'),
                ('FlClash', 'FlClash/v0.8.94 clash-verge Platform/windows')]
 TEST_TARGETS = {'google': 'https://www.gstatic.com/generate_204',

@@ -121,6 +121,16 @@ class Service:
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_release_version_and_default_user_agent_agree_without_rewriting_saved_identity(self):
+        from check_proxy_plugin.configuration import DEFAULT_USER_AGENT
+        manifest = json.loads((ROOT / 'plugins/proxy_control/plugin.json').read_text(encoding='utf-8'))
+        self.assertEqual(module.ProxyControl.version, manifest['version'])
+        self.assertTrue(DEFAULT_USER_AGENT.endswith('DDM-Proxy/' + manifest['version']))
+        with tempfile.TemporaryDirectory() as root:
+            previous_agent = 'clash.meta/1.19.33 DDM-Proxy/0.1'
+            save_options(root, Options(user_agent=previous_agent))
+            self.assertEqual(load_options(root).user_agent, previous_agent)
+
     def test_flclash_download_preset_advertises_client_and_clash_verge_compatibility(self):
         agent = dict(USER_AGENTS)['FlClash']
         service = Service()
