@@ -139,6 +139,7 @@ def check(app, host, module):
                         patch.object(History, 'bounds', lambda _self: (100., now[0] + .2)), \
                         patch.object(recovery, 'capture_band', captured), \
                         patch.object(recovery, 'recognize_bands', recognized):
+                    viewer.playback_rate = .98
                     for _ in range(2):
                         control.next_sample = 0
                         control.tick()
@@ -150,6 +151,7 @@ def check(app, host, module):
                         now[0] += 2
                     assert not control.pending and control.first is None
                     assert not viewer.rows['2'].awaiting_confirmation
+                    viewer.playback_rate = 1
 
                 # A reference reset isolates every calibrated secondary, never the reference.
                 control.arm(readings(), regions, -1)

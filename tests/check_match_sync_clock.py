@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 
 def check(app, host, module, output=None):
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import QRectF, Qt
     from PySide6.QtGui import QColor, QFont, QFontDatabase, QImage, QPainter
     from PySide6.QtTest import QTest
     from ddm import plugins, recording
@@ -127,7 +127,7 @@ def check(app, host, module, output=None):
             viewer.running = True
             for row in viewer.rows.values():
                 row.decoder = SimpleNamespace(history=history, pictures=None)
-            viewer.playback_rate = 1
+            viewer.playback_rate = .98  # Normal SafetyBuffer headroom building, not user replay.
             with patch.object(viewer, 'shifts', return_value={'1': 0., '2': 0.}), \
                     patch.object(viewer, 'live_clock', return_value=103.):
                 async_dialog = ui.ClockDialog(viewer)
@@ -138,6 +138,21 @@ def check(app, host, module, output=None):
                     app.processEvents()
                     time.sleep(.01)
                 assert all(lane.preview is not None for lane in async_dialog.lanes.values()), async_dialog.status.text()
+                assert all(lane.strip.count() == 1 and not lane.strip.item(0).icon().isNull()
+                           for lane in async_dialog.lanes.values()), 'Getting a picture must display it'
+                if output:
+                    async_dialog.grab().save(str(output.with_name('clock-preview.png')))
+                def accept_region(picker):
+                    canvas = picker.findChild(ui.Canvas)
+                    assert canvas is not None and not canvas.image.isNull()
+                    canvas.crop = QRectF(.2, .25, .6, .5)
+                    return ui.QDialog.DialogCode.Accepted
+                with patch.object(ui.QDialog, 'exec', accept_region):
+                    async_dialog.lanes['1'].choose_region()
+                assert async_dialog.lanes['1'].strip.item(0).text() == '计时器选区'
+                assert not async_dialog.lanes['1'].frames and async_dialog.sample_token is None
+                if output:
+                    async_dialog.grab().save(str(output.with_name('clock-region.png')))
                 for lane in async_dialog.lanes.values():
                     lane.region = (.2, .25, .6, .5)
                 async_dialog.start_job(preview=False)
@@ -146,8 +161,19 @@ def check(app, host, module, output=None):
                     app.processEvents()
                     time.sleep(.01)
                 assert not async_dialog.busy and async_dialog.sample_token is not None, async_dialog.status.text()
+                viewer.playback_rate = 1.005
+                async_dialog.check_session()
+                assert async_dialog.sample_token is not None, 'Adaptive live speed must not invalidate cached samples'
                 async_dialog.calculate_proposal()
                 assert async_dialog.apply.isEnabled(), async_dialog.status.text()
+                viewer.replay.delay = 2
+                try:
+                    ui.session_token(viewer, ('1', '2'))
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError('Replay must remain unavailable for live timer sampling')
+                viewer.replay.delay = 0
                 async_dialog.reject()
                 assert async_dialog.cancelled.is_set()
                 async_dialog.deleteLater()
