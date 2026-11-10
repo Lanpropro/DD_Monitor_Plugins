@@ -518,6 +518,7 @@ class SendConsole(SettingsPanel):
         self.refresh_interactions()
 
     def sync_height(self):
+        scroll_state = self.viewer.panel._scroll_state()
         settings = self.viewer.settings_panel
         if not settings.isHidden():
             self.expanded_without_settings = False
@@ -532,6 +533,7 @@ class SendConsole(SettingsPanel):
         self.restore.setVisible(not visible)
         self.restore_bar.setVisible(not visible)
         self.parentWidget().layout().activate()
+        self.viewer.panel._restore_scroll_state(scroll_state)
 
     def set_collapsed(self, collapsed):
         self.collapsed = collapsed
