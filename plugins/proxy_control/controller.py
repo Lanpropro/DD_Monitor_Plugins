@@ -72,6 +72,7 @@ class Controller(QObject):
         self._results = {}
         self._test_key = None
         self._menu_visible = False
+        self._overview_ready = False
         self._auto_test_pending = True
         self.latency.running.connect(self._testing_changed)
         self.latency.result.connect(self._test_result)
@@ -99,15 +100,23 @@ class Controller(QObject):
 
     def menu_visible(self, visible):
         self._menu_visible = visible
+        self._overview_ready = False
         if visible:
-            self._maybe_auto_test()
+            self._trace('menu-open')
         else:
             self._auto_test_pending = False
 
+    def overview_ready(self, ready):
+        self._overview_ready = ready and self._menu_visible
+        if self._overview_ready:
+            self._trace('overview-ready')
+            self._maybe_auto_test()
+
     def _maybe_auto_test(self):
-        if (self._auto_test_pending and self._menu_visible and not self.working
+        if (self._auto_test_pending and self._menu_visible and self._overview_ready and not self.working
                 and not self.latency.testing and self.node_snapshot()[0]):
             self._auto_test_pending = False
+            self._trace('auto-latency-start')
             self.test_nodes(self.node_snapshot()[0])
 
     def _test_detail(self, name, detail):

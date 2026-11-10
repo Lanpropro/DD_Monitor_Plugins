@@ -33,7 +33,7 @@ args, remaining = parser.parse_known_args()
 sys.path.insert(0, str(args.host.resolve()))
 os.environ['DDM_NO_SAVE'] = '1'
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
-from PySide6.QtCore import QPoint, QProcess, QSize, Qt
+from PySide6.QtCore import QEvent, QObject, QPoint, QProcess, QSize, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QWidget, QToolButton, QVBoxLayout
 import requests
@@ -1213,14 +1213,112 @@ class InterfaceTests(unittest.TestCase):
                 with patch.object(controller, 'test_nodes') as test:
                     controller.menu_visible(True)
                     test.assert_not_called()
+                    controller.overview_ready(True)
+                    test.assert_not_called()
+                    controller.overview_ready(False)
                     controller.options.profile_id = 'one'
                     controller.profiles = [Profile('one', 'Fixture', 'nodes', 'fixture', nodes={'A': 'Http'})]
                     controller._maybe_auto_test()
+                    test.assert_not_called()
+                    controller.overview_ready(True)
                     test.assert_called_once_with(['A'])
                     controller.menu_visible(False)
                     controller.menu_visible(True)
                     controller._maybe_auto_test()
                     test.assert_called_once()
+            finally:
+                controller.stop(announce=False)
+                controller.deleteLater()
+
+    def test_automatic_latency_starts_after_overview_child_cards_have_painted(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(module.config, 'data_root', return_value=root):
+            directory = Path(root) / 'utils/proxy_control'
+            save_options(directory, Options(core=__file__, profile_id='one', source='nodes', profile='fixture'))
+            save_profiles(directory, [Profile('one', 'Fixture', 'nodes', 'fixture', nodes={'A': 'Http'})])
+            window = QWidget()
+            window.resize(1100, 800)
+            plugin = module.ProxyControl()
+            events = []
+            class PaintProbe(QObject):
+                def eventFilter(self, watched, event):
+                    if event.type() == QEvent.Paint:
+                        events.append(watched)
+                    return False
+            probe = PaintProbe(window)
+            try:
+                plugin.on_load(SimpleNamespace(window=window, register_workspace_control=Mock()))
+                window.show()
+                with patch.object(plugin.controller, 'test_nodes', side_effect=lambda _names: events.append('test')) as test:
+                    plugin.toggle()
+                    test.assert_not_called()
+                    for card in plugin.panel.dashboard_cards:
+                        card.installEventFilter(probe)
+                    wait_for(lambda: test.called)
+                    test.assert_called_once_with(['A'])
+                    for card in plugin.panel.dashboard_cards:
+                        if card.isVisible():
+                            self.assertLess(events.index(card), events.index('test'))
+                    self.assertFalse(plugin.panel._overview_timer.isActive())
+                    plugin.popover.hide()
+                    plugin.toggle()
+                    QTest.qWait(30)
+                    test.assert_called_once()
+            finally:
+                plugin.on_unload()
+                window.deleteLater()
+                APP.processEvents()
+
+    def test_automatic_latency_waits_for_return_to_overview_and_cancels_on_early_hide(self):
+        for early_action in ('other-page', 'hide'):
+            with self.subTest(action=early_action), tempfile.TemporaryDirectory() as root, \
+                    patch.object(module.config, 'data_root', return_value=root):
+                directory = Path(root) / 'utils/proxy_control'
+                save_options(directory, Options(core=__file__, profile_id='one', source='nodes', profile='fixture'))
+                save_profiles(directory, [Profile('one', 'Fixture', 'nodes', 'fixture', nodes={'A': 'Http'})])
+                window = QWidget()
+                window.resize(1100, 800)
+                plugin = module.ProxyControl()
+                try:
+                    plugin.on_load(SimpleNamespace(window=window, register_workspace_control=Mock()))
+                    window.show()
+                    with patch.object(plugin.controller, 'test_nodes') as test:
+                        plugin.toggle()
+                        if early_action == 'other-page':
+                            plugin.panel.navigation.setCurrentRow(1)
+                        else:
+                            plugin.popover.hide()
+                        QTest.qWait(30)
+                        test.assert_not_called()
+                        if early_action == 'other-page':
+                            plugin.panel.navigation.setCurrentRow(0)
+                            wait_for(lambda: test.called)
+                            test.assert_called_once_with(['A'])
+                        else:
+                            plugin.toggle()
+                            QTest.qWait(30)
+                            test.assert_not_called()
+                finally:
+                    plugin.on_unload()
+                    window.deleteLater()
+                    APP.processEvents()
+
+    def test_busy_completion_cannot_start_auto_latency_after_leaving_overview(self):
+        with tempfile.TemporaryDirectory() as directory:
+            controller = Controller(directory)
+            controller.options.profile_id = 'one'
+            controller.profiles = [Profile('one', 'Fixture', 'nodes', 'fixture', nodes={'A': 'Http'})]
+            try:
+                with patch.object(controller, 'test_nodes') as test:
+                    controller.menu_visible(True)
+                    controller._busy(True)
+                    controller.overview_ready(True)
+                    test.assert_not_called()
+                    controller.overview_ready(False)
+                    controller._busy(False)
+                    APP.processEvents()
+                    test.assert_not_called()
+                    controller.overview_ready(True)
+                    test.assert_called_once_with(['A'])
             finally:
                 controller.stop(announce=False)
                 controller.deleteLater()

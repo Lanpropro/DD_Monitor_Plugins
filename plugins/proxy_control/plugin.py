@@ -66,6 +66,7 @@ class ProxyControl(Plugin):
             self.panel = Panel(self.controller.options)
             self.popover = Popover(self.panel, self.context.window, self.entry)
             self.panel.hideRequested.connect(self.popover.hide)
+            self.panel.overviewReady.connect(self.controller.overview_ready)
             self.popover.hidden.connect(lambda: self.controller.menu_visible(False))
             self.popover.hidden.connect(self.controller.cancel_tests)
             self.popover.hidden.connect(lambda: self.action.setChecked(False))

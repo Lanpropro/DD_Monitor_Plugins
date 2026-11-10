@@ -311,7 +311,7 @@
       "source_kind": "repository_candidate",
       "last_edit_verified": false,
       "base_commit": "6a0f4cec30e5f671b83bb91874264b569af5af4f",
-      "sha256": "dfdf658282bd1b5db9cf9eb3cfbf93028ed364e5ad3f9d249f4d796c97616686",
+      "sha256": "935616a5dfdac41ca079ca19c89d08c1b24a2ec49cfaab238249bcc4f155e97a",
       "release_gate": "on_hold_due_to_public_host_incompatibility"
     }
   ],

@@ -2,7 +2,7 @@
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QFrame,
                                QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
@@ -36,6 +36,7 @@ class Panel(QWidget):
     catalogRequested = Signal()
     routingRequested = Signal(str)
     targetRequested = Signal(str)
+    overviewReady = Signal(bool)
 
     def __init__(self, options, parent=None):
         super().__init__(parent)
@@ -46,6 +47,10 @@ class Panel(QWidget):
         self._running = False
         self._importing = False
         self._loading = False
+        self._overview_presented = False
+        self._overview_timer = QTimer(self)
+        self._overview_timer.setSingleShot(True)
+        self._overview_timer.timeout.connect(self._overview_ready)
         self._saved_options = replace(options)
         self._profiles = []
         self._edit_id = options.profile_id
@@ -119,11 +124,12 @@ class Panel(QWidget):
         self.refresh_theme()
 
     def _build_dashboard(self, options):
-        scroll = QScrollArea()
+        scroll = self.overview = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        content = QWidget()
+        content = self.overview_content = QWidget()
+        content.installEventFilter(self)
         grid = QGridLayout(content)
         self.dashboard_grid = grid
         self.dashboard_cards = []
@@ -225,6 +231,14 @@ class Panel(QWidget):
         self.pages.addWidget(scroll)
 
     def eventFilter(self, watched, event):
+        if watched is getattr(self, 'overview_content', None):
+            if event.type() == QEvent.Paint and not self._overview_presented and not self._overview_timer.isActive():
+                # Queue after the complete widget paint traversal, including child cards.
+                self._overview_timer.start(0)
+            elif event.type() == QEvent.Hide:
+                self._overview_timer.stop()
+                self._overview_presented = False
+                self.overviewReady.emit(False)
         if event.type() == QEvent.Wheel and watched in (self.source, self.agent):
             event.ignore()
             return True
@@ -233,6 +247,11 @@ class Panel(QWidget):
             if columns != self._dashboard_columns:
                 self._arrange_dashboard(columns)
         return super().eventFilter(watched, event)
+
+    def _overview_ready(self):
+        if self.isVisible() and self.pages.currentIndex() == 0 and self.overview.isVisible():
+            self._overview_presented = True
+            self.overviewReady.emit(True)
 
     def _arrange_dashboard(self, columns):
         self._dashboard_columns = columns
