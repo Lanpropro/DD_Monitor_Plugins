@@ -152,7 +152,7 @@ class ClockRecovery(QObject):
             self.fail('恢复缓存或计时器复核超时，请重新确认对齐')
             return
         if (self.busy or time.monotonic() < self.next_sample or viewer.replay.active
-                or viewer.playback_rate != 1 or getattr(viewer, 'clock_dialog', None) is not None
+                or getattr(viewer, 'clock_dialog', None) is not None
                 or any(viewer.rows[key].paused for key in readings)):
             return
         keys = tuple(key for key in readings if key == reference or key in self.pending)
@@ -211,7 +211,7 @@ class ClockRecovery(QObject):
         self.busy = False
         if token.is_set() or self.profile is None or self.failed:
             return
-        if (self.viewer.replay.active or self.viewer.playback_rate != 1
+        if (self.viewer.replay.active
                 or getattr(self.viewer, 'clock_dialog', None) is not None
                 or any(self.viewer.rows[key].paused for key, *_rest in identities)):
             self.first = None
