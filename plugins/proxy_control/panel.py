@@ -14,7 +14,7 @@ from ddm import theme
 from ddm.ui import SegmentedControl, SelectControl, ToggleSwitch
 
 from .configuration import Options, DEFAULT_USER_AGENT, USER_AGENTS
-from .node_list import NodeChoiceDelegate, NodeDelegate, NodeModel, NodeView
+from .node_list import NodeChoiceDelegate, NodeDelegate, NodeModel, NodeSelect, NodeView
 from .visuals import NavigationDelegate, ProfileDelegate, ProfileList, icon, surface, translucent
 from .regions import display_node_name, flag_icon, region_code
 from .connection_page import ConnectionPage
@@ -129,11 +129,18 @@ class Panel(QWidget):
         self._dashboard_columns = 2
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setSpacing(12)
+        self.dashboard_columns = [QVBoxLayout(), QVBoxLayout()]
+        for index, column in enumerate(self.dashboard_columns):
+            column.setSpacing(12)
+            column.addStretch()
+            grid.addLayout(column, 0, index)
+        grid.setRowStretch(0, 1)
         self.card_icons = []
 
-        def card(title, symbol, row, column, span=1):
+        def card(title, symbol):
             frame = QFrame()
             frame.setObjectName('ProxyCard')
+            frame.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
             self.dashboard_cards.append(frame)
             box = QVBoxLayout(frame)
             box.setContentsMargins(14, 12, 14, 12)
@@ -148,22 +155,20 @@ class Panel(QWidget):
             label.setObjectName('ProxyHint')
             heading.addWidget(label, 1)
             box.addLayout(heading)
-            grid.addWidget(frame, row, column, 1, span)
             return box
 
-        service = card('代理服务', 'latency', 0, 0)
+        service = card('代理服务', 'latency')
         self.service_state = QLabel('尚未启动')
         self.service_state.setObjectName('ProxyValue')
-        service.addWidget(self.service_state)
         actions = QHBoxLayout()
+        actions.addWidget(self.service_state, 1)
         self.apply = QPushButton()
         self.apply.setObjectName('ProxyPower')
         self.apply.setFixedSize(40, 40)
         self.apply.clicked.connect(self._start)
-        actions.addWidget(self.apply, 0, Qt.AlignLeft)
-        actions.addStretch()
+        actions.addWidget(self.apply)
         service.addLayout(actions)
-        settings = card('快捷设置', 'settings', 0, 1)
+        settings = card('快捷设置', 'settings')
         restore_row = QHBoxLayout()
         restore_row.addWidget(QLabel('启动软件时自动连接'), 1)
         self.auto_start = ToggleSwitch('启动软件时自动连接代理')
@@ -187,7 +192,7 @@ class Panel(QWidget):
         self.routing_hint.setWordWrap(True)
         settings.addWidget(self.routing_hint)
         self._routing_hint(options.routing)
-        provider = card('当前配置', 'folder', 1, 0)
+        provider = card('当前配置', 'folder')
         self.quick_profile = SelectControl()
         self.quick_profile.setObjectName('ProxyInline')
         self.quick_profile.setPlaceholderText('先在配置页添加服务商')
@@ -200,15 +205,14 @@ class Panel(QWidget):
         self.activate_profile.clicked.connect(lambda: self.profileRequested.emit(self.quick_profile.currentData()))
         provider.addWidget(self.quick_profile)
         provider.addWidget(self.activate_profile, 0, Qt.AlignLeft)
-        node = card('当前节点', 'nodes', 1, 1)
-        self.quick_node = SelectControl()
+        node = card('当前节点', 'nodes')
+        self.quick_node = NodeSelect()
         self.quick_node.setObjectName('ProxyInline')
         self.quick_node.setPlaceholderText('启动服务后可选择节点')
         self.quick_node.setMinimumWidth(0)
         self.quick_node.setMinimumContentsLength(14)
         self.quick_node.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.quick_node.setItemDelegate(NodeChoiceDelegate(self.model, self.quick_node))
-        self.quick_node.view().setMinimumWidth(280)
         self.quick_node.setMaxVisibleItems(5)
         self.quick_node.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.quick_node.setEnabled(False)
@@ -217,14 +221,12 @@ class Panel(QWidget):
         self.all_nodes.clicked.connect(lambda: self.navigation.setCurrentRow(1))
         node.addWidget(self.quick_node)
         node.addWidget(self.all_nodes, 0, Qt.AlignLeft)
-        resource = card('资源占用', 'overview', 2, 0, 2)
+        resource = card('资源占用', 'overview')
         self.resources = QLabel('内核未运行')
         self.resources.setObjectName('ProxyHint')
         self.resources.setWordWrap(True)
         resource.addWidget(self.resources)
-        grid.setRowStretch(3, 1)
-        grid.setColumnStretch(0, 1)
-        grid.setColumnStretch(1, 1)
+        self._arrange_dashboard(2)
         scroll.setWidget(content)
         self.pages.addWidget(scroll)
 
@@ -232,19 +234,20 @@ class Panel(QWidget):
         if watched is self.pages and event.type() == QEvent.Resize and hasattr(self, 'dashboard_cards'):
             columns = 1 if self.pages.width() < 460 else 2
             if columns != self._dashboard_columns:
-                self._dashboard_columns = columns
-                for index, card in enumerate(self.dashboard_cards):
-                    self.dashboard_grid.removeWidget(card)
-                    if columns == 1:
-                        self.dashboard_grid.addWidget(card, index, 0)
-                    elif index < 4:
-                        self.dashboard_grid.addWidget(card, index // 2, index % 2)
-                    else:
-                        self.dashboard_grid.addWidget(card, 2, 0, 1, 2)
-                self.dashboard_grid.setColumnStretch(1, 1 if columns == 2 else 0)
-                self.dashboard_grid.setRowStretch(3, 0 if columns == 1 else 1)
-                self.dashboard_grid.setRowStretch(5, 1 if columns == 1 else 0)
+                self._arrange_dashboard(columns)
         return super().eventFilter(watched, event)
+
+    def _arrange_dashboard(self, columns):
+        self._dashboard_columns = columns
+        for card in self.dashboard_cards:
+            for column in self.dashboard_columns:
+                column.removeWidget(card)
+        for index, card in enumerate(self.dashboard_cards):
+            column = self.dashboard_columns[0 if columns == 1 or index in (0, 2, 4) else 1]
+            column.insertWidget(column.count() - 1, card)
+        self.dashboard_grid.setColumnStretch(0, 1)
+        self.dashboard_grid.setColumnStretch(1, 1 if columns == 2 else 0)
+        self.dashboard_grid.setHorizontalSpacing(12 if columns == 2 else 0)
 
     def _build_nodes(self):
         page = QWidget()
@@ -735,7 +738,7 @@ class Panel(QWidget):
 #ProxyPanel QPushButton:disabled {{color: {theme.TEXT3};}}
 #ProxyPanel QPushButton#ProxyStart {{background: {theme.ACCENT_SOFT}; border: 1px solid transparent; color: {theme.ACCENT}; border-radius: 15px; padding: 6px 13px;}}
 #ProxyPanel QPushButton#ProxyStart:hover {{border-color: {theme.ACCENT};}}
-#ProxyPanel QPushButton#ProxyPower {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT}; border: 1px solid {translucent(theme.ACCENT, 90)}; border-radius: 20px; padding: 0; min-height: 0;}}
+#ProxyPanel QPushButton#ProxyPower {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT}; border: 1px solid {translucent(theme.ACCENT, 90)}; border-radius: 20px; padding: 0; min-height: 38px; max-height: 38px;}}
 #ProxyPanel QPushButton#ProxyPower:hover {{border-color: {theme.ACCENT};}}
 #ProxyPanel QPushButton#ProxyPower[serviceState="on"] {{background: {translucent(theme.ERROR, 28)}; color: {stop_ink}; border-color: {translucent(theme.ERROR, 120)};}}
 #ProxyPanel QPushButton#ProxyPower[serviceState="on"]:hover {{background: {translucent(theme.ERROR, 46)}; border-color: {theme.ERROR};}}

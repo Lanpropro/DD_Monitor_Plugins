@@ -5,11 +5,25 @@ from PySide6.QtWidgets import QListView, QStyledItemDelegate, QStyle
 
 from ddm import theme
 from ddm.motion import enabled as motion_enabled
+from ddm.ui import SelectControl
 from .visuals import surface, symbol
 from .regions import display_node_name, flag_icon, region_code
 
 NODE_ROLE = Qt.UserRole + 1
 ACTIVE_ROLE = Qt.UserRole + 2
+
+
+class NodeSelect(SelectControl):
+    """Keep the rich node popup at the closed selector's logical width."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.view().setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+    def showPopup(self):
+        popup = self.view().window()
+        popup.setFixedWidth(self.width())
+        super().showPopup()
+        popup.setFixedWidth(self.width())
 
 
 class NodeView(QListView):
@@ -191,7 +205,7 @@ class NodeChoiceDelegate(QStyledItemDelegate):
         self.nodes = model
 
     def sizeHint(self, option, index):
-        return QSize(280, 58)
+        return QSize(0, 58)
 
     def paint(self, painter, option, index):
         record = self.nodes.records.get(index.data(Qt.UserRole))

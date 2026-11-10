@@ -759,6 +759,63 @@ class ConnectionTests(unittest.TestCase):
 
 
 class InterfaceTests(unittest.TestCase):
+    def test_expanded_node_popup_matches_selector_width_for_short_and_long_names(self):
+        panel = Panel(Options())
+        names = ['香港 01 [D]', '香港 02 [D]'] + ['Long node name ' * 20 + str(i) for i in range(12)]
+        panel.set_nodes(names, names[1], {name: 'AnyTLS' for name in names})
+        panel.show()
+        try:
+            for width in (658, 380):
+                panel.resize(width, 478)
+                panel.navigation.setCurrentRow(0)
+                QTest.qWait(30)
+                panel.quick_node.showPopup()
+                QTest.qWait(30)
+                popup = panel.quick_node.view().window()
+                self.assertTrue(popup.isVisible())
+                self.assertEqual(popup.width(), panel.quick_node.width())
+                anchor_left = panel.quick_node.mapToGlobal(QPoint()).x()
+                available = panel.quick_node.screen().availableGeometry()
+                if anchor_left + panel.quick_node.width() <= available.right() + 1:
+                    self.assertEqual(popup.x(), anchor_left)
+                else:
+                    self.assertLessEqual(popup.x(), anchor_left)  # Qt keeps an edge popup on screen.
+                self.assertFalse(panel.quick_node.view().horizontalScrollBar().isVisible())
+                self.assertEqual(panel.quick_node.currentData(), names[1])
+                QTest.keyClick(panel.quick_node.view(), Qt.Key_Escape)
+                APP.processEvents()
+                self.assertFalse(popup.isVisible())
+        finally:
+            panel.quick_node.hidePopup()
+            panel.hide()
+            panel.deleteLater()
+
+    def test_service_card_is_compact_and_columns_have_no_forced_row_gaps(self):
+        panel = Panel(Options())
+        panel.resize(658, 478)
+        panel.show()
+        QTest.qWait(30)
+        try:
+            service, settings, profile, node, resources = panel.dashboard_cards
+            self.assertLessEqual(service.height(), 120)
+            self.assertEqual(panel.apply.width(), panel.apply.height())
+            self.assertGreaterEqual(panel.apply.height(), 34)
+            state = panel.service_state.mapTo(service, panel.service_state.rect().center())
+            button = panel.apply.mapTo(service, panel.apply.rect().center())
+            self.assertLessEqual(abs(state.y() - button.y()), 1)
+            self.assertLessEqual(profile.y() - service.y() - service.height(), 14)
+            self.assertLessEqual(resources.y() - profile.y() - profile.height(), 14)
+            self.assertLessEqual(node.y() - settings.y() - settings.height(), 14)
+            self.assertGreater(node.x(), profile.x())
+            panel.resize(380, 478)
+            QTest.qWait(30)
+            for first, second in zip(panel.dashboard_cards, panel.dashboard_cards[1:]):
+                self.assertEqual(first.x(), second.x())
+                self.assertGreater(second.y(), first.y())
+        finally:
+            panel.hide()
+            panel.deleteLater()
+
     def test_running_badge_keeps_text_contrast_in_both_themes(self):
         from ddm import theme
         from PySide6.QtGui import QPalette
