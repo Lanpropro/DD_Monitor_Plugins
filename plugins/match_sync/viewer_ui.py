@@ -104,6 +104,7 @@ def build_ui(viewer):
     heading.addWidget(viewer.automatic)
     heading.addWidget(viewer.compare)
     viewer.clock_button = native_console_button(QPushButton('计时器对齐'), '计时器辅助对齐')
+    viewer.clock_button.setFixedWidth(max(104, viewer.clock_button.fontMetrics().horizontalAdvance('计时器对齐') + 24))
     viewer.clock_button.setObjectName('ChipButton')
     viewer.clock_button.setToolTip('框选各路游戏计时器并核对翻秒；请先播放至少两路')
     viewer.clock_button.clicked.connect(lambda: viewer.comparison_panel.open_clock())

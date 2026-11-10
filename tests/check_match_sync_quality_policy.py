@@ -112,6 +112,7 @@ def check(app, host, module):
         try:
             viewer.clock_button.click()
             assert '至少一路副画面' in viewer.notice.text()
+            assert viewer.clock_button.width() >= viewer.clock_button.fontMetrics().horizontalAdvance(viewer.clock_button.text()) + 16
             viewer.add_room('1', {'quality': 1014000, 'quality_auto': False})
             viewer.add_room('2', {'quality': 1004000, 'quality_auto': False})
             for row in viewer.rows.values():
