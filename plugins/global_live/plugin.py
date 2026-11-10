@@ -347,7 +347,8 @@ class YouTubePlatform(PublicLivePlatform):
             with session.get("https://www.googleapis.com/youtube/v3/subscriptions", params=params,
                     timeout=(4, 8)) as response:
                 if response.status_code in (401, 403):
-                    raise RuntimeError("YouTube 订阅读取未获授权，请确认已启用 YouTube Data API 并重新授权")
+                    from .youtube_account_errors import subscription_error
+                    raise RuntimeError(subscription_error(response))
                 response.raise_for_status()
                 payload = response.json()
             if not isinstance(payload.get("items"), list):

@@ -50,6 +50,8 @@ Twitch 使用匿名只读 IRC WebSocket，处理 PING/PONG；YouTube 使用网�
 
 ### OAuth授权（备选）
 
+YouTube订阅读取失败时显示HTTP状态与已知原因代码，区分权限未勾选、API未启用、配额和频道设置；不输出Google响应正文或用户令牌。离线专项：`python tests/check_youtube_account_errors.py --host ../DD_Monitor_CE`。
+
 底部账号条的“登录其他平台”提供 Twitch 与 YouTube；授权通过系统默认浏览器完成。
 已登录平台只展示账号身份，不会再次弹出登录网页。两个平台沿用头像、昵称、ID、
 粉色登录边框与指定账号退出；未加载本插件时不显示入口。
