@@ -6,7 +6,7 @@ from PySide6.QtCore import QEvent, QSize, Qt, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QFrame,
                                QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-                               QListWidgetItem, QPlainTextEdit,
+                               QListWidgetItem,
                                QScrollArea, QSizePolicy, QStackedWidget,
                                QVBoxLayout, QWidget)
 
@@ -21,6 +21,7 @@ from .regions import display_node_name, flag_icon, region_code
 from .connection_page import ConnectionPage
 from .latency import MAX_CONCURRENT
 from .traffic import quota, expiry_text
+from .profile_editor import build_profile_editor
 
 
 class Panel(QWidget):
@@ -316,99 +317,7 @@ class Panel(QWidget):
         self.add_profile.clicked.connect(self._new_profile)
         list_box.addWidget(self.add_profile, 0, Qt.AlignRight)
         self.configuration_views.addWidget(listing)
-        scroll = QScrollArea()
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        content = QWidget()
-        content.setObjectName('ProxyEditor')
-        outer = QVBoxLayout(content)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(12)
-        self.editor_card = SettingsSurface()
-        self.editor_card.setObjectName('ProxyCard')
-        box = QVBoxLayout(self.editor_card)
-        box.setContentsMargins(14, 12, 14, 12)
-        box.setSpacing(10)
-        self.back_to_profiles = ActionButton('配置列表')
-        self.back_to_profiles.clicked.connect(lambda: self.configuration_views.setCurrentIndex(0))
-        outer.addWidget(self.back_to_profiles, 0, Qt.AlignLeft)
-        outer.addWidget(self.editor_card)
-        outer.addStretch()
-        name_label = QLabel('配置名称')
-        box.addWidget(name_label)
-        self.profile_name = QLineEdit(options.profile_name if options.profile else '')
-        self.profile_name.setPlaceholderText('留空自动识别服务商名称')
-        self.profile_name.setMinimumWidth(0)
-        self.profile_name.setFixedHeight(theme.CONTROL_HEIGHT)
-        self.profile_name.setToolTip('优先读取订阅提供的名称；未提供时显示订阅域名，也可手动命名')
-        box.addWidget(self.profile_name)
-        source_label = QLabel('导入方式')
-        box.addWidget(source_label)
-        self.source = SelectControl()
-        self.source.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.source.setMinimumWidth(0)
-        for name, value in [('订阅地址', 'url'), ('本地 Clash／Mihomo 配置', 'file'), ('节点链接', 'nodes')]:
-            self.source.addItem(name, value)
-        self.source.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
-        self.source.setMinimumContentsLength(6)
-        self.source.setCurrentIndex(self.source.findData(options.source))
-        box.addWidget(self.source)
-        self.location = QLineEdit(options.profile if options.source != 'nodes' else '')
-        self.location.setMinimumWidth(0)
-        self.location.setFixedHeight(theme.CONTROL_HEIGHT)
-        self.location.returnPressed.connect(self._confirm_import)
-        box.addWidget(self.location)
-        self.profile = QPlainTextEdit(options.profile if options.source == 'nodes' else '')
-        self.profile.setFixedHeight(130)
-        box.addWidget(self.profile)
-        self.browse_profile = ActionButton('选择配置文件…')
-        self.browse_profile.clicked.connect(self._profile_file)
-        box.addWidget(self.browse_profile)
-        self.agent_label = QLabel('订阅格式（支持自定义 UA）')
-        self.agent_label.setWordWrap(True)
-        box.addWidget(self.agent_label)
-        self.agent = QComboBox()
-        self.agent.setEditable(True)
-        self.agent.setAccessibleName('订阅格式／User-Agent')
-        self.agent.lineEdit().setPlaceholderText('选择或输入自定义 User-Agent')
-        self.agent.setMinimumWidth(0)
-        self.agent.setFixedHeight(theme.CONTROL_HEIGHT)
-        self.agent.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.agent.setToolTip('通常使用 Mihomo；服务商有要求时选择对应客户端标识，也可直接输入。仅作用于此配置。')
-        for label, value in USER_AGENTS:
-            self.agent.addItem(label, value)
-        self._set_user_agent(options.user_agent)
-        box.addWidget(self.agent)
-        self.import_button = ActionButton()
-        self.import_button.setObjectName('PrimaryButton')
-        self.import_button.clicked.connect(self._confirm_import)
-        box.addWidget(self.import_button, 0, Qt.AlignRight)
-        self.import_status = HintLabel('填写后点击上方按钮，下载并载入节点。')
-        box.addWidget(self.import_status)
-        self.advanced = DisclosureButton()
-        self.advanced.setText('内核设置')
-        box.addWidget(self.advanced)
-        self.runtime = QWidget()
-        runtime = QVBoxLayout(self.runtime)
-        runtime.setContentsMargins(0, 0, 0, 0)
-        runtime.addWidget(QLabel('内核程序'))
-        self.core = QLineEdit(options.core)
-        self.core.setMinimumWidth(0)
-        self.core.setFixedHeight(theme.CONTROL_HEIGHT)
-        runtime.addWidget(self.core)
-        choose = ActionButton('选择内核程序…')
-        choose.clicked.connect(self._core_file)
-        runtime.addWidget(choose)
-        self.prepare = ActionButton('准备内核（首次下载）')
-        self.prepare.clicked.connect(self.prepareRequested)
-        runtime.addWidget(self.prepare)
-        self.advanced.setChecked(not Path(options.core).is_file())
-        self.advanced.toggled.connect(self._advanced)
-        self._advanced(self.advanced.isChecked())
-        box.addWidget(self.runtime)
-        scroll.setWidget(content)
-        self.configuration_views.addWidget(scroll)
+        self.configuration_views.addWidget(build_profile_editor(self, options))
         self.configuration_views.setCurrentIndex(1 if not options.profile else 0)
         self.pages.addWidget(page)
         self.source.currentIndexChanged.connect(self._visibility)
@@ -439,6 +348,9 @@ class Panel(QWidget):
         else:
             self.navigation.setCurrentRow(2)
 
+    def _compatibility(self, checked):
+        self.agent_area.setVisible(checked and self.source.currentData() == 'url')
+
     def _advanced(self, checked):
         self.runtime.setVisible(checked)
 
@@ -454,8 +366,12 @@ class Panel(QWidget):
 
     def _visibility(self):
         source = self.source.currentData()
-        self.agent_label.setVisible(source == 'url')
-        self.agent.setVisible(source == 'url')
+        self.compatibility.setVisible(source == 'url')
+        self._compatibility(self.compatibility.isChecked())
+        self.location_label.setText('订阅地址' if source == 'url' else '配置文件')
+        self.location_label.setVisible(source != 'nodes')
+        self.location_row.setVisible(source != 'nodes')
+        self.profile_label.setVisible(source == 'nodes')
         self.browse_profile.setVisible(source == 'file')
         self.location.setVisible(source != 'nodes')
         self.profile.setVisible(source == 'nodes')
@@ -467,7 +383,7 @@ class Panel(QWidget):
 
     def _edited(self, *_args):
         if not self._busy and not self._loading:
-            message = '修改尚未确认，请点击上方导入按钮。'
+            message = '修改尚未确认，请点击下方导入按钮。'
             self.import_status.setText(message)
             self.status.setText(message)
 
@@ -542,7 +458,7 @@ class Panel(QWidget):
         self._set_user_agent(DEFAULT_USER_AGENT)
         self._loading = False
         self._visibility()
-        self.import_status.setText('填写配置名称和订阅，点击导入即可保存并启用。')
+        self.import_status.setText('填写订阅地址，名称可留空；导入后保存并启用。')
         self.profile_name.setFocus()
 
     def _edit_profile(self, row, show=True):
@@ -560,7 +476,7 @@ class Panel(QWidget):
         self._set_user_agent(profile.user_agent)
         self._loading = False
         self._visibility()
-        self.import_status.setText('点击导入按钮，更新并启用此配置。')
+        self.import_status.setText('编辑后点击下方按钮，更新并启用此配置。')
 
     def set_profiles(self, profiles, active):
         self._profiles = list(profiles)

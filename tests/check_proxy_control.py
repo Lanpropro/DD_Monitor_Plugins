@@ -35,7 +35,7 @@ os.environ['DDM_NO_SAVE'] = '1'
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 from PySide6.QtCore import QPoint, QProcess, QSize, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QWidget, QToolButton, QVBoxLayout
+from PySide6.QtWidgets import QApplication, QLabel, QWidget, QToolButton, QVBoxLayout
 import requests
 
 spec = importlib.util.spec_from_file_location('check_proxy_plugin', ROOT / 'plugins/proxy_control/plugin.py')
@@ -770,6 +770,51 @@ class ConnectionTests(unittest.TestCase):
 
 
 class InterfaceTests(unittest.TestCase):
+    def test_profile_editor_uses_compact_rows_and_fixed_confirmation_in_both_themes(self):
+        from ddm import theme
+        previous = theme.mode()
+        panel = Panel(Options(core=__file__))
+        panel.navigation.setCurrentRow(2)
+        panel.show()
+        try:
+            self.assertFalse(panel.compatibility.isChecked())
+            self.assertFalse(panel.agent_area.isVisible())
+            for mode in ('dark', 'light'):
+                theme.apply(mode)
+                for width in (658, 380):
+                    panel.resize(width, 478)
+                    panel.source.setCurrentIndex(panel.source.findData('url'))
+                    panel.advanced.setChecked(False)
+                    APP.processEvents()
+                    for control in (panel.profile_name, panel.source, panel.location):
+                        label = next(label for label in panel.editor_card.findChildren(QLabel)
+                                     if label.buddy() is control)
+                        self.assertLessEqual(abs(label.mapTo(panel, label.rect().center()).y() -
+                                                 control.mapTo(panel, control.rect().center()).y()), 1)
+                    footer_y = panel.import_button.mapTo(panel, QPoint()).y()
+                    self.assertLessEqual(footer_y + panel.import_button.height(), panel.height())
+                    panel.source.setCurrentIndex(panel.source.findData('nodes'))
+                    panel.advanced.setChecked(True)
+                    APP.processEvents()
+                    self.assertTrue(panel.profile_label.isVisible())
+                    self.assertFalse(panel.location_row.isVisible())
+                    self.assertFalse(panel.compatibility.isVisible())
+                    panel.editor_scroll.ensureWidgetVisible(panel.prepare)
+                    APP.processEvents()
+                    self.assertEqual(panel.import_button.mapTo(panel, QPoint()).y(), footer_y)
+                    self.assertFalse(panel.editor_scroll.isAncestorOf(panel.import_button))
+                    self.assertLessEqual(panel.editor_card.width(), panel.editor_scroll.viewport().width())
+            panel.source.setCurrentIndex(panel.source.findData('url'))
+            panel.compatibility.setChecked(True)
+            panel._set_user_agent('Custom/3.0')
+            panel.compatibility.setChecked(False)
+            self.assertEqual(panel.options().user_agent, 'Custom/3.0')
+        finally:
+            panel.hide()
+            panel.deleteLater()
+            APP.processEvents()
+            theme.apply(previous)
+
     def setUp(self):
         preparation = patch.object(Controller, 'prepare')
         self.prepare_core = preparation.start()
@@ -824,7 +869,7 @@ class InterfaceTests(unittest.TestCase):
         panel.location.setText('https://example.invalid/unconfirmed')
         imports = []
         panel.applyRequested.connect(imports.append)
-        scroll = panel.configuration_views.widget(1)
+        scroll = panel.editor_scroll
         try:
             self.assertFalse(panel.advanced.isChecked())
             scroll.ensureWidgetVisible(panel.advanced)
@@ -1040,6 +1085,7 @@ class InterfaceTests(unittest.TestCase):
                 self.assertEqual(panel.quick_node.width(), panel.quick_profile.width())
                 panel.navigation.setCurrentRow(2)
                 panel._edit_profile(0)
+                panel.compatibility.setChecked(True)
                 APP.processEvents()
                 self.assertEqual(panel.editor_card.objectName(), 'ProxyCard')
                 self.assertEqual(panel.source.width(), panel.profile_name.width())
@@ -1222,6 +1268,7 @@ class InterfaceTests(unittest.TestCase):
             self.assertEqual(panel.options().user_agent, DEFAULT_USER_AGENT)
             panel.navigation.setCurrentRow(2)
             panel.show()
+            panel.compatibility.setChecked(True)
             panel.agent.setFocus()
             QTest.keyClick(panel.agent.lineEdit(), Qt.Key_A, Qt.ControlModifier)
             QTest.keyClicks(panel.agent.lineEdit(), 'Provider Client/3.0')

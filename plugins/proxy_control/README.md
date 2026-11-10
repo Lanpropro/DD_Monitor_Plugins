@@ -124,6 +124,7 @@ git diff --check
 | `plugin.py` | 宿主左侧入口及卸载协调 |
 | `popover.py` | 图标旁主窗口内面板、有限尺寸、定位、外部点击／Esc 收起；不修改直播墙布局 |
 | `panel.py` | 四页导航、总览／代理／配置、草稿，组装宿主公共设置控件；不拥有内核 |
+| `profile_editor.py` | 配置详情的紧凑设置行、折叠选项与固定导入区域；控件值和信号仍由 Panel 管理 |
 | `core_install.py` / `prepare_core.py` | 内核校验与原子解压、可取消工作线程和独立命令入口；不持有代理运行状态 |
 | `connection_page.py` | 连接详情及会话事件展示，随可见性启停监测 |
 | `connections.py` | 本机连接 API、快照解析、有界缓冲及按需刷新；固定错误分类文字 |

@@ -71,6 +71,7 @@ def main():
                     assert 'proxy_control/regions.py' in names and 'proxy_control/entry_icon.py' in names
                     assert 'proxy_control/connections.py' in names and 'proxy_control/connection_page.py' in names
                     assert 'proxy_control/profile_settings.py' in names
+                    assert 'proxy_control/profile_editor.py' in names
                     assert 'proxy_control/vendor/yaml/loader.py' in names
                     assert 'proxy_control/vendor/yaml/LICENSE' in names
                     assert not any(name.endswith('.pyd') for name in names)
