@@ -303,6 +303,15 @@
           "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/match-sync-v1.6.1/plugin-catalog.json"
         }
       ]
+    },
+    {
+      "tag": "proxy-control-v0.1",
+      "file": "RELEASE-proxy-control-v0.1.md",
+      "status": "prepared",
+      "source_kind": "repository_candidate",
+      "last_edit_verified": false,
+      "base_commit": "72619eaf2bb4aa4b9687b80b2732ff3db5a9c024",
+      "sha256": "c1efb175267c51adfc5b34c223cc8eec874cb3ca7bcc994e94238bd777c00dbd"
     }
   ],
   "tags_without_recoverable_body": [

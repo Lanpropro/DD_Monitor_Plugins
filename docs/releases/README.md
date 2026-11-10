@@ -14,6 +14,12 @@
 | 国内直播平台 | [2.0](RELEASE-domestic-live-v2.0.md) | [domestic-live-v2.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v2.0) |
 | 海外直播平台 | [1.2](RELEASE-global-live-v1.2.md) | [global-live-v1.2](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2) |
 
+## 待确认发布候选
+
+| 插件 | 候选说明 | 状态 |
+| --- | --- | --- |
+| 网络代理 | [0.1](RELEASE-proxy-control-v0.1.md) | 已准备本地候选；依赖配套开发宿主，公开版兼容与发布方式待确认；未发布 |
+
 ## 替代版本的核验归档
 
 新版公开下载及商店、网站入口验证完成后，先同步旧 Release 最新正文和来源信息、提交归档，再删除旧发布页及附件。保留源码标签和提交；原始 Release JSON、安装包及目录附件另存本地备份，不加入源码仓库。
