@@ -55,7 +55,7 @@ class EntryIcon(QIconEngine):
             painter.restore()
         else:
             self._outline(painter, rect, color)
-        if running and opened:
+        if running:
             painter.save()
             painter.setRenderHint(QPainter.Antialiasing)
             diameter = max(4, rect.width() * .3)

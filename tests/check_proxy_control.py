@@ -1300,6 +1300,40 @@ class InterfaceTests(unittest.TestCase):
                 window.deleteLater()
                 APP.processEvents()
 
+    def test_rail_running_dot_stays_visible_when_closed_and_clears_on_stop_in_both_themes(self):
+        from ddm import theme
+        previous = 'light' if theme.is_light() else 'dark'
+        with tempfile.TemporaryDirectory() as root, patch.object(module.config, 'data_root', return_value=root):
+            window = QWidget()
+            window.resize(1100, 800)
+            plugin = module.ProxyControl()
+            try:
+                plugin.on_load(SimpleNamespace(window=window, register_workspace_control=Mock()))
+                window.show()
+                for mode in ('dark', 'light'):
+                    theme.apply(mode)
+                    plugin.controller.runningChanged.emit(True)
+                    for opened in (True, False):
+                        plugin.toggle()
+                        if not opened:
+                            plugin.popover.hide()
+                        APP.processEvents()
+                        self.assertEqual(plugin.entry.isChecked(), opened)
+                        for size in (18, 24, 28, 42):
+                            rendered = plugin.entry.icon().pixmap(size, size).toImage()
+                            center = int(size - 1 - max(4, size * .3) / 2)
+                            self.assertEqual(rendered.pixelColor(center, center), theme.qcolor(theme.SUCCESS),
+                                             (mode, opened, size))
+                    plugin.controller.runningChanged.emit(False)
+                    rendered = plugin.entry.icon().pixmap(24, 24).toImage()
+                    self.assertNotEqual(rendered.pixelColor(19, 19), theme.qcolor(theme.SUCCESS))
+                    self.assertIn('未启动', plugin.entry.toolTip())
+            finally:
+                plugin.on_unload()
+                window.deleteLater()
+                APP.processEvents()
+                theme.apply(previous)
+
     def test_modes_use_shared_segments_and_flag_display_preserves_node_identifiers(self):
         from ddm.ui import SegmentedControl, SelectControl, ToggleSwitch
         panel = Panel(Options())
