@@ -1,6 +1,7 @@
 """Twitch、YouTube 公开直播与软件内独立 OAuth 授权会话。"""
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
+import os
 import re
 import zlib
 from urllib.parse import parse_qs, quote, unquote, urlsplit
@@ -19,6 +20,11 @@ from ddm import plugins as api
 from ddm.auto_quality import AUTO_QUALITY
 from ddm.global_danmaku import GlobalDanmakuClient, page_json, renderers
 from ddm.live_danmaku import USER_AGENT
+
+__path__ = [os.path.dirname(__file__)]
+__package__ = __name__
+if __spec__ is not None:
+    __spec__.submodule_search_locations = __path__
 
 
 def public_request(method, url, **kwargs):
@@ -160,6 +166,16 @@ class TwitchPlatform(PublicLivePlatform):
     account_cookie_domain = "twitch.tv"
     follow_login_url = "https://www.twitch.tv/directory/following/channels"
     follow_cookie_domain = "twitch.tv"
+    browser_login_url = "https://www.twitch.tv/login"
+    browser_cookie_domains = ("twitch.tv",)
+
+    def browser_account_info(self, session, cancelled):
+        from . import web_accounts
+        return web_accounts.twitch_account(session, cancelled)
+
+    def browser_follow_rooms(self, session, cancelled):
+        from . import web_accounts
+        return web_accounts.twitch_follows(session, cancelled)
 
     def _authorization(self, session):
         token = next((cookie.value for cookie in session.cookies if cookie.name == "auth-token"
@@ -299,6 +315,16 @@ class YouTubePlatform(PublicLivePlatform):
     image_hosts = ("ytimg.com", "ggpht.com", "googleusercontent.com")
 
     oauth_provider = "youtube"
+    browser_login_url = "https://www.youtube.com/"
+    browser_cookie_domains = ("youtube.com", "google.com")
+
+    def browser_account_info(self, session, cancelled):
+        from . import web_accounts
+        return web_accounts.youtube_account(session, cancelled)
+
+    def browser_follow_rooms(self, session, cancelled):
+        from . import web_accounts
+        return web_accounts.youtube_follows(session, cancelled)
 
     def account_info(self, session, cancelled):
         if cancelled():
@@ -321,7 +347,8 @@ class YouTubePlatform(PublicLivePlatform):
             with session.get("https://www.googleapis.com/youtube/v3/subscriptions", params=params,
                     timeout=(4, 8)) as response:
                 if response.status_code in (401, 403):
-                    raise RuntimeError("YouTube 订阅读取未获授权，请确认已启用 YouTube Data API 并重新授权")
+                    from .youtube_account_errors import subscription_error
+                    raise RuntimeError(subscription_error(response))
                 response.raise_for_status()
                 payload = response.json()
             if not isinstance(payload.get("items"), list):
