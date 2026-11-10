@@ -346,10 +346,10 @@ class RecipientDelegate(QStyledItemDelegate):
         c = colors()
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing)
-        rect = QRectF(option.rect.adjusted(4, 3, -16, -3))
+        rect = QRectF(option.rect.adjusted(6, 5, -18, -7))
         compact = bool(self.parent().property('avatarOnly'))
         if compact:
-            rect = QRectF(option.rect.adjusted(2, 2, -2, -2))
+            rect = QRectF(option.rect.adjusted(4, 4, -4, -6))
         checked = index.data(Qt.CheckStateRole)
         selected = (checked == Qt.Checked.value if checked is not None else
                     bool(option.state & QStyle.State_Selected))
@@ -358,6 +358,15 @@ class RecipientDelegate(QStyledItemDelegate):
         painter.setClipRect(option.rect)
         painter.translate(0 if compact else 12 * progress, 0)
         painter.setPen(Qt.NoPen)
+        # Paint inside each item's margins so scrolling cannot crop the shadow.
+        for layer in range(4, 0, -1):
+            spread = layer * .65
+            alpha = (3 + (4 - layer) * 3) if theme.is_light() else (5 + (4 - layer) * 4)
+            painter.setBrush(QColor(0, 0, 0, alpha))
+            shadow = rect.adjusted(-spread, -spread, spread, spread).translated(0, 2)
+            painter.drawRoundedRect(shadow, 6 + spread, 6 + spread)
+        painter.setBrush(QColor(c['raised']))
+        painter.drawRoundedRect(rect, 6, 6)
         if progress or option.state & QStyle.State_MouseOver:
             color = theme.qcolor(console_hover_color() if option.state & QStyle.State_MouseOver else theme.ACCENT_SOFT)
             color.setAlphaF(color.alphaF() * max(progress, .5 if option.state & QStyle.State_MouseOver else 0))
@@ -413,5 +422,5 @@ class RecipientDelegate(QStyledItemDelegate):
 
     def sizeHint(self, option, index):
         if self.parent().property('avatarOnly'):
-            return QSize(48, 44)
-        return QSize(164, max(52, option.fontMetrics.height() * 2 + 12))
+            return QSize(48, 48)
+        return QSize(164, max(56, option.fontMetrics.height() * 2 + 16))
