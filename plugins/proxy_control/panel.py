@@ -84,8 +84,10 @@ class Panel(QWidget):
         root.addWidget(content, 1)
         header = QHBoxLayout()
         self.title = TitleLabel('总览')
-        self.state = QLabel('未启动')
+        self.state = QLabel()
         self.state.setObjectName('ProxyState')
+        self.state.setFixedSize(28, 28)
+        self.state.setAlignment(Qt.AlignCenter)
         self.close_button = ActionButton()
         self.close_button.setObjectName('ProxyClose')
         self.close_button.setFixedSize(28, 28)
@@ -635,8 +637,6 @@ class Panel(QWidget):
 
     def set_running(self, running):
         self._running = running
-        self.state.setText('运行中' if running else '未启动')
-        self.state.setProperty('online', running)
         self.service_state.setText('运行中' if running else '尚未启动')
         self._filter(self.search.text())
         self.refresh_theme()
@@ -682,15 +682,12 @@ class Panel(QWidget):
         self.quick_node.setEnabled(not busy and bool(self.model.records))
         self.nodes.setEnabled(not busy)
         if busy:
-            self.state.setText('准备中…')
             self.service_state.setText('正在准备服务…')
         else:
-            self.state.setText('运行中' if self._running else '未启动')
             self.service_state.setText('运行中' if self._running else '尚未启动')
+        self._status_icon()
 
     def refresh_theme(self, *_args):
-        status_ink = (theme.qcolor(theme.SUCCESS).darker(145) if theme.is_light()
-                      else theme.qcolor(theme.SUCCESS).lighter(115)).name()
         stop_ink = (theme.qcolor(theme.ERROR).darker(120) if theme.is_light()
                     else theme.qcolor(theme.ERROR).lighter(110)).name()
         self.setStyleSheet(f'''
@@ -704,8 +701,6 @@ class Panel(QWidget):
 #ProxyPanel QHeaderView::section {{background: {surface()}; color: {theme.TEXT2}; border: none; border-bottom: 1px solid {theme.BORDER}; padding: 4px;}}
 #ProxyPanel QLabel {{background: transparent; border: none;}}
 #ProxyPanel QLabel#ProxyBrand {{background: {surface()}; border-radius: {theme.RADIUS_LG}px;}}
-#ProxyPanel QLabel#ProxyState {{color: {theme.TEXT2}; background: {surface()}; border: 1px solid {theme.BORDER_STRONG}; border-radius: 11px; padding: 5px 10px; font-size: 12px; font-weight: 600;}}
-#ProxyPanel QLabel#ProxyState[online="true"] {{color: {status_ink}; background: {translucent(theme.SUCCESS, 28)}; border-color: {translucent(theme.SUCCESS, 110)};}}
 #ProxyPanel QListView {{background: transparent; border: none; outline: none;}}
 #ProxyPanel QPushButton#ProxyPower {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT}; border: 1px solid {translucent(theme.ACCENT, 90)}; border-radius: 20px; padding: 0; min-height: 38px; max-height: 38px;}}
 #ProxyPanel QPushButton#ProxyPower:hover {{border-color: {theme.ACCENT};}}
@@ -724,11 +719,25 @@ class Panel(QWidget):
             button.setIcon(icon(name, theme.TEXT2))
             button.setIconSize(QSize(16, 16))
         self._service_button()
+        self._status_icon()
         self._advanced(self.advanced.isChecked())
         self.navigation.viewport().update()
         self.profiles_list.viewport().update()
         self.auto_start.update()
         self.nodes.viewport().update()
+
+    def _status_icon(self):
+        if self._busy:
+            name, text, color = 'latency', '代理准备中', theme.ACCENT
+        elif self._running:
+            name, text = 'check', '代理运行中'
+            color = (theme.qcolor(theme.SUCCESS).darker(145) if theme.is_light()
+                     else theme.qcolor(theme.SUCCESS).lighter(115)).name()
+        else:
+            name, text, color = 'power', '代理未启动', theme.TEXT2
+        self.state.setPixmap(icon(name, color).pixmap(22, 22))
+        self.state.setToolTip(text)
+        self.state.setAccessibleName(text)
 
     def _service_button(self):
         action = '取消准备' if self._busy else ('暂停代理' if self._running else '开启代理')

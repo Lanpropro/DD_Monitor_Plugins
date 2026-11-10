@@ -886,9 +886,8 @@ class InterfaceTests(unittest.TestCase):
             panel.hide()
             panel.deleteLater()
 
-    def test_running_badge_keeps_text_contrast_in_both_themes(self):
+    def test_header_status_icons_distinguish_states_and_keep_contrast_in_both_themes(self):
         from ddm import theme
-        from PySide6.QtGui import QPalette
         previous = 'light' if theme.is_light() else 'dark'
         window = QWidget()
         window.resize(1000, 700)
@@ -901,15 +900,33 @@ class InterfaceTests(unittest.TestCase):
         try:
             window.show()
             popover.show()
-            panel.set_running(True)
             for mode in ('dark', 'light'):
                 theme.apply(mode)
-                APP.processEvents()
-                point = panel.state.mapTo(popover, QPoint(panel.state.width() - 6, panel.state.height() // 2))
-                background = popover.grab().toImage().pixelColor(point)
-                text = panel.state.palette().color(QPalette.WindowText)
-                a, b = sorted((luminance(text), luminance(background)))
-                self.assertGreaterEqual((b + .05) / (a + .05), 4.5, mode)
+                icons = []
+                for running, busy, label in ((False, False, '代理未启动'),
+                                              (True, False, '代理运行中'),
+                                              (True, True, '代理准备中'),
+                                              (False, False, '代理未启动')):
+                    panel.set_running(running)
+                    panel.set_busy(busy)
+                    APP.processEvents()
+                    self.assertEqual(panel.state.text(), '')
+                    self.assertEqual(panel.state.accessibleName(), label)
+                    self.assertEqual(panel.state.toolTip(), label)
+                    self.assertEqual(panel.state.size().width(), 28)
+                    pixmap = panel.state.pixmap().toImage()
+                    self.assertFalse(pixmap.isNull())
+                    icons.append(pixmap)
+                    point = panel.state.mapTo(popover, QPoint(1, 1))
+                    background = popover.grab().toImage().pixelColor(point)
+                    pixels = [pixmap.pixelColor(x, y) for x in range(pixmap.width())
+                              for y in range(pixmap.height()) if pixmap.pixelColor(x, y).alpha() > 128]
+                    self.assertGreater(len(pixels), 5, (mode, label))
+                    a, b = sorted((luminance(pixels[0]), luminance(background)))
+                    self.assertGreaterEqual((b + .05) / (a + .05), 3, (mode, label))
+                self.assertNotEqual(icons[0], icons[1])
+                self.assertNotEqual(icons[1], icons[2])
+                self.assertEqual(icons[0], icons[3])
         finally:
             popover.hide()
             window.deleteLater()
@@ -1526,7 +1543,7 @@ class InterfaceTests(unittest.TestCase):
             self.assertEqual(panel.import_status.text(), '下载失败，请重试')
             self.assertEqual(panel.location.text(), 'https://example.invalid/sub')
             self.assertTrue(panel.import_button.isEnabled())
-            self.assertEqual(panel.state.text(), '未启动')
+            self.assertEqual(panel.state.accessibleName(), '代理未启动')
             panel.import_button.click()
             panel.set_nodes([], '')
             panel.set_busy(False)
@@ -1734,7 +1751,7 @@ class InterfaceTests(unittest.TestCase):
                 plugin.toggle()
                 panel = plugin.panel
                 self.assertEqual(panel.model.visible, ['First', 'Second'])
-                self.assertEqual(panel.state.text(), '未启动')
+                self.assertEqual(panel.state.accessibleName(), '代理未启动')
                 self.assertTrue(panel.test.isEnabled())
                 panel.nodeRequested.emit('Second')
                 self.assertEqual(panel.model.active, 'Second')
