@@ -298,3 +298,5 @@ Qt 6.11.2 上 `selfcheck_match_sync_retry_rows.py` 的离屏全屏窗口退出�
 
 `check_match_sync_quality_policy.py --host <宿主目录>` 检查切换主路不重选最高档、平台自动及手动档位原样传递、重试不升档、匹配seed复用，以及失败请求档位的去敏诊断。
 播放日志的每路acquisition增加requested_quality和实际返回后的actual_quality，仅保存数值；未返回地址时不伪造实际档位，上一轮失败仍保留请求档位。
+
+`tools/diagnose_match_ui_dispatch.py --host <宿主根目录> --output <本地产物目录>` 只生成经根run.cmd启动的专用诊断入口。普通入口不启用。专用入口中Ctrl+Alt+F9开始/结束90秒以内采集，记录Qt事件分发和已知窗口/样式调用的墙钟/主线程CPU耗时、父子span；写入有界后台队列，不记录文本、对象名、账号、消息或调用参数。模态exec和存在多次嵌套投递的span标记可能包含用户等待，不能把总时间当作阻塞。原Qt对象可在投递时被销毁，返回后仅处理事先保存的标量。`check_match_sync_ui_dispatch.py --host <宿主目录>` 验证原返回/异常、销毁事件、嵌套/模态、槽参数个数、主线程限制、后台写入收尾和启动器隔离；合成延迟只验证机制，不是实况证据。

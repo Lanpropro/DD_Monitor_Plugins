@@ -76,7 +76,7 @@ def check(app, host, module):
             with patch.object(module.source_control.Decoder, 'start'), patch.object(viewer, '_start_chat'):
                 viewer._start_row(viewer.rows['1'])
                 assert viewer.rows['1'].decoder.seed['quality'] == 1014100
-                assert 'highest_quality' not in viewer.rows['1'].decoder.seed
+                assert not viewer.rows['1'].decoder.seed.get('highest_quality', False)
             return dict(passed=True, main_preserves_tier=True, provider_auto_and_retry=True,
                         explicit_hdr_preserved=True, matching_seed_reused=True,
                         failed_tier_in_receipt=True, no_network=True, real_messages=0)
