@@ -28,8 +28,11 @@
 
 ## 集成与发布状态
 
-- 发布基线：尚无公开发布基线。
-- 分支：`function/live-translate`，PR 目标为 `develop`。
+- PR：[DD_Monitor_Plugins #74](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/74)，目标分支 `develop`，当前待维护者审阅，尚未合并。
+- 宿主配套 PR：[DD_Monitor_CE #234](https://github.com/Lanpropro/DD_Monitor_CE/pull/234)，提供 `set_tile_caption()` / `clear_tile_caption()`；旧宿主继续回退独立字幕窗。
+- 发布基线：上游尚无公开发布基线。
+- 预发布：[live-translate-v0.1](https://github.com/Soraray/DD_Monitor_Plugins/releases/tag/live-translate-v0.1)，由贡献账号 `Soraray` 的 fork 代管，供 PR 审阅和附件下载；合并后由维护者镜像到主仓库 Release。
+- 附件：`live_translate-0.1.zip` 47,176 B，SHA256 `f80c282b11f698e7a3959b7519e7bfc932d9a9bef6794f6edec46a783e270712`；`live_translate-0.1-offline.zip` 750,841,281 B，SHA256 `2cccb71e9d8f725473412bf35537a5e55f7dfc18403ccc2d9fa6d2b983940fdd`。
 - 旧宿主没有字幕覆盖层接口时回退独立字幕窗；内嵌字幕需要配套宿主接口。
 - 进程归组由插件自身完成，不要求宿主修改；宿主进程内的识别线程随插件卸载和会话停止回收。
 - 源码版和离线完整包发布为同一 GitHub 预发布标签下的两个附件，模型与便携运行环境不进入 Git。
