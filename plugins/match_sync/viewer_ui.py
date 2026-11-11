@@ -318,11 +318,7 @@ def refresh_appearance(viewer, *_args):
     color = theme.qcolor(theme.CONTENT)
     background = (f"rgba({color.red()}, {color.green()}, {color.blue()}, {round(255 * viewer.panel_alpha)})"
                   if viewer.skin_visible else "palette(base)")
-    styled(viewer.comparison_panel, f"""
-            #MatchSyncCompare {{ background: {background}; border: none; border-radius: 8px; }}
-            #MatchSyncCompare QLabel, #MatchSyncCompare QCheckBox {{ color: palette(window-text); }}
-            #MatchSyncCompare QScrollArea, #MatchSyncCompare QScrollArea > QWidget {{ background: transparent; border: none; }}
-        """)
+    viewer.comparison_panel.refresh_design()
     styled(viewer.panel, f"#MatchSync #DanmakuPanel {{ background: {background}; border: none; }}"
            '#MatchSync #DanmakuPanel[joined="true"] {border-bottom-left-radius: 0; border-bottom-right-radius: 0;}')
     panel_bar = getattr(viewer.panel, 'bar', None)

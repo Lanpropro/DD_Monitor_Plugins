@@ -235,15 +235,24 @@ def _fullscreen_picture(viewer):
     dialog._fullscreen_cursor = FullscreenCursor(dialog)
     viewer.console_size_timer.stop()
     sizes = viewer.body_split.sizes()
+    previous_fullscreen = viewer.picture.property('fullscreen')
     layout = QVBoxLayout(dialog)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.addWidget(viewer.picture)
+    viewer.picture.setProperty('fullscreen', True)
+    viewer.picture.style().unpolish(viewer.picture)
+    viewer.picture.style().polish(viewer.picture)
+    viewer.picture._layout_areas()
     fullscreen_hwnd = None
     def restore(_result):
         if fullscreen_hwnd is not None:
             mark_fullscreen(fullscreen_hwnd, False)
         dialog._fullscreen_cursor.stop()
+        viewer.picture.setProperty('fullscreen', previous_fullscreen)
+        viewer.picture.style().unpolish(viewer.picture)
+        viewer.picture.style().polish(viewer.picture)
         viewer.body_split.insertWidget(0, viewer.picture)
+        viewer.picture._layout_areas()
         viewer.body_split.setSizes(sizes)
         viewer.fullscreen_dialog = None
         viewer.queue_console_height()
