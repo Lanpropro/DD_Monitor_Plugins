@@ -279,6 +279,7 @@ class RoomRow(QFrame):
         clock_layout.setContentsMargins(0, 0, 0, 0)
         clock_layout.setSpacing(4)
         for button in (self.hint_fast, self.hint_slow, self.clock_button):
+            button.setFocusPolicy(Qt.StrongFocus)
             clock_layout.addWidget(button)
         clock_layout.addStretch()
         self.clock_controls.setFixedWidth(44 * 2 + 32 + 4 * 2)

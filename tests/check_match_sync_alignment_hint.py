@@ -74,6 +74,8 @@ def check(app, host, module, output=None):
             assert row.assist.x() > row.offset_box.geometry().right()
             assert row.clock_button.mapTo(row, QPoint()).x() > row.assist.mapTo(row, QPoint()).x() + row.assist.width()
             assert row.hint_fast.isHidden() and row.hint_slow.isHidden()
+            assert all(button.focusPolicy() == Qt.StrongFocus
+                       for button in (row.hint_fast, row.hint_slow, row.clock_button))
             assert row.independent.parentWidget() is row.audible.parentWidget()
             assert row.independent.parentWidget() is not row.floating_button.parentWidget()
             assert isinstance(row.audible, module.VolumeButton)
