@@ -53,6 +53,14 @@
 <p><a href="plugins/bili_live/README.md">功能与兼容说明</a> · <a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.1">下载插件</a></p>
 </td>
 </tr>
+<tr>
+<td width="50%" valign="top">
+<h3><a href="plugins/live_translate/README.md">实时翻译（开发预览）</a></h3>
+<p>所选直播间音轨的本地识别、可选本地或 API 翻译与双语字幕；单路按需加载模型，提供资源记录。</p>
+<p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
+<p><a href="plugins/live_translate/README.md">试用与兼容说明</a> · <a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/live-translate-v0.1">下载插件</a></p>
+</td>
+</tr>
 </table>
 
 比赛二路同步 [v1.5 候选更新说明](docs/releases/RELEASE-match-sync-v1.5.md)（待实播录制验收）；已发布测试版：[v1.5-pre.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.5-pre.1)。
@@ -99,6 +107,7 @@ ZIP 内只有插件 ID 对应的顶层文件夹。GitHub 自动生成的 **Sourc
 | 海外直播平台 | `global_live` | 1.2 |
 | 比赛二路同步 | `match_sync` | 1.6.1 |
 | B站直播互动 | `bili_live` | 1.1 |
+| 实时翻译（开发预览） | `live_translate` | 0.1 |
 
 先按文件明确暂存需要发布的源码，再执行：
 

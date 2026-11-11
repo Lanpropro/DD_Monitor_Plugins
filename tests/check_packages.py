@@ -36,7 +36,7 @@ def main():
     assert f"match_sync-{match_version}.zip" in match_readme
     notes = ROOT / 'docs/releases' / f"RELEASE-match-sync-v{match_version}.md"
     assert notes.read_text(encoding="utf-8").startswith(f"# 比赛二路同步 v{match_version}\n")
-    display_names = {"domestic_live": "国内直播平台", "global_live": "海外直播平台", "match_sync": "比赛二路同步", "bili_live": "B站直播互动"}
+    display_names = {"domestic_live": "国内直播平台", "global_live": "海外直播平台", "match_sync": "比赛二路同步", "bili_live": "B站直播互动", "live_translate": "实时翻译"}
     with tempfile.TemporaryDirectory() as directory:
         manager = PluginManager(plugins_dir=directory, enabled=[])
         for path in build():

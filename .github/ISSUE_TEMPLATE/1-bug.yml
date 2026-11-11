@@ -17,6 +17,7 @@ body:
         - 海外直播平台
         - 比赛二路同步
         - B站直播互动
+        - 实时翻译
         - 多个插件或暂不确定
     validations:
       required: true

@@ -4,6 +4,15 @@
   "normalization": "CRLF or repeated CR to LF; one final LF for synchronized release bodies",
   "entries": [
     {
+      "tag": "live-translate-v0.1",
+      "file": "RELEASE-live-translate-v0.1.md",
+      "status": "prepared",
+      "source_kind": "repository_candidate",
+      "base_commit": "6fc68814c97221a09033726b2fec58a25dc9b667",
+      "last_edit_verified": false,
+      "sha256": "991a10541500e616c577458243db47529df96a89670ecf29a5b7d221e077ae14"
+    },
+    {
       "tag": "bili-live-v1.0",
       "file": "RELEASE-bili-live-v1.0.md",
       "status": "archived_verified",
