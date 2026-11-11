@@ -70,6 +70,8 @@ def check(app, host, module, output=None):
                 assert viewer.console_toolbar.isAncestorOf(viewer.notice)
                 assert not viewer.console_footer.isAncestorOf(viewer.buffer_notice)
                 assert viewer.buffer_notice.alignment() == Qt.AlignCenter
+                center = viewer.console_notices.mapTo(viewer.console_toolbar, viewer.console_notices.rect().center()).x()
+                assert abs(center - viewer.console_toolbar.rect().center().x()) <= 1
                 assert not viewer.buffer_notice.toolTip() and not main.buffer_warning.toolTip()
                 assert not main.buffer_warning.tooltip_at(QPoint(8, 8))
                 assert not main.buffer_warning.text(), 'Use the native status icon instead of a text badge'

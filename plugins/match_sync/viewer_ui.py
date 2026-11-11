@@ -4,7 +4,7 @@ from __future__ import annotations
 from .canvas import Canvas
 from .comparison import ComparisonPanel
 from .panels import ConsoleIconButton, ConsoleModeToggle, ConsoleNotice, SettingsPanel, native_console_button, style_checkbox
-from PySide6.QtWidgets import QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLayout, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QSplitter, QVBoxLayout, QWidget
 from PySide6.QtCore import QTimer, Qt
 from .replay import ReplayBar
 from .sending import SendConsole
@@ -98,12 +98,19 @@ def build_ui(viewer):
     viewer.console_toolbar = QWidget()
     viewer.console_toolbar.setObjectName('MatchSyncToolbar')
     viewer.console_toolbar.setStyleSheet(f'QWidget#MatchSyncToolbar {{border-bottom: 1px solid {theme.BORDER_STRONG};}}')
-    heading = QHBoxLayout(viewer.console_toolbar)
+    heading = QGridLayout(viewer.console_toolbar)
     heading.setContentsMargins(16, 10, 16, 10)
-    heading.setSpacing(16)
+    heading.setHorizontalSpacing(16)
+    for column, stretch in enumerate((1, 2, 1)):
+        heading.setColumnStretch(column, stretch)
+    leading = QWidget()
+    leading_layout = QHBoxLayout(leading)
+    leading_layout.setContentsMargins(0, 0, 0, 0)
+    leading_layout.setSpacing(16)
     viewer.main.hide()
-    heading.addWidget(viewer.automatic)
-    heading.addWidget(viewer.compare)
+    leading_layout.addWidget(viewer.automatic)
+    leading_layout.addWidget(viewer.compare)
+    heading.addWidget(leading, 0, 0, Qt.AlignLeft)
     viewer.console_notices = QWidget()
     viewer.console_notices.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     notices = QHBoxLayout(viewer.console_notices)
@@ -115,14 +122,18 @@ def build_ui(viewer):
     for label in (viewer.notice, viewer.late_notice, viewer.buffer_notice):
         label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         notices.addWidget(label, 1)
-    heading.addWidget(viewer.console_notices, 1)
+    heading.addWidget(viewer.console_notices, 0, 1)
+    trailing = QWidget()
+    trailing_layout = QHBoxLayout(trailing)
+    trailing_layout.setContentsMargins(0, 0, 0, 0)
+    trailing_layout.setSpacing(16)
     for widget in viewer.add_controls:
-        heading.addWidget(widget)
-    heading.addStretch(0)
+        trailing_layout.addWidget(widget)
     viewer.match_settings_button = native_console_button(TileButton('⚙'), '比赛二路设置')
     viewer.match_settings_button.clicked.connect(viewer.open_match_settings)
-    heading.addWidget(viewer.match_settings_button)
-    heading.addWidget(viewer.minimize_settings)
+    trailing_layout.addWidget(viewer.match_settings_button)
+    trailing_layout.addWidget(viewer.minimize_settings)
+    heading.addWidget(trailing, 0, 2, Qt.AlignRight)
     viewer.picture = Tile({})
     # Keep pixel hover inside the tile instead of dispatching it through
     # every surrounding layout and application event filter again.
