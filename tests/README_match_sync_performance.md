@@ -1,5 +1,7 @@
 # 二路插件响应性回归
 
+`check_match_sync_rebuffer.py --host <宿主目录>` 用描述性history验证主路真正耗尽后，保持共同播放时钟直到已有安全目标余量补足，避免50ms耗尽/300ms恢复反复切换；容量小于目标时按连续缓存容量恢复，不等待不可能达到的余量。保留手动偏移、同history与暂停，结合gap_recovery检查PTS缺口与独立音频回归；不连接媒体或账号，也不作为实播性能证据。
+
 职责拆分后的模块边界见[架构文档](../plugins/match_sync/ARCHITECTURE.md)。
 `check_match_sync_module_boundaries.py --host <宿主目录>` 同时核对房间/对照控件、业务协调模块、
 弹幕展示/发送组件与媒体协议兼容对象身份、无反向Viewer依赖、Qt父对象和既有定时器间隔。

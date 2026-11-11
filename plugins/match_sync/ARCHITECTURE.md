@@ -61,6 +61,8 @@ flowchart TD
 
 自动偏移框的展示更新仍由presentation协调：每轮计算原有同步偏移，按控件范围及Qt格式转换为实际显示数值，仅在数值变化时setValue，避免QAbstractSpinBox对同值也请求重绘。编辑中的文本和手动模式保持；previous_delay仍同步实际控件值，不增加第二份偏移状态或降低视频轮询频率。
 
+主路连续缓存耗尽后的恢复由playback_timing._recover_clock协调，继续复用Viewer的sync_waiting/locked_clock和AudioPump.correction冻结共同播放时钟。恢复余量使用已有SafetyBuffer目标并受当前连续区间容量约束，避免只补300ms就恢复造成反复等待；不增加第二份时钟或改变人工偏移。PTS缺口仍由既有区间恢复路径处理，真实Decoder/history更换与计时器复核由对应功能模块处理，不能因主路已补足缓存就自动解除副路的待确认状态。
+
 ## 音频和聊天收尾
 
 1. AudioPump仍以Viewer为QObject父对象。GUI的10ms快照刷新保留；AudioFeed无父对象，移入原QThread后创建QAudioSink与10ms PreciseTimer。
