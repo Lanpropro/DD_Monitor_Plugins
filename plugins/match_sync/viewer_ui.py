@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from .canvas import Canvas
 from .comparison import ComparisonPanel
-from .panels import ConsoleIconButton, ConsoleModeToggle, SettingsPanel, native_console_button, style_checkbox
+from .panels import ConsoleIconButton, ConsoleModeToggle, ConsoleNotice, SettingsPanel, native_console_button, style_checkbox
 from PySide6.QtWidgets import QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QSplitter, QVBoxLayout, QWidget
 from PySide6.QtCore import QTimer, Qt
 from .replay import ReplayBar
@@ -58,12 +58,12 @@ def build_ui(viewer):
     viewer.automatic.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
     viewer.compare.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
     viewer.compare.toggled.connect(viewer.set_comparison_visible)
-    viewer.late_notice = QLabel()
+    viewer.late_notice = ConsoleNotice()
     viewer.late_notice.setObjectName("MatchSyncLateNotice")
     viewer.late_notice.setTextFormat(Qt.PlainText)
-    viewer.late_notice.setWordWrap(True)
+    viewer.late_notice.setWordWrap(False)
     viewer.late_notice.setAlignment(Qt.AlignCenter)
-    viewer.late_notice.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+    viewer.late_notice.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
     viewer.late_notice.setMinimumWidth(0)
     viewer.late_notice.hide()
     viewer.buffer_reserve = QComboBox()
@@ -104,13 +104,18 @@ def build_ui(viewer):
     viewer.main.hide()
     heading.addWidget(viewer.automatic)
     heading.addWidget(viewer.compare)
-    viewer.clock_button = native_console_button(QPushButton('计时器对齐'), '计时器辅助对齐')
-    viewer.clock_button.setFixedWidth(max(104, viewer.clock_button.fontMetrics().horizontalAdvance('计时器对齐') + 24))
-    viewer.clock_button.setObjectName('ChipButton')
-    viewer.clock_button.setToolTip('框选各路游戏计时器并核对翻秒；请先播放至少两路')
-    viewer.clock_button.clicked.connect(lambda: viewer.comparison_panel.open_clock())
-    heading.addWidget(viewer.clock_button)
-    heading.addWidget(viewer.late_notice, 1)
+    viewer.console_notices = QWidget()
+    viewer.console_notices.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+    notices = QHBoxLayout(viewer.console_notices)
+    notices.setContentsMargins(0, 0, 0, 0)
+    notices.setSpacing(8)
+    viewer.notice = ConsoleNotice()
+    viewer.buffer_notice = ConsoleNotice()
+    viewer.buffer_notice.hide()
+    for label in (viewer.notice, viewer.late_notice, viewer.buffer_notice):
+        label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        notices.addWidget(label, 1)
+    heading.addWidget(viewer.console_notices, 1)
     for widget in viewer.add_controls:
         heading.addWidget(widget)
     heading.addStretch(0)
@@ -180,8 +185,6 @@ def build_ui(viewer):
     split.setHandleWidth(4)
     split.setStyleSheet("QSplitter::handle { background: transparent; } QSplitter::handle:hover { background: palette(mid); }")
     viewer.picture_split = split
-    viewer.notice = QLabel('')
-    viewer.notice.setWordWrap(True)
     body = QWidget()
     body.setObjectName("MatchSyncRows")
     viewer.rows_layout = QVBoxLayout(body)
@@ -224,13 +227,6 @@ def build_ui(viewer):
     footer = QHBoxLayout(viewer.console_footer)
     footer.setContentsMargins(16, 10, 16, 10)
     footer.setSpacing(16)
-    footer.addWidget(viewer.notice, 1)
-    viewer.buffer_notice = QLabel()
-    viewer.buffer_notice.setTextFormat(Qt.PlainText)
-    viewer.buffer_notice.setWordWrap(True)
-    viewer.buffer_notice.setStyleSheet(f'color: {theme.ERROR};')
-    viewer.buffer_notice.hide()
-    footer.addWidget(viewer.buffer_notice, 1)
     viewer.buffer_notice_timer = QTimer(viewer)
     viewer.buffer_notice_timer.setSingleShot(True)
     viewer.buffer_notice_timer.setInterval(15000)

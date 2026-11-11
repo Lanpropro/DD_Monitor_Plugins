@@ -261,16 +261,27 @@ class RoomRow(QFrame):
         self.remove_button.clicked.connect(lambda: viewer.remove_room_with_undo(room_id))
         self.assist = ConsoleIconButton('assist', '辅助自动对齐', size=32)
         self.assist.setCheckable(True)
+        self.clock_button = ConsoleIconButton('clock', '计时器对齐', size=32)
+        self.clock_button.setAccessibleDescription('框选各路游戏计时器并核对翻秒；请先播放至少两路')
+        self.clock_button.clicked.connect(lambda: viewer.comparison_panel.open_clock())
         self.hint_fast = native_console_button(QPushButton('偏快'), '本路比主画面偏快')
         self.hint_slow = native_console_button(QPushButton('偏慢'), '本路比主画面偏慢')
         for button, direction in ((self.hint_fast, -1), (self.hint_slow, 1)):
             button.setFixedSize(44, 28)
             policy = button.sizePolicy()
-            policy.setRetainSizeWhenHidden(True)
+            policy.setRetainSizeWhenHidden(False)
             button.setSizePolicy(policy)
             button.hide()
             button.clicked.connect(lambda _checked=False, d=direction: viewer.submit_alignment_hint(room_id, d))
         self.assist.toggled.connect(self._toggle_hint_choices)
+        self.clock_controls = QWidget()
+        clock_layout = QHBoxLayout(self.clock_controls)
+        clock_layout.setContentsMargins(0, 0, 0, 0)
+        clock_layout.setSpacing(4)
+        for button in (self.hint_fast, self.hint_slow, self.clock_button):
+            clock_layout.addWidget(button)
+        clock_layout.addStretch()
+        self.clock_controls.setFixedWidth(44 * 2 + 32 + 4 * 2)
         self.join = QPushButton("确认对齐并加入")
         self.join.setAutoDefault(False)
         self.join.setFixedHeight(28)
@@ -283,12 +294,12 @@ class RoomRow(QFrame):
         self.name_label = QLabel()
         self.name_label.setMaximumWidth(140)
         self.name_label.setStyleSheet('font-size: 14px; font-weight: 600;')
-        self.buffer_warning = QLabel('!')
+        self.buffer_warning = CompactStatus()
         self.buffer_warning.setFixedSize(18, 18)
-        self.buffer_warning.setAlignment(Qt.AlignCenter)
-        self.buffer_warning.setStyleSheet(f'background: {theme.ERROR}; color: white; border-radius: 9px; font-weight: bold;')
+        self.buffer_warning.set_status([(QStyle.SP_MessageBoxWarning, '')],
+            '短时间内多次耗尽缓冲。为获得更好的观看体验，建议切换主画面', [''])
+        self.buffer_warning.setStyleSheet(f'color: {theme.ERROR};')
         self.buffer_warning.setAccessibleName('缓冲反复耗尽')
-        self.buffer_warning.setToolTip('短时间内多次耗尽缓冲。为获得更好的观看体验，建议切换主画面')
         self.buffer_warning.hide()
         self.status = CompactStatus()
         self.status.setStyleSheet(f'font-size: 12px; color: {theme.TEXT2};')
@@ -332,7 +343,7 @@ class RoomRow(QFrame):
         for index, widgets in enumerate(((floating, self.realign),
                         (self.independent, self.audible, self.volume, self.volume_number, self.channel),
                         (self.show_chat, self.color_choice),
-                        (self.offset_box, self.assist, self.hint_fast, self.hint_slow), (region, self.remove_button)), 1):
+                        (self.offset_box, self.assist, self.clock_controls), (region, self.remove_button)), 1):
             group = QWidget()
             line = QHBoxLayout(group)
             line.setContentsMargins(0, 0, 0, 0)

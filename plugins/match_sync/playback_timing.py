@@ -196,7 +196,6 @@ def _observe_buffer_exhaustion(viewer, row, exhausted, eligible, now):
                 row.buffer_notice_at = now
                 text = f'{row.label()}：为获得更好的观看体验，建议切换主画面'
                 viewer.buffer_notice.setText(text)
-                viewer.buffer_notice.setToolTip(text)
                 viewer.notice.hide()
                 viewer.buffer_notice.show()
                 viewer.buffer_notice_timer.start()

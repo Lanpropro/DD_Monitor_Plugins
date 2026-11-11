@@ -1,5 +1,7 @@
 # 比赛二路同步：模块职责与生命周期
 
+控制台通知由`viewer_ui.py`在顶部中央放置原`notice`、`late_notice`和`buffer_notice`；`panels.ConsoleNotice`只负责单行居中与窄幅省略绘制，不增加消息队列、线程或定时器。缓冲告警原有15秒显示与120秒冷却仍由播放协调逻辑持有；每路标记复用`CompactStatus`的原生图标绘制，不显示黑底悬停长提示。`RoomRow`拥有32px计时器入口及偏快/偏慢选择；固定宽度容器内显隐选择按钮，仅让计时器图标右移/归位，不改变其他列位置或控制台目标高度，入口仍委托原`ComparisonPanel.open_clock`。
+
 `danmaku_settings.py`负责二路自己的画面弹幕观看面板。唯一可变参数源为原Tile的video_danmaku_overrides，控件只映射现有参数，不复制可变设置；通过公开的apply_video_danmaku_settings应用独立参数，并保存插件overlay_settings。来源颜色模式和无自定义缩放曲线由插件固定，SC仍使用宿主设置。替换菜单以picture为Qt父对象，旧菜单deleteLater，原按钮/右键入口动态访问替换后的菜单；不增加线程、定时器或渲染层。普通宿主画面格及全局设置不改。
 
 结构拆分基线`1dc6993`不调整画质、缓冲、时序、信号连接或线程策略。结构拆分本身不代表实播性能提升。

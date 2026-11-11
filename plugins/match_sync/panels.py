@@ -131,6 +131,23 @@ def console_role_icon():
     return icon
 
 
+class ConsoleNotice(QLabel):
+    """Keep console messages centered without growing the toolbar or a tooltip."""
+    def __init__(self, text=''):
+        super().__init__(text)
+        self.setTextFormat(Qt.PlainText)
+        self.setAlignment(Qt.AlignCenter)
+        self.setMinimumWidth(0)
+        self.setFixedHeight(28)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setPen(self.palette().windowText().color())
+        painter.setFont(self.font())
+        text = self.fontMetrics().elidedText(self.text(), Qt.ElideRight, self.width())
+        painter.drawText(self.rect(), Qt.AlignCenter, text)
+
+
 class ConsoleIconButton(QPushButton):
     def __init__(self, kind, tooltip, parent=None, *, size=28):
         super().__init__(parent)
@@ -185,6 +202,13 @@ class ConsoleIconButton(QPushButton):
                 painter.drawLine(x, -6, x, 6)
                 painter.drawLine(x, direction * 6, x - 3, direction * 3)
                 painter.drawLine(x, direction * 6, x + 3, direction * 3)
+        elif self.kind == 'clock':
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(QRectF(-7, -6, 14, 14))
+            painter.drawLine(QPointF(0, -6), QPointF(0, -9))
+            painter.drawLine(QPointF(-3, -9), QPointF(3, -9))
+            painter.drawLine(QPointF(0, 1), QPointF(0, -3))
+            painter.drawLine(QPointF(0, 1), QPointF(3, 3))
         elif self.kind == 'independent':
             painter.setBrush(Qt.NoBrush)
             painter.drawRoundedRect(QRectF(-8, -7, 16, 14), 2, 2)

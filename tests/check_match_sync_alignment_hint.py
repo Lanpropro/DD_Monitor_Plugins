@@ -72,8 +72,7 @@ def check(app, host, module, output=None):
             assert viewer.settings_panel.height() == manual_height, 'Keep explicit splitter adjustments too'
             row = viewer.rows['2']
             assert row.assist.x() > row.offset_box.geometry().right()
-            assert row.hint_fast.x() > row.assist.geometry().right()
-            assert row.hint_slow.x() > row.hint_fast.geometry().right()
+            assert row.clock_button.mapTo(row, QPoint()).x() > row.assist.mapTo(row, QPoint()).x() + row.assist.width()
             assert row.hint_fast.isHidden() and row.hint_slow.isHidden()
             assert row.independent.parentWidget() is row.audible.parentWidget()
             assert row.independent.parentWidget() is not row.floating_button.parentWidget()
@@ -171,6 +170,7 @@ def check(app, host, module, output=None):
             # Numeric history descriptors exercise the real job dispatch, without decoding.
             for current in viewer.rows.values():
                 current.decoder = SimpleNamespace(
+                    seed={'highest_quality': True},
                     history=SimpleNamespace(origin=100., lock=threading.RLock(), details=samples,
                                             snapshots=lambda: samples, bounds=lambda: (90., 120.),
                                             bounds_at=lambda _stamp: (90., 120.)),
@@ -193,16 +193,26 @@ def check(app, host, module, output=None):
             with patch.object(viewer, 'live_clock', return_value=103.), \
                     patch.object(viewer, 'shifts', return_value=positions), patch.object(viewer, 'analyse'):
                 row.refresh_status()
+                QTest.qWait(30)
                 fixed_height = viewer.settings_panel.height()
                 remove_position = row.remove_button.mapTo(row, QPoint())
+                assist_position = row.assist.mapTo(row, QPoint())
+                clock_position = row.clock_button.mapTo(row, QPoint())
                 row.assist.click()
-                app.processEvents()
+                QTest.qWait(30)
                 assert not row.hint_fast.isHidden() and not row.hint_slow.isHidden()
+                assert row.assist.mapTo(row, QPoint()) == assist_position
+                assert row.hint_fast.x() < row.hint_slow.x() < row.clock_button.x()
+                assert row.clock_button.mapTo(row, QPoint()).x() == clock_position.x() + 96, (
+                    clock_position, row.clock_button.mapTo(row, QPoint()), row.clock_controls.geometry(),
+                    row.hint_fast.geometry(), row.hint_slow.geometry(), row.clock_button.geometry())
                 assert row.remove_button.mapTo(row, QPoint()) == remove_position
                 assert viewer.settings_panel.height() == fixed_height
                 if output:
                     viewer.settings_panel.grab().save(str(output.with_name(output.stem + '-expanded.png')))
                 row.assist.click()
+                QTest.qWait(30)
+                assert row.clock_button.mapTo(row, QPoint()) == clock_position
                 assert row.hint_fast.isHidden() and row.hint_slow.isHidden() and not row.hint_pending
                 row.assist.click()
                 row.hint_fast.click()
