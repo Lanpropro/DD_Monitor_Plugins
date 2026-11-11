@@ -8,6 +8,7 @@
 
 | 插件 | 仓库说明 | GitHub 来源 |
 | --- | --- | --- |
+| 实时翻译 | [0.1 开发预览](RELEASE-live-translate-v0.1.md) | 已由贡献者 fork 创建 [`live-translate-v0.1` 预发布](https://github.com/Soraray/DD_Monitor_Plugins/releases/tag/live-translate-v0.1)，待镜像到主仓库 |
 | B站直播互动 | [1.1](RELEASE-bili-live-v1.1.md) | [bili-live-v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.1) |
 | 比赛二路同步 | [1.6.1](RELEASE-match-sync-v1.6.1.md) | [match-sync-v1.6.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.6.1) |
 | 比赛二路同步 | [1.6](RELEASE-match-sync-v1.6.md) | [match-sync-v1.6](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.6) |

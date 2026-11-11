@@ -152,6 +152,7 @@ class ContributionGuideTests(unittest.TestCase):
             'global_live': {'twitch', 'youtube'},
             'match_sync': {'bilibili', 'huya', 'douyu', 'douyin', 'twitch', 'youtube'},
             'bili_live': {'bilibili'},
+            'live_translate': set(),
         }
         for path in manifests:
             manifest = json.loads(path.read_text(encoding='utf-8'))
@@ -228,7 +229,8 @@ class ContributionGuideTests(unittest.TestCase):
                 self.assertIn(f']({note.name})', index)
                 self.assertIn(f'`{plugin_id}`', source)
                 self.assertIn('## 待发布', source)
-                self.assertRegex(source, r'https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/')
+                if '尚无公开发布基线' not in source:
+                    self.assertRegex(source, r'https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/')
         self.assertIn('(docs/changes/README.md)', (ROOT / 'README.md').read_text(encoding='utf-8'))
         self.assertIn('(docs/changes/README.md)', (ROOT / 'CONTRIBUTING.md').read_text(encoding='utf-8'))
 

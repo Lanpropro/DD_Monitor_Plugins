@@ -1,12 +1,13 @@
 # 插件仓库目录与资料分类
 
-本仓库维护四个插件，网站在独立仓库维护。整理只调整文档位置和本机历史资料，不变更插件行为、版本和发布状态。
+本仓库维护四个正式插件及实时翻译开发候选，网站在独立仓库维护。下述历史整理记录不变更插件行为、版本和发布状态。
 
 ## 持续维护的文件
 
 | 位置 | 职责与处理方式 |
 | --- | --- |
 | `plugins/bili_live/`、`plugins/domestic_live/`、`plugins/global_live/`、`plugins/match_sync/` | 正式插件源码、资源、清单及各自 README；保留 |
+| `plugins/live_translate/` | 实时翻译开发候选；模型、运行环境不进入源码与安装包，模块职责见插件 README |
 | `tests/` | 离线替身回归、宿主集成、原生界面及性能专项；按测试自身条件执行，不能仅因未被批量调用而判定无用 |
 | `tools/build_plugins.py` | 从 Git 跟踪文件生成安装包；保留 |
 | `tools/inspect_host_package.py` | 针对旧 `v0.2` PyInstaller 宿主附件的只读诊断工具，硬编码旧 EXE 名；保留供历史包排查，不适用于当前包的通用验收 |

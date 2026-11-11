@@ -1,0 +1,8 @@
+{
+  "id": "live_translate",
+  "name": "实时翻译",
+  "version": "0.1",
+  "description": "从选定直播间提取音轨，本地识别并显示双语字幕，支持本地或在线兼容翻译接口。",
+  "author": "Lanpropro",
+  "min_app_version": "0.7.2"
+}
