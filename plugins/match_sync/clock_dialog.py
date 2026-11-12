@@ -4,7 +4,7 @@ import threading
 from PySide6.QtCore import QObject, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QPen, QPixmap
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox,
-    QFrame, QHBoxLayout, QLabel, QLineEdit, QListView, QListWidget, QListWidgetItem,
+    QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListView, QListWidget, QListWidgetItem,
     QPushButton, QScrollArea, QSizePolicy, QStyledItemDelegate, QStyle, QVBoxLayout, QWidget)
 
 from ddm import theme
@@ -84,20 +84,16 @@ class ClockLane(QWidget):
         self.included = QCheckBox(row.label() + ('（主画面）' if key == dialog.reference else ''))
         self.included.setChecked(True)
         self.included.setEnabled(key != dialog.reference)
-        self.pick = native_console_button(QPushButton('框选计时器'), '框选游戏计时器')
-        self.pick.setFixedWidth(max(92, self.pick.fontMetrics().horizontalAdvance(self.pick.text()) + 20))
+        self.pick = native_console_button(QPushButton('框选计时器区域'), '在画面中框选游戏计时器区域')
+        self.pick.setFixedWidth(max(126, self.pick.fontMetrics().horizontalAdvance(self.pick.text()) + 20))
         self.pick.setEnabled(False)
         self.pick.clicked.connect(self.choose_region)
         self.first = QLineEdit()
-        self.first.setPlaceholderText('第一帧：0130 或 分:秒')
-        self.first.setFixedWidth(130)
+        self.first.setPlaceholderText('首帧时间 0130 / 01:30')
+        self.first.setFixedWidth(150)
         self.first.setObjectName('ClockFirstFrame')
         self.first.setAccessibleName(row.label() + '第一帧计时器读数')
-        heading = QHBoxLayout()
-        heading.addWidget(self.included, 1)
-        heading.addWidget(self.pick)
-        heading.addWidget(self.first)
-        self.status = QLabel('请分别框选同一个游戏计时器' if not self.region else '已记住计时器区域')
+        self.status = QLabel('请框选游戏计时器区域' if not self.region else '已记住计时器区域，可重新框选')
         self.setObjectName('MatchSyncClockLane')
         self.status.setObjectName('ClockLaneStatus')
         style_checkbox(self.included)
@@ -110,14 +106,18 @@ class ClockLane(QWidget):
         self.strip.setGridSize(QSize(166, 96))
         self.strip.setItemDelegate(ClockFrameDelegate(self.strip))
         self.strip.setObjectName('ClockFrameStrip')
-        self.strip.setFixedHeight(128)
+        self.strip.setFixedHeight(115)
         self.strip.setAccessibleName(row.label() + '翻秒帧：选择数字首次变化后的画面')
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(8)
-        layout.addLayout(heading)
-        layout.addWidget(self.strip)
-        layout.addWidget(self.status)
+        layout = QGridLayout(self)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setHorizontalSpacing(8)
+        layout.setVerticalSpacing(6)
+        layout.addWidget(self.included, 0, 0, Qt.AlignVCenter)
+        layout.addWidget(self.strip, 0, 1)
+        layout.addWidget(self.pick, 0, 2, Qt.AlignVCenter)
+        layout.addWidget(self.first, 0, 3, Qt.AlignVCenter)
+        layout.addWidget(self.status, 1, 0, 1, 4)
+        layout.setColumnStretch(1, 1)
         for signal in (self.first.textChanged, self.included.toggled):
             signal.connect(dialog.invalidate)
         self.strip.currentRowChanged.connect(self.select_transition)
@@ -149,7 +149,7 @@ class ClockLane(QWidget):
         self.frames = []
         self.first.clear()
         self.show_preview()
-        self.status.setText('已获取画面，请框选游戏计时器' if self.region is None else '已显示计时器选区，可重新框选或采样')
+        self.status.setText('已获取画面，请框选游戏计时器区域' if self.region is None else '已显示计时器选区，可重新框选或采样')
 
     def choose_region(self):
         if self.preview is None:
@@ -197,7 +197,7 @@ class ClockLane(QWidget):
         self.first.setText(format_clock(readings[0]) if readings and readings[0] is not None else '')
         found = suggest_transition([stamp for stamp, _image in frames], readings, direction)
         self.strip.setCurrentRow(found if found is not None else -1)
-        self.status.setText('已建议翻秒帧，请核对后计算' if found is not None else '请填写第一帧时间，并点击第一次翻秒后的画面')
+        self.status.setText('已建议翻秒帧，请核对计时器数字后计算' if found is not None else '请填写首帧时间，并点击第一次翻秒后的画面')
 
 
 class ClockDialog(QDialog):
@@ -267,9 +267,12 @@ class ClockDialog(QDialog):
         for lane in self.lanes.values():
             body_layout.addWidget(lane)
         body_layout.addStretch()
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(body)
+        self.scroll = QScrollArea()
+        self.scroll.setObjectName('ClockDialogScroll')
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setWidget(body)
         self.status = QLabel('各路请选择同一局、同一回合的游戏计时器；主播电脑时钟不能用来对齐游戏。')
         self.status.setObjectName('ClockDialogStatus')
         self.status.setWordWrap(True)
@@ -296,7 +299,7 @@ class ClockDialog(QDialog):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
         layout.addWidget(header)
-        layout.addWidget(scroll, 1)
+        layout.addWidget(self.scroll, 1)
         layout.addWidget(self.status)
         layout.addWidget(footer)
         self.watch = QTimer(self)

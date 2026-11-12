@@ -140,8 +140,14 @@ def check(app, host, module, output=None):
                 assert async_dialog.objectName() == 'MatchSyncClockDialog'
                 assert async_dialog.findChild(QWidget, 'ClockDialogToolbar') is not None
                 assert async_dialog.findChild(QWidget, 'ClockDialogFooter') is not None
+                assert async_dialog.findChild(QWidget, 'ClockDialogScroll') is async_dialog.scroll
                 assert all(lane.objectName() == 'MatchSyncClockLane'
                            for lane in async_dialog.lanes.values())
+                assert async_dialog.calculate.text() == '计算偏移'
+                assert all(lane.pick.text() == '框选计时器区域' for lane in async_dialog.lanes.values())
+                assert all(lane.included.geometry().center().y() == lane.strip.geometry().center().y()
+                           for lane in async_dialog.lanes.values())
+                assert async_dialog.scroll.verticalScrollBar().maximum() == 0
                 QTest.qWait(120)
                 assert not async_dialog.busy and all(lane.preview is None for lane in async_dialog.lanes.values()), \
                     'Opening the dialog must not start cache sampling'
