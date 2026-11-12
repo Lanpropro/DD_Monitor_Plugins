@@ -141,7 +141,10 @@ class ClockLane(QWidget):
         self.strip.addItem(item)
 
     def set_preview(self, item):
-        self.preview = item
+        stamp, image = item
+        if image.width() > 640:
+            image = image.scaled(640, 360, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.preview = (stamp, image)
         self.pick.setEnabled(not self.dialog.busy)
         self.frames = []
         self.first.clear()
@@ -300,8 +303,25 @@ class ClockDialog(QDialog):
         self.watch.setInterval(250)
         self.watch.timeout.connect(self.check_session)
         self.watch.start()
-        QTimer.singleShot(0, lambda: self.start_job(preview=True))
+        self.populate_current_previews()
         self.finished.connect(lambda: self.cancelled.set())
+
+    def current_preview(self, key):
+        """Reuse a frame already displayed by the main or comparison canvas."""
+        if key == self.reference:
+            frame = getattr(self.viewer.canvas, 'frame', None)
+        else:
+            card = self.viewer.comparison_panel.cards.get(key)
+            frame = card[2].frame if card is not None else None
+        if frame is None or not hasattr(frame, '__len__') or len(frame) != 2:
+            return None
+        return frame
+
+    def populate_current_previews(self):
+        for key, lane in self.lanes.items():
+            frame = self.current_preview(key)
+            if frame is not None:
+                lane.set_preview(frame)
 
     def selected_keys(self):
         return tuple(key for key, lane in self.lanes.items() if lane.included.isChecked())
@@ -367,6 +387,8 @@ class ClockDialog(QDialog):
         except ValueError as error:
             self.status.setText(str(error))
             return
+        current = {key: self.current_preview(key) for key in keys} if preview else {}
+        missing = tuple(key for key in keys if current.get(key) is None)
         self.set_busy(True)
         self.status.setText('正在从缓存取帧…' if preview else '正在采样与本地识别；直播继续播放…')
         bridge = ClockResult()
@@ -374,8 +396,11 @@ class ClockDialog(QDialog):
         cancelled = self.cancelled
         def work():
             try:
-                bands = {key: capture_band(history, anchor, region, cancelled, preview=preview)
-                         for key, history, anchor, region in requests}
+                bands = {key: [item] for key, item in current.items() if item is not None}
+                for key, history, anchor, region in requests:
+                    if key not in missing:
+                        continue
+                    bands[key] = capture_band(history, anchor, region, cancelled, preview=preview)
                 if cancelled.is_set():
                     return
                 readings, note = ({}, '') if preview else recognize_bands(bands, cancelled)
@@ -399,7 +424,7 @@ class ClockDialog(QDialog):
                     self.sample_token = None
                     for key, frames in bands.items():
                         self.lanes[key].set_preview(frames[-1])
-                    self.status.setText('画面已获取，请框选各路相同的游戏计时器')
+                    self.status.setText('画面已准备，请框选各路相同的游戏计时器')
                 else:
                     self.sample_token, self.sample_keys = token, keys
                     self.sample_shifts = shifts

@@ -44,14 +44,16 @@ def capture_band(history, anchor, crop, cancelled, *, preview=False):
                 if stamp < start - .001:
                     continue
                 if preview:
-                    return [(stamp, image_from_frame(frame, width=1280))]
+                    return [(stamp, image_from_frame(frame, width=640))]
                 if stamp > anchor + .001:
                     if len(frames) < 12 or frames[-1][0] - frames[0][0] < 1.1:
                         raise ValueError('连续画面不足，请重新采样')
                     return frames
                 if stamp - last < .065:
                     continue
-                image = image_from_frame(frame)
+                # Limit the full-frame conversion before applying the normalized
+                # crop; a 4K source must not become a 4K QImage on the worker.
+                image = image_from_frame(frame, width=1280)
                 x, y, width, height = crop
                 image = image.copy(round(x * image.width()), round(y * image.height()),
                                    max(1, round(width * image.width())), max(1, round(height * image.height())))

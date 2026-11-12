@@ -142,8 +142,28 @@ def check(app, host, module, output=None):
                 assert async_dialog.findChild(QWidget, 'ClockDialogFooter') is not None
                 assert all(lane.objectName() == 'MatchSyncClockLane'
                            for lane in async_dialog.lanes.values())
+                QTest.qWait(120)
+                assert not async_dialog.busy and all(lane.preview is None for lane in async_dialog.lanes.values()), \
+                    'Opening the dialog must not start cache sampling'
+                viewer.canvas.set_frame((103., timer_image(90)))
+                viewer.comparison_panel.cards = {}
+                for key in viewer.rows:
+                    canvas = ui.Canvas()
+                    canvas.set_frame((103., timer_image(90)))
+                    viewer.comparison_panel.cards[key] = (None, None, canvas, None)
+                async_dialog.populate_current_previews()
+                assert all(lane.preview is not None for lane in async_dialog.lanes.values())
+                with patch.object(ui, 'capture_band', side_effect=AssertionError('Current frame should be reused')):
+                    async_dialog.start_job(preview=True)
+                    deadline = time.monotonic() + 2
+                    while async_dialog.busy and time.monotonic() < deadline:
+                        app.processEvents()
+                        time.sleep(.01)
+                viewer.canvas.set_frame(None)
+                viewer.comparison_panel.cards = {}
+                async_dialog.start_job(preview=True)
                 deadline = time.monotonic() + 10
-                while any(lane.preview is None for lane in async_dialog.lanes.values()) and time.monotonic() < deadline:
+                while async_dialog.busy and time.monotonic() < deadline:
                     app.processEvents()
                     time.sleep(.01)
                 assert all(lane.preview is not None for lane in async_dialog.lanes.values()), async_dialog.status.text()
@@ -198,6 +218,7 @@ def check(app, host, module, output=None):
                     closing = ui.ClockDialog(viewer)
                     closing.setAttribute(Qt.WA_DontShowOnScreen)
                     closing.show()
+                    closing.start_job(preview=True)
                     deadline = time.monotonic() + 3
                     while not entered.is_set() and time.monotonic() < deadline:
                         app.processEvents()
@@ -264,7 +285,8 @@ def check(app, host, module, output=None):
             app.processEvents()
     return {'passed': True, 'clock_directions': True, 'bounded_real_video_capture': True,
             'windows_ocr': not note, 'manual_review': True, 'stale_source_rejected': True,
-            'explicit_apply': True, 'async_sample_ocr_ui': True, 'real_live_test': False, 'real_messages': 0}
+            'explicit_apply': True, 'async_sample_ocr_ui': True, 'open_is_idle_until_requested': True,
+            'real_live_test': False, 'real_messages': 0}
 
 
 def main():
