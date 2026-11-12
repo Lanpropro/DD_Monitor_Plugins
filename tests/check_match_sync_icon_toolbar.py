@@ -36,6 +36,8 @@ def check(app, host, module, output=None):
             assert len(first.group_separators) == 3
             assert not hasattr(viewer, 'add_room_button')
             assert first.main_button.styleSheet() == second.main_button.styleSheet()
+            assert 'QPushButton:pressed' in first.main_button.styleSheet()
+            assert 'QCheckBox:hover' in viewer.automatic.styleSheet()
             assert first.main_button.size() == second.main_button.size()
             assert first.main_button.mapTo(first, QPoint()).x() == second.main_button.mapTo(second, QPoint()).x()
             second.join.show()

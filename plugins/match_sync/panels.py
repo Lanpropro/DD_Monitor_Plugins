@@ -72,12 +72,12 @@ def console_hover_color():
 
 
 class ConsoleModeToggle(QCheckBox):
-    """Native checkbox behavior with the approved switch/compare presentation."""
+    """Settings-style checkbox with the console's shared hover and cursor feedback."""
     def __init__(self, text, kind):
         super().__init__(text)
         self.kind = kind
         self.setFocusPolicy(Qt.StrongFocus)
-        use_link_cursor(self)
+        style_checkbox(self)
 
     def sizeHint(self):
         return QSize(self.fontMetrics().horizontalAdvance(self.text()) + 42, 32)
@@ -89,30 +89,7 @@ class ConsoleModeToggle(QCheckBox):
         return self.rect().contains(point)
 
     def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        hovered = self.isEnabled() and self.underMouse()
-        if hovered:
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(theme.qcolor(console_hover_color()))
-            painter.drawRoundedRect(QRectF(self.rect()), 5, 5)
-        y = self.height() / 2
-        font = painter.font()
-        font.setPixelSize(13)
-        painter.setFont(font)
-        if self.kind == 'automatic':
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(theme.qcolor(theme.ACCENT if self.isChecked() else theme.TEXT3))
-            painter.drawRoundedRect(QRectF(1, y - 8, 27, 16), 8, 8)
-            painter.setBrush(QColor('#e9edf2'))
-            painter.drawEllipse(QPointF(20 if self.isChecked() else 9, y), 5, 5)
-        else:
-            painter.setPen(QPen(theme.qcolor(theme.ACCENT if self.isChecked() else theme.TEXT2), 1.5))
-            painter.setBrush(Qt.NoBrush)
-            for x in (3, 17):
-                painter.drawRoundedRect(QRectF(x, y - 8, 8, 16), 1, 1)
-        painter.setPen(theme.qcolor(theme.ACCENT if hovered else theme.TEXT1 if self.isChecked() else theme.TEXT2))
-        painter.drawText(QRect(38, 0, self.width() - 38, self.height()), Qt.AlignVCenter, self.text())
+        super().paintEvent(event)
 
 
 def console_role_icon():
@@ -180,12 +157,15 @@ class ConsoleIconButton(QPushButton):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         hovered = self.isEnabled() and QApplication.widgetAt(QCursor.pos()) is self
-        if hovered or self.isChecked():
+        pressed = self.isDown()
+        if hovered or self.isChecked() or pressed:
             painter.setPen(Qt.NoPen)
-            painter.setBrush(theme.qcolor(console_hover_color() if hovered else theme.ACCENT_SOFT))
+            painter.setBrush(theme.qcolor(theme.mix(console_hover_color(), theme.ACCENT, .25)
+                                         if pressed else console_hover_color() if hovered else theme.ACCENT_SOFT))
             painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 6, 6)
         painter.translate(self.width() / 2, self.height() / 2)
-        color = theme.TEXT4 if not self.isEnabled() else theme.ACCENT if hovered or self.isChecked() else theme.TEXT1
+        color = (theme.TEXT4 if not self.isEnabled() else theme.ACCENT
+                 if hovered or self.isChecked() or pressed else theme.TEXT1)
         pen = QPen(theme.qcolor(color), 1.6)
         pen.setCapStyle(Qt.RoundCap)
         painter.setPen(pen)
@@ -263,6 +243,7 @@ def native_console_button(button, tooltip, size=32):
     button.setStyleSheet(f'''QPushButton {{background: transparent; border: none; outline: none;
         padding: 0; border-radius: 6px;}}
         QPushButton:hover {{background: {console_hover_color()};}}
+        QPushButton:pressed {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}
         QPushButton:checked {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}
         QPushButton:checked:hover {{background: {console_hover_color()};}}
         QPushButton:disabled {{color: {theme.TEXT4};}}''')
@@ -520,6 +501,7 @@ def console_button_style(selector):
             border-radius: {theme.RADIUS_MD}px; padding: 4px 6px;
         }}
         {selector}:hover {{ background: palette(light); border-color: palette(highlight); }}
+        {selector}:pressed {{ background: palette(highlight); color: palette(highlighted-text); }}
         {selector}:checked {{ background: rgba(251, 114, 153, 45); border-color: palette(highlight); }}
     """
 
