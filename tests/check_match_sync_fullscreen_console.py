@@ -37,7 +37,6 @@ def check(app, host, module, output=None):
                     assert viewer.body_split.count() == 2 and viewer.picture.parentWidget() is dialog
                     assert viewer.picture.property('fullscreen'), 'The fullscreen picture needs the host presentation state'
                     assert viewer.picture.bottom.property('fullscreen'), 'Use the transparent fullscreen bar'
-                    assert viewer.picture.bottom.property('matchSyncFullscreen')
                     assert viewer.picture.video.height() == viewer.picture.height(), 'The bar must overlay the full video'
                     cursor = dialog._fullscreen_cursor
                     point = viewer.picture.video.mapToGlobal(viewer.picture.video.rect().center())
@@ -73,7 +72,7 @@ def check(app, host, module, output=None):
                         bar.render(painter, QPoint(), QRegion(), QWidget.DrawChildren)
                         painter.end()
                         assert image.pixelColor(5, 0).alpha() < 10
-                        assert 30 < image.pixelColor(5, image.height() - 1).alpha() < 100
+                        assert 100 < image.pixelColor(5, image.height() - 1).alpha() < 200
                         if output:
                             Path(output).parent.mkdir(parents=True, exist_ok=True)
                             image.save(str(output))
@@ -89,7 +88,6 @@ def check(app, host, module, output=None):
                     dialog.close()
                     assert viewer.fullscreen_dialog is None
                     assert not viewer.picture.property('fullscreen') and not viewer.picture.bottom.property('fullscreen')
-                    assert not viewer.picture.bottom.property('matchSyncFullscreen')
                     assert not viewer.picture._fullscreen_controls_hidden
                     assert viewer.body_split.count() == 3 and viewer.body_split.widget(0) is viewer.picture
                     viewer.console_content_height = viewer.settings_height

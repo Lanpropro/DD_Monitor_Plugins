@@ -3,8 +3,7 @@ from __future__ import annotations
 
 from .canvas import Canvas
 from .comparison import ComparisonPanel
-from .panels import (ConsoleIconButton, ConsoleModeToggle, ConsoleNotice, SettingsPanel,
-                     console_button_style, native_console_button, style_checkbox, use_link_cursor)
+from .panels import ConsoleIconButton, ConsoleModeToggle, ConsoleNotice, SettingsPanel, native_console_button, style_checkbox
 from PySide6.QtWidgets import QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLayout, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QSplitter, QVBoxLayout, QWidget
 from PySide6.QtCore import QTimer, Qt
 from .replay import ReplayBar
@@ -49,7 +48,6 @@ def build_ui(viewer):
     viewer.resize(1320, 880)
     viewer.main = QComboBox(viewer)
     viewer.main.setFixedWidth(180)
-    use_link_cursor(viewer.main)
     viewer.main.currentIndexChanged.connect(viewer._main_changed)
     viewer.automatic = ConsoleModeToggle("自动对齐比赛画面", 'automatic')
     viewer.automatic.setToolTip("关闭时保存当前相对偏移；重新勾选或主动修改偏移可解除保存状态。切换不收起对照。")
@@ -73,7 +71,6 @@ def build_ui(viewer):
         viewer.buffer_reserve.addItem(label, seconds)
     viewer.buffer_reserve.setCurrentIndex(viewer.buffer_reserve.findData(viewer.reserve_seconds))
     viewer.buffer_reserve.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
-    use_link_cursor(viewer.buffer_reserve)
     viewer.buffer_reserve.setToolTip('自动对齐后的目标可播放余量。增加时通过轻微降速逐步积累，可能需要数分钟；不会暂停或跳转主画面。')
     viewer.buffer_reserve.setAccessibleName('抗波动缓存')
     viewer.buffer_reserve.currentIndexChanged.connect(viewer._buffer_reserve_changed)
@@ -81,12 +78,8 @@ def build_ui(viewer):
     viewer.input.setPlaceholderText("房间号、平台前缀或官方直播链接")
     viewer.input.returnPressed.connect(viewer._add_input)
     add = QPushButton("添加直播间")
-    add.setStyleSheet(console_button_style('QPushButton'))
-    use_link_cursor(add)
     add.clicked.connect(viewer._add_input)
     use_current = QPushButton("加入当前观看的房间")
-    use_current.setStyleSheet(console_button_style('QPushButton'))
-    use_link_cursor(use_current)
     use_current.clicked.connect(viewer.import_current)
     viewer.add_controls = (viewer.input, add, use_current)
     viewer.settings_panel = SettingsPanel(viewer)
@@ -100,8 +93,6 @@ def build_ui(viewer):
     viewer.minimize_settings.clicked.connect(lambda: viewer.set_settings_visible(False))
     viewer.restore_settings = QPushButton("展开设置")
     viewer.restore_settings.setFixedWidth(90)
-    viewer.restore_settings.setStyleSheet(console_button_style('QPushButton'))
-    use_link_cursor(viewer.restore_settings)
     viewer.restore_settings.clicked.connect(lambda: viewer.set_settings_visible(True))
     viewer.restore_settings.hide()
     viewer.console_toolbar = QWidget()
@@ -265,8 +256,6 @@ def build_ui(viewer):
     removal_layout.addWidget(viewer.removal_label)
     undo = QPushButton('撤销')
     undo.setAutoDefault(False)
-    undo.setStyleSheet(console_button_style('QPushButton'))
-    use_link_cursor(undo)
     undo.clicked.connect(viewer.undo_remove_room)
     removal_layout.addWidget(undo)
     viewer.removal_notice.hide()
@@ -301,8 +290,6 @@ def build_ui(viewer):
     viewer.restore_chat.setObjectName('TileCtrl')
     viewer.restore_chat.setFixedSize(90, 26)
     viewer.restore_chat.setToolTip('恢复弹幕列表')
-    viewer.restore_chat.setStyleSheet(console_button_style('QPushButton'))
-    use_link_cursor(viewer.restore_chat)
     viewer.restore_chat.clicked.connect(lambda: viewer.set_chat_visible(True))
     viewer.picture.bottom.layout().insertWidget(
         viewer.picture.bottom.layout().indexOf(viewer.picture.danmaku_button), viewer.restore_chat)

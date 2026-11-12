@@ -184,7 +184,6 @@ class RoomRow(QFrame):
         self.main_button.setStyleSheet(f'''QPushButton {{background: transparent; border: 1px solid {theme.BORDER_STRONG};
             border-radius: 5px; outline: none; padding: 3px 6px; font-size: 12px;}}
             QPushButton:checked {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}
-            QPushButton:pressed {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}
             QPushButton:hover, QPushButton:checked:hover {{background: {console_hover_color()}; color: {theme.ACCENT};}}''')
         self.main_button.setToolTip("选择这位主播作为主画面，其他路声音与弹幕继续播放。")
         self.main_button.clicked.connect(lambda: viewer.select_main(room_id))
@@ -337,8 +336,7 @@ class RoomRow(QFrame):
         for step in (self.decrease, self.increase):
             step.setFixedHeight(30)
             step.setStyleSheet(f'''QPushButton {{background: transparent; border: none; padding: 0; border-radius: 0;}}
-                QPushButton:hover {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}
-                QPushButton:pressed {{background: {theme.ACCENT}; color: {theme.BG};}}''')
+                QPushButton:hover {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}''')
         for widget in (self.decrease, self.delay, self.increase):
             offset_layout.addWidget(widget)
         groups = [identity]
