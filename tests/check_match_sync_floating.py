@@ -91,16 +91,89 @@ def check_selection(app, module, source):
         app.processEvents()
 
 
+def check_move_coalescing(app, host, module):
+    from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+    from PySide6.QtGui import QColor, QImage, QMouseEvent, QResizeEvent
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QWidget
+    parent=QWidget(host)
+    parent.setAttribute(Qt.WA_DontShowOnScreen)
+    parent.resize(1000,700)
+    parent.show()
+    crop=module.FloatingCrop(parent,'move-check',(0,0,1,1))
+    crop.fit_geometry(20,20,240)
+    crop.show();app.processEvents()
+    def send(kind,point):
+        button=Qt.NoButton if kind==QEvent.MouseMove else Qt.LeftButton
+        buttons=Qt.NoButton if kind==QEvent.MouseButtonRelease else Qt.LeftButton
+        app.sendEvent(crop,QMouseEvent(kind,QPointF(crop.mapFromGlobal(point)),QPointF(point),
+                                      button,buttons,Qt.NoModifier))
+    def press():
+        point=crop.mapToGlobal(QPoint(40,60))
+        send(QEvent.MouseButtonPress,point)
+        return point
+    try:
+        initial=crop.pos();origin=press()
+        with patch.object(crop,'fit_geometry',wraps=crop.fit_geometry) as fit:
+            for index in range(1,201):
+                send(QEvent.MouseMove,origin+QPoint(index,index//2))
+            assert fit.call_count==0, 'Mouse bursts must defer geometry, not submit every event'
+            assert crop._move_timer.isActive() and crop._move_timer.isSingleShot()
+            assert crop._move_timer.interval()==16
+            image=QImage(32,18,QImage.Format_RGB32);image.fill(QColor('red'))
+            crop.set_frame((1,image))
+            QTest.qWait(35)
+            assert fit.call_count==1 and crop.pos()==initial+QPoint(200,100)
+            assert crop.frame_key==1 and not crop._move_timer.isActive()
+            send(QEvent.MouseMove,origin+QPoint(230,110))
+            send(QEvent.MouseButtonRelease,origin+QPoint(230,110))
+            assert fit.call_count==2 and crop.pos()==initial+QPoint(230,110)
+            assert crop.drag is None and crop._pending_move is None and not crop._move_timer.isActive()
+        for cancel in ('capture_loss','hide','reparent','parent_resize','lock','close'):
+            origin=press();unchanged=crop.pos()
+            send(QEvent.MouseMove,origin+QPoint(50,20))
+            assert crop._move_timer.isActive()
+            if cancel=='capture_loss':app.sendEvent(crop,QEvent(QEvent.UngrabMouse))
+            elif cancel=='hide':crop.hide()
+            elif cancel=='reparent':
+                crop.setParent(host)
+                unchanged=crop.pos()
+            elif cancel=='parent_resize':
+                old_size=parent.size();parent.resize(980,680)
+                app.sendEvent(parent,QResizeEvent(parent.size(),old_size))
+                unchanged=crop.pos()
+            elif cancel=='lock':crop.cycle_lock()
+            else:crop.close()
+            if cancel=='close':
+                # WA_DeleteOnClose may delete the receiver on the next event-loop pass.
+                assert not crop._move_timer.isActive() and crop._pending_move is None
+                crop=None
+                break
+            assert crop.drag is None and crop._pending_move is None and not crop._move_timer.isActive(), cancel
+            QTest.qWait(25)
+            if cancel!='lock':assert crop.pos()==unchanged, 'Cancelled requests must not move later'
+            if cancel=='reparent':crop.setParent(parent)
+            crop.lock_mode=0;crop.show();app.processEvents()
+    finally:
+        if crop is not None:crop.close()
+        parent.close();parent.deleteLater();app.processEvents()
+
+
 def check(app, host, module, output=None):
     from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt
     from PySide6.QtGui import QColor, QEnterEvent, QImage, QPainter, QPixmap, QWheelEvent
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QDialog, QDialogButtonBox, QPushButton, QWidget
     from ddm import plugins
+    check_move_coalescing(app, host, module)
     host.settings, host.rooms = {}, []
     host.resize(1400, 900)
     host.show()
-    with tempfile.TemporaryDirectory() as directory:
+    picker = import_module(module.__package__ + '.crop_ui').CropPicker
+    with tempfile.TemporaryDirectory() as directory, \
+            patch.object(module.floating_control, 'create_picker', side_effect=picker), \
+            patch('PySide6.QtGui.QWindow.startSystemMove',
+                  side_effect=AssertionError('Floating crop gestures must stay outside the system move loop')):
         manager = plugins.PluginManager(window=host, plugins_dir=directory)
         viewer = module.Viewer(plugins.PluginContext(manager, 'floating_check'), {})
         viewer.setWindowFlags(Qt.Widget)
@@ -147,10 +220,9 @@ def check(app, host, module, output=None):
                 if output:
                     output.parent.mkdir(parents=True, exist_ok=True)
                     dialog.grab().save(str(output.with_name('selection.png')))
-                dialog.hide()
-                return QDialog.Accepted
-            with patch.object(module.QDialog, 'exec', select_region):
-                viewer.choose_crop(row, floating=True)
+                dialog.accept()
+            viewer.choose_crop(row, floating=True)
+            select_region(viewer.crop_dialog)
             assert row.room_id in viewer.floating_crops and row.crop == original_crop
             floating = viewer.show_floating_crop(row, (.5, .5, .5, .5), (1, source))
             QTest.qWait(30)
@@ -223,16 +295,16 @@ def check(app, host, module, output=None):
                 assert selecting.crop == floating.crop and selecting.selection_ready, 'Reopen the existing editable crop'
                 selecting.crop = QRectF(.4, .4, .5, .5)
                 adjusted.append(True)
-                return QDialog.Accepted
-            with patch.object(module.QDialog, 'exec', adjust_region):
-                QTest.mouseClick(floating, Qt.LeftButton, pos=floating.adjust_rect().center())
+                dialog.accept()
+            QTest.mouseClick(floating, Qt.LeftButton, pos=floating.adjust_rect().center())
+            adjust_region(viewer.crop_dialog)
             assert adjusted and floating.crop == QRectF(.4, .4, .5, .5)
             assert row.crop == original_crop, 'Fine tuning must not change alignment/comparison crops'
             def cancel_adjustment(dialog):
                 dialog.findChild(module.Canvas).crop = QRectF(0, 0, 1, 1)
-                return QDialog.Rejected
-            with patch.object(module.QDialog, 'exec', cancel_adjustment):
-                QTest.mouseClick(floating, Qt.LeftButton, pos=floating.adjust_rect().center())
+                dialog.reject()
+            QTest.mouseClick(floating, Qt.LeftButton, pos=floating.adjust_rect().center())
+            cancel_adjustment(viewer.crop_dialog)
             assert floating.crop == QRectF(.4, .4, .5, .5), 'Cancel must preserve the applied crop'
             floating.fit_geometry(10, 10, 400)
             anchor = floating.mapTo(host, floating.rect().bottomRight() - QPoint(4, 4))
@@ -375,7 +447,9 @@ def check(app, host, module, output=None):
             return {'passed': True, 'source_resolution': '1920x1080', 'app_wide_drag': True,
                     'wheel_corner_resize': True, 'four_corner_resize': True, 'editable_selection': True,
                     'inline_actions': True, 'fine_tune_button': True, 'replay_source_time': True,
-                    'resize_placement_restored': True, 'cursor_zoom': True, 'burst_repaints_100_to_1': True, 'network_requests': 0}
+                    'resize_placement_restored': True, 'cursor_zoom': True, 'burst_repaints_100_to_1': True,
+                    'system_move_not_called': True, 'move_bursts_200_to_1': True,
+                    'pending_move_cleanup': True, 'network_requests': 0}
         finally:
             row.decoder = None
             viewer.embedded = False

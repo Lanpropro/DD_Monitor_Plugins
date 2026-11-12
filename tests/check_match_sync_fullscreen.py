@@ -78,7 +78,7 @@ def main():
         from dev.selfcheck_match_sync import FakeChat, FakeDecoder
         from ddm import plugins
         with tempfile.TemporaryDirectory() as temporary, \
-                patch.object(module, 'Decoder', FakeDecoder), patch.object(module, 'Chat', FakeChat), \
+                patch.object(module.source_control, 'Decoder', FakeDecoder), patch.object(module.chat_control, 'Chat', FakeChat), \
                 patch.object(module.AudioPump, 'start', lambda _self: None):
             host = QWidget()
             host.settings = {}
@@ -94,7 +94,7 @@ def main():
                     floating = viewer.show_floating_crop(viewer.rows['1'], (0, 0, .5, .5), (1, image))
                     sizes = viewer.body_split.sizes()
                     with patch.object(module.QApplication, 'platformName', return_value='windows'), \
-                            patch.object(module, 'mark_fullscreen', return_value=True, create=True) as mark:
+                            patch.object(module.picture_control, 'mark_fullscreen', return_value=True, create=True) as mark:
                         viewer._fullscreen_picture()
                         dialog = viewer.fullscreen_dialog
                         assert floating.parentWidget() is dialog
