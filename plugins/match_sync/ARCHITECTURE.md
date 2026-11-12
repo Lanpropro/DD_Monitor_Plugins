@@ -2,6 +2,8 @@
 
 `ComparisonPanel`复用`SettingsPanel`的控制台材质与主题，拥有标题工具条、缩放开关、收起图标及各路预览卡片。其顶部不再提供重复的计时器按钮；`open_clock`保留为每路图标的薄委托。主题刷新由Viewer统一调用`refresh_design`，视频帧/偏移/多来源选择仍沿用原流程，不创建播放状态副本。二路全屏仍迁移同一个Tile；`picture_control`进入时设置宿主`fullscreen`属性并刷新布局，退出时恢复先前属性和原splitter位置。自动隐藏复用宿主`FullscreenCursor`及原100ms轮询，透明底栏复用宿主`FullscreenBar`，不另加隐藏定时器、动画或透明窗口实现。
 
+计时器对齐计算结果逐路写入`ClockLane.status`，同时显示建议偏移和采样误差；确认应用后打开原`ComparisonPanel`，让用户继续使用既有偏移控件微调。首帧解析由`clock_sync.parse_clock`兼容带冒号和连续数字格式，计算/校验规则不变。
+
 主路连续缓存耗尽后的恢复由playback_timing._recover_clock协调，继续复用Viewer的sync_waiting/locked_clock和AudioPump.correction冻结共同播放时钟。恢复余量使用已有SafetyBuffer目标并受当前连续区间容量约束，避免只补300ms就恢复造成反复等待；不增加第二份时钟或改变人工偏移。PTS缺口仍由既有区间恢复路径处理，真实Decoder/history更换与计时器复核由对应功能模块处理，不能因主路已补足缓存就自动解除副路的待确认状态。
 
 控制台通知由`viewer_ui.py`在顶部中央放置原`notice`、`late_notice`和`buffer_notice`；`panels.ConsoleNotice`只负责单行居中与窄幅省略绘制，不增加消息队列、线程或定时器。缓冲告警原有15秒显示与120秒冷却仍由播放协调逻辑持有；每路标记复用`CompactStatus`的原生图标绘制，不显示黑底悬停长提示。`RoomRow`拥有32px计时器入口及偏快/偏慢选择；固定宽度容器内显隐选择按钮，仅让计时器图标右移/归位，不改变其他列位置或控制台目标高度，入口仍委托原`ComparisonPanel.open_clock`。

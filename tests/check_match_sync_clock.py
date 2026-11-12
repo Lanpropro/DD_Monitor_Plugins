@@ -16,6 +16,7 @@ def check(app, host, module, output=None):
     from PySide6.QtCore import QRectF, Qt
     from PySide6.QtGui import QColor, QFont, QFontDatabase, QImage, QPainter
     from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QWidget
     from ddm import plugins, recording
     model = import_module(module.__package__ + '.clock_sync')
     capture = import_module(module.__package__ + '.clock_capture')
@@ -25,6 +26,9 @@ def check(app, host, module, output=None):
     font_id = QFontDatabase.addApplicationFont('C:/Windows/Fonts/arial.ttf')
     family = QFontDatabase.applicationFontFamilies(font_id)[0] if font_id >= 0 else 'sans-serif'
     assert model.parse_clock('01:29') == 89
+    assert model.parse_clock('0129') == 89
+    assert model.parse_clock('129') == 89
+    assert model.parse_clock('01299') is None
     assert model.parse_clock('01•.29') == 89
     assert model.parse_clock('1:30 2:30') is None
     assert model.parse_clock('01:99') is None
@@ -133,6 +137,11 @@ def check(app, host, module, output=None):
                 async_dialog = ui.ClockDialog(viewer)
                 async_dialog.setAttribute(Qt.WA_DontShowOnScreen)
                 async_dialog.show()
+                assert async_dialog.objectName() == 'MatchSyncClockDialog'
+                assert async_dialog.findChild(QWidget, 'ClockDialogToolbar') is not None
+                assert async_dialog.findChild(QWidget, 'ClockDialogFooter') is not None
+                assert all(lane.objectName() == 'MatchSyncClockLane'
+                           for lane in async_dialog.lanes.values())
                 deadline = time.monotonic() + 10
                 while any(lane.preview is None for lane in async_dialog.lanes.values()) and time.monotonic() < deadline:
                     app.processEvents()
@@ -217,6 +226,8 @@ def check(app, host, module, output=None):
                 old_delay = viewer.rows['2'].delay.value()
                 dialog.calculate_proposal()
                 assert dialog.apply.isEnabled() and abs(dialog.proposal['2'] + 4.3) < .0001
+                assert '建议偏移' in dialog.lanes['2'].status.text()
+                assert '误差' in dialog.lanes['2'].status.text()
                 assert viewer.rows['2'].delay.value() == old_delay, 'Calculating is not applying'
                 if output:
                     dialog.grab().save(str(output))
@@ -239,6 +250,7 @@ def check(app, host, module, output=None):
                 assert abs(viewer.rows['2'].delay.value() - 1.3) < .011
                 assert not viewer.automatic.isChecked() and viewer.alignment.manual_locked
                 assert viewer.rows['2'].user_confirmed
+                assert viewer.compare.isChecked(), 'Applied offsets should return to comparison controls'
                 assert dialog.cancelled.is_set()
         finally:
             viewer.running = False

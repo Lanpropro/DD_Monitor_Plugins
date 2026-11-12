@@ -44,9 +44,14 @@ def check(app, host, module, output=None):
                 for index, (card, name, canvas, state) in enumerate(panel.cards.values()):
                     assert isinstance(card, QFrame) and card.objectName() == 'MatchSyncCompareCard'
                     assert card.parentWidget() is panel.cards_layout.parentWidget()
+                    assert canvas.fill_height
+                    assert canvas.sizePolicy().horizontalPolicy().name == 'Expanding'
                     image = QImage(640, 360, QImage.Format_RGB32)
                     image.fill(('#265776', '#464477', '#225d52')[index])
                     canvas.set_frame((100., image))
+                    app.processEvents()
+                    assert canvas.image_rect.width() <= canvas.width() + 1
+                    assert canvas.image_rect.height() <= canvas.height() + 1
                     assert name.fontMetrics().horizontalAdvance(name.text()) < card.width()
                     assert 'font-size: 12px' in state.styleSheet()
                 app.processEvents()
