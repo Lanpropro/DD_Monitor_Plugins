@@ -71,18 +71,6 @@ class DanmakuComposer(QWidget):
         self.setStyleSheet(f"""
             #DanmakuComposer {{background: transparent; border: none;}}
             #DanmakuComposer QLineEdit {{padding: 3px 6px; font-size: {theme.FONT_CONTROL}px;}}
-            #DanmakuComposer[fullscreen="true"] QLineEdit {{
-                background: rgba(255, 255, 255, 0.16); color: #ffffff;
-                border: 1px solid rgba(255, 255, 255, 0.18);
-                border-radius: 14px; padding: 2px 10px;
-            }}
-            #DanmakuComposer[fullscreen="true"] QPushButton#TileCtrl {{
-                background: rgba(0, 174, 236, 0.92); color: #ffffff;
-                border: none; border-radius: 14px; padding: 0 12px;
-            }}
-            #DanmakuComposer[fullscreen="true"] QPushButton#TileCtrl:hover {{
-                background: #00aeec; color: #ffffff;
-            }}
             #DanmakuSendFeedback {{background: palette(tooltip-base); color: palette(window-text);
                 border: 1px solid palette(mid); border-radius: {theme.RADIUS_SM}px;
                 padding: 6px 8px; font-size: {theme.FONT_CAPTION}px;}}
