@@ -84,6 +84,7 @@ class ComparisonPanel(SettingsPanel):
                 name = QLabel()
                 canvas = Canvas()
                 canvas.transparent_background = self.viewer.skin_visible
+                canvas.setMinimumSize(200, 110)
                 state = QLabel()
                 state.setWordWrap(True)
                 heading = QHBoxLayout()

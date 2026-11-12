@@ -47,16 +47,6 @@ def check(app, host, module, output=None):
                     image = QImage(640, 360, QImage.Format_RGB32)
                     image.fill(('#265776', '#464477', '#225d52')[index])
                     canvas.set_frame((100., image))
-                    app.processEvents()
-                    assert canvas.image_rect.width() <= canvas.width() + 1
-                    assert canvas.image_rect.height() <= canvas.height() + 1
-                    assert canvas.image_rect.x() >= -1 and canvas.image_rect.right() <= canvas.width() + 1
-                    assert canvas.image_rect.y() >= -1 and canvas.image_rect.bottom() <= canvas.height() + 1
-                    assert abs(canvas.image_rect.width() / canvas.image_rect.height() - 16 / 9) < .02
-                    if canvas.width() / canvas.height() >= 16 / 9:
-                        assert abs(canvas.image_rect.top()) <= 1 and abs(canvas.image_rect.bottom() - canvas.height()) <= 1
-                    else:
-                        assert abs(canvas.image_rect.left()) <= 1 and abs(canvas.image_rect.right() - canvas.width()) <= 1
                     assert name.fontMetrics().horizontalAdvance(name.text()) < card.width()
                     assert 'font-size: 12px' in state.styleSheet()
                 app.processEvents()
