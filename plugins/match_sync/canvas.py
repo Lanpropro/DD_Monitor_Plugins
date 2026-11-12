@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import QPointF, QRect, QRectF, QSizeF, Qt
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPen
-from PySide6.QtWidgets import QFrame, QSizePolicy
+from PySide6.QtWidgets import QFrame
 
 from ddm import theme
 
@@ -23,7 +23,6 @@ class Canvas(QFrame):
         self.preview_only = False
         self.preview_shift = None
         self.transparent_background = False
-        self.fill_height = False
         self.presented = 0
         self.repeated = 0
         self.paint_probe = None
@@ -87,9 +86,8 @@ class Canvas(QFrame):
         return source
 
     def _sync_opaque_paint(self):
-        source = self._source_rect()
-        covered = (not self.image.isNull() and self.fill_height and source.height() > 0
-                   and source.width() * self.height() <= self.width() * source.height())
+        covered = (not self.image.isNull() and
+                   self._source_rect().size().scaled(self.size(), Qt.KeepAspectRatio) == self.size())
         self.setAttribute(Qt.WA_OpaquePaintEvent, not self.transparent_background or covered)
 
     def resizeEvent(self, event):
@@ -115,11 +113,7 @@ class Canvas(QFrame):
             return
         image = self.image
         source = self._source_rect()
-        if (self.fill_height and source.height() > 0
-                and source.width() * self.height() <= self.width() * source.height()):
-            size = QSizeF(source.width() * self.height() / source.height(), self.height())
-        else:
-            size = source.size().scaled(self.size(), Qt.KeepAspectRatio)
+        size = source.size().scaled(self.size(), Qt.KeepAspectRatio)
         self.image_rect = QRectF((self.width() - size.width()) / 2,
                                 (self.height() - size.height()) / 2,
                                 size.width(), size.height())

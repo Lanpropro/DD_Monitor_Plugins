@@ -81,13 +81,9 @@ class ComparisonPanel(SettingsPanel):
             for room_id in rows:
                 card = QFrame()
                 card.setObjectName('MatchSyncCompareCard')
-                card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
                 name = QLabel()
                 canvas = Canvas()
                 canvas.transparent_background = self.viewer.skin_visible
-                canvas.fill_height = True
-                canvas.setMinimumSize(200, 110)
-                canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
                 state = QLabel()
                 state.setWordWrap(True)
                 heading = QHBoxLayout()
