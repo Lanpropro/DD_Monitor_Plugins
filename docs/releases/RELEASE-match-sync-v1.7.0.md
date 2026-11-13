@@ -1,6 +1,6 @@
 # 比赛二路同步 v1.7.0
 
-候选发布说明：本版本基于公开的 `match-sync-v1.6.1`，源码候选位于 `function/match-console-notices` 分支。当前仅完成源码、安装包和验证准备，尚未创建公开 GitHub Release 或插件商店目录。
+本版本基于公开的 `match-sync-v1.6.1`，源码来自 `function/match-console-notices` 分支；软件本体 `v0.7.3` 已发布。
 
 ## 更新
 

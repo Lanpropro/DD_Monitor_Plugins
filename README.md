@@ -42,7 +42,7 @@
 <p><strong>一路主画面，多路解说</strong></p>
 <p>对齐比赛主画面与二路直播，混合解说声音、合并带来源标记的弹幕。其他平台需先启用对应平台插件。</p>
 <p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
-<p><a href="plugins/match_sync/README.md">功能与兼容说明</a> · <a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.6.1">下载插件</a></p>
+<p><a href="plugins/match_sync/README.md">功能与兼容说明</a> · <a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.7.0">下载插件</a></p>
 </td>
 <td width="50%" valign="top">
 <h3><a href="plugins/bili_live/README.md">B站直播互动</a></h3>
@@ -57,7 +57,7 @@
 
 比赛二路同步 [v1.5 候选更新说明](docs/releases/RELEASE-match-sync-v1.5.md)（待实播录制验收）；已发布测试版：[v1.5-pre.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.5-pre.1)。
 
-比赛二路同步 [v1.7.0 候选发布说明](docs/releases/RELEASE-match-sync-v1.7.0.md)（待公开发布）；当前下载入口仍指向已发布的 v1.6.1。
+比赛二路同步 [v1.7.0 发布说明](docs/releases/RELEASE-match-sync-v1.7.0.md)。
 
 插件依赖配套的 [DD监控室CE](https://github.com/Lanpropro/DD_Monitor_CE/releases/latest) 运行。具体能力、账号要求与最低本体版本，以各插件说明及对应 Release 为准。
 

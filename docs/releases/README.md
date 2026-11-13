@@ -4,17 +4,12 @@
 
 删除 GitHub Release 不会删除已提交的说明。网页后续修改不会自动回写仓库；删除发布页前，应先再次同步并提交。[来源记录](sources.json)保存各文件的来源、网页更新时间及正文校验值。
 
-## 待发布候选说明
-
-| 插件 | 候选版本 | 仓库说明 | 发布状态 |
-| --- | --- | --- | --- |
-| 比赛二路同步 | 1.7.0 | [RELEASE-match-sync-v1.7.0.md](RELEASE-match-sync-v1.7.0.md) | 已准备源码与安装包，尚未公开发布 |
-
 ## 当前在线发布说明
 
 | 插件 | 仓库说明 | GitHub 来源 |
 | --- | --- | --- |
 | B站直播互动 | [1.1](RELEASE-bili-live-v1.1.md) | [bili-live-v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.1) |
+| 比赛二路同步 | [1.7.0](RELEASE-match-sync-v1.7.0.md) | [match-sync-v1.7.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.7.0) |
 | 比赛二路同步 | [1.6.1](RELEASE-match-sync-v1.6.1.md) | [match-sync-v1.6.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.6.1) |
 | 比赛二路同步 | [1.6](RELEASE-match-sync-v1.6.md) | [match-sync-v1.6](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.6) |
 | 国内直播平台 | [2.0](RELEASE-domestic-live-v2.0.md) | [domestic-live-v2.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v2.0) |
