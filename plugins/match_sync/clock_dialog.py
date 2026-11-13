@@ -94,9 +94,22 @@ class ClockLane(QWidget):
         self.preview = None
         saved = dialog.viewer.context.setting('clock_regions', {}).get(key, ())
         self.region = tuple(saved) if valid_region(saved) else None
-        self.included = QCheckBox(row.label() + ('（主画面）' if key == dialog.reference else ''))
+        self.display_name = row.label() + ('（主画面）' if key == dialog.reference else '')
+        self.included = QCheckBox(self.display_name)
         self.included.setChecked(True)
         self.included.setEnabled(key != dialog.reference)
+        self.included.setAccessibleName(self.display_name)
+        avatar = QLabel()
+        avatar.setFixedSize(36, 36)
+        avatar.setAlignment(Qt.AlignCenter)
+        avatar.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        try:
+            pixmap = row.avatar.grab().scaled(32, 32, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            avatar.setPixmap(pixmap)
+        except (AttributeError, RuntimeError):
+            avatar.setText((row.label() or '?')[0])
+        avatar.setStyleSheet('border-radius: 16px;')
+        self.avatar = avatar
         self.pick = settings_button('框选计时器区域', '在画面中框选游戏计时器区域')
         self.pick.setFixedWidth(max(126, self.pick.fontMetrics().horizontalAdvance(self.pick.text()) + 20))
         self.pick.setEnabled(False)
@@ -115,22 +128,30 @@ class ClockLane(QWidget):
         self.strip.setViewMode(QListView.IconMode)
         self.strip.setFlow(QListView.LeftToRight)
         self.strip.setWrapping(False)
-        self.strip.setIconSize(QSize(150, 70))
-        self.strip.setGridSize(QSize(166, 96))
+        self.strip.setIconSize(QSize(128, 70))
+        self.strip.setGridSize(QSize(140, 88))
         self.strip.setItemDelegate(ClockFrameDelegate(self.strip))
         self.strip.setObjectName('ClockFrameStrip')
-        self.strip.setFixedHeight(115)
+        self.strip.setFixedHeight(102)
         self.strip.setAccessibleName(row.label() + '翻秒帧：选择数字首次变化后的画面')
         layout = QGridLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setHorizontalSpacing(8)
         layout.setVerticalSpacing(6)
-        layout.addWidget(self.included, 0, 0, Qt.AlignVCenter)
+        identity = QWidget()
+        identity_layout = QHBoxLayout(identity)
+        identity_layout.setContentsMargins(0, 0, 0, 0)
+        identity_layout.setSpacing(6)
+        identity_layout.addWidget(self.avatar, 0, Qt.AlignTop)
+        identity_layout.addWidget(self.included, 1, Qt.AlignTop)
+        layout.addWidget(identity, 0, 0, Qt.AlignTop)
         layout.addWidget(self.strip, 0, 1)
         layout.addWidget(self.pick, 0, 2, Qt.AlignVCenter)
         layout.addWidget(self.first, 0, 3, Qt.AlignVCenter)
         layout.addWidget(self.status, 1, 0, 1, 4)
         layout.setColumnStretch(1, 1)
+        self.setMinimumHeight(142)
+        self.setMaximumHeight(170)
         for signal in (self.first.textChanged, self.included.toggled):
             signal.connect(dialog.invalidate)
         self.strip.currentRowChanged.connect(self.select_transition)
@@ -169,7 +190,7 @@ class ClockLane(QWidget):
             self.dialog.status.setText('当前没有可框选画面，请点击获取画面')
             return
         picker = QDialog(self.dialog)
-        picker.setWindowTitle('框选游戏计时器 · ' + self.included.text())
+        picker.setWindowTitle('框选游戏计时器 · ' + self.display_name)
         picker.resize(1000, 650)
         canvas = Canvas(selecting=True)
         canvas.set_frame(self.preview)
@@ -223,6 +244,7 @@ class ClockDialog(QDialog):
         self.sample_token = None
         self.proposal = None
         self.setObjectName('MatchSyncClockDialog')
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_StyledBackground, True)
         settings = getattr(viewer.context.window, 'settings', {})
         glass_enabled = bool(settings.get('settings_glass_enabled', False))
@@ -248,11 +270,11 @@ class ClockDialog(QDialog):
                 border: 1px solid {theme.BORDER}; border-radius: {theme.RADIUS_MD}px; padding: 5px 8px;
             }}
             #MatchSyncClockLane {{
-                background: transparent; border: 1px solid {theme.BORDER};
+                background: {theme.CONTENT}; border: 1px solid {theme.BORDER};
                 border-radius: {theme.RADIUS_MD}px;
             }}
             #ClockFrameStrip {{
-                background: {theme.CONTENT}; border: 1px solid {theme.BORDER};
+                background: {theme.ELEVATED}; border: 1px solid {theme.BORDER};
                 border-radius: {theme.RADIUS_MD}px; color: {theme.TEXT2};
             }}
             #ClockLaneStatus, #ClockDialogStatus {{ color: {theme.TEXT2}; background: transparent; }}

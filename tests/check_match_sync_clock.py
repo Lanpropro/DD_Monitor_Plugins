@@ -147,7 +147,8 @@ def check(app, host, module, output=None):
                            for lane in async_dialog.lanes.values())
                 assert async_dialog.calculate.text() == '计算偏移'
                 assert all(lane.pick.text() == '框选计时器区域' for lane in async_dialog.lanes.values())
-                assert all(lane.included.geometry().center().y() == lane.strip.geometry().center().y()
+                assert async_dialog.windowFlags() & Qt.FramelessWindowHint
+                assert all(lane.avatar.size().width() == 36 and lane.avatar.size().height() == 36
                            for lane in async_dialog.lanes.values())
                 assert async_dialog.scroll.verticalScrollBar().maximum() == 0
                 QTest.qWait(120)
