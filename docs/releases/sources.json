@@ -208,14 +208,13 @@
     {
       "tag": "match-sync-v1.6",
       "file": "RELEASE-match-sync-v1.6.md",
-      "status": "online",
-      "source_kind": "github_release",
-      "release_id": 432850748,
-      "release_updated_at": "2026-11-03T15:14:35Z",
-      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.6",
-      "last_edit_verified": true,
-      "raw_body_sha256": "3bb012dd92539355147f31490611eb28fe0e4b5d5c73fec64459e74afd5c0890",
-      "sha256": "508d44cff755ccd0a08aa42755cbac4374f350fc5954451f6aab3e30ec579e2c"
+      "status": "repository_archive",
+      "source_kind": "repository_history",
+      "last_edit_verified": false,
+      "sha256": "508d44cff755ccd0a08aa42755cbac4374f350fc5954451f6aab3e30ec579e2c",
+      "source_commit": "85fe0963b60dc326290f2d1084f452935d062f13",
+      "source_path": "docs/releases/RELEASE-match-sync-v1.6.md",
+      "superseded_by": "match-sync-v1.7.0"
     },
     {
       "tag": "v1.1",
@@ -278,15 +277,22 @@
     {
       "tag": "match-sync-v1.6.1",
       "file": "RELEASE-match-sync-v1.6.1.md",
-      "status": "online",
+      "status": "archived_verified",
       "source_kind": "github_release",
       "release_id": 438035903,
-      "release_updated_at": "2026-11-08T04:41:32Z",
+      "release_updated_at": "2026-11-08T04:44:51Z",
       "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.6.1",
       "last_edit_verified": true,
-      "raw_body_sha256": "35edb141948d2766d9b065766c7f2c83ae92bf2fae916fd31bd7e18026fcae3d",
-      "sha256": "35edb141948d2766d9b065766c7f2c83ae92bf2fae916fd31bd7e18026fcae3d",
+      "raw_body_sha256": "2b31e61c779c1df569bb863408bc79f718e32c38b9bbabee3c0f9bbd578b6cf2",
+      "sha256": "dff6654f1376f68ab981c61bd0de1a0a2b4657487c4ba52afb9da82ed1e34993",
+      "release_name": "比赛二路同步 v1.6.1 hotfix",
+      "release_author": "Lanpropro",
+      "plugin_author": "Lanpropro",
+      "release_created_at": "2026-11-08T04:40:43Z",
+      "release_published_at": "2026-11-08T04:41:32Z",
       "source_commit": "fc84870f5b1e1e149c63f1aef5538dfb79a2b247",
+      "archived_at": "2026-11-13T14:12:29.483373+00:00",
+      "superseded_by": "match-sync-v1.7.0",
       "assets": [
         {
           "id": 722901715,
