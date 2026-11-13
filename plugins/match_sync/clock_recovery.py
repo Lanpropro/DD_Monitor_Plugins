@@ -218,9 +218,14 @@ class ClockRecovery(QObject):
             self.next_sample = time.monotonic() + 2
             return
         reference, readings, regions, direction, shifts, _old_identities = self.profile
+        if error:
+            # An unreadable band is not a rejected calibration. Try a fresh pair
+            # within the original deadline; progression/offset failures stay hard.
+            self.first = None
+            self.next_sample = time.monotonic() + 2
+            logging.getLogger(__name__).info('Clock recovery sample deferred: %s', error)
+            return
         try:
-            if error:
-                raise ValueError(error)
             verify_progress(readings, measured, direction)
             if self.first is None:
                 self.first = measured

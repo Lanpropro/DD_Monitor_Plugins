@@ -23,6 +23,8 @@ def check(app, host, module, output=None):
             viewer.resize(1800, 950)
             viewer.add_room('1', {'alias': '主路'})
             viewer.add_room('2', {'alias': '副路'})
+            for widget in viewer.add_controls:
+                widget.hide()  # Match the toolbar used when embedded in the host.
             ends = {'1': 100., '2': 200.}
             for key, row in viewer.rows.items():
                 row.decoder = SimpleNamespace(history=SimpleNamespace(bounds_at=lambda _target, k=key: (0., ends[k])),
@@ -64,13 +66,38 @@ def check(app, host, module, output=None):
                 assert '为获得更好的观看体验，建议切换主画面' in viewer.buffer_notice.text()
                 assert peer.buffer_warning.isHidden() and not peer.buffer_exhaustions
                 app.processEvents()
+                assert viewer.console_toolbar.isAncestorOf(viewer.buffer_notice)
+                assert viewer.console_toolbar.isAncestorOf(viewer.notice)
+                assert not viewer.console_footer.isAncestorOf(viewer.buffer_notice)
+                assert viewer.buffer_notice.alignment() == Qt.AlignCenter
+                center = viewer.console_notices.mapTo(viewer.console_toolbar, viewer.console_notices.rect().center()).x()
+                assert abs(center - viewer.console_toolbar.rect().center().x()) <= 1
+                assert not viewer.buffer_notice.toolTip() and not main.buffer_warning.toolTip()
+                assert not main.buffer_warning.tooltip_at(QPoint(8, 8))
+                assert not main.buffer_warning.text(), 'Use the native status icon instead of a text badge'
                 assert main.buffer_warning.mapTo(main, QPoint()).x() > main.name_label.mapTo(main, QPoint()).x()
                 assert viewer.settings_panel.height() == height, ('A warning must not resize the console', height, viewer.settings_panel.height())
                 if output:
                     output = Path(output)
                     output.parent.mkdir(parents=True, exist_ok=True)
                     viewer.grab().save(str(output))
+                toolbar_height = viewer.console_toolbar.height()
+                notice_text = viewer.buffer_notice.text()
+                viewer.buffer_notice.setText('主路：' + '缓冲反复耗尽，请切换主画面；' * 40)
+                for width in (1100, 1800):
+                    viewer.resize(width, 950)
+                    QTest.qWait(30)
+                    assert viewer.console_toolbar.height() == toolbar_height, 'Long notices stay on one line'
+                    assert viewer.buffer_notice.width() > 0
+                    assert viewer.settings_panel.height() == height
+                viewer.buffer_notice.setText(notice_text)
+                module.theme.apply('light')
+                app.processEvents()
+                if output:
+                    viewer.grab().save(str(output.with_name(output.stem + '-light.png')))
+                module.theme.apply('dark')
                 viewer.dismiss_buffer_notice()
+                assert not viewer.notice.isHidden(), 'Normal status returns in the same header area'
                 recover(31)
                 health(40, 99.97)
                 assert viewer.buffer_notice.isHidden(), 'Repeated incidents within cooldown do not spam'

@@ -2,57 +2,65 @@
 from __future__ import annotations
 
 from .canvas import Canvas
-from PySide6.QtWidgets import QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
-from PySide6.QtCore import QRectF
+from .panels import ConsoleIconButton, ConsoleModeToggle, SettingsPanel, style_checkbox
+from PySide6.QtWidgets import QComboBox, QFrame, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtCore import QRectF, Qt
 from ddm import theme
 
 
-class ComparisonPanel(QFrame):
+class ComparisonPanel(SettingsPanel):
     def __init__(self, viewer):
-        super().__init__()
-        self.viewer = viewer
+        super().__init__(viewer, 'MatchSyncCompare')
         self.cards = {}
         self.shown_rooms = ()
-        self.setObjectName("MatchSyncCompare")
         self.setMinimumHeight(185)
         self.setMaximumHeight(300)
-        self.setStyleSheet(f"""
-            #MatchSyncCompare {{ background: {theme.CONTENT}; border: none;
-                border-radius: {theme.RADIUS_MD}px; }}
-            #MatchSyncCompare QLabel, #MatchSyncCompare QCheckBox {{ color: {theme.TEXT1}; }}
-            #MatchSyncCompare QScrollArea {{ border: none; background: transparent; }}
-        """)
-        heading = QHBoxLayout()
+        self.toolbar = QWidget()
+        self.toolbar.setObjectName('MatchSyncCompareToolbar')
+        heading = QHBoxLayout(self.toolbar)
+        heading.setContentsMargins(16, 10, 16, 10)
+        heading.setSpacing(16)
         self.heading_label = QLabel()
-        heading.addWidget(self.heading_label)
-        heading.addStretch()
+        self.heading_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        heading.addWidget(self.heading_label, 1)
         self.target = QComboBox()
         self.target.setMinimumWidth(150)
         self.target.currentIndexChanged.connect(lambda: viewer.render())
         heading.addWidget(self.target)
-        self.zoom = QCheckBox("放大框选区域")
+        self.zoom = ConsoleModeToggle("放大框选区域", 'automatic')
         self.zoom.setChecked(True)
         heading.addWidget(self.zoom)
-        self.clock_button = QPushButton('计时器对齐')
-        self.clock_button.setToolTip('框选同一游戏计时器，核对翻秒画面后计算偏移')
-        self.clock_button.clicked.connect(lambda: self.open_clock())
-        heading.addWidget(self.clock_button)
-        self.close_button = QPushButton("收起对照")
-        self.close_button.setObjectName("ChipButton")
+        self.close_button = ConsoleIconButton('minimize', '收起对照')
+        self.close_button.setFocusPolicy(Qt.StrongFocus)
         self.close_button.setToolTip("隐藏对照画面，保留已调整的偏移并继续播放。")
         self.close_button.clicked.connect(lambda: viewer.compare.setChecked(False))
         heading.addWidget(self.close_button)
         body = QWidget()
         self.cards_layout = QHBoxLayout(body)
-        self.cards_layout.setContentsMargins(0, 0, 0, 0)
+        self.cards_layout.setContentsMargins(16, 8, 16, 8)
+        self.cards_layout.setSpacing(12)
         scroll = QScrollArea()
+        scroll.setObjectName('MatchSyncCompareScroll')
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.viewport().setAutoFillBackground(False)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setWidgetResizable(True)
         scroll.setWidget(body)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.addLayout(heading)
+        layout.setContentsMargins(1, 1, 1, 1)
+        layout.setSpacing(0)
+        layout.addWidget(self.toolbar)
         layout.addWidget(scroll, 1)
+        self.refresh_design()
         self.hide()
+
+    def refresh_design(self):
+        self.toolbar.setStyleSheet(f'#MatchSyncCompareToolbar {{border-bottom: 1px solid {theme.BORDER_STRONG};}}')
+        style_checkbox(self.zoom)
+        for card, _name, _canvas, state in self.cards.values():
+            card.setStyleSheet(f'#MatchSyncCompareCard {{background: transparent; border: 1px solid {theme.BORDER_STRONG}; border-radius: 6px;}}')
+            state.setStyleSheet(f'font-size: 12px; color: {theme.TEXT2};')
 
     def open_clock(self):
         from .clock_dialog import open_clock_dialog
@@ -74,22 +82,33 @@ class ComparisonPanel(QFrame):
             self.cards.clear()
             self.shown_rooms = ()
             for room_id in rows:
-                card = QWidget()
+                card = QFrame()
+                card.setObjectName('MatchSyncCompareCard')
                 name = QLabel()
+                name.setAlignment(Qt.AlignLeft | Qt.AlignTop)
                 canvas = Canvas()
                 canvas.transparent_background = self.viewer.skin_visible
-                canvas.setMinimumSize(200, 110)
+                canvas.setMinimumSize(0, 110)
+                canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
                 state = QLabel()
                 state.setWordWrap(True)
-                heading = QHBoxLayout()
-                heading.addWidget(name, 1)
-                layout = QVBoxLayout(card)
-                layout.setContentsMargins(0, 0, 0, 0)
-                layout.addLayout(heading)
+                state.setAlignment(Qt.AlignLeft | Qt.AlignBottom)
+                meta = QWidget(card)
+                meta.setMinimumWidth(180)
+                meta_layout = QVBoxLayout(meta)
+                meta_layout.setContentsMargins(0, 0, 0, 0)
+                meta_layout.setSpacing(4)
+                meta_layout.addWidget(name)
+                meta_layout.addStretch(1)
+                meta_layout.addWidget(state)
+                layout = QHBoxLayout(card)
+                layout.setContentsMargins(12, 8, 12, 8)
+                layout.setSpacing(12)
+                layout.addWidget(meta)
                 layout.addWidget(canvas, 1)
-                layout.addWidget(state)
                 card.hide()
                 self.cards[room_id] = (card, name, canvas, state)
+            self.refresh_design()
         reference = self.viewer.alignment.reference
         selected = self.target.currentData()
         choices = [(key, row.label()) for key, row in rows.items() if key != reference]
@@ -118,7 +137,7 @@ class ComparisonPanel(QFrame):
                 continue
             _card, name, canvas, state = self.cards[room_id]
             name.setText(f"{'主画面' if room_id == reference else '对照'} · {row.label()}")
-            style = f"color: {row.color};"
+            style = f"color: {row.color}; font-size: 14px; font-weight: 600;"
             if name.styleSheet() != style:
                 name.setStyleSheet(style)
             crop, zoom = QRectF(*row.crop), self.zoom.isChecked()

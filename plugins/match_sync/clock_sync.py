@@ -5,7 +5,11 @@ import re
 
 
 def parse_clock(text):
-    text = text.replace('•.', ':').replace('·.', ':')
+    text = text.strip().replace('•.', ':').replace('·.', ':')
+    compact = re.fullmatch(r'\d{3,5}', text)
+    if compact:
+        minutes, seconds = int(text[:-2]), int(text[-2:])
+        return minutes * 60 + seconds if seconds < 60 else None
     matches = re.findall(r'(?<!\d)(\d{1,3})\s*[:：]\s*([0-5]\d)(?!\d)', text)
     values = {int(minutes) * 60 + int(seconds) for minutes, seconds in matches}
     return next(iter(values)) if len(values) == 1 else None

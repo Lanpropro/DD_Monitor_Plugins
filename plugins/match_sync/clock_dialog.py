@@ -1,17 +1,81 @@
 """Timer sampling, human review and explicit application of playback offsets."""
 import threading
 
-from PySide6.QtCore import QObject, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QIcon, QPen, QPixmap
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox,
-    QHBoxLayout, QLabel, QLineEdit, QListView, QListWidget, QListWidgetItem,
-    QPushButton, QScrollArea, QStyledItemDelegate, QStyle, QVBoxLayout, QWidget)
+from PySide6.QtCore import QObject, QPoint, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox,
+    QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListView, QListWidget, QListWidgetItem,
+    QPushButton, QScrollArea, QSizePolicy, QStyledItemDelegate, QStyle, QVBoxLayout, QWidget)
 
 from ddm import theme
 from .canvas import Canvas
 from .clock_sync import (ClockReading, calculate_offsets, format_clock, parse_clock,
                          suggest_transition, valid_region)
 from .clock_capture import capture_band, recognize_bands
+from .panels import ConsoleIconButton, console_button_style, use_link_cursor
+
+
+def settings_button(text, tooltip):
+    button = QPushButton(text)
+    button.setAutoDefault(False)
+    button.setDefault(False)
+    button.setFocusPolicy(Qt.StrongFocus)
+    button.setFixedHeight(32)
+    button.setToolTip(tooltip)
+    button.setAccessibleName(tooltip)
+    button.setStyleSheet(console_button_style('QPushButton'))
+    use_link_cursor(button)
+    return button
+
+
+class ClockTimeEdit(QWidget):
+    """Minute/second input with a fixed colon between editable fields."""
+    textChanged = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName('ClockFirstFrame')
+        self.minutes = QLineEdit()
+        self.seconds = QLineEdit()
+        for edit in (self.minutes, self.seconds):
+            edit.setAlignment(Qt.AlignCenter)
+            edit.setMaxLength(2)
+            edit.setPlaceholderText('00')
+            edit.setFixedSize(40, 32)
+            edit.setObjectName('ClockTimePart')
+            edit.textChanged.connect(self._changed)
+        colon = QLabel(':')
+        colon.setAlignment(Qt.AlignCenter)
+        colon.setObjectName('ClockTimeColon')
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(3)
+        layout.addWidget(self.minutes)
+        layout.addWidget(colon)
+        layout.addWidget(self.seconds)
+
+    def _changed(self, _text=''):
+        self.textChanged.emit(self.text())
+
+    def text(self):
+        minutes, seconds = self.minutes.text().strip(), self.seconds.text().strip()
+        if not minutes and not seconds:
+            return ''
+        return f'{minutes or "0"}:{seconds.zfill(2) if seconds else "00"}'
+
+    def setText(self, value):
+        value = str(value or '').strip()
+        if ':' in value or '：' in value:
+            minutes, seconds = value.replace('：', ':').split(':', 1)
+        else:
+            digits = ''.join(char for char in value if char.isdigit())
+            minutes, seconds = (digits[:-2], digits[-2:]) if len(digits) >= 3 else ('', digits)
+        self.minutes.setText(minutes[-3:])
+        self.seconds.setText(seconds[:2])
+
+    def clear(self):
+        self.minutes.clear()
+        self.seconds.clear()
 
 
 class ClockResult(QObject):
@@ -80,36 +144,64 @@ class ClockLane(QWidget):
         self.preview = None
         saved = dialog.viewer.context.setting('clock_regions', {}).get(key, ())
         self.region = tuple(saved) if valid_region(saved) else None
-        self.included = QCheckBox(row.label() + ('（主画面）' if key == dialog.reference else ''))
-        self.included.setChecked(True)
-        self.included.setEnabled(key != dialog.reference)
-        self.pick = QPushButton('框选计时器')
+        self.display_name = row.label() + ('（主画面）' if key == dialog.reference else '')
+        avatar = QLabel()
+        avatar.setFixedSize(48, 48)
+        avatar.setAlignment(Qt.AlignCenter)
+        avatar.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        try:
+            pixmap = row.avatar.grab().scaled(44, 44, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            avatar.setPixmap(pixmap)
+        except (AttributeError, RuntimeError):
+            avatar.setText((row.label() or '?')[0])
+        avatar.setStyleSheet('border-radius: 24px;')
+        self.avatar = avatar
+        self.pick = ConsoleIconButton('region', '框选游戏计时器区域', size=32)
         self.pick.setEnabled(False)
         self.pick.clicked.connect(self.choose_region)
-        self.first = QLineEdit()
-        self.first.setPlaceholderText('第一帧：分:秒')
-        self.first.setFixedWidth(130)
+        self.first = ClockTimeEdit()
         self.first.setAccessibleName(row.label() + '第一帧计时器读数')
-        heading = QHBoxLayout()
-        heading.addWidget(self.included, 1)
-        heading.addWidget(self.pick)
-        heading.addWidget(self.first)
-        self.status = QLabel('请分别框选同一个游戏计时器' if not self.region else '已记住计时器区域')
+        self.status = QLabel('请框选游戏计时器区域' if not self.region else '已记住计时器区域，可重新框选')
+        self.setObjectName('MatchSyncClockLane')
+        self.status.setObjectName('ClockLaneStatus')
         self.status.setWordWrap(True)
         self.strip = QListWidget()
         self.strip.setViewMode(QListView.IconMode)
         self.strip.setFlow(QListView.LeftToRight)
         self.strip.setWrapping(False)
-        self.strip.setIconSize(QSize(150, 70))
-        self.strip.setGridSize(QSize(166, 96))
+        self.strip.setIconSize(QSize(128, 70))
+        self.strip.setGridSize(QSize(140, 88))
         self.strip.setItemDelegate(ClockFrameDelegate(self.strip))
-        self.strip.setFixedHeight(115)
+        self.strip.setObjectName('ClockFrameStrip')
+        self.strip.setFixedHeight(102)
         self.strip.setAccessibleName(row.label() + '翻秒帧：选择数字首次变化后的画面')
-        layout = QVBoxLayout(self)
-        layout.addLayout(heading)
-        layout.addWidget(self.strip)
-        layout.addWidget(self.status)
-        for signal in (self.first.textChanged, self.included.toggled):
+        layout = QGridLayout(self)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setHorizontalSpacing(8)
+        layout.setVerticalSpacing(6)
+        identity = QWidget()
+        identity.setFixedWidth(60)
+        identity_layout = QVBoxLayout(identity)
+        identity_layout.setContentsMargins(0, 0, 0, 0)
+        identity_layout.setSpacing(4)
+        identity_layout.addWidget(self.avatar, 0, Qt.AlignLeft | Qt.AlignTop)
+        layout.addWidget(identity, 0, 0, Qt.AlignTop)
+        layout.addWidget(self.strip, 0, 1)
+        layout.addWidget(self.pick, 0, 2, Qt.AlignTop)
+        first_group = QWidget()
+        first_layout = QVBoxLayout(first_group)
+        first_layout.setContentsMargins(0, 0, 0, 0)
+        first_layout.setSpacing(2)
+        first_label = QLabel('首帧时间')
+        first_label.setObjectName('ClockTimeLabel')
+        first_layout.addWidget(first_label)
+        first_layout.addWidget(self.first)
+        layout.addWidget(first_group, 0, 3, Qt.AlignTop)
+        layout.addWidget(self.status, 1, 0, 1, 4)
+        layout.setColumnStretch(1, 1)
+        self.setMinimumHeight(142)
+        self.setMaximumHeight(170)
+        for signal in (self.first.textChanged,):
             signal.connect(dialog.invalidate)
         self.strip.currentRowChanged.connect(self.select_transition)
 
@@ -132,19 +224,22 @@ class ClockLane(QWidget):
         self.strip.addItem(item)
 
     def set_preview(self, item):
-        self.preview = item
+        stamp, image = item
+        if image.width() > 640:
+            image = image.scaled(640, 360, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.preview = (stamp, image)
         self.pick.setEnabled(not self.dialog.busy)
         self.frames = []
         self.first.clear()
         self.show_preview()
-        self.status.setText('已获取画面，请框选游戏计时器' if self.region is None else '已显示计时器选区，可重新框选或采样')
+        self.status.setText('已获取画面，请框选游戏计时器区域' if self.region is None else '已显示计时器选区，可重新框选或采样')
 
     def choose_region(self):
         if self.preview is None:
             self.dialog.status.setText('当前没有可框选画面，请点击获取画面')
             return
         picker = QDialog(self.dialog)
-        picker.setWindowTitle('框选游戏计时器 · ' + self.included.text())
+        picker.setWindowTitle('框选游戏计时器 · ' + self.display_name)
         picker.resize(1000, 650)
         canvas = Canvas(selecting=True)
         canvas.set_frame(self.preview)
@@ -185,7 +280,7 @@ class ClockLane(QWidget):
         self.first.setText(format_clock(readings[0]) if readings and readings[0] is not None else '')
         found = suggest_transition([stamp for stamp, _image in frames], readings, direction)
         self.strip.setCurrentRow(found if found is not None else -1)
-        self.status.setText('已建议翻秒帧，请核对后计算' if found is not None else '请填写第一帧时间，并点击第一次翻秒后的画面')
+        self.status.setText('已建议翻秒帧，请核对计时器数字后计算' if found is not None else '请填写首帧时间，并点击第一次翻秒后的画面')
 
 
 class ClockDialog(QDialog):
@@ -197,60 +292,159 @@ class ClockDialog(QDialog):
         self.busy = False
         self.sample_token = None
         self.proposal = None
+        self.setObjectName('MatchSyncClockDialog')
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self._drag_offset = None
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setProperty('settingsGlassWindow', False)
+        self.setProperty('settings_glass_enabled', False)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setStyleSheet(f'''
+            #MatchSyncClockDialog {{ background: transparent; border: none; }}
+            #ClockDialogToolbar, #ClockDialogFooter {{
+                background: transparent; border: none;
+            }}
+            #ClockDialogToolbar QComboBox, #ClockFirstFrame QLineEdit {{
+                background: {theme.CONTENT}; color: {theme.TEXT1};
+                border: 1px solid {theme.BORDER}; border-radius: {theme.RADIUS_MD}px; padding: 5px 8px;
+            }}
+            #ClockTimeColon, #ClockTimeLabel {{ color: {theme.TEXT2}; background: transparent; }}
+            #MatchSyncClockLane {{
+                background: {theme.CONTENT}; border: 1px solid {theme.BORDER};
+                border-radius: {theme.RADIUS_MD}px;
+            }}
+            #ClockFrameStrip {{
+                background: {theme.ELEVATED}; border: 1px solid {theme.BORDER};
+                border-radius: {theme.RADIUS_MD}px; color: {theme.TEXT2};
+            }}
+            #ClockLaneStatus, #ClockDialogStatus {{ color: {theme.TEXT2}; background: transparent; }}
+            #ClockDialogBody {{ background: transparent; }}
+        ''')
         self.setWindowTitle('计时器辅助对齐')
         self.resize(1060, 760)
         self.setMinimumSize(820, 580)
         self.mode = QComboBox()
+        self.mode.setObjectName('ClockMode')
+        self.mode.setFixedWidth(132)
         self.mode.addItem('倒计时', -1)
         self.mode.addItem('正计时', 1)
         self.mode.currentIndexChanged.connect(self.clear_bands)
-        self.refresh = QPushButton('获取画面')
+        self.refresh = settings_button('获取画面', '从现有缓存获取画面')
+        self.refresh.setFixedWidth(max(88, self.refresh.fontMetrics().horizontalAdvance(self.refresh.text()) + 20))
         self.refresh.clicked.connect(lambda: self.start_job(preview=True))
-        self.sample = QPushButton('采样并识别')
+        self.sample = settings_button('采样并识别', '采样计时器并本地识别')
+        self.sample.setFixedWidth(max(104, self.sample.fontMetrics().horizontalAdvance(self.sample.text()) + 20))
         self.sample.clicked.connect(lambda: self.start_job(preview=False))
-        heading = QHBoxLayout()
+        header = QFrame()
+        header.setObjectName('ClockDialogToolbar')
+        heading = QHBoxLayout(header)
+        heading.setContentsMargins(12, 10, 12, 10)
+        heading.setSpacing(10)
         heading.addWidget(self.mode)
         heading.addStretch()
         heading.addWidget(self.refresh)
         heading.addWidget(self.sample)
         body = QWidget()
+        body.setObjectName('ClockDialogBody')
         body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(8, 8, 8, 8)
+        body_layout.setSpacing(10)
         self.lanes = {key: ClockLane(self, key, row) for key, row in viewer.rows.items()
                       if row.decoder is not None}
         for lane in self.lanes.values():
             body_layout.addWidget(lane)
         body_layout.addStretch()
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(body)
+        self.scroll = QScrollArea()
+        self.scroll.setObjectName('ClockDialogScroll')
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setWidget(body)
         self.status = QLabel('各路请选择同一局、同一回合的游戏计时器；主播电脑时钟不能用来对齐游戏。')
+        self.status.setObjectName('ClockDialogStatus')
         self.status.setWordWrap(True)
-        self.calculate = QPushButton('计算偏移')
+        self.calculate = settings_button('计算偏移', '根据已核对的计时器计算偏移')
+        self.calculate.setFixedWidth(max(92, self.calculate.fontMetrics().horizontalAdvance(self.calculate.text()) + 20))
         self.calculate.clicked.connect(self.calculate_proposal)
-        self.apply = QPushButton('确认应用')
+        self.apply = settings_button('确认应用', '确认偏移并手动锁定')
+        self.apply.setFixedWidth(max(92, self.apply.fontMetrics().horizontalAdvance(self.apply.text()) + 20))
         self.apply.setEnabled(False)
         self.apply.clicked.connect(self.apply_proposal)
-        close = QPushButton('关闭')
+        close = settings_button('关闭', '关闭计时器对齐')
+        close.setFixedWidth(max(72, close.fontMetrics().horizontalAdvance(close.text()) + 20))
         close.clicked.connect(self.reject)
-        actions = QHBoxLayout()
+        footer = QFrame()
+        footer.setObjectName('ClockDialogFooter')
+        actions = QHBoxLayout(footer)
+        actions.setContentsMargins(12, 8, 12, 8)
+        actions.setSpacing(10)
         actions.addWidget(self.calculate)
         actions.addStretch()
         actions.addWidget(self.apply)
         actions.addWidget(close)
         layout = QVBoxLayout(self)
-        layout.addLayout(heading)
-        layout.addWidget(scroll, 1)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+        layout.addWidget(header)
+        layout.addWidget(self.scroll, 1)
         layout.addWidget(self.status)
-        layout.addLayout(actions)
+        layout.addWidget(footer)
         self.watch = QTimer(self)
         self.watch.setInterval(250)
         self.watch.timeout.connect(self.check_session)
         self.watch.start()
-        QTimer.singleShot(0, lambda: self.start_job(preview=True))
+        self.populate_current_previews()
+        QTimer.singleShot(0, self, lambda: self.start_job(preview=True))
         self.finished.connect(lambda: self.cancelled.set())
 
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(self.rect()).adjusted(.5, .5, -.5, -.5)
+        path = QPainterPath()
+        path.addRoundedRect(rect, 18, 18)
+        painter.fillPath(path, theme.qcolor(theme.BG))
+        painter.setPen(QPen(theme.qcolor(theme.BORDER_STRONG), 1))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPath(path)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and event.position().y() <= 58:
+            self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_offset is not None and event.buttons() & Qt.LeftButton:
+            self.move(event.globalPosition().toPoint() - self._drag_offset)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_offset = None
+        super().mouseReleaseEvent(event)
+
+    def current_preview(self, key):
+        """Reuse a frame already displayed by the main or comparison canvas."""
+        if key == self.reference:
+            frame = getattr(self.viewer.canvas, 'frame', None)
+        else:
+            card = self.viewer.comparison_panel.cards.get(key)
+            frame = card[2].frame if card is not None else None
+        if frame is None or not hasattr(frame, '__len__') or len(frame) != 2:
+            return None
+        return frame
+
+    def populate_current_previews(self):
+        for key, lane in self.lanes.items():
+            frame = self.current_preview(key)
+            if frame is not None:
+                lane.set_preview(frame)
+
     def selected_keys(self):
-        return tuple(key for key, lane in self.lanes.items() if lane.included.isChecked())
+        return tuple(self.lanes)
 
     def invalidate(self, *_args):
         self.proposal = None
@@ -294,7 +488,6 @@ class ClockDialog(QDialog):
             widget.setEnabled(not busy)
         for lane in self.lanes.values():
             lane.pick.setEnabled(not busy and lane.preview is not None)
-            lane.included.setEnabled(not busy and lane.key != self.reference)
 
     def start_job(self, *, preview):
         if self.busy or self.cancelled.is_set():
@@ -313,6 +506,8 @@ class ClockDialog(QDialog):
         except ValueError as error:
             self.status.setText(str(error))
             return
+        current = {key: self.current_preview(key) for key in keys} if preview else {}
+        missing = tuple(key for key in keys if current.get(key) is None)
         self.set_busy(True)
         self.status.setText('正在从缓存取帧…' if preview else '正在采样与本地识别；直播继续播放…')
         bridge = ClockResult()
@@ -320,8 +515,11 @@ class ClockDialog(QDialog):
         cancelled = self.cancelled
         def work():
             try:
-                bands = {key: capture_band(history, anchor, region, cancelled, preview=preview)
-                         for key, history, anchor, region in requests}
+                bands = {key: [item] for key, item in current.items() if item is not None}
+                for key, history, anchor, region in requests:
+                    if key not in missing:
+                        continue
+                    bands[key] = capture_band(history, anchor, region, cancelled, preview=preview)
                 if cancelled.is_set():
                     return
                 readings, note = ({}, '') if preview else recognize_bands(bands, cancelled)
@@ -345,7 +543,7 @@ class ClockDialog(QDialog):
                     self.sample_token = None
                     for key, frames in bands.items():
                         self.lanes[key].set_preview(frames[-1])
-                    self.status.setText('画面已获取，请框选各路相同的游戏计时器')
+                    self.status.setText('画面已准备，请框选各路相同的游戏计时器')
                 else:
                     self.sample_token, self.sample_keys = token, keys
                     self.sample_shifts = shifts
@@ -367,7 +565,7 @@ class ClockDialog(QDialog):
                 lane = self.lanes[key]
                 value = parse_clock(lane.first.text())
                 if value is None:
-                    raise ValueError('请按分:秒填写各路第一帧时间')
+                    raise ValueError('请填写各路第一帧时间，例如 0130 或 01:30')
                 readings[key] = ClockReading(value, tuple(stamp for stamp, _image in lane.frames),
                                              lane.strip.currentRow(), self.anchors[key])
             desired, errors = calculate_offsets(readings, self.sample_shifts, self.reference, self.mode.currentData())
@@ -377,8 +575,10 @@ class ClockDialog(QDialog):
             for key in self.sample_keys:
                 if key != self.reference:
                     delay = desired[self.reference] - desired[key]
-                    labels.append(f'{self.lanes[key].included.text()}：偏移 {delay:+.2f}s，采样边界误差约 ±{errors[key]:.2f}s')
-            self.status.setText('；'.join(labels) + '。确认后手动锁定；断流后自动复核计时器，无法复核时等待确认。')
+                    labels.append(f'{self.lanes[key].display_name}：偏移 {delay:+.2f}s，采样边界误差约 ±{errors[key]:.2f}s')
+                    self.lanes[key].status.setText(
+                        f'建议偏移 {delay:+.2f}s · 误差约 ±{errors[key]:.2f}s；应用后可在控制台偏移组继续微调')
+            self.status.setText('；'.join(labels) + '。确认应用后自动打开对照微调，仍可逐路继续调整。')
             self.apply.setEnabled(True)
         except ValueError as error:
             self.status.setText(str(error))
@@ -394,6 +594,10 @@ class ClockDialog(QDialog):
         except ValueError as error:
             self.status.setText(str(error))
             return
+        secondary = next((key for key in self.sample_keys if key != self.reference), None)
+        self.viewer.compare.setChecked(True)
+        if secondary is not None:
+            self.viewer.show_comparison(secondary)
         self.accept()
 
 

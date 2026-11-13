@@ -112,7 +112,10 @@ def _recover_clock(viewer, clock, shifts):
         viewer.audio.correction += recovered - clock
         viewer.sync_waiting = False
         return recovered
-    waiting = clock > upper - (.3 if viewer.sync_waiting else .05)
+    # Refill the existing safety reserve after starvation, rather than oscillate
+    # between 50ms exhaustion and 300ms recovery on a slow incoming stream.
+    resume = min(reserve, max(.3, bounds[1] - bounds[0] - .1))
+    waiting = clock > upper - (resume if viewer.sync_waiting else .05)
     recovered = min(clock, viewer.locked_clock if viewer.sync_waiting and viewer.locked_clock is not None else upper - .05) if waiting else clock
     viewer.sync_waiting = waiting
     viewer.locked_clock = recovered
@@ -196,7 +199,6 @@ def _observe_buffer_exhaustion(viewer, row, exhausted, eligible, now):
                 row.buffer_notice_at = now
                 text = f'{row.label()}：为获得更好的观看体验，建议切换主画面'
                 viewer.buffer_notice.setText(text)
-                viewer.buffer_notice.setToolTip(text)
                 viewer.notice.hide()
                 viewer.buffer_notice.show()
                 viewer.buffer_notice_timer.start()
