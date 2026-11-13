@@ -12,7 +12,20 @@ from .canvas import Canvas
 from .clock_sync import (ClockReading, calculate_offsets, format_clock, parse_clock,
                          suggest_transition, valid_region)
 from .clock_capture import capture_band, recognize_bands
-from .panels import ConsoleModeToggle, native_console_button, style_checkbox
+from .panels import console_button_style, style_checkbox, use_link_cursor
+
+
+def settings_button(text, tooltip):
+    button = QPushButton(text)
+    button.setAutoDefault(False)
+    button.setDefault(False)
+    button.setFocusPolicy(Qt.StrongFocus)
+    button.setFixedHeight(32)
+    button.setToolTip(tooltip)
+    button.setAccessibleName(tooltip)
+    button.setStyleSheet(console_button_style('QPushButton'))
+    use_link_cursor(button)
+    return button
 
 
 class ClockResult(QObject):
@@ -84,7 +97,7 @@ class ClockLane(QWidget):
         self.included = QCheckBox(row.label() + ('（主画面）' if key == dialog.reference else ''))
         self.included.setChecked(True)
         self.included.setEnabled(key != dialog.reference)
-        self.pick = native_console_button(QPushButton('框选计时器区域'), '在画面中框选游戏计时器区域')
+        self.pick = settings_button('框选计时器区域', '在画面中框选游戏计时器区域')
         self.pick.setFixedWidth(max(126, self.pick.fontMetrics().horizontalAdvance(self.pick.text()) + 20))
         self.pick.setEnabled(False)
         self.pick.clicked.connect(self.choose_region)
@@ -211,27 +224,39 @@ class ClockDialog(QDialog):
         self.proposal = None
         self.setObjectName('MatchSyncClockDialog')
         self.setAttribute(Qt.WA_StyledBackground, True)
+        settings = getattr(viewer.context.window, 'settings', {})
+        glass_enabled = bool(settings.get('settings_glass_enabled', False))
+        self.setProperty('settingsGlassWindow', glass_enabled)
+        self.setProperty('settings_glass_enabled', glass_enabled)
+        if glass_enabled:
+            self.setAttribute(Qt.WA_TranslucentBackground, True)
+            try:
+                from ddm.settings_backdrop import apply_blur
+                apply_blur(self, True)
+            except (ImportError, OSError, RuntimeError):
+                pass
+        else:
+            self.setAttribute(Qt.WA_TranslucentBackground, False)
+        dialog_background = 'transparent' if glass_enabled else theme.BG
         self.setStyleSheet(f'''
-            #MatchSyncClockDialog {{ background: {theme.BG}; }}
+            #MatchSyncClockDialog {{ background: {dialog_background}; border: none; }}
             #ClockDialogToolbar, #ClockDialogFooter {{
-                background: {theme.CONTENT}; border: 1px solid {theme.BORDER_STRONG};
-                border-radius: 8px;
+                background: transparent; border: none;
             }}
             #ClockDialogToolbar QComboBox, #ClockFirstFrame {{
-                background: {theme.ELEVATED}; color: {theme.TEXT1};
-                border: 1px solid {theme.BORDER_STRONG}; border-radius: 7px; padding: 6px 10px;
+                background: {theme.CONTENT}; color: {theme.TEXT1};
+                border: 1px solid {theme.BORDER}; border-radius: {theme.RADIUS_MD}px; padding: 5px 8px;
             }}
             #MatchSyncClockLane {{
-                background: {theme.CONTENT}; border: 1px solid {theme.BORDER_STRONG};
-                border-radius: 8px;
+                background: transparent; border: 1px solid {theme.BORDER};
+                border-radius: {theme.RADIUS_MD}px;
             }}
             #ClockFrameStrip {{
-                background: {theme.ELEVATED}; border: 1px solid {theme.BORDER_STRONG};
-                border-radius: 6px; color: {theme.TEXT2};
+                background: {theme.CONTENT}; border: 1px solid {theme.BORDER};
+                border-radius: {theme.RADIUS_MD}px; color: {theme.TEXT2};
             }}
             #ClockLaneStatus, #ClockDialogStatus {{ color: {theme.TEXT2}; background: transparent; }}
             #ClockDialogBody {{ background: transparent; }}
-            #ClockDialogFooter {{ border-radius: 8px; }}
         ''')
         self.setWindowTitle('计时器辅助对齐')
         self.resize(1060, 760)
@@ -242,10 +267,10 @@ class ClockDialog(QDialog):
         self.mode.addItem('倒计时', -1)
         self.mode.addItem('正计时', 1)
         self.mode.currentIndexChanged.connect(self.clear_bands)
-        self.refresh = native_console_button(QPushButton('获取画面'), '从现有缓存获取画面')
+        self.refresh = settings_button('获取画面', '从现有缓存获取画面')
         self.refresh.setFixedWidth(max(88, self.refresh.fontMetrics().horizontalAdvance(self.refresh.text()) + 20))
         self.refresh.clicked.connect(lambda: self.start_job(preview=True))
-        self.sample = native_console_button(QPushButton('采样并识别'), '采样计时器并本地识别')
+        self.sample = settings_button('采样并识别', '采样计时器并本地识别')
         self.sample.setFixedWidth(max(104, self.sample.fontMetrics().horizontalAdvance(self.sample.text()) + 20))
         self.sample.clicked.connect(lambda: self.start_job(preview=False))
         header = QFrame()
@@ -276,14 +301,14 @@ class ClockDialog(QDialog):
         self.status = QLabel('各路请选择同一局、同一回合的游戏计时器；主播电脑时钟不能用来对齐游戏。')
         self.status.setObjectName('ClockDialogStatus')
         self.status.setWordWrap(True)
-        self.calculate = native_console_button(QPushButton('计算偏移'), '根据已核对的计时器计算偏移')
+        self.calculate = settings_button('计算偏移', '根据已核对的计时器计算偏移')
         self.calculate.setFixedWidth(max(92, self.calculate.fontMetrics().horizontalAdvance(self.calculate.text()) + 20))
         self.calculate.clicked.connect(self.calculate_proposal)
-        self.apply = native_console_button(QPushButton('确认应用'), '确认偏移并手动锁定')
+        self.apply = settings_button('确认应用', '确认偏移并手动锁定')
         self.apply.setFixedWidth(max(92, self.apply.fontMetrics().horizontalAdvance(self.apply.text()) + 20))
         self.apply.setEnabled(False)
         self.apply.clicked.connect(self.apply_proposal)
-        close = native_console_button(QPushButton('关闭'), '关闭计时器对齐')
+        close = settings_button('关闭', '关闭计时器对齐')
         close.setFixedWidth(max(72, close.fontMetrics().horizontalAdvance(close.text()) + 20))
         close.clicked.connect(self.reject)
         footer = QFrame()

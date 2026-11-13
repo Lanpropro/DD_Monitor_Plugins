@@ -138,6 +138,8 @@ def check(app, host, module, output=None):
                 async_dialog.setAttribute(Qt.WA_DontShowOnScreen)
                 async_dialog.show()
                 assert async_dialog.objectName() == 'MatchSyncClockDialog'
+                assert not async_dialog.property('settingsGlassWindow')
+                assert not async_dialog.testAttribute(Qt.WA_TranslucentBackground)
                 assert async_dialog.findChild(QWidget, 'ClockDialogToolbar') is not None
                 assert async_dialog.findChild(QWidget, 'ClockDialogFooter') is not None
                 assert async_dialog.findChild(QWidget, 'ClockDialogScroll') is async_dialog.scroll
