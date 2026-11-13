@@ -13,12 +13,8 @@
 | 比赛二路同步 | [1.6](RELEASE-match-sync-v1.6.md) | [match-sync-v1.6](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.6) |
 | 国内直播平台 | [2.0](RELEASE-domestic-live-v2.0.md) | [domestic-live-v2.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v2.0) |
 | 海外直播平台 | [1.2](RELEASE-global-live-v1.2.md) | [global-live-v1.2](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2) |
+| 网络代理 | [1.0](RELEASE-proxy-control-v1.0.md) | [proxy-control-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/proxy-control-v1.0) |
 
-## 待确认发布候选
-
-| 插件 | 候选说明 | 状态 |
-| --- | --- | --- |
-| 网络代理 | [1.0](RELEASE-proxy-control-v1.0.md) | 已准备本地候选；现有公开宿主不兼容，按维护者要求暂缓发布 |
 
 ## 替代版本的核验归档
 
