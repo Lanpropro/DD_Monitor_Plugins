@@ -36,7 +36,13 @@ def main():
     assert f"match_sync-{match_version}.zip" in match_readme
     notes = ROOT / 'docs/releases' / f"RELEASE-match-sync-v{match_version}.md"
     assert notes.read_text(encoding="utf-8").startswith(f"# 比赛二路同步 v{match_version}\n")
-    display_names = {"domestic_live": "国内直播平台", "global_live": "海外直播平台", "match_sync": "比赛二路同步", "bili_live": "B站直播互动"}
+    proxy_version = versions['proxy_control']
+    proxy_readme = (ROOT / 'plugins/proxy_control/README.md').read_text(encoding='utf-8')
+    assert proxy_readme.startswith(f'# 网络代理 v{proxy_version}\n')
+    assert f'proxy_control-{proxy_version}.zip' in proxy_readme
+    proxy_notes = ROOT / 'docs/releases' / f'RELEASE-proxy-control-v{proxy_version}.md'
+    assert proxy_notes.read_text(encoding='utf-8').startswith(f'# 网络代理 v{proxy_version}\n')
+    display_names = {"domestic_live": "国内直播平台", "global_live": "海外直播平台", "match_sync": "比赛二路同步", "bili_live": "B站直播互动", "proxy_control": "网络代理"}
     with tempfile.TemporaryDirectory() as directory:
         manager = PluginManager(plugins_dir=directory, enabled=[])
         for path in build():
@@ -57,6 +63,22 @@ def main():
                     assert 'match_sync/fullscreen.py' in names, 'Fullscreen shell integration must ship with the viewer'
                     assert 'match_sync/recording.py' in names, 'The selectable audio track recorder must ship with the viewer'
                     assert 'match_sync/replay_preview.py' in names and 'match_sync/preview_frames.py' in names, 'Continuous timeline preview must ship with its background frame cache'
+                if plugin_id == 'proxy_control':
+                    assert 'proxy_control/popover.py' in names and 'proxy_control/profiles.py' in names
+                    assert 'proxy_control/visuals.py' in names
+                    assert 'proxy_control/core_install.py' in names
+                    assert 'proxy_control/metadata.py' in names
+                    assert 'proxy_control/regions.py' in names and 'proxy_control/entry_icon.py' in names
+                    assert 'proxy_control/connections.py' in names and 'proxy_control/connection_page.py' in names
+                    assert 'proxy_control/profile_settings.py' in names
+                    assert 'proxy_control/profile_editor.py' in names
+                    assert 'proxy_control/vendor/yaml/loader.py' in names
+                    assert 'proxy_control/vendor/yaml/LICENSE' in names
+                    assert not any(name.endswith('.pyd') for name in names)
+                    assert 'proxy_control/flags/cn.svg' in names and 'proxy_control/flags/LICENSE.txt' in names
+                    assert 'proxy_control/flags/tw.svg' not in names
+                    assert 'proxy_control/drawer.py' not in names
+                    assert not any(name.endswith(('preferences.json', 'profiles.json')) for name in names)
                 if plugin_id == 'domestic_live':
                     assert 'domestic_live/douyin_native.js' in names, 'Official native input requires its browser script'
                     assert 'domestic_live/douyin_browser.py' in names

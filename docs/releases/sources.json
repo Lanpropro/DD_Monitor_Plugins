@@ -303,6 +303,42 @@
           "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/match-sync-v1.6.1/plugin-catalog.json"
         }
       ]
+    },
+    {
+      "tag": "proxy-control-v1.0",
+      "file": "RELEASE-proxy-control-v1.0.md",
+      "status": "online",
+      "source_kind": "github_release",
+      "last_edit_verified": true,
+      "base_commit": "6a0f4cec30e5f671b83bb91874264b569af5af4f",
+      "sha256": "ad3a1a274a4216a02879906607f0427f6b492398658037ec791c2ded58c433c5",
+      "release_gate": "on_hold_due_to_public_host_incompatibility",
+      "release_id": 444266655,
+      "release_updated_at": "2026-11-13T13:32:16Z",
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/proxy-control-v1.0",
+      "raw_body_sha256": "ad3a1a274a4216a02879906607f0427f6b492398658037ec791c2ded58c433c5",
+      "release_name": "网络代理 v1.0",
+      "release_author": "Lanpropro",
+      "plugin_author": "Lanpropro",
+      "release_created_at": "2026-11-13T13:31:37Z",
+      "release_published_at": "2026-11-13T13:32:12Z",
+      "source_commit": "b8d4e75c09f01405475d1c9f0b4a50a94ef066c2",
+      "assets": [
+        {
+          "id": 743774827,
+          "name": "proxy_control-1.0.zip",
+          "size": 131101,
+          "sha256": "2c18c417d3ba995a958e15c6ef8b6bbbe7c1dddce3185cb3d65e0a19562723e2",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/proxy-control-v1.0/proxy_control-1.0.zip"
+        },
+        {
+          "id": 743774997,
+          "name": "plugin-catalog.json",
+          "size": 2701,
+          "sha256": "ba4837c1145285c8962c0b07f5e5c7a6b476b8bb9e038a70687ac8d5dedda860",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/proxy-control-v1.0/plugin-catalog.json"
+        }
+      ]
     }
   ],
   "tags_without_recoverable_body": [
