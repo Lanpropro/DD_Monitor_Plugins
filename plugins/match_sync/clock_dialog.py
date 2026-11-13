@@ -3,7 +3,7 @@ import threading
 
 from PySide6.QtCore import QObject, QPoint, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox,
     QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListView, QListWidget, QListWidgetItem,
     QPushButton, QScrollArea, QSizePolicy, QStyledItemDelegate, QStyle, QVBoxLayout, QWidget)
 
@@ -12,7 +12,7 @@ from .canvas import Canvas
 from .clock_sync import (ClockReading, calculate_offsets, format_clock, parse_clock,
                          suggest_transition, valid_region)
 from .clock_capture import capture_band, recognize_bands
-from .panels import ConsoleIconButton, console_button_style, style_checkbox, use_link_cursor
+from .panels import ConsoleIconButton, console_button_style, use_link_cursor
 
 
 def settings_button(text, tooltip):
@@ -145,20 +145,16 @@ class ClockLane(QWidget):
         saved = dialog.viewer.context.setting('clock_regions', {}).get(key, ())
         self.region = tuple(saved) if valid_region(saved) else None
         self.display_name = row.label() + ('（主画面）' if key == dialog.reference else '')
-        self.included = QCheckBox('')
-        self.included.setChecked(True)
-        self.included.setEnabled(key != dialog.reference)
-        self.included.setAccessibleName(self.display_name)
         avatar = QLabel()
-        avatar.setFixedSize(36, 36)
+        avatar.setFixedSize(48, 48)
         avatar.setAlignment(Qt.AlignCenter)
         avatar.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         try:
-            pixmap = row.avatar.grab().scaled(32, 32, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            pixmap = row.avatar.grab().scaled(44, 44, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
             avatar.setPixmap(pixmap)
         except (AttributeError, RuntimeError):
             avatar.setText((row.label() or '?')[0])
-        avatar.setStyleSheet('border-radius: 16px;')
+        avatar.setStyleSheet('border-radius: 24px;')
         self.avatar = avatar
         self.pick = ConsoleIconButton('region', '框选游戏计时器区域', size=32)
         self.pick.setEnabled(False)
@@ -168,7 +164,6 @@ class ClockLane(QWidget):
         self.status = QLabel('请框选游戏计时器区域' if not self.region else '已记住计时器区域，可重新框选')
         self.setObjectName('MatchSyncClockLane')
         self.status.setObjectName('ClockLaneStatus')
-        style_checkbox(self.included)
         self.status.setWordWrap(True)
         self.strip = QListWidget()
         self.strip.setViewMode(QListView.IconMode)
@@ -185,12 +180,11 @@ class ClockLane(QWidget):
         layout.setHorizontalSpacing(8)
         layout.setVerticalSpacing(6)
         identity = QWidget()
-        identity.setFixedWidth(52)
+        identity.setFixedWidth(60)
         identity_layout = QVBoxLayout(identity)
         identity_layout.setContentsMargins(0, 0, 0, 0)
         identity_layout.setSpacing(4)
         identity_layout.addWidget(self.avatar, 0, Qt.AlignLeft | Qt.AlignTop)
-        identity_layout.addWidget(self.included, 0, Qt.AlignLeft | Qt.AlignTop)
         layout.addWidget(identity, 0, 0, Qt.AlignTop)
         layout.addWidget(self.strip, 0, 1)
         layout.addWidget(self.pick, 0, 2, Qt.AlignTop)
@@ -207,7 +201,7 @@ class ClockLane(QWidget):
         layout.setColumnStretch(1, 1)
         self.setMinimumHeight(142)
         self.setMaximumHeight(170)
-        for signal in (self.first.textChanged, self.included.toggled):
+        for signal in (self.first.textChanged,):
             signal.connect(dialog.invalidate)
         self.strip.currentRowChanged.connect(self.select_transition)
 
@@ -449,7 +443,7 @@ class ClockDialog(QDialog):
                 lane.set_preview(frame)
 
     def selected_keys(self):
-        return tuple(key for key, lane in self.lanes.items() if lane.included.isChecked())
+        return tuple(self.lanes)
 
     def invalidate(self, *_args):
         self.proposal = None
@@ -493,7 +487,6 @@ class ClockDialog(QDialog):
             widget.setEnabled(not busy)
         for lane in self.lanes.values():
             lane.pick.setEnabled(not busy and lane.preview is not None)
-            lane.included.setEnabled(not busy and lane.key != self.reference)
 
     def start_job(self, *, preview):
         if self.busy or self.cancelled.is_set():
@@ -581,7 +574,7 @@ class ClockDialog(QDialog):
             for key in self.sample_keys:
                 if key != self.reference:
                     delay = desired[self.reference] - desired[key]
-                    labels.append(f'{self.lanes[key].included.text()}：偏移 {delay:+.2f}s，采样边界误差约 ±{errors[key]:.2f}s')
+                    labels.append(f'{self.lanes[key].display_name}：偏移 {delay:+.2f}s，采样边界误差约 ±{errors[key]:.2f}s')
                     self.lanes[key].status.setText(
                         f'建议偏移 {delay:+.2f}s · 误差约 ±{errors[key]:.2f}s；应用后可在控制台偏移组继续微调')
             self.status.setText('；'.join(labels) + '。确认应用后自动打开对照微调，仍可逐路继续调整。')

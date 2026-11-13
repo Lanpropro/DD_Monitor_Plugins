@@ -16,7 +16,7 @@ def check(app, host, module, output=None):
     from PySide6.QtCore import QRectF, Qt
     from PySide6.QtGui import QColor, QFont, QFontDatabase, QImage, QPainter
     from PySide6.QtTest import QTest
-    from PySide6.QtWidgets import QWidget
+    from PySide6.QtWidgets import QCheckBox, QWidget
     from ddm import plugins, recording
     model = import_module(module.__package__ + '.clock_sync')
     capture = import_module(module.__package__ + '.clock_capture')
@@ -149,8 +149,9 @@ def check(app, host, module, output=None):
                 assert all(lane.pick.kind == 'region' and lane.pick.accessibleName() == '框选游戏计时器区域'
                            for lane in async_dialog.lanes.values())
                 assert async_dialog.windowFlags() & Qt.FramelessWindowHint
-                assert all(lane.avatar.size().width() == 36 and lane.avatar.size().height() == 36
+                assert all(lane.avatar.size().width() == 48 and lane.avatar.size().height() == 48
                            for lane in async_dialog.lanes.values())
+                assert all(not lane.findChildren(QCheckBox) for lane in async_dialog.lanes.values())
                 assert async_dialog.scroll.verticalScrollBar().maximum() == 0
                 QTest.qWait(120)
                 assert not async_dialog.busy and all(lane.preview is None for lane in async_dialog.lanes.values()), \
