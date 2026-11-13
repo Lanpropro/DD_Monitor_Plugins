@@ -139,14 +139,15 @@ def check(app, host, module, output=None):
                 async_dialog.show()
                 assert async_dialog.objectName() == 'MatchSyncClockDialog'
                 assert not async_dialog.property('settingsGlassWindow')
-                assert not async_dialog.testAttribute(Qt.WA_TranslucentBackground)
+                assert async_dialog.testAttribute(Qt.WA_TranslucentBackground)
                 assert async_dialog.findChild(QWidget, 'ClockDialogToolbar') is not None
                 assert async_dialog.findChild(QWidget, 'ClockDialogFooter') is not None
                 assert async_dialog.findChild(QWidget, 'ClockDialogScroll') is async_dialog.scroll
                 assert all(lane.objectName() == 'MatchSyncClockLane'
                            for lane in async_dialog.lanes.values())
                 assert async_dialog.calculate.text() == '计算偏移'
-                assert all(lane.pick.text() == '框选计时器区域' for lane in async_dialog.lanes.values())
+                assert all(lane.pick.kind == 'region' and lane.pick.accessibleName() == '框选游戏计时器区域'
+                           for lane in async_dialog.lanes.values())
                 assert async_dialog.windowFlags() & Qt.FramelessWindowHint
                 assert all(lane.avatar.size().width() == 36 and lane.avatar.size().height() == 36
                            for lane in async_dialog.lanes.values())

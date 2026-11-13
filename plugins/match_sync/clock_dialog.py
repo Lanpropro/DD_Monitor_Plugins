@@ -1,8 +1,8 @@
 """Timer sampling, human review and explicit application of playback offsets."""
 import threading
 
-from PySide6.QtCore import QObject, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QIcon, QPen, QPixmap
+from PySide6.QtCore import QObject, QPoint, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListView, QListWidget, QListWidgetItem,
     QPushButton, QScrollArea, QSizePolicy, QStyledItemDelegate, QStyle, QVBoxLayout, QWidget)
@@ -12,7 +12,7 @@ from .canvas import Canvas
 from .clock_sync import (ClockReading, calculate_offsets, format_clock, parse_clock,
                          suggest_transition, valid_region)
 from .clock_capture import capture_band, recognize_bands
-from .panels import console_button_style, style_checkbox, use_link_cursor
+from .panels import ConsoleIconButton, console_button_style, style_checkbox, use_link_cursor
 
 
 def settings_button(text, tooltip):
@@ -26,6 +26,56 @@ def settings_button(text, tooltip):
     button.setStyleSheet(console_button_style('QPushButton'))
     use_link_cursor(button)
     return button
+
+
+class ClockTimeEdit(QWidget):
+    """Minute/second input with a fixed colon between editable fields."""
+    textChanged = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName('ClockFirstFrame')
+        self.minutes = QLineEdit()
+        self.seconds = QLineEdit()
+        for edit in (self.minutes, self.seconds):
+            edit.setAlignment(Qt.AlignCenter)
+            edit.setMaxLength(2)
+            edit.setPlaceholderText('00')
+            edit.setFixedSize(40, 32)
+            edit.setObjectName('ClockTimePart')
+            edit.textChanged.connect(self._changed)
+        colon = QLabel(':')
+        colon.setAlignment(Qt.AlignCenter)
+        colon.setObjectName('ClockTimeColon')
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(3)
+        layout.addWidget(self.minutes)
+        layout.addWidget(colon)
+        layout.addWidget(self.seconds)
+
+    def _changed(self, _text=''):
+        self.textChanged.emit(self.text())
+
+    def text(self):
+        minutes, seconds = self.minutes.text().strip(), self.seconds.text().strip()
+        if not minutes and not seconds:
+            return ''
+        return f'{minutes or "0"}:{seconds.zfill(2) if seconds else "00"}'
+
+    def setText(self, value):
+        value = str(value or '').strip()
+        if ':' in value or '：' in value:
+            minutes, seconds = value.replace('：', ':').split(':', 1)
+        else:
+            digits = ''.join(char for char in value if char.isdigit())
+            minutes, seconds = (digits[:-2], digits[-2:]) if len(digits) >= 3 else ('', digits)
+        self.minutes.setText(minutes[-3:])
+        self.seconds.setText(seconds[:2])
+
+    def clear(self):
+        self.minutes.clear()
+        self.seconds.clear()
 
 
 class ClockResult(QObject):
@@ -95,7 +145,7 @@ class ClockLane(QWidget):
         saved = dialog.viewer.context.setting('clock_regions', {}).get(key, ())
         self.region = tuple(saved) if valid_region(saved) else None
         self.display_name = row.label() + ('（主画面）' if key == dialog.reference else '')
-        self.included = QCheckBox(self.display_name)
+        self.included = QCheckBox('')
         self.included.setChecked(True)
         self.included.setEnabled(key != dialog.reference)
         self.included.setAccessibleName(self.display_name)
@@ -110,14 +160,10 @@ class ClockLane(QWidget):
             avatar.setText((row.label() or '?')[0])
         avatar.setStyleSheet('border-radius: 16px;')
         self.avatar = avatar
-        self.pick = settings_button('框选计时器区域', '在画面中框选游戏计时器区域')
-        self.pick.setFixedWidth(max(126, self.pick.fontMetrics().horizontalAdvance(self.pick.text()) + 20))
+        self.pick = ConsoleIconButton('region', '框选游戏计时器区域', size=32)
         self.pick.setEnabled(False)
         self.pick.clicked.connect(self.choose_region)
-        self.first = QLineEdit()
-        self.first.setPlaceholderText('首帧时间 0130 / 01:30')
-        self.first.setFixedWidth(150)
-        self.first.setObjectName('ClockFirstFrame')
+        self.first = ClockTimeEdit()
         self.first.setAccessibleName(row.label() + '第一帧计时器读数')
         self.status = QLabel('请框选游戏计时器区域' if not self.region else '已记住计时器区域，可重新框选')
         self.setObjectName('MatchSyncClockLane')
@@ -139,15 +185,24 @@ class ClockLane(QWidget):
         layout.setHorizontalSpacing(8)
         layout.setVerticalSpacing(6)
         identity = QWidget()
-        identity_layout = QHBoxLayout(identity)
+        identity.setFixedWidth(52)
+        identity_layout = QVBoxLayout(identity)
         identity_layout.setContentsMargins(0, 0, 0, 0)
-        identity_layout.setSpacing(6)
-        identity_layout.addWidget(self.avatar, 0, Qt.AlignTop)
-        identity_layout.addWidget(self.included, 1, Qt.AlignTop)
+        identity_layout.setSpacing(4)
+        identity_layout.addWidget(self.avatar, 0, Qt.AlignLeft | Qt.AlignTop)
+        identity_layout.addWidget(self.included, 0, Qt.AlignLeft | Qt.AlignTop)
         layout.addWidget(identity, 0, 0, Qt.AlignTop)
         layout.addWidget(self.strip, 0, 1)
-        layout.addWidget(self.pick, 0, 2, Qt.AlignVCenter)
-        layout.addWidget(self.first, 0, 3, Qt.AlignVCenter)
+        layout.addWidget(self.pick, 0, 2, Qt.AlignTop)
+        first_group = QWidget()
+        first_layout = QVBoxLayout(first_group)
+        first_layout.setContentsMargins(0, 0, 0, 0)
+        first_layout.setSpacing(2)
+        first_label = QLabel('首帧时间')
+        first_label.setObjectName('ClockTimeLabel')
+        first_layout.addWidget(first_label)
+        first_layout.addWidget(self.first)
+        layout.addWidget(first_group, 0, 3, Qt.AlignTop)
         layout.addWidget(self.status, 1, 0, 1, 4)
         layout.setColumnStretch(1, 1)
         self.setMinimumHeight(142)
@@ -245,30 +300,21 @@ class ClockDialog(QDialog):
         self.proposal = None
         self.setObjectName('MatchSyncClockDialog')
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self._drag_offset = None
         self.setAttribute(Qt.WA_StyledBackground, True)
-        settings = getattr(viewer.context.window, 'settings', {})
-        glass_enabled = bool(settings.get('settings_glass_enabled', False))
-        self.setProperty('settingsGlassWindow', glass_enabled)
-        self.setProperty('settings_glass_enabled', glass_enabled)
-        if glass_enabled:
-            self.setAttribute(Qt.WA_TranslucentBackground, True)
-            try:
-                from ddm.settings_backdrop import apply_blur
-                apply_blur(self, True)
-            except (ImportError, OSError, RuntimeError):
-                pass
-        else:
-            self.setAttribute(Qt.WA_TranslucentBackground, False)
-        dialog_background = 'transparent' if glass_enabled else theme.BG
+        self.setProperty('settingsGlassWindow', False)
+        self.setProperty('settings_glass_enabled', False)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setStyleSheet(f'''
-            #MatchSyncClockDialog {{ background: {dialog_background}; border: none; }}
+            #MatchSyncClockDialog {{ background: transparent; border: none; }}
             #ClockDialogToolbar, #ClockDialogFooter {{
                 background: transparent; border: none;
             }}
-            #ClockDialogToolbar QComboBox, #ClockFirstFrame {{
+            #ClockDialogToolbar QComboBox, #ClockFirstFrame QLineEdit {{
                 background: {theme.CONTENT}; color: {theme.TEXT1};
                 border: 1px solid {theme.BORDER}; border-radius: {theme.RADIUS_MD}px; padding: 5px 8px;
             }}
+            #ClockTimeColon, #ClockTimeLabel {{ color: {theme.TEXT2}; background: transparent; }}
             #MatchSyncClockLane {{
                 background: {theme.CONTENT}; border: 1px solid {theme.BORDER};
                 border-radius: {theme.RADIUS_MD}px;
@@ -355,6 +401,35 @@ class ClockDialog(QDialog):
         self.watch.start()
         self.populate_current_previews()
         self.finished.connect(lambda: self.cancelled.set())
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(self.rect()).adjusted(.5, .5, -.5, -.5)
+        path = QPainterPath()
+        path.addRoundedRect(rect, 18, 18)
+        painter.fillPath(path, theme.qcolor(theme.BG))
+        painter.setPen(QPen(theme.qcolor(theme.BORDER_STRONG), 1))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPath(path)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and event.position().y() <= 58:
+            self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_offset is not None and event.buttons() & Qt.LeftButton:
+            self.move(event.globalPosition().toPoint() - self._drag_offset)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_offset = None
+        super().mouseReleaseEvent(event)
 
     def current_preview(self, key):
         """Reuse a frame already displayed by the main or comparison canvas."""
