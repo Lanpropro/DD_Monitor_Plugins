@@ -1,12 +1,55 @@
 """Contribution workflow and local documentation links; standard library only."""
+from datetime import date
 from pathlib import Path
 import hashlib
 import json
 import re
 import unittest
+from urllib.parse import unquote
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+METADATA = re.compile(
+    r"^> 类型：(?P<type>\S+) ｜ 状态：(?P<status>\S+) ｜ 适用版本：(?P<version>[^｜]+) "
+    r"｜ 更新：(?P<updated>\d{4}-\d{2}-\d{2}) ｜ 读者：(?P<readers>.+)$",
+    re.MULTILINE,
+)
+
+
+def read(path):
+    return path.read_text(encoding='utf-8')
+
+
+def markdown_links(path):
+    return re.findall(r"\]\(([^)]+)\)", read(path))
+
+
+def resolve(source, target):
+    destination = unquote(target.split('#', 1)[0])
+    if not destination:
+        return None
+    return (source.parent / destination).resolve()
+
+
+def slug(title):
+    text = title.strip().lower()
+    text = re.sub(r"`([^`]*)`", r"\1", text)
+    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"[*_~]", "", text)
+    text = re.sub(r"[^\w\s\-]", "", text, flags=re.UNICODE)
+    return text.strip().replace(" ", "-")
+
+
+def anchors(path):
+    found, result = {}, set()
+    for heading in re.findall(r"^#{1,6}\s+(.+)$", read(path), re.MULTILINE):
+        base = slug(heading)
+        count = found.get(base, 0)
+        found[base] = count + 1
+        result.add(base if count == 0 else f"{base}-{count}")
+    return result
+
 
 
 class ContributionGuideTests(unittest.TestCase):
@@ -139,6 +182,79 @@ class ContributionGuideTests(unittest.TestCase):
                 heading = note.read_text(encoding='utf-8').splitlines()[0]
                 self.assertTrue(heading.startswith('# '))
                 self.assertTrue(heading.endswith(' v' + tag.rsplit('-v', 1)[1]))
+
+
+    def test_documentation_center_indexes_every_document(self):
+        readme = read(ROOT / 'README.md')
+        contributing = read(ROOT / 'CONTRIBUTING.md')
+        self.assertIn('(docs/README.md)', readme)
+        self.assertIn('(docs/README.md)', contributing)
+        self.assertIn('(docs/standards/documentation.md)', readme)
+        self.assertIn('(docs/development/README.md)', readme)
+        start = ROOT / 'docs/README.md'
+        seen, queue = set(), [start]
+        while queue:
+            document = queue.pop()
+            if document in seen:
+                continue
+            seen.add(document)
+            for target in markdown_links(document):
+                if '://' in target or target.startswith('mailto:'):
+                    continue
+                destination = resolve(document, target)
+                if (destination is not None and destination.is_file()
+                        and destination.suffix.lower() == '.md'
+                        and destination.is_relative_to(ROOT / 'docs')):
+                    queue.append(destination)
+        tracked = {path for path in (ROOT / 'docs').rglob('*.md')}
+        missing = sorted(path.relative_to(ROOT).as_posix() for path in tracked - seen)
+        self.assertEqual(missing, [], 'documents not linked from docs/README.md')
+
+    def test_maintained_documents_have_metadata(self):
+        documents = [
+            'docs/README.md', 'docs/development/README.md', 'docs/standards/documentation.md',
+            'docs/repository-layout.md', 'docs/changes/README.md', 'docs/releases/README.md',
+            'docs/archive/README.md', 'docs/development/match-live-evidence.md',
+            'docs/assets/platforms/README.md', 'WEBSITE.md',
+        ]
+        for relative in documents:
+            with self.subTest(document=relative):
+                header = '\n'.join(read(ROOT / relative).splitlines()[:8])
+                match = METADATA.search(header)
+                self.assertIsNotNone(match, 'missing metadata blockquote')
+                data = {name: value.strip() for name, value in match.groupdict().items()}
+                self.assertIn(data['type'], {'规范', '指南', '参考', '记录', '索引'})
+                self.assertIn(data['status'], {'草案', '维护中', '稳定', '冻结', '历史'})
+                self.assertTrue(data['version'] in ('全部版本', '不适用')
+                                or re.fullmatch(r'\d+\.\d+(\.x)?', data['version']))
+                self.assertLessEqual(date.fromisoformat(data['updated']), date.today())
+                self.assertTrue(data['readers'])
+
+    def test_all_document_links_and_anchors_resolve(self):
+        documents = list((ROOT / 'docs').rglob('*.md'))
+        documents += [ROOT / name for name in ('README.md', 'CONTRIBUTING.md', 'WEBSITE.md')]
+        for document in documents:
+            for target in markdown_links(document):
+                target = target.strip()
+                if not target or target.startswith('#') or '://' in target or target.startswith('mailto:'):
+                    continue
+                destination = resolve(document, target)
+                if destination is None:
+                    continue
+                with self.subTest(document=document.relative_to(ROOT).as_posix(), target=target):
+                    self.assertTrue(destination.exists(), 'missing link target')
+                    if '#' in target and destination.suffix.lower() == '.md':
+                        fragment = unquote(target.split('#', 1)[1])
+                        self.assertIn(fragment, anchors(destination), 'missing anchor')
+
+    def test_documents_do_not_contain_machine_specific_data(self):
+        documents = list((ROOT / 'docs').rglob('*.md'))
+        documents += [ROOT / name for name in ('README.md', 'CONTRIBUTING.md', 'WEBSITE.md')]
+        for document in documents:
+            text = read(document)
+            for pattern in ('C:\\Users\\', 'F:\\CodexAppManager', 'SESSDATA=', 'bili_jct='):
+                with self.subTest(document=document.relative_to(ROOT).as_posix(), pattern=pattern):
+                    self.assertNotIn(pattern, text)
 
 
 if __name__ == '__main__':

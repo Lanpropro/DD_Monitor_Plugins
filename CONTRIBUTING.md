@@ -2,6 +2,9 @@
 
 本仓库维护插件源码；展示网站已独立至 [DD_Monitor_Website](https://github.com/Lanpropro/DD_Monitor_Website)。日常开发以 `develop` 为基线，正式发布由各插件自己的版本标签和 GitHub Releases 标识。
 
+文档入口为 [插件文档中心](docs/README.md)；文档分层、元信息和记录规则见[插件文档规范](docs/standards/documentation.md)，
+从改动到发布的完整顺序见[插件开发指南](docs/development/README.md)。
+
 ## 分支与目录
 
 | 分支 | 用途 |
@@ -63,6 +66,8 @@ git commit -m "fix(domestic): preserve selected quality"
 python tests/check_contributing.py
 git diff --check
 ```
+
+`check_contributing.py` 同时检查文档入口、索引可达、相对链接、增量记录与发布索引；新增或移动文档后必须通过。
 
 网站构建与回归检查在独立网站仓库执行，使用方式见 [WEBSITE.md](WEBSITE.md)。本仓库无需安装 Node.js 依赖。
 

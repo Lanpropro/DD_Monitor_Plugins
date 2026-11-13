@@ -1,12 +1,14 @@
 # 展示网站已迁移
 
+> 类型：参考 ｜ 状态：稳定 ｜ 适用版本：全部版本 ｜ 更新：2026-10-22 ｜ 读者：维护者、贡献者
+
 网站源码、前端依赖、素材、测试与部署配置现独立维护：
 https://github.com/Lanpropro/DD_Monitor_Website
 
-本地文件夹：`F:/CodexAppManager/Code/DD_Monitor_Website`。
+本地开发时，网站仓库默认与本仓库放在同级目录 `../DD_Monitor_Website`。
 
 ```powershell
-cd F:\CodexAppManager\Code\DD_Monitor_Website
+cd ..\DD_Monitor_Website
 npm ci
 npm run dev
 ```
