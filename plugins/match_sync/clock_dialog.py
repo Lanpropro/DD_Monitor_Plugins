@@ -394,6 +394,7 @@ class ClockDialog(QDialog):
         self.watch.timeout.connect(self.check_session)
         self.watch.start()
         self.populate_current_previews()
+        QTimer.singleShot(0, self, lambda: self.start_job(preview=True))
         self.finished.connect(lambda: self.cancelled.set())
 
     def paintEvent(self, event):

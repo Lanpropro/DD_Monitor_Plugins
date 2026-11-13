@@ -134,9 +134,12 @@ def check(app, host, module, output=None):
             viewer.playback_rate = .98  # Normal SafetyBuffer headroom building, not user replay.
             with patch.object(viewer, 'shifts', return_value={'1': 0., '2': 0.}), \
                     patch.object(viewer, 'live_clock', return_value=103.):
-                async_dialog = ui.ClockDialog(viewer)
-                async_dialog.setAttribute(Qt.WA_DontShowOnScreen)
-                async_dialog.show()
+                with patch.object(ui.ClockDialog, 'start_job') as auto_preview:
+                    async_dialog = ui.ClockDialog(viewer)
+                    async_dialog.setAttribute(Qt.WA_DontShowOnScreen)
+                    async_dialog.show()
+                    QTest.qWait(120)
+                    auto_preview.assert_called_once_with(preview=True)
                 assert async_dialog.objectName() == 'MatchSyncClockDialog'
                 assert not async_dialog.property('settingsGlassWindow')
                 assert async_dialog.testAttribute(Qt.WA_TranslucentBackground)
@@ -153,7 +156,6 @@ def check(app, host, module, output=None):
                            for lane in async_dialog.lanes.values())
                 assert all(not lane.findChildren(QCheckBox) for lane in async_dialog.lanes.values())
                 assert async_dialog.scroll.verticalScrollBar().maximum() == 0
-                QTest.qWait(120)
                 assert not async_dialog.busy and all(lane.preview is None for lane in async_dialog.lanes.values()), \
                     'Opening the dialog must not start cache sampling'
                 viewer.canvas.set_frame((103., timer_image(90)))
@@ -296,7 +298,7 @@ def check(app, host, module, output=None):
             app.processEvents()
     return {'passed': True, 'clock_directions': True, 'bounded_real_video_capture': True,
             'windows_ocr': not note, 'manual_review': True, 'stale_source_rejected': True,
-            'explicit_apply': True, 'async_sample_ocr_ui': True, 'open_is_idle_until_requested': True,
+            'explicit_apply': True, 'async_sample_ocr_ui': True, 'open_requests_preview_once': True,
             'real_live_test': False, 'real_messages': 0}
 
 
