@@ -57,6 +57,8 @@
 
 比赛二路同步 [v1.5 候选更新说明](docs/releases/RELEASE-match-sync-v1.5.md)（待实播录制验收）；已发布测试版：[v1.5-pre.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.5-pre.1)。
 
+比赛二路同步 [v1.7.0 候选发布说明](docs/releases/RELEASE-match-sync-v1.7.0.md)（待公开发布）；当前下载入口仍指向已发布的 v1.6.1。
+
 插件依赖配套的 [DD监控室CE](https://github.com/Lanpropro/DD_Monitor_CE/releases/latest) 运行。具体能力、账号要求与最低本体版本，以各插件说明及对应 Release 为准。
 
 ## 安装与更新
@@ -97,7 +99,7 @@ ZIP 内只有插件 ID 对应的顶层文件夹。GitHub 自动生成的 **Sourc
 | --- | --- | --- |
 | 国内直播平台 | `domestic_live` | 2.0 |
 | 海外直播平台 | `global_live` | 1.2 |
-| 比赛二路同步 | `match_sync` | 1.6.1 |
+| 比赛二路同步 | `match_sync` | 1.7.0 |
 | B站直播互动 | `bili_live` | 1.1 |
 
 先按文件明确暂存需要发布的源码，再执行：
@@ -107,7 +109,7 @@ python tools/build_plugins.py
 python tests/check_packages.py --host ../DD_Monitor_CE
 ```
 
-输出为 `dist/domestic_live-2.0.zip`、`dist/global_live-1.2.zip`、`dist/match_sync-1.6.1.zip` 和 `dist/bili_live-1.1.zip`。
+输出为 `dist/domestic_live-2.0.zip`、`dist/global_live-1.2.zip`、`dist/match_sync-1.7.0.zip` 和 `dist/bili_live-1.1.zip`。
 
 B站直播互动 1.1 已发布，下载入口和在线插件目录已更新。
 构建只读取 Git 跟踪文件，并将许可与来源说明放入每个安装包。

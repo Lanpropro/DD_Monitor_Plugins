@@ -303,6 +303,15 @@
           "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/match-sync-v1.6.1/plugin-catalog.json"
         }
       ]
+    },
+    {
+      "tag": "match-sync-v1.7.0",
+      "file": "RELEASE-match-sync-v1.7.0.md",
+      "status": "prepared",
+      "source_kind": "repository_candidate",
+      "last_edit_verified": false,
+      "sha256": "9bcfed6d83d9adaf4f60e7f6f1d699be0f7eb54389301643116d5e8022dc7aef",
+      "base_commit": "ad0c54552459eab6a166dce17686737af0cf2eb8"
     }
   ],
   "tags_without_recoverable_body": [
