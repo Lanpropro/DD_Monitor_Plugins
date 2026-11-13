@@ -41,6 +41,7 @@ def check(app, host, module, output=None):
             assert panel.toolbar.layout().contentsMargins() == viewer.console_toolbar.layout().contentsMargins()
             assert panel.cards_layout.spacing() == 12 and panel.shown_rooms == ('1', '2', '3')
             assert panel.target.isHidden()
+            assert 'border-radius' in panel.zoom.styleSheet()
             assert scroll.horizontalScrollBar().maximum() == 0 and scroll.verticalScrollBar().maximum() == 0
             for mode in ('dark', 'light'):
                 module.theme.apply(mode)
