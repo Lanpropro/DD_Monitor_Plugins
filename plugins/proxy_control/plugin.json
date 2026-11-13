@@ -4,5 +4,5 @@
   "version": "1.0",
   "description": "导入订阅与节点，按需启动内置代理内核。",
   "author": "Lanpropro",
-  "min_app_version": "0.7.2"
+  "min_app_version": "0.7.3"
 }

@@ -1,12 +1,12 @@
 # 网络代理 v1.0
 
-发布候选。维护者已指定版本号为1.0；因现有公开宿主无法适配，暂缓发布，尚未创建公开 Release 或标签。兼容验证通过后，仍需维护者确认才能公开发布。
+网络代理 1.0 正式发布，要求配套宿主 v0.7.3-hotfix.1 或更高版本。
 
 ## 兼容范围
 
-本候选面向配套开发宿主，已在根开发源码 `d254e923` 验证。当前公开版 `v0.7.2-hotfix.2` 缺少 `DisclosureButton`、`SettingsSurface`、`SegmentedControl`、`SelectControl` 和 `ToggleSwitch`，实际导入会失败；清单中的最低版本号 `0.7.2` 不能代替这些接口要求。正式发布前须先提供包含公共控件和侧栏运行指示的配套宿主，或另行完成旧版兼容。
+本候选面向配套开发宿主，已在根开发源码 `d254e923` 验证。公开宿主 v0.7.3-hotfix.1 已包含所需公共控件和插件目录登记；清单最低版本为 0.7.3，旧版宿主不会显示或安装本插件。
 
-当前宿主商店也尚未注册 `proxy_control`；本候选只准备手动导入 ZIP，不宣称商店已可发现或更新。侧栏绿色运行圆点的宿主配套修复见 [PR #230](https://github.com/Lanpropro/DD_Monitor_CE/pull/230)，该修复本身不包含其余公共控件。插件集成见 [PR #66](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/66)。
+插件商店已登记 `proxy_control`，正式 Release 同时提供完整目录清单和安装包。侧栏绿色运行圆点的宿主配套修复见 [PR #230](https://github.com/Lanpropro/DD_Monitor_CE/pull/230)，该修复本身不包含其余公共控件。插件集成见 [PR #66](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/66)。
 
 ## 功能
 
