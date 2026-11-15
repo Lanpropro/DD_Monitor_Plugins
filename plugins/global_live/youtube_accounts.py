@@ -6,7 +6,7 @@ import time
 from ddm import plugins as api
 from ddm.global_danmaku import page_json, renderers
 from ddm.live_danmaku import USER_AGENT
-from .public_live import image_url
+from .public_http import image_url
 from .account_common import cookie_value, checked, progress
 
 def youtube_context(session):

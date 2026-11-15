@@ -3,7 +3,7 @@ import re
 from ddm import plugins as api
 from ddm.live_danmaku import USER_AGENT
 from streamlink.plugins.twitch import TwitchAPI
-from .public_live import image_url
+from .public_http import image_url
 from .account_common import cookie_value, checked, progress
 
 def twitch_query(session, query, variables):

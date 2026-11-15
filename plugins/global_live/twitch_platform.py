@@ -5,7 +5,8 @@ import requests
 from streamlink.plugins.twitch import Twitch, TwitchAPI
 from ddm import plugins as api
 from ddm.live_danmaku import USER_AGENT
-from .public_live import PublicLivePlatform, official_url, public_request, image_url
+from .public_live import PublicLivePlatform
+from .public_http import official_url, public_request, image_url
 from .twitch_accounts import TwitchAccounts
 
 

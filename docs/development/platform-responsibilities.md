@@ -19,6 +19,7 @@
 | --- | --- | --- |
 | 账号模块独立性、取消、覆写和映射 | `check_platform_accounts`、`check_domestic_modules`、`check_global_modules` | 使用替身账号，不登录真实网站 |
 | 国内媒体、查询与解析边界 | `check_platform_media`、`check_domestic_modules` | 旧异常导出与静态助手保留；不意外装载另一平台或界面 |
+| 海外 HTTP/URL 校验与 HLS 边界 | `check_public_http`、`check_global_modules` | 公共 HTTP 工具不依赖宿主/Streamlink/Qt；旧工具函数同对象导出；三个海外包必须携带该依赖 |
 | 国内账号、离线关注、分页和映射恢复 | `check_douyu_follows`、`check_douyin_accounts`、`check_douyin_lookup` | 根入口人工核对已有账号、关注与文件夹；不自动读取个人配置 |
 | 海外网页/官方账号 | `check_global_web_accounts`、`check_youtube_account_errors` | 官方权限与真实账号由用户操作；不自动发送 |
 | 原画质、授权、CDN 和分享链接 | `check_huya_high_resolution`、`check_huya_playback_auth`、`check_douyu_playback_auth`、`check_douyu_recovery`、`check_domestic_share_links`、`check_chzzk` | 真实多路播放、网络/缓存表现另验；斗鱼缓冲尚未根治 |

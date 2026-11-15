@@ -7,7 +7,8 @@ from streamlink.stream.hls import HLSStream
 
 from ddm import plugins as api
 from ddm.live_danmaku import USER_AGENT
-from .public_live import PublicLivePlatform, image_url, official_url, public_request
+from .public_live import PublicLivePlatform
+from .public_http import image_url, official_url, public_request
 
 
 class LiveChzzk(Chzzk):

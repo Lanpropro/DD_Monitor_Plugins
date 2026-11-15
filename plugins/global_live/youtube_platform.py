@@ -6,7 +6,8 @@ from streamlink.plugins.youtube import YouTube
 from ddm import plugins as api
 from ddm.global_danmaku import GlobalDanmakuClient, page_json, renderers
 from ddm.live_danmaku import USER_AGENT
-from .public_live import PublicLivePlatform, official_url, public_request, thumbnail
+from .public_live import PublicLivePlatform
+from .public_http import official_url, public_request, thumbnail
 
 class LiveYouTube(YouTube):
     def _get_res(self, url):
