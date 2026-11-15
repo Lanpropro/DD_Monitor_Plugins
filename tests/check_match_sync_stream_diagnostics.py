@@ -14,11 +14,13 @@ from unittest.mock import Mock, patch
 
 
 def check(app, host, diagnostic, media, video):
+    process_control = import_module(media.recording._ensure_job.__module__)
     secret = 'DO_NOT_LOG_PRIVATE_VALUE'
     address = 'https://private.invalid/live?token=' + secret
     trace = diagnostic.StreamAcquisition()
     with patch.object(diagnostic.time, 'perf_counter', return_value=10.):
         trace.begin(0)
+    trace.quality(requested=250, actual=1004000)
     with patch.object(diagnostic.time, 'perf_counter', return_value=10.125):
         trace.mark('resolved')
     trace.mark('resolved')
@@ -28,10 +30,13 @@ def check(app, host, diagnostic, media, video):
     trace.exited(1)
     trace.finish('error')
     first = trace.snapshot()
+    assert first['requested_quality'] == 250 and first['actual_quality'] == 1004000
     assert first['error_phase'] == 'input_open' and first['ffmpeg_exit_code'] == 1
     assert first['error_codes'] == ['http_403']
     trace.begin(1)
     assert trace.snapshot()['previous_attempt']['error_codes'] == ['http_403']
+    assert trace.snapshot()['previous_attempt']['actual_quality'] == 1004000
+    assert 'requested_quality' not in trace.snapshot() and 'actual_quality' not in trace.snapshot()
     assert not trace.snapshot()['milestones_ms']
     with trace.lock:
         assert trace.snapshot() == {'busy': True}, 'GUI-independent snapshots must never wait on the writer'
@@ -56,7 +61,7 @@ def check(app, host, diagnostic, media, video):
     assert stream.read(2) == b'ab' and stream.read(2) == b'cd'
     assert stream.read(2) == b'' and calls == [True]
 
-    decoder = media.Decoder('fixture', {'highest_quality': True})
+    decoder = media.Decoder('fixture', {'balanced_quality': True})
     decoder.events = SimpleNamespace(information=Mock(), state=Mock(), reset=Mock())
     entered, release = threading.Event(), threading.Event()
     def play_url(*_args):
@@ -74,12 +79,14 @@ def check(app, host, diagnostic, media, video):
         assert entered.wait(2)
         receipt = decoder.acquisition.snapshot()
         assert receipt['phase'] == 'play_url' and 'room_info_ready' in receipt['milestones_ms']
+        assert receipt['requested_quality'] == 20000 and 'actual_quality' not in receipt
     finally:
         release.set()
         worker.join(3)
     assert not worker.is_alive() and resolved == [(address, {'Cookie': secret})]
     assert platform.play_url.call_count == 1 and platform.room_quality_options.call_count == 2
     assert 'play_url_ready' in decoder.acquisition.snapshot()['milestones_ms']
+    assert decoder.acquisition.snapshot()['actual_quality'] == 20000
     assert decoder.acquisition.snapshot()['phase'] == 'quality_metadata'
     assert 'private.invalid' not in json.dumps(decoder.acquisition.snapshot())
     # A retry after failure to get an address must preserve the failing phase.
@@ -119,7 +126,7 @@ def check(app, host, diagnostic, media, video):
         return nullcontext(container)
     decoder.preview_frames = SimpleNamespace(submit=Mock())
     with patch.object(media.subprocess, 'Popen', return_value=process) as launch, \
-            patch.object(media.recording, '_adopt_process'), patch.object(media.recording, '_kernel32', None), \
+            patch.object(media.recording, '_adopt_process'), patch.object(process_control, '_kernel32', None), \
             patch.object(media, 'av', SimpleNamespace(open=open_input)), \
             patch.object(media, 'recording_template', return_value=nullcontext()):
         assert decoder._capture('ffmpeg', address, {'Cookie': secret}) == 'eof'
@@ -141,7 +148,7 @@ def check(app, host, diagnostic, media, video):
             patch.object(decoder, 'cancelled', cancelled), \
             patch.object(media.recording, 'ffmpeg_path', return_value='ffmpeg'), \
             patch.object(media.subprocess, 'Popen', return_value=failed_process), \
-            patch.object(media.recording, '_adopt_process'), patch.object(media.recording, '_kernel32', None), \
+            patch.object(media.recording, '_adopt_process'), patch.object(process_control, '_kernel32', None), \
             patch.object(media, 'av', SimpleNamespace(open=Mock(side_effect=RuntimeError('Invalid data found')))):
         decoder._run()
     failed = decoder.acquisition.snapshot()
@@ -174,6 +181,7 @@ def check(app, host, diagnostic, media, video):
     with patch.dict(os.environ, DDM_MATCH_DIAGNOSTICS='0'):
         disabled = diagnostic.StreamAcquisition()
         disabled.begin(0)
+        disabled.quality(requested=250, actual=1004000)
         disabled.phase('receive')
         disabled.error(RuntimeError(secret))
         disabled.mark('first_byte')
@@ -183,7 +191,7 @@ def check(app, host, diagnostic, media, video):
         decoder.acquisition = disabled
         quiet_process = SimpleNamespace(**dict(vars(process), stdout=io.BytesIO(b'header'), stderr=None))
         with patch.object(media.subprocess, 'Popen', return_value=quiet_process) as launch, \
-                patch.object(media.recording, '_adopt_process'), patch.object(media.recording, '_kernel32', None), \
+                patch.object(media.recording, '_adopt_process'), patch.object(process_control, '_kernel32', None), \
                 patch.object(media, 'av', SimpleNamespace(open=open_input)), \
                 patch.object(media, 'recording_template', return_value=nullcontext()):
             assert decoder._capture('ffmpeg', address, {}) == 'eof'

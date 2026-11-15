@@ -23,7 +23,7 @@ def main():
     os.environ['QT_QPA_PLATFORM'] = 'offscreen'
     from ddm import recording
     from plugins.match_sync import media, video
-    from plugins.match_sync.viewer import Canvas
+    from plugins.match_sync.canvas import Canvas
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([])
     with tempfile.TemporaryDirectory(prefix='ddm_uhd_') as folder:
