@@ -110,6 +110,18 @@ def check(app, host, module):
                     control.complete((control.active_job, control.cancelled,
                                       control.identities(('1', '2')), measured, ''))
 
+                deadline=control.deadline
+                token=control.cancelled
+                control.first=readings(.3,2)
+                control.active_job=object();control.busy=True
+                control.complete((control.active_job,token,control.identities(('1','2')),
+                                  None,'计时器未可靠翻秒，请重新确认对齐'))
+                assert not control.failed and control.pending=={'2'}, 'Retry unreadable samples within the existing deadline'
+                assert control.first is None and not control.busy
+                assert control.deadline==deadline and control.cancelled is token
+                assert control.next_sample>time.monotonic()
+                assert viewer.rows['2'].awaiting_confirmation and viewer.rows['2'].mix_gain==0
+
                 viewer.rows['2'].paused = True
                 deliver(readings(.3, 2))
                 assert control.first is None and control.pending
@@ -212,7 +224,8 @@ def check(app, host, module):
             app.processEvents()
     return dict(passed=True, same_timeline_kept=True, two_bands_required=True,
                 reset_isolated=True, stale_results_rejected=True, cancellation_nonblocking=True,
-                frozen_or_reset_timer_rejected=True, real_live_test=False, real_messages=0)
+                frozen_or_reset_timer_rejected=True, unreadable_sample_retried=True,
+                retry_deadline_preserved=True, real_live_test=False, real_messages=0)
 
 
 if __name__ == '__main__':

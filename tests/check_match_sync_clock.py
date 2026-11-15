@@ -16,6 +16,7 @@ def check(app, host, module, output=None):
     from PySide6.QtCore import QRectF, Qt
     from PySide6.QtGui import QColor, QFont, QFontDatabase, QImage, QPainter
     from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QCheckBox, QWidget
     from ddm import plugins, recording
     model = import_module(module.__package__ + '.clock_sync')
     capture = import_module(module.__package__ + '.clock_capture')
@@ -25,6 +26,9 @@ def check(app, host, module, output=None):
     font_id = QFontDatabase.addApplicationFont('C:/Windows/Fonts/arial.ttf')
     family = QFontDatabase.applicationFontFamilies(font_id)[0] if font_id >= 0 else 'sans-serif'
     assert model.parse_clock('01:29') == 89
+    assert model.parse_clock('0129') == 89
+    assert model.parse_clock('129') == 89
+    assert model.parse_clock('01299') is None
     assert model.parse_clock('01•.29') == 89
     assert model.parse_clock('1:30 2:30') is None
     assert model.parse_clock('01:99') is None
@@ -130,11 +134,49 @@ def check(app, host, module, output=None):
             viewer.playback_rate = .98  # Normal SafetyBuffer headroom building, not user replay.
             with patch.object(viewer, 'shifts', return_value={'1': 0., '2': 0.}), \
                     patch.object(viewer, 'live_clock', return_value=103.):
-                async_dialog = ui.ClockDialog(viewer)
-                async_dialog.setAttribute(Qt.WA_DontShowOnScreen)
-                async_dialog.show()
+                with patch.object(ui.ClockDialog, 'start_job') as auto_preview:
+                    async_dialog = ui.ClockDialog(viewer)
+                    async_dialog.setAttribute(Qt.WA_DontShowOnScreen)
+                    async_dialog.show()
+                    QTest.qWait(120)
+                    auto_preview.assert_called_once_with(preview=True)
+                assert async_dialog.objectName() == 'MatchSyncClockDialog'
+                assert not async_dialog.property('settingsGlassWindow')
+                assert async_dialog.testAttribute(Qt.WA_TranslucentBackground)
+                assert async_dialog.findChild(QWidget, 'ClockDialogToolbar') is not None
+                assert async_dialog.findChild(QWidget, 'ClockDialogFooter') is not None
+                assert async_dialog.findChild(QWidget, 'ClockDialogScroll') is async_dialog.scroll
+                assert all(lane.objectName() == 'MatchSyncClockLane'
+                           for lane in async_dialog.lanes.values())
+                assert async_dialog.calculate.text() == '计算偏移'
+                assert all(lane.pick.kind == 'region' and lane.pick.accessibleName() == '框选游戏计时器区域'
+                           for lane in async_dialog.lanes.values())
+                assert async_dialog.windowFlags() & Qt.FramelessWindowHint
+                assert all(lane.avatar.size().width() == 48 and lane.avatar.size().height() == 48
+                           for lane in async_dialog.lanes.values())
+                assert all(not lane.findChildren(QCheckBox) for lane in async_dialog.lanes.values())
+                assert async_dialog.scroll.verticalScrollBar().maximum() == 0
+                assert not async_dialog.busy and all(lane.preview is None for lane in async_dialog.lanes.values()), \
+                    'Opening the dialog must not start cache sampling'
+                viewer.canvas.set_frame((103., timer_image(90)))
+                viewer.comparison_panel.cards = {}
+                for key in viewer.rows:
+                    canvas = ui.Canvas()
+                    canvas.set_frame((103., timer_image(90)))
+                    viewer.comparison_panel.cards[key] = (None, None, canvas, None)
+                async_dialog.populate_current_previews()
+                assert all(lane.preview is not None for lane in async_dialog.lanes.values())
+                with patch.object(ui, 'capture_band', side_effect=AssertionError('Current frame should be reused')):
+                    async_dialog.start_job(preview=True)
+                    deadline = time.monotonic() + 2
+                    while async_dialog.busy and time.monotonic() < deadline:
+                        app.processEvents()
+                        time.sleep(.01)
+                viewer.canvas.set_frame(None)
+                viewer.comparison_panel.cards = {}
+                async_dialog.start_job(preview=True)
                 deadline = time.monotonic() + 10
-                while any(lane.preview is None for lane in async_dialog.lanes.values()) and time.monotonic() < deadline:
+                while async_dialog.busy and time.monotonic() < deadline:
                     app.processEvents()
                     time.sleep(.01)
                 assert all(lane.preview is not None for lane in async_dialog.lanes.values()), async_dialog.status.text()
@@ -189,6 +231,7 @@ def check(app, host, module, output=None):
                     closing = ui.ClockDialog(viewer)
                     closing.setAttribute(Qt.WA_DontShowOnScreen)
                     closing.show()
+                    closing.start_job(preview=True)
                     deadline = time.monotonic() + 3
                     while not entered.is_set() and time.monotonic() < deadline:
                         app.processEvents()
@@ -217,6 +260,8 @@ def check(app, host, module, output=None):
                 old_delay = viewer.rows['2'].delay.value()
                 dialog.calculate_proposal()
                 assert dialog.apply.isEnabled() and abs(dialog.proposal['2'] + 4.3) < .0001
+                assert '建议偏移' in dialog.lanes['2'].status.text()
+                assert '误差' in dialog.lanes['2'].status.text()
                 assert viewer.rows['2'].delay.value() == old_delay, 'Calculating is not applying'
                 if output:
                     dialog.grab().save(str(output))
@@ -239,6 +284,7 @@ def check(app, host, module, output=None):
                 assert abs(viewer.rows['2'].delay.value() - 1.3) < .011
                 assert not viewer.automatic.isChecked() and viewer.alignment.manual_locked
                 assert viewer.rows['2'].user_confirmed
+                assert viewer.compare.isChecked(), 'Applied offsets should return to comparison controls'
                 assert dialog.cancelled.is_set()
         finally:
             viewer.running = False
@@ -252,7 +298,8 @@ def check(app, host, module, output=None):
             app.processEvents()
     return {'passed': True, 'clock_directions': True, 'bounded_real_video_capture': True,
             'windows_ocr': not note, 'manual_review': True, 'stale_source_rejected': True,
-            'explicit_apply': True, 'async_sample_ocr_ui': True, 'real_live_test': False, 'real_messages': 0}
+            'explicit_apply': True, 'async_sample_ocr_ui': True, 'open_requests_preview_once': True,
+            'real_live_test': False, 'real_messages': 0}
 
 
 def main():

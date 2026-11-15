@@ -110,11 +110,12 @@ def check(app, host, module):
         viewer = module.Viewer(plugins.PluginContext(
             plugins.PluginManager(window=host, plugins_dir=directory), 'quality_policy'), {})
         try:
-            viewer.clock_button.click()
-            assert '至少一路副画面' in viewer.notice.text()
-            assert viewer.clock_button.width() >= viewer.clock_button.fontMetrics().horizontalAdvance(viewer.clock_button.text()) + 16
             viewer.add_room('1', {'quality': 1014000, 'quality_auto': False})
             viewer.add_room('2', {'quality': 1004000, 'quality_auto': False})
+            clock_button = viewer.rows['1'].clock_button
+            clock_button.click()
+            assert '至少一路副画面' in viewer.notice.text()
+            assert not clock_button.text() and clock_button.size().width() == 32
             for row in viewer.rows.values():
                 row.quality_options = [dict(item) for item in options]
                 row.platform = platform
@@ -143,11 +144,11 @@ def check(app, host, module):
                 assert reload.call_count == 1, 'Do not reconnect an already automatic main source'
             viewer.running = False
             with patch.object(viewer.comparison_panel, 'open_clock') as opened:
-                assert not viewer.clock_button.isHidden() and not viewer.compare.isChecked()
-                viewer.clock_button.click()
+                assert not clock_button.isHidden() and not viewer.compare.isChecked()
+                clock_button.click()
                 opened.assert_called_once()
             return dict(passed=True, main_preserves_tier=True, provider_auto_and_retry=True,
-                        highest_available_fallback=True, toolbar_clock_entry=True,
+                        highest_available_fallback=True, row_clock_entry=True,
                         explicit_hdr_preserved=True, matching_seed_reused=True,
                         failed_tier_in_receipt=True, no_network=True, real_messages=0)
         finally:

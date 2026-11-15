@@ -23,6 +23,7 @@ def check(app, host, module):
         viewer = module.Viewer(plugins.PluginContext(
             plugins.PluginManager(window=host, plugins_dir=directory), 'stream_info'), {})
         viewer.setAttribute(Qt.WA_DontShowOnScreen)
+        viewer.picture.bottom.setAttribute(Qt.WA_DontShowOnScreen)
         decoders = []
         try:
             for room_id, width, codec in (('101', 1920, 'h264'), ('202', 1280, 'hevc')):
@@ -30,7 +31,7 @@ def check(app, host, module):
                 row = viewer.rows[room_id]
                 row.alias.setText('Fixture ' + room_id)
                 row.quality = row.actual_quality = 10000
-                decoder = row.decoder = module.Decoder(room_id, {'quality': 10000})
+                decoder = row.decoder = module.Decoder(room_id, {'quality': 10000, 'highest_quality': True})
                 decoders.append(decoder)
                 decoder.source_url = f'https://user:password@cdn{room_id}.test/live?token=secret'
                 decoder.video_size = (width, 720)
