@@ -141,3 +141,7 @@ YouTube订阅读取失败时显示HTTP状态与已知原因代码，区分权限
 参考：[CHZZK 官方 Live API](https://chzzk.gitbook.io/chzzk/chzzk-api/live)、[Streamlink CHZZK](https://github.com/streamlink/streamlink/blob/8.6.1/src/streamlink/plugins/chzzk.py)。
 
 离线回归：`python tests/check_chzzk.py --host <宿主目录>`；实际播放请从宿主根 `run.cmd` 添加正在直播的公开频道，检查画质切换、预览和停止清理。
+
+## 模块职责
+
+入口只组合平台，Twitch／YouTube／CHZZK协议及两平台网页登录分别维护；旧类和函数入口保留兼容导出。缓存属于每个平台实例，Logo控制对象由插件创建并在卸载时移除。详见[海外模块边界](../../docs/development/global-modules.md)。

@@ -131,10 +131,11 @@ if __name__ == '__main__':
     args = parser.parse_args()
     sys.path.insert(0, str(args.host.resolve()))
     from ddm import plugins as api
-    path = Path(__file__).resolve().parents[1] / 'plugins/global_live/web_accounts.py'
+    path = Path(__file__).resolve().parents[1] / 'plugins/global_live/plugin.py'
     spec = importlib.util.spec_from_file_location('global_web_test', path)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    web = module
+    import importlib
+    web = importlib.import_module(spec.name + ".web_accounts")
     unittest.main(argv=[sys.argv[0]])
