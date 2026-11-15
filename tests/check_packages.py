@@ -1,4 +1,4 @@
-"""校验 ZIP、源码一致、真实宿主导入及五个平台注册。"""
+"""校验 ZIP、源码一致、真实宿主导入及六个平台注册。"""
 import argparse
 import json
 import os
@@ -71,7 +71,7 @@ def main():
         manager.load()
         assert len(manager.plugins) == len(versions) and not manager.skipped
         assert all(plugin.version == versions[plugin.context.name] for plugin in manager.plugins)
-        assert set(manager.platforms) == {"huya", "douyu", "douyin", "twitch", "youtube"}
+        assert set(manager.platforms) == {"huya", "douyu", "douyin", "twitch", "youtube", "chzzk"}
         assert all(platform.room_input_hint for platform in manager.platforms.values())
         assert manager.platforms['douyin'].room_input_hint == '抖音直播间链接'
         assert '__ddmDouyinProfile' in manager.platforms['douyin'].profile_browser_init_script
@@ -81,7 +81,7 @@ def main():
         assert all(entry["name"] == display_names[entry["id"]] for entry in manager.catalog())
         assert all(entry["version"] == versions[entry["id"]] for entry in manager.catalog())
         manager.unload()
-    print("PASS: package integrity, source consistency, install without execution and five platforms")
+    print("PASS: package integrity, source consistency, install without execution and six platforms")
 
 
 if __name__ == "__main__":

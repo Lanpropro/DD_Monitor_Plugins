@@ -1,4 +1,4 @@
-"""Twitch、YouTube 公开直播与软件内独立 OAuth 授权会话。"""
+"""Twitch、YouTube、CHZZK 公开直播与软件内独立 OAuth 授权会话。"""
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 import os
@@ -142,6 +142,8 @@ class PublicLivePlatform(api.Platform):
                 (item for item in options if item["qn"] == quality), options[0])
             url = streams[selected["key"]].to_url()
             return url, selected["qn"], self.kind, {"User-Agent": USER_AGENT, "Referer": self.origin}
+        except api.LoginRequiredError:
+            raise
         except Exception as error:  # noqa: BLE001
             raise RuntimeError(f"{self.label} 直播取流失败，请稍后重试") from error
         finally:
@@ -524,8 +526,10 @@ class GlobalLivePlugin(api.Plugin):
     def on_load(self, context):
         context.register_platform(TwitchPlatform())
         context.register_platform(YouTubePlatform())
+        from .chzzk import ChzzkPlatform
+        context.register_platform(ChzzkPlatform())
         if QApplication.instance() is not None and context.window is not None:
-            self._logo_control = PlatformLogoControl(context, ("twitch", "youtube"), "显示海外平台 Logo")
+            self._logo_control = PlatformLogoControl(context, ("twitch", "youtube", "chzzk"), "显示海外平台 Logo")
 
     def on_unload(self):
         if getattr(self, "_logo_control", None) is not None:

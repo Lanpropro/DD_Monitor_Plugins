@@ -1,4 +1,4 @@
-# Twitch 与 YouTube
+# Twitch、YouTube 与 CHZZK
 
 ## v1.2 更新日志
 
@@ -128,3 +128,16 @@ YouTube订阅读取失败时显示HTTP状态与已知原因代码，区分权限
 - 上述自检设置 `DDM_NO_SAVE=1`，不修改用户配置；截图存放在 `work/<平台>-preview-live/`。
 
 在“设置 → 常规”可切换“显示海外平台 Logo”，仅控制该插件平台的关注栏卡片标识。默认开启，保存后立即生效；取消不改变设置，重启后保留选择。开关仅在插件已装载时显示。
+
+## CHZZK 公开直播（开发候选）
+
+添加 `https://chzzk.naver.com/live/<32位频道ID>`、频道主页链接或 `chzzk:<32位频道ID>`，即可加入本地关注并拖入画面墙。
+支持频道名称、头像、封面、开播状态、H.264 画质和低画质悬停预览；自动画质及本机代理转发需配套包含 CHZZK 接入的本体。
+本批不提供 CHZZK 登录、关注导入、聊天、回放或需要账号／年龄验证的直播。
+
+`chzzk.py` 负责链接校验、公开频道元数据与实时 HLS 解析；复用 Streamlink 8.6.1 的 CHZZK 响应校验，
+使用实时清单，不使用需要专用分片签名的时光机回看路径。媒体 URL 仅用于本次播放，不持久化。
+这里使用网页公开接口，并非 CHZZK Open API 授权接入；官方 Live API 提供直播列表和推流设置，未提供观众播放地址。
+参考：[CHZZK 官方 Live API](https://chzzk.gitbook.io/chzzk/chzzk-api/live)、[Streamlink CHZZK](https://github.com/streamlink/streamlink/blob/8.6.1/src/streamlink/plugins/chzzk.py)。
+
+离线回归：`python tests/check_chzzk.py --host <宿主目录>`；实际播放请从宿主根 `run.cmd` 添加正在直播的公开频道，检查画质切换、预览和停止清理。

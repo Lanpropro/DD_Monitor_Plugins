@@ -29,7 +29,7 @@
 <td width="50%" valign="top">
 <h3><a href="plugins/global_live/README.md">海外直播平台</a></h3>
 <p><img src="docs/assets/platforms/twitch.png" alt="Twitch" width="24" height="24"> &nbsp; <img src="docs/assets/platforms/youtube.png" alt="YouTube" width="24" height="24"></p>
-<p><strong>Twitch · YouTube</strong></p>
+<p><strong>Twitch · YouTube · CHZZK（开发候选）</strong></p>
 <p>接入海外平台直播，提供关注、播放、悬停预览与聊天弹幕，支持自动画质。</p>
 <p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
 <p><a href="plugins/global_live/README.md">功能与兼容说明</a> · <a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2">下载插件</a></p>
