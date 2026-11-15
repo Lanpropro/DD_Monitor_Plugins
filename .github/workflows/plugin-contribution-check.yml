@@ -1,0 +1,19 @@
+name: Plugin contribution checks
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python tests/check_contributing.py
+      - run: python tests/check_plugin_release.py
+      - run: python -m compileall -q plugins tests tools
+      - run: git diff --check
