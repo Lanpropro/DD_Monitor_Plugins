@@ -60,6 +60,9 @@ def main():
                 if plugin_id == 'domestic_live':
                     assert 'domestic_live/douyin_native.js' in names, 'Official native input requires its browser script'
                     assert 'domestic_live/douyin_browser.py' in names
+                    for module in ('platform_base', 'huya_protocol', 'douyin_errors', 'diagnostic_errors', 'huya_platform', 'douyu_platform',
+                                   'douyin_platform', 'platform_logo', 'playback_diagnostics'):
+                        assert f'domestic_live/{module}.py' in names, module
                 assert f"{plugin_id}-{manifest['version']}.zip" == path.name
                 assert archive.read(f"{plugin_id}/LICENSE") == (ROOT / "LICENSE").read_bytes()
                 for name in names:
