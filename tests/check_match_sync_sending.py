@@ -2,6 +2,7 @@
 import argparse
 from importlib import import_module
 import os
+import re
 from pathlib import Path
 import socket
 import subprocess
@@ -18,6 +19,7 @@ def check_platform_controls(app, host, module, source):
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QPushButton, QWidget
     from ddm import plugins
+    from ddm.continuous_corners import source_stylesheet
     package = types.ModuleType('sending_domestic_fixture')
     package.__path__ = [str(source.resolve())]
     sys.modules[package.__name__] = package
@@ -69,9 +71,9 @@ def check_platform_controls(app, host, module, source):
                 assert send.size() == viewer.send_console.batch_panel.send.size(), kind
                 assert send.width() == 32 and hasattr(send, '_match_sync_face'), kind
                 gift = controls.applicable()[0].control.widget.gifts
-                assert 'QPushButton#TileCtrl:hover' in gift.styleSheet(), kind
-                assert 'border-radius: 6px' in gift.styleSheet(), kind
-                assert 'background: transparent' in send.styleSheet(), kind
+                assert 'QPushButton#TileCtrl:hover' in source_stylesheet(gift.styleSheet()), kind
+                assert 'border-radius: 6px' in source_stylesheet(gift.styleSheet()), kind
+                assert re.search(r'background\s*:\s*transparent\s*[;}]', source_stylesheet(send.styleSheet())), kind
                 shared = controls.applicable()[0].control.widget.findChild(QWidget, 'SendInteractions')
                 assert shared is not None and len(shared.findChildren(QPushButton)) == 2
                 assert all(not button.isHidden() for button in shared.findChildren(QPushButton))
@@ -241,7 +243,8 @@ def check(app, host, module, output=None):
                 assert not console.batch_panel.timer.isActive(), 'The synthetic send queue must finish'
             assert not hasattr(console, 'saved_input'), 'Only the active danmaku input remains'
             assert not console.save_text.text() and console.save_text.kind == 'save'
-            assert 'background: transparent' in console.save_text.styleSheet()
+            from ddm.continuous_corners import source_stylesheet
+            assert re.search(r'background\s*:\s*transparent\s*[;}]', source_stylesheet(console.save_text.styleSheet()))
             assert not console.active_editor().isHidden() and not console.work.isHidden()
             assert not console.feedback.isVisible()
             assert not any('左键选择主播；' in label.text() for label in console.findChildren(module.QLabel))

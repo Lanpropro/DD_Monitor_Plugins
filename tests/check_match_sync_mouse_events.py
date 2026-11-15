@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 import tempfile
 import time
+from unittest.mock import patch
 
 
 def check(app, host, module):
@@ -15,6 +16,9 @@ def check(app, host, module):
     with tempfile.TemporaryDirectory() as directory:
         viewer = module.Viewer(plugins.PluginContext(
             plugins.PluginManager(window=host, plugins_dir=directory), 'mouse_events'), {})
+        host.setAttribute(Qt.WA_DontShowOnScreen)
+        host.resize(1100, 700)
+        host.show()
         viewer.embed(getattr(host, '_content', host))
         viewer.show()
         image = QImage(640, 360, QImage.Format_RGB32)
@@ -56,7 +60,9 @@ def check(app, host, module):
             # Enter and tile clicks still reach their existing handlers.
             viewer.picture.set_controls_visible(False)
             point = QPointF(40, 40)
-            app.sendEvent(viewer.picture, QEnterEvent(point, point, point))
+            position = viewer.picture.mapToGlobal(point.toPoint())
+            with patch.object(module.QCursor, 'pos', return_value=position):
+                app.sendEvent(viewer.picture, QEnterEvent(point, point, QPointF(position)))
             assert viewer.picture._overlay_visible
             clicks = []
             viewer.picture.clicked.connect(clicks.append)
@@ -79,6 +85,7 @@ def check(app, host, module):
                 parent.setAttribute(Qt.WA_Hover, hovered)
             selector.close()
             viewer.close()
+            host.hide()
             selector.deleteLater()
             viewer.deleteLater()
             app.processEvents()

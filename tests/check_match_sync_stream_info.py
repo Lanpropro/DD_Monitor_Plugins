@@ -30,7 +30,7 @@ def check(app, host, module):
                 row = viewer.rows[room_id]
                 row.alias.setText('Fixture ' + room_id)
                 row.quality = row.actual_quality = 10000
-                decoder = row.decoder = module.Decoder(room_id, {'highest_quality': True, 'quality': 10000})
+                decoder = row.decoder = module.Decoder(room_id, {'quality': 10000})
                 decoders.append(decoder)
                 decoder.source_url = f'https://user:password@cdn{room_id}.test/live?token=secret'
                 decoder.video_size = (width, 720)
@@ -54,7 +54,7 @@ def check(app, host, module):
                 event = QContextMenuEvent(QContextMenuEvent.Mouse, point,
                                           viewer.canvas.mapToGlobal(point))
                 with patch.object(viewer.picture, 'build_menu', return_value=SimpleNamespace(
-                        exec=lambda *_args: choose_info(menu))):
+                        exec=lambda *_args: choose_info(menu), deleteLater=menu.deleteLater)):
                     app.sendEvent(viewer.canvas, event)
                 app.processEvents()
 

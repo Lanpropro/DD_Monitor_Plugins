@@ -230,8 +230,8 @@ def check(app, host, module, output=None):
                     self.target()
             refined = engine.Match(-4., .95, 'verified descriptors', refined=True)
             with patch.object(module.threading, 'Thread', InlineJob), \
-                    patch.object(module, 'match_scenes', return_value=refined) as coarse, \
-                    patch.object(module, 'refine_match', return_value=refined), \
+                    patch.object(module.alignment_control, 'match_scenes', return_value=refined) as coarse, \
+                    patch.object(module.alignment_control, 'refine_match', return_value=refined), \
                     patch.object(viewer, 'live_clock', return_value=103.), \
                     patch.object(viewer, 'shifts', return_value=positions):
                 viewer.analyse()
