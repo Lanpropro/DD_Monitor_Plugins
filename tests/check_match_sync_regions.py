@@ -100,8 +100,8 @@ def check(module):
             viewer.results = SimpleNamespace(completed=SimpleNamespace(emit=lambda *args: captured.append(args)))
             viewer.running = True
             with patch.object(viewer, 'live_clock', return_value=124), patch.object(viewer, 'shifts', return_value={'1': 0, '2': 0}), \
-                    patch.object(module, 'match_scenes', return_value=module.Match(None, 0, 'whole frame mismatch')), \
-                    patch.object(module, 'refine_match', return_value=module.Match(None, 0, 'whole frame mismatch')):
+                    patch.object(module.alignment_control, 'match_scenes', return_value=module.Match(None, 0, 'whole frame mismatch')), \
+                    patch.object(module.alignment_control, 'refine_match', return_value=module.Match(None, 0, 'whole frame mismatch')):
                 viewer.analyse()
                 deadline = time.monotonic() + 5
                 while not captured and time.monotonic() < deadline:

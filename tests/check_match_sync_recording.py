@@ -253,7 +253,7 @@ def check(app, host, module, output=None):
             patch.object(module.Decoder, 'start', lambda _self: None), \
             patch.object(module.Chat, 'start', lambda _self: None), \
             patch.object(module.AudioPump, 'start', lambda _self: None), \
-            patch.object(module, 'MultiTrackRecorder', StubRecorder):
+            patch.object(module.recording_control, 'MultiTrackRecorder', StubRecorder):
         host.settings, host.rooms = {}, []
         manager = plugins.PluginManager(window=host, plugins_dir=directory)
         notices = []

@@ -35,6 +35,27 @@ def buttons(popup):
 
 class EmoticonTabTests(unittest.TestCase):
 
+    def test_refresh_keeps_keyboard_activation_without_mouse_focus_frame(self):
+        from ddm import theme, continuous_corners
+        button = self.popup.retry_button
+        calls = []
+        button.clicked.disconnect()
+        button.clicked.connect(lambda: calls.append(True))
+        self.popup.set_packages([package('emoji', 0)])
+        for mode in ('dark', 'light'):
+            theme.apply(mode)
+            APP.processEvents()
+            button.clearFocus()
+            QTest.mouseClick(button, Qt.LeftButton)
+            APP.processEvents()
+            self.assertFalse(button.hasFocus())
+            button.setFocus(Qt.TabFocusReason)
+            self.assertTrue(button.hasFocus())
+            self.assertEqual(continuous_corners._filter.values(button).get('border'), 'none')
+            QTest.keyClick(button, Qt.Key_Space)
+        self.assertEqual(len(calls), 4)
+        theme.apply('dark')
+
     def test_standard_category_uses_local_icon_in_both_themes(self):
         from ddm import theme
         self.popup.set_packages([package('emoji',0),package('主播表情',0,2)])

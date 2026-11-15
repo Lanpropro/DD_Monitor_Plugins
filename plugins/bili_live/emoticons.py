@@ -24,7 +24,7 @@ def _style_button(button, *, diameter=None):
     # 与主题注入的浅色局部样式放在同一层，并保留状态选择器的优先级。
     button.setStyleSheet("""
         QPushButton#TileCtrl:disabled {background: transparent; color: palette(tooltip-text);}
-        QPushButton#TileCtrl:focus {border: 1px solid palette(highlight);}
+        QPushButton#TileCtrl:focus {border: none; outline: none;}
     """)
     if diameter is not None:
         button.setFixedSize(diameter, diameter)
@@ -32,6 +32,7 @@ def _style_button(button, *, diameter=None):
             QPushButton#TileCtrl {{border-radius: {diameter // 2}px; padding: 0;}}
         """)
     button.setCursor(Qt.PointingHandCursor)
+    button.setFocusPolicy(Qt.TabFocus)
     button.setAutoDefault(False)
 
 
