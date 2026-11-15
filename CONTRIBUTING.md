@@ -34,6 +34,8 @@
 
 ## 日常开发与 PR
 
+新插件投稿使用仓库的 [PR 模板](.github/PULL_REQUEST_TEMPLATE.md)，提供作者与源码、许可证、最低本体版本、宿主接口、权限和运行时依赖，以及测试结果、人工验收步骤和候选 ZIP 的提交/大小/SHA256。ZIP 是审查材料，不代替源码 PR；审核和发布继续由维护者执行。基础 CI 只执行文档、发布检查器回归与源码编译，不运行第三方插件或真实账号功能。
+
 开始前确认目录、分支和未提交文件。工作区未归类清楚时，不切换分支或拉取合并。
 
 ```powershell
@@ -91,6 +93,22 @@ python -m compileall -q plugins tests tools
 测试使用替身账号和请求数据，不读取真实 Cookie、不自动发送弹幕。真实直播、登录、播放与打包验证单独说明条件和结果；未执行或失败的项目明确记录。
 
 ## 版本、打包与网站发布
+
+### 新版本发布门槛
+
+1. 先完成源码审查和人工验收，将实际发布源码集成到 `develop`、`main`，再在该源码上创建插件标签，例如 `proxy-control-v1.1`。不以未合入功能分支的标签直接公开发布。
+2. 同步远端分支与标签，在仓库根目录从标签内的 Git 原始文件生成正式包并验证；日常候选仍可使用原构建工具：
+
+   ```powershell
+   git fetch origin main develop --tags
+   python tools/verify_plugin_release.py --plugin proxy_control --tag proxy-control-v1.1 --archive dist/proxy_control-1.1.zip --build
+   ```
+
+   输出路径须不存在。检查器核对标签提交是 `origin/develop` 和 `origin/main` 的祖先、清单与标签/文件名一致，以及 ZIP 每个文件与标签源码逐字节一致（含 LICENSE/NOTICE），拒绝多余文件、重复文件或超过安装限制的包。`--build` 直接读取 Git 对象，避免本机未提交内容或 CRLF 转换混入正式包；对已有包省略 `--build`。输出包含源码 SHA、大小及 ZIP SHA256。
+3. 创建**草稿 Release**，上传已核验 ZIP 和对应说明；需要兼容旧本体时同步维护 `plugin-catalog.json`。在 Actions 手动运行 [Verify and publish plugin draft](.github/workflows/publish-plugin.yml)，填写插件 ID 和标签。它会重新下载草稿中的实际 ZIP，校验通过后才公开；候选失败保持草稿。
+4. 发布后核对公开附件与输出摘要，更新发布说明和增量记录。不要在网页绕过工作流直接公开，也不要覆盖既有正式附件。GitHub 管理员仍能绕过工作流，这不是仓库权限的硬性限制。
+
+此门槛适用于后续新发布。历史已发布版本不改标签、不替换附件；代理1.0本次只将与公开包一致的源码补入开发基线，历史来源记录保留。
 
 - 插件版本以各自的 `plugins/<ID>/plugin.json` 为准。发布前核对清单、README、发布说明、标签源码和安装包是否对应。
 - 从 [插件增量记录](docs/changes/README.md) 汇总本次实际包含且已验收的条目，并核对上次公开标签之后的源码差异；正式发布后归入各插件记录的已发布段，更新基线，未包含的条目保留待发布。
