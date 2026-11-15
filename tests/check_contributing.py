@@ -152,6 +152,12 @@ class ContributionGuideTests(unittest.TestCase):
             'global_live': {'twitch', 'youtube'},
             'match_sync': {'bilibili', 'huya', 'douyu', 'douyin', 'twitch', 'youtube'},
             'bili_live': {'bilibili'},
+            'huya_live': {'huya'},
+            'douyu_live': {'douyu'},
+            'douyin_live': {'douyin'},
+            'twitch_live': {'twitch'},
+            'youtube_live': {'youtube'},
+            'chzzk_live': set(),
         }
         for path in manifests:
             manifest = json.loads(path.read_text(encoding='utf-8'))

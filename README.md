@@ -129,3 +129,67 @@ B站直播互动 1.1 已发布，下载入口和在线插件目录已更新。
 
 插件首次提取自 [DD监控室CE](https://github.com/Lanpropro/DD_Monitor_CE) 的 `4bf84bc` 基线，后续在本仓库独立维护。
 保留原项目的 GNU LGPL v2.1 许可，第三方来源与声明见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE.md)。
+
+## 按平台安装的开发候选
+
+国内／海外组合包保留兼容；以下独立插件尚未正式发布。新包内置所需公共组件，无需安装基础插件。
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<h3><a href="plugins/huya_live/README.md">虎牙直播（独立开发候选）</a></h3>
+<p><img src="docs/assets/platforms/huya.png" alt="虎牙直播" width="24" height="24"></p>
+<p>独立启用、更新与回滚，版本0.1；需配套0.7.3开发版。</p>
+<p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
+<p>下载插件：仅本地候选，尚未发布。</p>
+</td>
+<td width="50%" valign="top">
+<h3><a href="plugins/douyu_live/README.md">斗鱼直播（独立开发候选）</a></h3>
+<p><img src="docs/assets/platforms/douyu.png" alt="斗鱼直播" width="24" height="24"></p>
+<p>独立启用、更新与回滚，版本0.1；需配套0.7.3开发版。</p>
+<p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
+<p>下载插件：仅本地候选，尚未发布。</p>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<h3><a href="plugins/douyin_live/README.md">抖音直播（独立开发候选）</a></h3>
+<p><img src="docs/assets/platforms/douyin.png" alt="抖音直播" width="24" height="24"></p>
+<p>独立启用、更新与回滚，版本0.1；需配套0.7.3开发版。</p>
+<p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
+<p>下载插件：仅本地候选，尚未发布。</p>
+</td>
+<td width="50%" valign="top">
+<h3><a href="plugins/twitch_live/README.md">Twitch直播（独立开发候选）</a></h3>
+<p><img src="docs/assets/platforms/twitch.png" alt="Twitch直播" width="24" height="24"></p>
+<p>独立启用、更新与回滚，版本0.1；需配套0.7.3开发版。</p>
+<p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
+<p>下载插件：仅本地候选，尚未发布。</p>
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<h3><a href="plugins/youtube_live/README.md">YouTube直播（独立开发候选）</a></h3>
+<p><img src="docs/assets/platforms/youtube.png" alt="YouTube直播" width="24" height="24"></p>
+<p>独立启用、更新与回滚，版本0.1；需配套0.7.3开发版。</p>
+<p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
+<p>下载插件：仅本地候选，尚未发布。</p>
+</td>
+<td width="50%" valign="top">
+<h3><a href="plugins/chzzk_live/README.md">CHZZK直播（独立开发候选）</a></h3>
+
+<p>独立启用、更新与回滚，版本0.1；需配套0.7.3开发版。</p>
+<p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
+<p>下载插件：仅本地候选，尚未发布。</p>
+</td>
+</tr>
+</table>
+
+| 插件ID | 候选版本 | 状态 |
+| --- | --- | --- |
+| `huya_live` | 0.1 | 独立开发候选，未发布 |
+| `douyu_live` | 0.1 | 独立开发候选，未发布 |
+| `douyin_live` | 0.1 | 独立开发候选，未发布 |
+| `twitch_live` | 0.1 | 独立开发候选，未发布 |
+| `youtube_live` | 0.1 | 独立开发候选，未发布 |
+| `chzzk_live` | 0.1 | 独立开发候选，未发布 |

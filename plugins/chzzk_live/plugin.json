@@ -1,0 +1,18 @@
+{
+  "id": "chzzk_live",
+  "name": "CHZZK直播",
+  "description": "CHZZK公开直播、状态与画质；暂不含账号和聊天",
+  "version": "0.1",
+  "min_app_version": "0.7.3",
+  "platforms": [
+    "chzzk"
+  ],
+  "replaces": "global_live",
+  "inherit_settings": [
+    "show_platform_logo"
+  ],
+  "replaces_platforms": [
+    "twitch",
+    "youtube"
+  ]
+}

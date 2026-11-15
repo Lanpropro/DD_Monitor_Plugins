@@ -145,3 +145,7 @@ YouTube订阅读取失败时显示HTTP状态与已知原因代码，区分权限
 ## 模块职责
 
 入口只组合平台，Twitch／YouTube／CHZZK协议及两平台网页登录分别维护；旧类和函数入口保留兼容导出。缓存属于每个平台实例，Logo控制对象由插件创建并在卸载时移除。详见[海外模块边界](../../docs/development/global-modules.md)。
+
+## 独立平台开发候选
+
+各平台已有0.1独立安装包，组合包保留兼容。迁移、共享源码收集与回滚方式见[平台独立包迁移](../../docs/development/platform-packages.md)；这些候选尚未正式发布。

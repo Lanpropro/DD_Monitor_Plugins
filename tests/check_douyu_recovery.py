@@ -73,6 +73,7 @@ def main():
         plugin = entry.LivePlatformsPlugin()
         plugin.context = plugins.PluginContext(manager, 'domestic_live')
         plugin._diagnostic_enabled = False
+        plugin._owned_kinds = ("huya", "douyu", "douyin")
         with patch.object(platform, 'report_playback_failure') as report:
             plugin.on_event(plugins.EVENT_STREAM_FAILED, {'room': {'room_id': 'douyu:123'},
                 'source_url': 'https://hw.test/live', 'reason': 'STALL'})

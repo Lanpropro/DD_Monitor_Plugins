@@ -15,12 +15,15 @@ from .platform_logo import PlatformLogoControl
 
 class GlobalLivePlugin(api.Plugin):
     def on_load(self, context):
-        context.register_platform(TwitchPlatform())
-        context.register_platform(YouTubePlatform())
         from .chzzk import ChzzkPlatform
-        context.register_platform(ChzzkPlatform())
-        if QApplication.instance() is not None and context.window is not None:
-            self._logo_control = PlatformLogoControl(context, ("twitch", "youtube", "chzzk"), "显示海外平台 Logo")
+        active = []
+        for factory in (TwitchPlatform, YouTubePlatform, ChzzkPlatform):
+            if getattr(context, 'platform_replaced', lambda _kind: False)(factory.kind) is True:
+                continue
+            context.register_platform(factory())
+            active.append(factory.kind)
+        if active and QApplication.instance() is not None and context.window is not None:
+            self._logo_control = PlatformLogoControl(context, tuple(active), '显示海外平台 Logo')
 
     def on_unload(self):
         if getattr(self, "_logo_control", None) is not None:

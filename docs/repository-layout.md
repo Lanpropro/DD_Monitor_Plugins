@@ -1,6 +1,6 @@
 # 插件仓库目录与资料分类
 
-本仓库维护四个插件，网站在独立仓库维护。整理只调整文档位置和本机历史资料，不变更插件行为、版本和发布状态。
+本仓库维护四个已发布插件系列及六个独立平台开发候选，网站在独立仓库维护。整理只调整文档位置和本机历史资料，不变更插件行为、版本和发布状态。
 
 ## 持续维护的文件
 
@@ -47,3 +47,5 @@ git log --oneline --left-right HEAD...origin/develop
 2026-10-31 整理时，根目录 `function/douyin-room-follow-reliability` 与 `origin/develop` 各有独立提交，因此根目录保留原分支，受版本管理的整理从 `origin/develop` 建立 `function/plugin-repository-organization`，通过独立 worktree 提交。此记录是当时的快照，不代表后续分支状态。
 
 不根据分支名、日期或工作树干净就认定工作已经合入；squash 合并也不能只靠祖先关系判断。删除工作树或分支前另行核对 PR、提交差异和保留需求，本次不删除。
+
+独立平台候选的入口和清单位于各自`plugins/<平台>_live/`，共享源码收集清单见[平台独立包迁移](development/platform-packages.md)。

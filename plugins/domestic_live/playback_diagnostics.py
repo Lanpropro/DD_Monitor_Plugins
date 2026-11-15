@@ -86,7 +86,7 @@ class PlaybackDiagnostics:
             return
         source = payload.get("source")
         room = str(getattr(source, "room_id", ""))
-        if not re.fullmatch(r"(?:huya|douyu|douyin):[A-Za-z0-9_-]{1,80}", room):
+        if room.split(":", 1)[0] not in getattr(self.host, "_owned_kinds", ("huya", "douyu", "douyin")) or not re.fullmatch(r"(?:huya|douyu|douyin):[A-Za-z0-9_-]{1,80}", room):
             self._detach_player_diagnostic(tile)
             return
         context = self.host.context

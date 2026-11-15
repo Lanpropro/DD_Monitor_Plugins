@@ -340,3 +340,7 @@ python tests/check_douyu_interaction.py --host ../DD_Monitor_CE --plugins-dir ..
 ### 开发职责
 
 入口只负责注册与生命周期；平台适配、虎牙协议、Logo 展示及播放诊断分别维护。状态所有权、兼容入口、验证方式与仍保留职责见[国内平台功能边界](../../docs/development/domestic-modules.md)。本批结构拆分不改变播放参数，不等同于实播缓冲修复。
+
+## 独立平台开发候选
+
+各平台已有0.1独立安装包，组合包保留兼容。迁移、共享源码收集与回滚方式见[平台独立包迁移](../../docs/development/platform-packages.md)；这些候选尚未正式发布。

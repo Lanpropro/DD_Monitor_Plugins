@@ -1,0 +1,21 @@
+{
+  "id": "douyin_live",
+  "name": "抖音直播",
+  "description": "抖音直播播放、登录关注与官网弹幕输入（实验功能）",
+  "version": "0.1",
+  "min_app_version": "0.7.3",
+  "platforms": [
+    "douyin"
+  ],
+  "replaces": "domestic_live",
+  "inherit_settings": [
+    "show_platform_logo",
+    "douyin_follow_profiles",
+    "douyin_room_owners"
+  ],
+  "replaces_platforms": [
+    "huya",
+    "douyu",
+    "douyin"
+  ]
+}

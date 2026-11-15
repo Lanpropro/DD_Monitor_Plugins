@@ -2,5 +2,10 @@
   "id": "global_live",
   "name": "海外直播平台",
   "description": "YouTube、Twitch 和 CHZZK 关注卡片、格子播放、自动选择画质、悬停预览与聊天弹幕",
-  "version": "1.2"
+  "version": "1.2",
+  "platforms": [
+    "twitch",
+    "youtube",
+    "chzzk"
+  ]
 }

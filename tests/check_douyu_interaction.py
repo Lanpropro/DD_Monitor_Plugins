@@ -416,7 +416,7 @@ class ChatTests(unittest.TestCase):
 class UITests(unittest.TestCase):
     def setUp(self):
         self.parent = QWidget()
-        self.owner = SimpleNamespace(platform=SimpleNamespace(_playback_cookies=lambda: cookie_jar()),
+        self.owner = SimpleNamespace(platform=SimpleNamespace(kind="douyu", _playback_cookies=lambda: cookie_jar()),
             context=SimpleNamespace(notify=Mock(), request_login=Mock()), sending=False, requests=set())
         def retire(request):
             request.wait()
@@ -568,7 +568,7 @@ class UITests(unittest.TestCase):
         def fail(room, text, cancelled, *, progress):
             progress("wait_ack")
             raise api.InteractionError("弹幕发送结果未确认，请在直播间核对后再试")
-        with patch.object(ui.DouyuAPI, "send_text", side_effect=fail):
+        with patch.object(api.DouyuAPI, "send_text", side_effect=fail):
             self.widget.send_text()
             deadline = time.monotonic() + 1
             while self.widget.pending is not None and time.monotonic() < deadline:
@@ -1114,7 +1114,7 @@ class HuyaTests(unittest.TestCase):
         self.session.__exit__ = Mock(return_value=False)
         self.session.get.return_value = response({})
         self.session.get.return_value.text = 'var TT_ROOM_DATA = {"id":42,"channel":100,"sid":200};'
-        self.platform = SimpleNamespace(normalize=lambda room: room if str(room).startswith("huya:") else "huya:"+str(room),
+        self.platform = SimpleNamespace(kind="huya", normalize=lambda room: room if str(room).startswith("huya:") else "huya:"+str(room),
             room_url=lambda room: "https://www.huya.com/"+room.split(":")[-1],
             account_info=Mock(return_value={"uid":"42"}), _playback_cookies=cookie_jar)
         self.client = huya.HuyaAPI(self.platform, cookie_jar(), session_factory=lambda: self.session)
@@ -1391,7 +1391,7 @@ class DouyinTests(unittest.TestCase):
         self.session.__enter__=Mock(return_value=self.session)
         self.session.__exit__=Mock(return_value=False)
         self.session.get.return_value=response({"status_code":0,"data":{"id_str":"12345"}})
-        self.platform=SimpleNamespace(normalize=lambda room:"douyin:123",room_url=lambda room:"https://live.douyin.com/123",
+        self.platform=SimpleNamespace(kind="douyin", normalize=lambda room:"douyin:123",room_url=lambda room:"https://live.douyin.com/123",
             account_info=Mock(return_value={"uid":"42","uname":"fixture"}),
             room_data=Mock(return_value={"room":{"id_str":"999999","status":2}}),
             _playback_cookies=lambda:requests.cookies.RequestsCookieJar())
