@@ -13,7 +13,14 @@
     "huya_platform.py": "plugins/domestic_live/huya_platform.py",
     "huya_protocol.py": "plugins/domestic_live/huya_protocol.py",
     "huya_interaction.py": "plugins/domestic_live/huya_interaction.py",
-    "biliup-MIT.txt": "plugins/domestic_live/biliup-MIT.txt"
+    "biliup-MIT.txt": "plugins/domestic_live/biliup-MIT.txt",
+    "huya_accounts.py": "plugins/domestic_live/huya_accounts.py",
+    "huya_playback.py": "plugins/domestic_live/huya_playback.py",
+    "interaction_widgets.py": "plugins/domestic_live/interaction_widgets.py",
+    "interaction_gifts.py": "plugins/domestic_live/interaction_gifts.py",
+    "interaction_requests.py": "plugins/domestic_live/interaction_requests.py",
+    "interaction_composers.py": "plugins/domestic_live/interaction_composers.py",
+    "interaction_controls.py": "plugins/domestic_live/interaction_controls.py"
   },
   "douyu_live": {
     "platform_base.py": "plugins/domestic_live/platform_base.py",
@@ -29,7 +36,14 @@
     "douyu_platform.py": "plugins/domestic_live/douyu_platform.py",
     "douyu_interaction.py": "plugins/domestic_live/douyu_interaction.py",
     "douyu_danmaku.py": "plugins/domestic_live/douyu_danmaku.py",
-    "biliup-MIT.txt": "plugins/domestic_live/biliup-MIT.txt"
+    "biliup-MIT.txt": "plugins/domestic_live/biliup-MIT.txt",
+    "douyu_accounts.py": "plugins/domestic_live/douyu_accounts.py",
+    "douyu_playback.py": "plugins/domestic_live/douyu_playback.py",
+    "interaction_widgets.py": "plugins/domestic_live/interaction_widgets.py",
+    "interaction_gifts.py": "plugins/domestic_live/interaction_gifts.py",
+    "interaction_requests.py": "plugins/domestic_live/interaction_requests.py",
+    "interaction_composers.py": "plugins/domestic_live/interaction_composers.py",
+    "interaction_controls.py": "plugins/domestic_live/interaction_controls.py"
   },
   "douyin_live": {
     "platform_base.py": "plugins/domestic_live/platform_base.py",
@@ -49,7 +63,16 @@
     "douyin_profile.js": "plugins/domestic_live/douyin_profile.js",
     "douyin_room.js": "plugins/domestic_live/douyin_room.js",
     "douyin_follows.js": "plugins/domestic_live/douyin_follows.js",
-    "biliup-MIT.txt": "plugins/domestic_live/biliup-MIT.txt"
+    "biliup-MIT.txt": "plugins/domestic_live/biliup-MIT.txt",
+    "douyin_accounts.py": "plugins/domestic_live/douyin_accounts.py",
+    "douyin_playback.py": "plugins/domestic_live/douyin_playback.py",
+    "interaction_widgets.py": "plugins/domestic_live/interaction_widgets.py",
+    "interaction_gifts.py": "plugins/domestic_live/interaction_gifts.py",
+    "interaction_requests.py": "plugins/domestic_live/interaction_requests.py",
+    "interaction_composers.py": "plugins/domestic_live/interaction_composers.py",
+    "interaction_controls.py": "plugins/domestic_live/interaction_controls.py",
+    "douyin_rooms.py": "plugins/domestic_live/douyin_rooms.py",
+    "douyin_room_data.py": "plugins/domestic_live/douyin_room_data.py"
   },
   "twitch_live": {
     "public_live.py": "plugins/global_live/public_live.py",
@@ -57,7 +80,8 @@
     "twitch_platform.py": "plugins/global_live/twitch_platform.py",
     "twitch_accounts.py": "plugins/global_live/twitch_accounts.py",
     "account_common.py": "plugins/global_live/account_common.py",
-    "platform_logo.py": "plugins/domestic_live/platform_logo.py"
+    "platform_logo.py": "plugins/domestic_live/platform_logo.py",
+    "public_http.py": "plugins/global_live/public_http.py"
   },
   "youtube_live": {
     "public_live.py": "plugins/global_live/public_live.py",
@@ -66,12 +90,14 @@
     "youtube_accounts.py": "plugins/global_live/youtube_accounts.py",
     "account_common.py": "plugins/global_live/account_common.py",
     "youtube_account_errors.py": "plugins/global_live/youtube_account_errors.py",
-    "platform_logo.py": "plugins/domestic_live/platform_logo.py"
+    "platform_logo.py": "plugins/domestic_live/platform_logo.py",
+    "public_http.py": "plugins/global_live/public_http.py"
   },
   "chzzk_live": {
     "public_live.py": "plugins/global_live/public_live.py",
     "platform_single.py": "plugins/global_live/platform_single.py",
     "chzzk.py": "plugins/global_live/chzzk.py",
-    "platform_logo.py": "plugins/domestic_live/platform_logo.py"
+    "platform_logo.py": "plugins/domestic_live/platform_logo.py",
+    "public_http.py": "plugins/global_live/public_http.py"
   }
 }

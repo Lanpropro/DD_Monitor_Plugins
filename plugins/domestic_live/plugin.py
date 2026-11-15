@@ -62,7 +62,8 @@ class LivePlatformsPlugin(api.Plugin):
             douyu._context = context
             context.register_platform(douyu)
         if callable(getattr(context, "register_tile_control", None)) and hasattr(api, "TileControl"):
-            from .douyu_composer import DouyuInteraction, HuyaComposer
+            from .interaction_controls import DouyuInteraction
+            from .interaction_composers import HuyaComposer
             if douyu is not None:
                 self._douyu_interaction = DouyuInteraction(context, douyu)
             if huya is not None:
@@ -78,7 +79,7 @@ class LivePlatformsPlugin(api.Plugin):
             douyin._context = context
             context.register_platform(douyin)
             if callable(getattr(context, "register_tile_control", None)) and hasattr(api, "TileControl"):
-                from .douyu_composer import DouyinComposer
+                from .interaction_composers import DouyinComposer
                 self._douyin_interaction = DouyuInteraction(context, douyin, composer_class=DouyinComposer, control_id="douyin_interaction")
         self._diagnostic_enabled = True
         self._diagnostic_players = {}
