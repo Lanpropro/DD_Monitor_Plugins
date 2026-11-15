@@ -6,10 +6,11 @@
 | --- | --- |
 | `plugin.py` | 注册平台与互动控件、恢复映射、宿主事件路由和关闭顺序；保留旧类及协议函数导出 |
 | `platform_base.py` | 官方分享链接校验/解析、画质元数据、数字房间及共用取流入口；`_qualities` 仍属于各平台实例 |
-| `huya_platform.py` | 虎牙账号、关注、房间、画质和 CDN 候选；CDN 锁和失败记录仍属于本平台实例 |
+| `huya_platform.py` | 虎牙房间、画质和 CDN 候选；CDN 锁和失败记录仍属于本平台实例 |
 | `huya_protocol.py` | WUP/Tars 编码、凭据域限制与响应校验；无界面和后台定时器 |
-| `douyu_platform.py` | 斗鱼账号、关注、房间、原生画质与 CDN 选择；失败隔离到本平台和房间 |
-| `douyin_platform.py` | 抖音身份/房间映射、关注/头像、公开资料与流地址解析；映射、缓存和广播匹配器仍属于本平台实例 |
+| `douyu_platform.py` | 斗鱼房间、原生画质与 CDN 选择；失败隔离到本平台和房间 |
+| `douyin_platform.py` | 抖音房间身份规范化、公开资料与流地址解析；映射、缓存和广播匹配器仍属于本平台实例 |
+| `douyu_accounts.py`、`huya_accounts.py`、`douyin_accounts.py` | 各平台专用的账号和关注功能类；包含登录配置、身份确认、关注分页及取消；抖音另含账号引用、主页关联和头像补取 |
 | `platform_logo.py` | Logo 设置和关注卡片展示；QObject 父对象仍是宿主窗口，卸载时移除事件过滤器 |
 | `douyin_errors.py`、`diagnostic_errors.py` | 查找/验证异常类型及跨平台共用的异常脱敏；避免平台日志反向依赖插件入口 |
 | `playback_diagnostics.py` | 协议异常脱敏、mpv 错误分类和播放状态观察；协调器仅引用插件，观察记录保留在插件原字典，不复制状态 |
@@ -17,13 +18,15 @@
 | `douyu_interaction.py`、`huya_interaction.py`、`douyin_interaction.py` | 各平台发送协议、回执及广播复核；本批不修改 |
 | `douyin_browser.py`、`douyin_native.js` | 官网原生输入、单次提交及核对窗口；本批不修改 |
 
-实现模块不反向导入 `plugin.py`；旧调用方仍可从入口取得同一个类对象。平台内部直接依赖职责模块。平台内账号、关注与媒体解析暂未继续细拆，输入控件里的礼物/发送详情界面也仍保留；后续按实际功能边界分批处理，不为缩短文件增加通用框架。
+实现模块不反向导入 `plugin.py`；旧调用方仍可从入口取得同一个类对象。账号功能类组合到同一个平台实例，调用 `self.normalize`、`self.room_info` 等原适配器方法，保留覆写和取消回调。它们没有自己的构造器、线程、定时器或可变状态副本；抖音四份映射／资料字典仍由平台构造并在原主线程流程持久化。媒体解析与输入控件里的礼物/发送详情界面仍需按完整功能边界审查，见[六平台职责与验收矩阵](platform-responsibilities.md)。
 
 诊断不创建新的定时器、不调整 mpv 日志级别、不重建播放器；同一 core 复用观察连接，换 core、格子停止、关闭或卸载按原顺序断开。主线程仍负责账号映射持久化，网络线程不接管配置写入。
 
 ## 验证
 
 `python tests/check_domestic_modules.py --host <本体目录>` 检查独立导入、旧对象身份、依赖方向、平台实例状态隔离及诊断卸载。可用 `--plugins-dir` 检查隔离安装目录。原平台、关注、分享、凭据、CDN、发送和原生浏览器专项继续执行；夹具的替换点随实现模块迁移，不减少原断言。包检查验证所有新模块随 ZIP 交付。
+
+账号职责补充 `python tests/check_platform_accounts.py --host <本体目录>`：独立导入不装载平台入口、取消后不请求、虎牙身份与关注保留适配器覆写、抖音映射原对象更新及实例隔离。原 `check_douyu_follows`、`check_douyin_accounts`、`check_douyin_lookup` 继续覆盖分页、离线账号和重启。
 
 根 `run.cmd` 验证使用临时插件目录、合成配置和禁止联网的夹具；不能代替真实多路播放。人工在根入口核对斗鱼/抖音/B站的原画质、切换/重连、关注与关闭；真实发送仍由用户手动操作。
 

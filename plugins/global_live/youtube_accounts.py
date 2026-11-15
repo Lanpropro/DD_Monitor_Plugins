@@ -6,6 +6,7 @@ import time
 from ddm import plugins as api
 from ddm.global_danmaku import page_json, renderers
 from ddm.live_danmaku import USER_AGENT
+from .public_live import image_url
 from .account_common import cookie_value, checked, progress
 
 def youtube_context(session):
@@ -97,3 +98,67 @@ def youtube_follows(session, cancelled):
         cursors.add(tokens[0])
         data = youtube_query(session, 'browse', config, headers, continuation=tokens[0])
     return []
+
+
+class YouTubeAccounts:
+    oauth_provider = "youtube"
+
+    browser_login_url = "https://www.youtube.com/"
+
+    browser_cookie_domains = ("youtube.com", "google.com")
+
+    def browser_account_info(self, session, cancelled):
+        return youtube_account(session, cancelled)
+
+    def browser_follow_rooms(self, session, cancelled):
+        return youtube_follows(session, cancelled)
+
+    def account_info(self, session, cancelled):
+        if cancelled():
+            return {}
+        with session.get("https://openidconnect.googleapis.com/v1/userinfo", timeout=(4, 8)) as response:
+            if response.status_code == 401:
+                raise RuntimeError("Google 登录已过期，请重新授权")
+            response.raise_for_status()
+            user = response.json()
+        uid = str(user.get("sub") or "")
+        if not uid or not user.get("name"):
+            raise RuntimeError("Google 未返回有效用户身份，请重新授权")
+        return {"uid": uid, "uname": user["name"],
+                "face": image_url(user.get("picture"), self.image_hosts)}
+
+    def follow_rooms(self, session, cancelled):
+        rooms, cursors = {}, set()
+        params = {"part": "snippet", "mine": "true", "maxResults": 50}
+        while not cancelled():
+            with session.get("https://www.googleapis.com/youtube/v3/subscriptions", params=params,
+                    timeout=(4, 8)) as response:
+                if response.status_code in (401, 403):
+                    from .youtube_account_errors import subscription_error
+                    raise RuntimeError(subscription_error(response))
+                response.raise_for_status()
+                payload = response.json()
+            if not isinstance(payload.get("items"), list):
+                raise RuntimeError("YouTube 订阅列表响应异常，请稍后重试")
+            for item in payload["items"]:
+                if cancelled():
+                    return []
+                snippet = item.get("snippet") or {}
+                channel = snippet.get("resourceId", {}).get("channelId", "")
+                if not re.fullmatch(r"UC[A-Za-z0-9_-]{22}", channel):
+                    raise RuntimeError("YouTube 订阅缺少有效频道 ID，请稍后重试")
+                rid = self.normalize("youtube:" + channel)
+                images = snippet.get("thumbnails") or {}
+                face = next((url for key in ("high", "medium", "default") if (
+                    url := image_url((images.get(key) or {}).get("url"), self.image_hosts))), "")
+                rooms[rid] = api.RoomInfo(room_id=rid, platform=self.kind,
+                    uname=snippet.get("title") or channel, face=face,
+                    extra={"live_known": False, "playback_mode": "stream"}).as_dict()
+            cursor = payload.get("nextPageToken")
+            if not cursor:
+                return list(rooms.values())
+            if not isinstance(cursor, str) or cursor in cursors:
+                raise RuntimeError("YouTube 订阅分页没有前进，请稍后重试")
+            cursors.add(cursor)
+            params["pageToken"] = cursor
+        return []

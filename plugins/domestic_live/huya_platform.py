@@ -1,4 +1,4 @@
-"""Huya account, follow, room and playback adapter; state belongs to each platform."""
+"""Huya room and playback adapter; state belongs to each platform."""
 import base64
 import hashlib
 from html import unescape
@@ -16,21 +16,19 @@ from streamlink.plugins.huya import Huya
 from streamlink.stream.http import HTTPStream
 from ddm import plugins as api
 from ddm.live_danmaku import tars_int
-from .huya_protocol import huya_string, huya_user, huya_wup_request, huya_follow_request
+from .huya_protocol import huya_string, huya_user, huya_wup_request
 from .platform_base import LiveQualityPlatform
 from .diagnostic_errors import diagnostic_reason
+from .huya_accounts import HuyaAccounts
 
-class HuyaPlatform(LiveQualityPlatform):
+
+class HuyaPlatform(HuyaAccounts, LiveQualityPlatform):
     kind = "huya"
     share_hosts = ("hy.fan",)
     hosts = ("www.huya.com", "huya.com", "m.huya.com")
     label = "虎牙"
     room_input_hint = "虎牙直播间链接"
     playback_mode = "stream"
-    account_login_url = "https://www.huya.com/?evt_fe=login"
-    account_cookie_domain = "huya.com"
-    follow_login_url = "https://www.huya.com/?evt_fe=login"
-    follow_cookie_domain = "huya.com"
 
     def __init__(self):
         super().__init__()
@@ -130,61 +128,6 @@ class HuyaPlatform(LiveQualityPlatform):
             public = [item for item in options if 0 < item["rate"] <= 4000 and not item.get("restricted")]
             return max(public, key=lambda item: item["rate"]) if public else options[0]
         return super()._select_quality(room_id, quality, preview)
-
-    def follow_rooms(self, session, cancelled) -> list:
-        if cancelled():
-            return []
-        account = self.account_info(session, cancelled)
-        if cancelled():
-            return []
-        uid = account["uid"]
-        data = huya_follow_request(session, "getAllSubscribeToUidList", uid, uid)
-        targets = data.get(1)
-        if not isinstance(targets, list) or any(not isinstance(value, int) or value <= 0 for value in targets):
-            raise RuntimeError("虎牙关注列表格式异常，请稍后重试")
-        rooms = {}
-        for target in dict.fromkeys(targets):
-            if cancelled():
-                return []
-            profile = huya_follow_request(session, "getUserProfile", uid, target).get(0, {})
-            user, presenter = profile.get(0, {}), profile.get(1, {})
-            rid = presenter.get(10) or presenter.get(3)
-            if not rid:
-                continue  # 普通用户和注销账号没有可导入的直播间。
-            if user.get(0) != target:
-                raise RuntimeError("虎牙关注主播信息不匹配，请稍后重试")
-            canonical = self.normalize("huya:" + str(rid))
-            if canonical not in rooms:
-                # 账号资料中的最近直播不能代表当前开播状态，复用房间状态查询。
-                rooms[canonical] = self.room_info(canonical).as_dict()
-                if cancelled():
-                    return []
-        return list(rooms.values())
-
-    def account_info(self, session, cancelled) -> dict:
-        if cancelled():
-            return {}
-        with session.get("https://l.huya.com/udb_web/udbport2.php",
-                params={"m": "HuyaLogin", "do": "checkLogin", "callback": "ddmAccount"},
-                headers={"User-Agent": "Mozilla/5.0", "Referer": self.account_login_url},
-                timeout=(4, 8)) as response:
-            response.raise_for_status()
-            match = re.fullmatch(r"\s*ddmAccount\((.*)\)\s*;?\s*", response.text, re.S)
-            if match is None:
-                raise RuntimeError("虎牙账号确认失败，请在官方页面重新登录后重试")
-            data = json.loads(match[1])
-        uid = str(data.get("uid") or "")
-        if data.get("isLogined") is not True or not uid.isdigit() or int(uid) <= 0:
-            raise RuntimeError("虎牙未登录或登录已过期，请在官方页面完成登录")
-        face = str(data.get("userLogo") or "")
-        if face.startswith("//"):
-            face = "https:" + face
-        parts = urlsplit(face)
-        if (parts.scheme != "https" or parts.username or parts.password or
-                not (parts.hostname or "").endswith(".msstatic.com")):
-            face = ""
-        return {"uid": uid, "uname": data.get("userNick") or data.get("userName") or uid,
-                "face": face}
 
     def matches(self, room_id: str) -> bool:
         text = str(room_id or "").strip()
