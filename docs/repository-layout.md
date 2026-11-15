@@ -1,5 +1,7 @@
 # 插件仓库目录与资料分类
 
+> 类型：参考 ｜ 状态：维护中 ｜ 适用版本：全部版本 ｜ 更新：2026-11-15 ｜ 读者：维护者
+
 本仓库维护四个插件，网站在独立仓库维护。整理只调整文档位置和本机历史资料，不变更插件行为、版本和发布状态。
 
 ## 持续维护的文件
@@ -10,9 +12,9 @@
 | `tests/` | 离线替身回归、宿主集成、原生界面及性能专项；按测试自身条件执行，不能仅因未被批量调用而判定无用 |
 | `tools/build_plugins.py` | 从 Git 跟踪文件生成安装包；保留 |
 | `tools/inspect_host_package.py` | 针对旧 `v0.2` PyInstaller 宿主附件的只读诊断工具，硬编码旧 EXE 名；保留供历史包排查，不适用于当前包的通用验收 |
-| [README](../README.md)、[贡献指南](../CONTRIBUTING.md)、`LICENSE`、`NOTICE.md` | 使用入口、开发约定及许可来源；保留 |
+| [README](../README.md)、[贡献指南](../CONTRIBUTING.md)、[文档中心](README.md)、`LICENSE`、`NOTICE.md` | 使用入口、开发约定及许可来源；保留 |
 | [WEBSITE.md](../WEBSITE.md) | 独立网站仓库的迁移与本地入口；保留 |
-| [releases/](releases/README.md) | 集中存放 10 份发布说明；4 份公开版本与 GitHub Releases 正文同步，其余保留历史正文和旧文件名 |
+| [releases/](releases/README.md) | 保存公开版本正文与历史说明，具体版本及来源以发布索引为准 |
 | [changes/](changes/README.md) | 按插件保存上次公开发布后的单项验收记录；每次通过后追加，发布时汇总并保留历史 |
 | [archive/](archive/README.md) | 已完成的历史实施计划；不作为当前开发任务 |
 

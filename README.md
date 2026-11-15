@@ -24,7 +24,7 @@
 <p><strong>虎牙 · 斗鱼 · 抖音</strong></p>
 <p>将国内平台的直播间加入关注与画面墙，解析直播流，在同一套界面里观看。</p>
 <p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
-<p><a href="plugins/domestic_live/README.md">功能与兼容说明</a> · <a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v1.5">下载插件</a></p>
+<p><a href="plugins/domestic_live/README.md">功能与兼容说明</a> · <a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v2.0">下载插件</a></p>
 </td>
 <td width="50%" valign="top">
 <h3><a href="plugins/global_live/README.md">海外直播平台</a></h3>
@@ -42,7 +42,7 @@
 <p><strong>一路主画面，多路解说</strong></p>
 <p>对齐比赛主画面与二路直播，混合解说声音、合并带来源标记的弹幕。其他平台需先启用对应平台插件。</p>
 <p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
-<p><a href="plugins/match_sync/README.md">功能与兼容说明</a> · <a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.6.1">下载插件</a></p>
+<p><a href="plugins/match_sync/README.md">功能与兼容说明</a> · <a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.7.0">下载插件</a></p>
 </td>
 <td width="50%" valign="top">
 <h3><a href="plugins/bili_live/README.md">B站直播互动</a></h3>
@@ -54,8 +54,6 @@
 </td>
 </tr>
 </table>
-
-比赛二路同步 [v1.5 候选更新说明](docs/releases/RELEASE-match-sync-v1.5.md)（待实播录制验收）；已发布测试版：[v1.5-pre.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.5-pre.1)。
 
 插件依赖配套的 [DD监控室CE](https://github.com/Lanpropro/DD_Monitor_CE/releases/latest) 运行。具体能力、账号要求与最低本体版本，以各插件说明及对应 Release 为准。
 
@@ -84,7 +82,7 @@ ZIP 内只有插件 ID 对应的顶层文件夹。GitHub 自动生成的 **Sourc
 
 ## 开发与文档
 
-[开发与贡献](CONTRIBUTING.md) · [待发布更新](docs/changes/README.md) · [仓库目录](docs/repository-layout.md) · [发布记录](docs/releases/README.md) · [展示网站仓库与迁移说明](WEBSITE.md)
+[文档中心](docs/README.md) · [开发与贡献](CONTRIBUTING.md) · [待发布更新](docs/changes/README.md) · [仓库目录](docs/repository-layout.md) · [发布记录](docs/releases/README.md) · [展示网站仓库与迁移说明](WEBSITE.md)
 
 插件源码位于 `plugins/<ID>/`，包含清单、实现、资源和各自的 README。网站独立维护，插件安装与更新仍由本仓库提供。
 
