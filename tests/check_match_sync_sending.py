@@ -464,9 +464,11 @@ def check(app, host, module, output=None):
                 console.body_layout.minimumSize(), console.work.geometry(), console.pages.geometry())
             if output:
                 console.grab().save(str(output.with_name(output.stem + '-single-detail.png')))
+                console.rooms.grab().save(str(output.with_name(output.stem + '-recipient-cards-dark.png')))
                 module.theme.apply('light')
                 QTest.qWait(30)
                 console.grab().save(str(output.with_name(output.stem + '-light.png')))
+                console.rooms.grab().save(str(output.with_name(output.stem + '-recipient-cards-light.png')))
                 module.theme.apply('dark')
             single_button = next(button for button in second.parentWidget().findChildren(QPushButton)
                                  if button.property('sendPrimary'))
