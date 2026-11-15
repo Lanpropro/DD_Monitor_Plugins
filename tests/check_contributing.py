@@ -129,6 +129,7 @@ class ContributionGuideTests(unittest.TestCase):
         self.assertIn('(CONTRIBUTING.md)', readme)
         documents = ['README.md', 'CONTRIBUTING.md', 'docs/repository-layout.md',
                      'docs/releases/README.md', 'docs/archive/README.md',
+                     'docs/development/domestic-modules.md',
                      'plugins/DDCut_Replay/README.md']
         documents += [str(path.relative_to(ROOT)) for path in (ROOT / 'docs/changes').glob('*.md')]
         for relative in documents:

@@ -2,6 +2,12 @@
 
 本批从 `plugin.py` 分出完整平台适配、协议、展示与诊断职责。它是结构整理，不改变画质、缓存、超时、重试或发送策略，也不宣称解决实播缓冲。
 
+## PR 集成关系（2026-11-16）
+
+[PR #75](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/75) 的 `f93e7bd` 与 [PR #67](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/67) 内 `04528f6` 的稳定补丁 ID 均为 `738e8782bd088c80638d6700dd9f92f1b8310e48`，无需再次移植实现。相关模块、测试和实播调查记录均已包含于 #67；#75 不再单独集成，分支保留。
+
+#67 后续对入口和诊断增加的平台所有权与组合包替代判断属于独立包迁移，必须保留。[PR #76](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/76) 在 #67 之上进一步拆分账号、媒体和交互职责，尚未人工验收，本次不合并。更新与验收边界见[国内插件增量记录](../changes/domestic_live.md)。
+
 | 模块 | 职责与状态所有者 |
 | --- | --- |
 | `plugin.py` | 注册平台与互动控件、恢复映射、宿主事件路由和关闭顺序；保留旧类及协议函数导出 |
