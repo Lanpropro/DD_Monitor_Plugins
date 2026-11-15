@@ -31,8 +31,9 @@ class ClockFrameDelegate(QStyledItemDelegate):
 
 
 def session_token(viewer, keys):
-    if not viewer.running or viewer.replay.active or viewer.playback_rate != 1:
-        raise ValueError('请恢复正常直播播放后采样；暂停、回看或变速时不能对时')
+    # Cached media timestamps do not change when SafetyBuffer gently varies playback speed.
+    if not viewer.running or viewer.replay.active:
+        raise ValueError('请恢复直播播放后采样；暂停或回看时不能对时')
     token = [viewer.alignment.reference]
     for key in keys:
         row = viewer.rows.get(key)
@@ -83,6 +84,7 @@ class ClockLane(QWidget):
         self.included.setChecked(True)
         self.included.setEnabled(key != dialog.reference)
         self.pick = QPushButton('框选计时器')
+        self.pick.setEnabled(False)
         self.pick.clicked.connect(self.choose_region)
         self.first = QLineEdit()
         self.first.setPlaceholderText('第一帧：分:秒')
@@ -113,8 +115,29 @@ class ClockLane(QWidget):
 
     def select_transition(self, index):
         self.dialog.invalidate()
-        if index >= 0:
+        if index >= 0 and self.frames:
             self.status.setText(f'已选第 {index + 1} 帧为首次翻秒后的画面；请核对数字刚刚变化')
+
+    def show_preview(self):
+        self.strip.clear()
+        if self.preview is None:
+            return
+        image = self.preview[1]
+        if self.region is not None:
+            x, y, width, height = self.region
+            image = image.copy(round(x * image.width()), round(y * image.height()),
+                               max(1, round(width * image.width())), max(1, round(height * image.height())))
+        item = QListWidgetItem(QIcon(QPixmap.fromImage(image)), '计时器选区' if self.region else '画面预览')
+        item.setSizeHint(QSize(160, 90))
+        self.strip.addItem(item)
+
+    def set_preview(self, item):
+        self.preview = item
+        self.pick.setEnabled(not self.dialog.busy)
+        self.frames = []
+        self.first.clear()
+        self.show_preview()
+        self.status.setText('已获取画面，请框选游戏计时器' if self.region is None else '已显示计时器选区，可重新框选或采样')
 
     def choose_region(self):
         if self.preview is None:
@@ -142,7 +165,9 @@ class ClockLane(QWidget):
                 saved[self.key] = self.region
                 self.dialog.viewer.context.set_setting('clock_regions', saved)
                 self.frames = []
-                self.strip.clear()
+                self.first.clear()
+                self.show_preview()
+                self.dialog.sample_token = None
                 self.status.setText('区域已保存，请重新采样')
                 self.dialog.invalidate()
 
@@ -234,7 +259,8 @@ class ClockDialog(QDialog):
     def clear_bands(self):
         for lane in self.lanes.values():
             lane.frames = []
-            lane.strip.clear()
+            lane.first.clear()
+            lane.show_preview()
         self.sample_token = None
         self.invalidate()
 
@@ -267,7 +293,7 @@ class ClockDialog(QDialog):
         for widget in (self.refresh, self.sample, self.calculate, self.mode):
             widget.setEnabled(not busy)
         for lane in self.lanes.values():
-            lane.pick.setEnabled(not busy)
+            lane.pick.setEnabled(not busy and lane.preview is not None)
             lane.included.setEnabled(not busy and lane.key != self.reference)
 
     def start_job(self, *, preview):
@@ -316,8 +342,9 @@ class ClockDialog(QDialog):
                 if error:
                     raise ValueError(error)
                 if preview:
+                    self.sample_token = None
                     for key, frames in bands.items():
-                        self.lanes[key].preview = frames[-1]
+                        self.lanes[key].set_preview(frames[-1])
                     self.status.setText('画面已获取，请框选各路相同的游戏计时器')
                 else:
                     self.sample_token, self.sample_keys = token, keys
