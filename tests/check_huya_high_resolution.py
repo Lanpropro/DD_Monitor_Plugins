@@ -21,7 +21,7 @@ def main():
     manager = PluginManager(plugins_dir=str(ROOT / 'plugins'), enabled=['domestic_live'])
     manager.load()
     platform = manager.platforms['huya']
-    module = sys.modules[type(platform).__module__]
+    module = sys.modules[platform._streams.__func__.__module__]
     session = module.Streamlink()
     data = {'vMultiStreamInfo': [{'iBitRate': rate, 'sDisplayName': name} for rate, name in
             ((20000, '4K'), (14000, '2K'), (4000, '蓝光4M'), (500, '流畅'))],

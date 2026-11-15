@@ -26,7 +26,8 @@ class SinglePlatformPlugin(api.Plugin):
         self._diagnostics = PlaybackDiagnostics(self)
         self._diagnostics._enable_diagnostics(context, self.platform)
         if callable(getattr(context, 'register_tile_control', None)) and hasattr(api, 'TileControl'):
-            from .douyu_composer import DouyuInteraction, DouyuComposer, HuyaComposer, DouyinComposer
+            from .interaction_controls import DouyuInteraction
+            from .interaction_composers import DouyuComposer, HuyaComposer, DouyinComposer
             composer = {'huya': HuyaComposer, 'douyu': DouyuComposer, 'douyin': DouyinComposer}[self.platform.kind]
             self._interaction = DouyuInteraction(context, self.platform, composer_class=composer,
                                                   control_id=self.platform.kind + '_interaction')

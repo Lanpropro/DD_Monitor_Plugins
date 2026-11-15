@@ -39,12 +39,75 @@ class PackageTests(unittest.TestCase):
                     self.assertFalse(manager.skipped)
                     self.assertEqual(len(manager.plugins),1)
                     self.assertEqual(set(path.name for path in Path(directory).iterdir()),{plugin_id})
+                    loaded={name.rsplit('.',1)[-1] for name in sys.modules
+                            if name.startswith('ddm_plugin_'+plugin_id+'.')}
                     package=Path(directory)/plugin_id
                     for other in KINDS:
                         if other!=kind:
                             self.assertFalse((package/(other+'_platform.py')).exists())
+                            self.assertFalse(loaded.intersection({other+'_platform',other+'_accounts',other+'_playback'}))
                 finally:
                     manager.unload()
+
+    def test_individual_upgrade_and_backup_rollback_keep_settings_and_other_packages(self):
+        from ddm import plugin_updates
+        from ddm.file_ops import replace_directory
+        for kind in KINDS:
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                root=Path(directory).resolve()
+                installed=root/'plugins'
+                plugin_id=kind+'_live'
+                installer=PluginManager(plugins_dir=str(installed),enabled=[])
+                for other in KINDS:
+                    self.install(installer,other+'_live')
+                settings={other+'_live':{'show_platform_logo':False} for other in KINDS}
+                settings['douyin_live'].update(douyin_room_owners={'douyin:12345':'98765'},
+                    douyin_follow_profiles={'98765':'MS4wLjAB'+'a'*12})
+                installer.plugin_settings=deepcopy(settings)
+                original={other:(installed/(other+'_live')/'plugin.json').read_bytes() for other in KINDS}
+                upgraded_archive=root/'fixture-upgrade.zip'
+                with zipfile.ZipFile(ROOT/'dist'/f'{plugin_id}-0.1.zip') as source, \
+                        zipfile.ZipFile(upgraded_archive,'w',zipfile.ZIP_DEFLATED) as destination:
+                    for item in source.infolist():
+                        content=source.read(item.filename)
+                        if item.filename==plugin_id+'/plugin.json':
+                            manifest=json.loads(content)
+                            manifest['version']='0.2'
+                            content=json.dumps(manifest).encode('utf-8')
+                        destination.writestr(item,content)
+                plugin_updates.stage(installer,str(upgraded_archive),plugin_id,'0.2')
+                self.assertEqual(plugin_updates.pending_versions(installer),{plugin_id:'0.2'})
+                self.assertEqual((installed/plugin_id/'plugin.json').read_bytes(),original[kind])
+                upgraded=PluginManager(plugins_dir=str(installed),enabled=list(settings))
+                upgraded.plugin_settings=deepcopy(settings)
+                try:
+                    upgraded.load()
+                    self.assertEqual(set(upgraded.platforms),set(KINDS))
+                    current=next(plugin for plugin in upgraded.plugins if plugin.context.name==plugin_id)
+                    self.assertEqual(current.version,'0.2')
+                    self.assertEqual(upgraded.plugin_settings,settings)
+                    restored_settings=deepcopy(upgraded.plugin_settings)
+                    disabled=upgraded.enabled-{plugin_id}
+                finally:
+                    upgraded.unload()
+                target=installed/plugin_id
+                backup=installed/'.updates'/(plugin_id+'.backup')
+                candidate=installed/'.updates'/(plugin_id+'.candidate')
+                for path in (target,backup,candidate):
+                    self.assertTrue(path.resolve().is_relative_to(root))
+                self.assertEqual((backup/'plugin.json').read_bytes(),original[kind])
+                replace_directory(target,candidate)
+                replace_directory(backup,target)
+                restored=PluginManager(plugins_dir=str(installed),enabled=list(disabled))
+                restored.plugin_settings=restored_settings
+                try:
+                    restored.load()
+                    self.assertEqual(set(restored.platforms),set(KINDS)-{kind})
+                    self.assertEqual(restored.plugin_settings,settings)
+                    for other in KINDS:
+                        self.assertEqual((installed/(other+'_live')/'plugin.json').read_bytes(),original[other])
+                finally:
+                    restored.unload()
 
     def test_all_packages_migrate_without_duplicate_registration(self):
         with tempfile.TemporaryDirectory() as directory:

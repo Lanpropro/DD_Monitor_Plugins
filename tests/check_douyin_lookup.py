@@ -608,15 +608,15 @@ class LookupTests(unittest.TestCase):
         node = '5:' + json.dumps(['$', '$L7', None, {'data': {'room': room}}])
         page = ''.join('self.__rsc_f.push([1,' + json.dumps(part) + ']);' for part in
                        (node + '\n8:T' + format(len(sdk.encode()), 'x') + ',', sdk))
-        parsed = module.DouyinPlatform._share_info(page, '901', '101', '')
+        parsed = provider_type._share_info(page, '901', '101', '')
         pull = parsed['stream_url']['live_core_sdk_data']['pull_data']
         self.assertEqual(pull['stream_data'], sdk)
         self.assertEqual(pull['options']['qualities'][0]['sdk_key'], 'origin')
-        self.assertEqual(module.DouyinPlatform._sdk_stream_data(page, '$9'), '')
+        self.assertEqual(provider_type._sdk_stream_data(page, '$9'), '')
 
     def test_original_sdk_stream_is_available_above_flat_blue_quality(self):
         from streamlink import Streamlink
-        provider = module.DouyinPlatform()
+        provider = provider_type()
         qualities = [{'sdk_key': 'uhd', 'name': '蓝光', 'resolution': '1920x1080'},
                      {'sdk_key': 'origin', 'name': '原画', 'fps': 60, 'resolution': ''}]
         raw = json.dumps({'data': {'origin': {'main': {'flv': 'https://cdn.test/origin.flv',
@@ -832,7 +832,7 @@ if __name__ == '__main__':
     manager.load()
     entry = sys.modules["ddm_plugin_domestic_live"]
     provider_type = type(manager.platforms['douyin'])
-    module = sys.modules[provider_type.__module__]
+    module = sys.modules[provider_type.room_data.__module__]
     try:
         outcome = unittest.main(argv=[sys.argv[0], *remaining], exit=False)
     finally:

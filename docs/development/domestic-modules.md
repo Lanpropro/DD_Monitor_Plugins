@@ -6,24 +6,43 @@
 | --- | --- |
 | `plugin.py` | 注册平台与互动控件、恢复映射、宿主事件路由和关闭顺序；保留旧类及协议函数导出 |
 | `platform_base.py` | 官方分享链接校验/解析、画质元数据、数字房间及共用取流入口；`_qualities` 仍属于各平台实例 |
-| `huya_platform.py` | 虎牙账号、关注、房间、画质和 CDN 候选；CDN 锁和失败记录仍属于本平台实例 |
+| `huya_platform.py` | 虎牙房间、链接与批量状态；构造同一平台的画质、CDN 锁和失败记录 |
 | `huya_protocol.py` | WUP/Tars 编码、凭据域限制与响应校验；无界面和后台定时器 |
-| `douyu_platform.py` | 斗鱼账号、关注、房间、原生画质与 CDN 选择；失败隔离到本平台和房间 |
-| `douyin_platform.py` | 抖音身份/房间映射、关注/头像、公开资料与流地址解析；映射、缓存和广播匹配器仍属于本平台实例 |
+| `douyu_platform.py` | 斗鱼房间与靓号资料、弹幕接线；构造同一平台的画质和 CDN 状态 |
+| `douyin_platform.py` | 抖音房间身份规范化和弹幕接线；构造映射、缓存和广播匹配器，保留旧异常类型导出 |
+| `douyu_accounts.py`、`huya_accounts.py`、`douyin_accounts.py` | 各平台专用的账号和关注功能类；包含登录配置、身份确认、关注分页及取消；抖音另含账号引用、主页关联和头像补取 |
+| `douyu_playback.py`、`huya_playback.py`、`douyin_playback.py` | 原生画质与取流；斗鱼的请求/实际 CDN 关联与避让，虎牙的 VIP 授权、签名、FLV/HLS 探测与连接交接；只使用原平台状态 |
+| `douyin_rooms.py` | 分享/完整页面/公开接口/异步房间查询及验证回退，调用同一实例的账号映射与错误分类 |
+| `douyin_room_data.py` | 无状态的分享身份、React Flight/SDK 数据解码和房间资料校验；原静态助手保留为同一函数的兼容绑定 |
 | `platform_logo.py` | Logo 设置和关注卡片展示；QObject 父对象仍是宿主窗口，卸载时移除事件过滤器 |
 | `douyin_errors.py`、`diagnostic_errors.py` | 查找/验证异常类型及跨平台共用的异常脱敏；避免平台日志反向依赖插件入口 |
 | `playback_diagnostics.py` | 协议异常脱敏、mpv 错误分类和播放状态观察；协调器仅引用插件，观察记录保留在插件原字典，不复制状态 |
-| `douyu_composer.py`、`interaction_popup.py` | 已有输入控件、礼物/通知界面和交互协调；Qt 父对象、计时器、请求取消规则不变 |
+| `interaction_widgets.py` | 输入法处理、发送详情与按钮展示；Qt 父对象由原调用方传入 |
+| `interaction_gifts.py`、`interaction_popup.py` | 礼物选择/确认、图片回复和锚定弹层；图片管理器/回复仍属于原弹层 |
+| `interaction_requests.py` | 每次互动的 QThread、取消事件与结果/阶段信号；请求集合仍由控制器持有 |
+| `interaction_composers.py` | 三个平台的每格输入/发送协调；房间快照、草稿、当前请求、浏览器和 250ms 身份定时器归原控件 |
+| `interaction_controls.py` | 宿主控件注册、弱引用集合、请求退休及插件关闭；保留原取消/等待退出顺序 |
+| `douyu_composer.py` | 旧类、模型及展示助手的兼容导出；内部入口直接依赖对应职责模块 |
 | `douyu_interaction.py`、`huya_interaction.py`、`douyin_interaction.py` | 各平台发送协议、回执及广播复核；本批不修改 |
 | `douyin_browser.py`、`douyin_native.js` | 官网原生输入、单次提交及核对窗口；本批不修改 |
 
-实现模块不反向导入 `plugin.py`；旧调用方仍可从入口取得同一个类对象。平台内部直接依赖职责模块。平台内账号、关注与媒体解析暂未继续细拆，输入控件里的礼物/发送详情界面也仍保留；后续按实际功能边界分批处理，不为缩短文件增加通用框架。
+实现模块不反向导入 `plugin.py`；旧调用方仍可从入口取得同一个类对象。账号、房间查询和播放功能类组合到同一个平台实例，调用 `self.normalize`、`self.room_info` 等原适配器方法，保留覆写和取消回调。它们没有自己的构造器、线程、定时器或可变状态副本；抖音四份映射／资料字典仍由平台构造并在原主线程流程持久化。完整分工见[六平台职责与验收矩阵](platform-responsibilities.md)。
+
+输入职责迁移保留完整类体和父类，不移动已创建的 Qt 对象。身份定时器仍以输入控件为父对象，控件关闭时停止；后台请求仍归控制器的原集合，先取消、等待再释放；弹层图片请求仍按原顺序中止和断开。失败保留草稿、发送详情和浏览器投递确认保持原行为，未修复输入框罕见字符缺字。
+
+媒体请求仍在原调用线程创建与关闭：虎牙 `play_url` 的 `finally` 关闭会话，FLV 仅在原交接成功条件下保留响应；斗鱼的失败时间与请求/实际 CDN 映射继续受原实例锁保护。抖音异步查询保留原 await/取消流程。共享诊断异常类型不装载其他平台适配器或注册生命周期。
 
 诊断不创建新的定时器、不调整 mpv 日志级别、不重建播放器；同一 core 复用观察连接，换 core、格子停止、关闭或卸载按原顺序断开。主线程仍负责账号映射持久化，网络线程不接管配置写入。
 
 ## 验证
 
 `python tests/check_domestic_modules.py --host <本体目录>` 检查独立导入、旧对象身份、依赖方向、平台实例状态隔离及诊断卸载。可用 `--plugins-dir` 检查隔离安装目录。原平台、关注、分享、凭据、CDN、发送和原生浏览器专项继续执行；夹具的替换点随实现模块迁移，不减少原断言。包检查验证所有新模块随 ZIP 交付。
+
+账号职责补充 `python tests/check_platform_accounts.py --host <本体目录>`：独立导入不装载平台入口、取消后不请求、虎牙身份与关注保留适配器覆写、抖音映射原对象更新及实例隔离。原 `check_douyu_follows`、`check_douyin_accounts`、`check_douyin_lookup` 继续覆盖分页、离线账号和重启。
+
+媒体边界补充 `python tests/check_platform_media.py --host <本体目录>`：取流/查询模块独立导入，不装载入口、输入界面或其他平台实现；抖音旧静态助手与数据解析函数保持同一对象。原画质、授权、CDN、FLV 交接及查询专项只调整实际实现模块的替身位置，保留全部断言。
+
+输入边界补充 `python tests/check_interaction_modules.py --host <本体目录>`，检查职责模块不依赖旧聚合入口、导入不执行其他平台协议、旧类/信号/助手身份一致。原互动 135 项和真实 Qt 离线页面 26 项继续执行；WebEngine 需要允许其子进程运行的测试环境，不能把受限沙箱中页面快照未就绪记为业务通过。
 
 根 `run.cmd` 验证使用临时插件目录、合成配置和禁止联网的夹具；不能代替真实多路播放。人工在根入口核对斗鱼/抖音/B站的原画质、切换/重连、关注与关闭；真实发送仍由用户手动操作。
 

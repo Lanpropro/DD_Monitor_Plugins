@@ -1281,7 +1281,7 @@ class HuyaTests(unittest.TestCase):
 
     def test_flv_signs_its_own_anticode_and_never_bypasses_member_tier(self):
         import json
-        module=importlib.import_module("ddm_plugin_domestic_live.huya_platform")
+        module=importlib.import_module("ddm_plugin_domestic_live.huya_playback")
         platform=MANAGER.platforms["huya"]
         info={"sHlsUrl":"https://fixture.msstatic.com","sHlsUrlSuffix":"m3u8","sHlsAntiCode":"fm=x&fs=y&wsTime=1", "sCdnType":"AL","sStreamName":"room",
               "sFlvUrl":"https://fixture.msstatic.com","sFlvUrlSuffix":"flv","sFlvAntiCode":"wsSecret=issued&wsTime=deadline&fm=opaque&fs=flvfs&ctype=flvtype"}

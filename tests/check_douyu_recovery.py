@@ -17,7 +17,7 @@ def main():
     manager = plugins.PluginManager(plugins_dir=str(root / 'plugins'), enabled=['domestic_live'])
     manager.load()
     platform = manager.platforms['douyu']
-    module = sys.modules[type(platform).__module__]
+    module = sys.modules[platform._streams.__func__.__module__]
     base_module = sys.modules["ddm_plugin_domestic_live.platform_base"]
     entry = sys.modules["ddm_plugin_domestic_live"]
     session = base_module.Streamlink()
