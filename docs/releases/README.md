@@ -1,12 +1,26 @@
 # 插件发布记录
 
-> 类型：索引 ｜ 状态：维护中 ｜ 适用版本：全部版本 ｜ 更新：2026-11-03 ｜ 读者：维护者、用户
+> 类型：索引 ｜ 状态：维护中 ｜ 适用版本：全部版本 ｜ 更新：2026-11-15 ｜ 读者：维护者、用户
 
 发布说明集中保存在本目录。2026-11-03 同步当前 GitHub Release 的最新正文，包括维护者在网页上的修改；正文仅统一换行和文件末尾换行，不改写内容。
 
 删除 GitHub Release 不会删除已提交的说明。网页后续修改不会自动回写仓库；删除发布页前，应先再次同步并提交。[来源记录](sources.json)保存各文件的来源、网页更新时间及正文校验值。
 
-## 当前在线发布说明
+## 当前正式 Releases（2026-11-15 核对）
+
+插件仓库的 GitHub Releases 每个插件 ID 只保留最新正式版；本表记录线上版本，本地源码清单与历史说明不作为线上版本判断依据。
+
+| 插件 | 线上版本 | GitHub Release |
+| --- | --- | --- |
+| 比赛二路同步 | v1.7.0 | [match-sync-v1.7.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.7.0) |
+| 国内直播平台 | v2.0 | [domestic-live-v2.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v2.0) |
+| 海外直播平台 | v1.2 | [global-live-v1.2](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2) |
+| B站直播互动 | v1.1 | [bili-live-v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.1) |
+| 网络代理 | v1.0 | [proxy-control-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/proxy-control-v1.0) |
+
+## 2026-11-03 已归档的在线说明
+
+以下是当日同步的正文快照；其中部分 Release 后来被替代或移除，不代表当前可下载版本。
 
 | 插件 | 仓库说明 | GitHub 来源 |
 | --- | --- | --- |

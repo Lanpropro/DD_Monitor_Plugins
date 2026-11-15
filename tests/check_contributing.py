@@ -170,9 +170,10 @@ class ContributionGuideTests(unittest.TestCase):
     def test_public_release_sources_have_matching_local_notes(self):
         directory = ROOT / 'docs/releases'
         index = (directory / 'README.md').read_text(encoding='utf-8')
+        archive = index.split('## 2026-11-03 已归档的在线说明', 1)[1].split('## 已删除 Release', 1)[0]
         tags = re.findall(
             r'https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/([^\s)]+)',
-            index)
+            archive)
         self.assertTrue(tags)
         self.assertEqual(len(tags), len(set(tags)))
         for tag in tags:
@@ -182,6 +183,18 @@ class ContributionGuideTests(unittest.TestCase):
                 heading = note.read_text(encoding='utf-8').splitlines()[0]
                 self.assertTrue(heading.startswith('# '))
                 self.assertTrue(heading.endswith(' v' + tag.rsplit('-v', 1)[1]))
+
+    def test_current_release_index_has_one_version_per_plugin(self):
+        index = read(ROOT / 'docs/releases/README.md')
+        current = index.split('## 当前正式 Releases', 1)[1].split('## 2026-11-03 已归档', 1)[0]
+        rows = re.findall(
+            r'^\| ([^|]+) \| v([\d.]+) \| \[[^]]+\]\(https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/([^)]+)\) \|$',
+            current, re.MULTILINE)
+        self.assertTrue(rows)
+        self.assertEqual(len({name for name, _, _ in rows}), len(rows))
+        for name, version, tag in rows:
+            with self.subTest(plugin=name):
+                self.assertTrue(tag.endswith('-v' + version))
 
 
     def test_documentation_center_indexes_every_document(self):

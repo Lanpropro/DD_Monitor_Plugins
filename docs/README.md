@@ -1,6 +1,6 @@
 # 插件文档中心
 
-> 类型：索引 ｜ 状态：维护中 ｜ 适用版本：全部版本 ｜ 更新：2026-11-14 ｜ 读者：插件作者、维护者、用户
+> 类型：索引 ｜ 状态：维护中 ｜ 适用版本：全部版本 ｜ 更新：2026-11-15 ｜ 读者：插件作者、维护者、用户
 
 本仓库的文档入口。插件源码在 `plugins/<ID>/`，每个插件独立版本；网站已迁出到
 [DD_Monitor_Website](https://github.com/Lanpropro/DD_Monitor_Website)。
@@ -46,7 +46,8 @@
 | B站直播互动 | 1.0 | [README](../plugins/bili_live/README.md) |
 | 录制与切片（开发候选） | 0.1.3 | [README](../plugins/DDCut_Replay/README.md)、[设计](../plugins/DDCut_Replay/DESIGN.md)、[功能](../plugins/DDCut_Replay/FEATURES.md)、[验收](../plugins/DDCut_Replay/ACCEPTANCE.md)、[对照](../plugins/DDCut_Replay/PARITY.md) |
 
-源码版本取自各插件 `plugin.json` 的当前分支值，不代表已发布的安装包；公开版本以
+源码版本取自各插件 `plugin.json` 的当前分支值，不代表已发布的安装包。2026-11-15 核对的
+[比赛二路同步最新正式版为 v1.7.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.7.0)；其他公开版本以
 [发布记录](releases/README.md)和 GitHub Releases 为准。
 
 ### 资源与边界
