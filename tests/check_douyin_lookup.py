@@ -235,7 +235,7 @@ class LookupTests(unittest.TestCase):
         registered = []
         context = SimpleNamespace(setting=lambda key, default: saved.get(key, default), register_platform=registered.append,
                                   log=lambda *_: None, window=None)
-        plugin = module.LivePlatformsPlugin()
+        plugin = entry.LivePlatformsPlugin()
         plugin.on_load(context)
         restored = registered[-1]
         self.assertEqual(restored.normalize('douyin:uid_101'), self.canonical)
@@ -459,7 +459,7 @@ class LookupTests(unittest.TestCase):
             self.assertEqual(self.provider.follow_accounts(session, lambda: session.get.called), [])
 
     def test_diagnostics_preserve_results_and_exceptions_without_secrets(self):
-        plugin = module.LivePlatformsPlugin()
+        plugin = entry.LivePlatformsPlugin()
         context = Mock()
         error = RuntimeError('private signed URL')
         error.__cause__ = requests.exceptions.SSLError('private CERTIFICATE_VERIFY_FAILED cookie')
@@ -480,7 +480,7 @@ class LookupTests(unittest.TestCase):
             self.assertNotIn('cookie', message)
 
     def test_diagnostic_categories_and_invalid_link_redaction(self):
-        plugin = module.LivePlatformsPlugin()
+        plugin = entry.LivePlatformsPlugin()
         for error, expected in ((requests.exceptions.ProxyError('private-proxy-password'), '代理连接失败'),
                 (requests.ConnectionError('private getaddrinfo failed'), '域名解析失败'),
                 (requests.HTTPError('private', response=response(status=403)), 'HTTP 403'),
@@ -523,7 +523,7 @@ class LookupTests(unittest.TestCase):
                 self.provider.room_info(self.canonical)
 
     def test_player_categories_do_not_repeat_raw_messages(self):
-        plugin = module.LivePlatformsPlugin()
+        plugin = entry.LivePlatformsPlugin()
         examples = [('ffmpeg', 'HTTP error 403 Forbidden private-url', 'HTTP_403'),
             ('ffmpeg', 'TLS handshake failed private-host', 'TLS_OR_CERTIFICATE'),
             ('ffmpeg', 'Connection timed out private-url', 'TIMEOUT'),
@@ -538,7 +538,7 @@ class LookupTests(unittest.TestCase):
             self.assertEqual(plugin._player_error_category(prefix, text), expected)
 
     def test_player_observers_follow_room_and_detach_without_changing_playback(self):
-        plugin = module.LivePlatformsPlugin()
+        plugin = entry.LivePlatformsPlugin()
         tile = object()
         core = Mock(spec=['register_event_callback', 'unregister_event_callback'])
         signal = Mock(spec=['connect', 'disconnect'])
@@ -580,7 +580,7 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(plugin._diagnostic_players, {})
 
     def test_unloaded_plugin_ignores_player_events(self):
-        plugin = module.LivePlatformsPlugin()
+        plugin = entry.LivePlatformsPlugin()
         context = Mock()
         plugin.context = context
         plugin.on_event(module.api.EVENT_STREAM_RESOLVED, {'source': object()})
@@ -653,7 +653,7 @@ class LookupTests(unittest.TestCase):
         self.provider.restore_follow_rooms([{'room_id': self.canonical, 'anchor_uid': '101'}])
         context = SimpleNamespace(platform=Mock(return_value=self.provider), set_setting=Mock())
         self.provider._context = context
-        plugin = module.LivePlatformsPlugin()
+        plugin = entry.LivePlatformsPlugin()
         plugin.context = context
         plugin.on_event(module.api.EVENT_CLOSING, {})
         context.set_setting.assert_called_once_with('douyin_room_owners', {self.canonical: '101'})
@@ -692,7 +692,7 @@ class LookupTests(unittest.TestCase):
                     self.provider.room_info(self.canonical)
 
     def test_huya_manifest_with_forbidden_segment_uses_next_cdn_same_quality(self):
-        provider = module.HuyaPlatform()
+        provider = entry.HuyaPlatform()
         session = SimpleNamespace(http=SimpleNamespace(headers={'User-Agent': 'fixture'}, close=Mock()))
         streams = {name: SimpleNamespace(ddm_quality=1014000, to_url=lambda name=name:
             'https://' + name + '.test/live.m3u8') for name in ('first', 'second')}
@@ -721,15 +721,15 @@ class LookupTests(unittest.TestCase):
         for text in ('', '<html>error</html>'):
             with patch.object(module.requests, 'get', side_effect=[
                     reply(url, '#EXTM3U\n#EXTINF:2,\nmedia.ts'), reply('https://cdn.test/media.ts', text)]):
-                self.assertFalse(module.HuyaPlatform._probe_hls(url, {}))
+                self.assertFalse(entry.HuyaPlatform._probe_hls(url, {}))
         with patch.object(module.requests, 'get', side_effect=[
                 reply(url, '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=4000000\nvariant.m3u8'),
                 reply('https://cdn.test/variant.m3u8', '#EXTM3U\n#EXTINF:2,\nmedia.ts'),
                 reply('https://cdn.test/media.ts', 'Gfixture-media')]):
-            self.assertEqual(module.HuyaPlatform._probe_hls(url, {}), url)
+            self.assertEqual(entry.HuyaPlatform._probe_hls(url, {}), url)
 
     def test_huya_does_not_discard_a_working_fourth_cdn(self):
-        provider = module.HuyaPlatform()
+        provider = entry.HuyaPlatform()
         session = SimpleNamespace(http=SimpleNamespace(headers={'User-Agent': 'fixture'}, close=Mock()))
         streams = {str(i): SimpleNamespace(ddm_quality=10000, to_url=lambda i=i:
             f'https://cdn{i}.test/live.m3u8') for i in range(4)}
@@ -747,7 +747,7 @@ class LookupTests(unittest.TestCase):
             self.assertEqual(get.call_count, 5)  # Four playlists and the successful media probe.
 
     def test_huya_playback_rejection_changes_cdn_but_not_other_rooms(self):
-        provider = module.HuyaPlatform()
+        provider = entry.HuyaPlatform()
         session = SimpleNamespace(http=SimpleNamespace(headers={'User-Agent': 'fixture'}, close=Mock()))
         streams = {name: SimpleNamespace(ddm_quality=10000, to_url=lambda name=name:
             'https://' + name + '.test/live.m3u8?signature=private') for name in ('first', 'second')}
@@ -769,7 +769,7 @@ class LookupTests(unittest.TestCase):
 
     def test_huya_hls_playback_failure_tries_healthy_flv_before_another_hls(self):
         from ddm.hls_proxy import FLV_HANDOFF_HEADER
-        provider = module.HuyaPlatform()
+        provider = entry.HuyaPlatform()
         session = SimpleNamespace(http=SimpleNamespace(headers={'User-Agent': 'fixture'}, close=Mock()))
         streams = {name: SimpleNamespace(ddm_quality=1004000, ddm_transport=transport,
             to_url=lambda name=name, transport=transport: f'https://{name}.test/live.' +
@@ -801,8 +801,8 @@ class LookupTests(unittest.TestCase):
             self.assertIn('hls1.test', provider.play_url('huya:123')[0])
 
     def test_huya_player_failure_event_is_independent_of_diagnostics_and_requires_context(self):
-        plugin = module.LivePlatformsPlugin()
-        provider = module.HuyaPlatform()
+        plugin = entry.LivePlatformsPlugin()
+        provider = entry.HuyaPlatform()
         plugin.context = SimpleNamespace(platform=lambda kind: provider)
         plugin._diagnostic_enabled = True
         payload = {'room': {'room_id': 'huya:123'}, 'source_url': 'https://bad.test/live?private',
@@ -830,6 +830,7 @@ if __name__ == '__main__':
     manager = PluginManager(plugins_dir=str(Path(__file__).resolve().parents[1] / 'plugins'),
                             enabled=['domestic_live'])
     manager.load()
+    entry = sys.modules["ddm_plugin_domestic_live"]
     provider_type = type(manager.platforms['douyin'])
     module = sys.modules[provider_type.__module__]
     try:

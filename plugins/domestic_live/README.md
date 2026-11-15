@@ -335,3 +335,8 @@ python tests/check_douyu_interaction.py --host ../DD_Monitor_CE --plugins-dir ..
 实际 Qt WebEngine 离线验证：`python tests/check_douyin_qt_browser.py --host <本体目录>`，可加 `--plugins-dir <本体目录>/plugins_user` 检查安装副本。测试使用临时无痕页面、模拟账号／广播并阻断外网，覆盖中文及 emoji 原生输入、单次 Enter、取消、身份／草稿校验和广播确认。它仅证明功能流程，不证明真实官网放行。
 
 根入口人工验收：重启根目录 `run.cmd`，打开已开播的抖音房间并保持弹幕接收开启，只在软件输入一条新的短文本后按 Enter，不操作官网输入框或发送按钮。预期独立广播匹配后草稿清空、官网窗口关闭；若未确认则保留两者，不立即重发，读取提示与本地阶段日志继续定位。真实投递、既往白屏及整体挂起仍未验收，尚未合入 develop 或发布。
+
+
+### 开发职责
+
+入口只负责注册与生命周期；平台适配、虎牙协议、Logo 展示及播放诊断分别维护。状态所有权、兼容入口、验证方式与仍保留职责见[国内平台功能边界](../../docs/development/domestic-modules.md)。本批结构拆分不改变播放参数，不等同于实播缓冲修复。

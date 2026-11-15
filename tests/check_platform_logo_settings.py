@@ -35,6 +35,7 @@ def main():
         spec = importlib.util.spec_from_file_location('logo_test_' + plugin_id,
                                                      ROOT / 'plugins' / plugin_id / 'plugin.py')
         module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         values[plugin_id] = True
         context = SimpleNamespace(window=owner, manager=manager, name=plugin_id,
@@ -46,6 +47,8 @@ def main():
         dialog = SettingsDialog(dict(DEFAULT_SETTINGS), {}, owner, plugin_manager=manager, preview=True)
         page = dialog.general_page
         if legacy:
+            if hasattr(page, 'contributions'):
+                page.removeEventFilter(page.contributions)
             # The older supported host placed live_alert on General rather than Notifications.
             page._checks['live_alert'] = page._checks.pop('sidebar_platform_logos')
             del dialog._plugin_manager
@@ -57,24 +60,35 @@ def main():
             with patch.object(SettingsDialog, 'plugin_page', property(lazy_access)):
                 for control in reversed(controls):
                     control.eventFilter(dialog, QEvent(QEvent.Show))
+                # Check the legacy insertion contract before the modern host
+                # collects those same widgets into its extension section.
+                injected = [page.findChild(QCheckBox, control.name) for control in controls]
+                assert all(check is not None and grid.indexOf(check) >= 0 for check in injected)
+                rows = [grid.getItemPosition(grid.indexOf(check))[0] for check in injected]
+                assert rows == [grid.getItemPosition(grid.indexOf(anchor))[0] + 1,
+                                grid.getItemPosition(grid.indexOf(anchor))[0] + 2]
                 dialog.setAttribute(Qt.WA_DontShowOnScreen)
                 dialog.show()
                 app.processEvents()
                 checks = [page.findChild(QCheckBox, control.name) for control in controls]
-                assert all(check is not None and grid.indexOf(check) >= 0 for check in checks), \
+                display_grid = (page.contributions.card.grid if not legacy and
+                                getattr(page, 'contributions', None) and page.contributions.card else grid)
+                assert all(check is not None and display_grid.indexOf(check) >= 0 for check in checks), \
                     'Plugin checkbox exists outside the grid and covers the page title'
                 if not legacy:
                     assert lazy_access.call_count == 0, 'General must not construct Plugins just to check its manager'
-                rows = [grid.getItemPosition(grid.indexOf(check))[0] for check in checks]
-                assert rows == [grid.getItemPosition(grid.indexOf(anchor))[0] + 1,
-                                grid.getItemPosition(grid.indexOf(anchor))[0] + 2]
-                widgets = [grid.itemAt(i).widget() for i in range(grid.count())
-                           if grid.itemAt(i).widget() and not grid.itemAt(i).widget().isHidden()]
+                rows = [display_grid.getItemPosition(display_grid.indexOf(check))[0] for check in checks]
+                assert rows[1] == rows[0] + 1
+                widgets = [display_grid.itemAt(i).widget() for i in range(display_grid.count())
+                           if display_grid.itemAt(i).widget() and not display_grid.itemAt(i).widget().isHidden()]
                 for index, first in enumerate(widgets):
                     assert not any(first.geometry().intersects(other.geometry()) for other in widgets[index + 1:]), \
                         'General grid controls overlap'
                 for check in checks:
-                    assert check.mapTo(page, QPoint()).y() > anchor.mapTo(page, QPoint()).y()
+                    if display_grid is grid:
+                        assert check.mapTo(page, QPoint()).y() > anchor.mapTo(page, QPoint()).y()
+                    else:
+                        assert check.parentWidget() is page.contributions.card
                     assert len(page.findChildren(QCheckBox, check.objectName())) == 1
                     check.setChecked(False)
                 if reset:
