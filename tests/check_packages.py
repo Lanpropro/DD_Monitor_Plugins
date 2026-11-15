@@ -59,7 +59,7 @@ def main():
                                'presentation', 'picture_control', 'recording_control', 'replay_control',
                                'floating_control', 'viewer_ui', 'console_control', 'host_integration',
                                'session_control', 'chat_panel', 'send_composers', 'chat_clients', 'media_signals',
-                               'clock_sync', 'clock_capture', 'clock_dialog', 'clock_recovery')
+                               'clock_sync', 'clock_capture', 'clock_dialog', 'clock_recovery', 'danmaku_settings')
                     assert all(f'match_sync/{name}.py' in names for name in modules), \
                         'The refactored Viewer must ship with every owning module'
                     assert 'match_sync/fullscreen.py' in names, 'Fullscreen shell integration must ship with the viewer'
