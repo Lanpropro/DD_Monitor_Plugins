@@ -42,10 +42,11 @@
 | --- | --- | --- |
 | 国内直播平台（虎牙 / 斗鱼 / 抖音） | 2.0 | [README](../plugins/domestic_live/README.md) |
 | 海外直播平台（Twitch / YouTube） | 1.2 | [README](../plugins/global_live/README.md) |
-| 比赛二路同步 | 1.6.1 | [README](../plugins/match_sync/README.md) |
+| 比赛二路同步 | 1.7.0 | [README](../plugins/match_sync/README.md) |
 | B站直播互动 | 1.1 | [README](../plugins/bili_live/README.md) |
+| 网络代理 | 1.0 | [README](../plugins/proxy_control/README.md) |
 
-源码版本取自各插件 `plugin.json` 的当前分支值，不代表已发布的安装包。线上公开版本以[发布记录](releases/README.md)和 GitHub Releases 为准；二路 1.7.0 已在独立发布分支，尚待合入当前分支。
+源码版本取自各插件 `plugin.json` 的当前分支值，不代表已发布的安装包。线上公开版本以[发布记录](releases/README.md)和 GitHub Releases 为准。
 
 ### 资源与边界
 

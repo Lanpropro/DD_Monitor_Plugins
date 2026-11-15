@@ -3,6 +3,7 @@ import argparse
 from importlib import import_module
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -13,6 +14,7 @@ from unittest.mock import patch
 
 
 def check(app, _host, module):
+    from ddm.continuous_corners import source_stylesheet
     from PySide6.QtCore import QAbstractAnimation, Qt
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QDialog, QFrame, QHBoxLayout, QToolButton, QVBoxLayout, QWidget
@@ -175,7 +177,7 @@ def check(app, _host, module):
                     viewer = plugin.viewer
                     assert viewer is not None and not viewer.running
                     assert cards[0].styleSheet() == original_styles[0]
-                    assert 'border: none' in cards[1].styleSheet() and cards[1].property('onWall'), (
+                    assert re.search(r'border\s*:\s*none\s*[;}]', source_stylesheet(cards[1].styleSheet())) and cards[1].property('onWall'), (
                         cards[1].styleSheet(), cards[1].property('onWall'), viewer.isHidden(), viewer.embedded,
                         len(viewer.sidebar_item_styles), getattr(viewer, 'sidebar_marks_state', None))
                     viewer.add_room('1')
@@ -184,7 +186,7 @@ def check(app, _host, module):
                     viewer.running = True
                     with patch.object(cards[2], 'setStyleSheet', side_effect=AssertionError('Touched an unrelated card')):
                         viewer._sync_sidebar_marks()
-                    assert cards[0].property('matchSync') and '#fb7299' in cards[0].styleSheet()
+                    assert cards[0].property('matchSync') and '#fb7299' in source_stylesheet(cards[0].styleSheet())
                     viewer.changed()
                     with patch.object(viewer, 'stop', wraps=viewer.stop) as stop, \
                             patch.object(viewer, '_restore_host_widgets', wraps=viewer._restore_host_widgets) as restore, \

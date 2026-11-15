@@ -154,6 +154,7 @@ class ContributionGuideTests(unittest.TestCase):
             'global_live': {'twitch', 'youtube'},
             'match_sync': {'bilibili', 'huya', 'douyu', 'douyin', 'twitch', 'youtube'},
             'bili_live': {'bilibili'},
+            'proxy_control': set(),
         }
         for path in manifests:
             manifest = json.loads(path.read_text(encoding='utf-8'))
@@ -253,8 +254,9 @@ class ContributionGuideTests(unittest.TestCase):
         documents = [
             ROOT / 'docs/README.md', ROOT / 'docs/development/README.md',
             ROOT / 'docs/standards/documentation.md', ROOT / 'docs/archive/README.md',
-            ROOT / 'docs/changes/domestic_live.md',
+            ROOT / 'docs/changes/domestic_live.md', ROOT / 'docs/changes/match_sync.md',
             ROOT / 'plugins/bili_live/README.md', ROOT / 'plugins/domestic_live/README.md',
+            ROOT / 'plugins/match_sync/README.md',
         ]
         for document in documents:
             for target in re.findall(r'\]\(([^)]+)\)', document.read_text(encoding='utf-8')):

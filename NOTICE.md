@@ -11,6 +11,11 @@
 保留原有 MIT 声明于 `plugins/domestic_live/biliup-MIT.txt`；宿主中相关协议实现
 及其许可继续由软件仓库维护。
 
+网络代理插件为保留订阅 DNS／hosts 配置，私有携带 PyYAML 6.0.3 的纯 Python 源码（MIT），
+固定提交 `49790e73684bebad1df05ef8d828fa12f685bffb`，
+来源 https://github.com/yaml/pyyaml 。原始许可证随 `proxy_control/vendor/yaml/LICENSE` 提供，
+未包含 LibYAML C 扩展，不要求修改宿主 Python 环境。
+
 插件使用平台公开直播入口，不读取浏览器账号或 Cookie，不发送聊天。
 详细支持范围见各插件 README。
 

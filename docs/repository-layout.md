@@ -2,13 +2,14 @@
 
 > 类型：参考 ｜ 状态：维护中 ｜ 适用版本：全部版本 ｜ 更新：2026-11-15 ｜ 读者：维护者
 
-本仓库维护四个插件，网站在独立仓库维护。整理只调整文档位置和本机历史资料，不变更插件行为、版本和发布状态。
+本分支包含五个插件的源码，网站在独立仓库维护。公开版本以[发布记录](releases/README.md)和 GitHub Releases 为准。
 
 ## 持续维护的文件
 
 | 位置 | 职责与处理方式 |
 | --- | --- |
 | `plugins/bili_live/`、`plugins/domestic_live/`、`plugins/global_live/`、`plugins/match_sync/` | 正式插件源码、资源、清单及各自 README；保留 |
+| `plugins/proxy_control/` | 网络代理源码、资源、清单和准备脚本；内核程序、订阅与个人配置不放进源码目录 |
 | `tests/` | 离线替身回归、宿主集成、原生界面及性能专项；按测试自身条件执行，不能仅因未被批量调用而判定无用 |
 | `tools/build_plugins.py` | 从 Git 跟踪文件生成安装包；保留 |
 | `tools/inspect_host_package.py` | 针对旧 `v0.2` PyInstaller 宿主附件的只读诊断工具，硬编码旧 EXE 名；保留供历史包排查，不适用于当前包的通用验收 |

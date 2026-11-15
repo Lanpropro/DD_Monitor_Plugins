@@ -1,0 +1,57 @@
+name: Verify and publish plugin draft
+on:
+  workflow_dispatch:
+    inputs:
+      plugin:
+        description: 'Plugin ID, e.g. proxy_control'
+        required: true
+        type: string
+      tag:
+        description: 'Integrated tag, e.g. proxy-control-v1.1'
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: publish-plugin-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      PLUGIN_ID: ${{ inputs.plugin }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Validate inputs and require a draft
+        run: |
+          python - <<'PY'
+          import os, re
+          plugin, tag = os.environ['PLUGIN_ID'], os.environ['RELEASE_TAG']
+          assert re.fullmatch(r'[a-z][a-z0-9_]*', plugin)
+          assert re.fullmatch(re.escape(plugin.replace('_', '-')) + r'-v\d+(?:\.\d+){0,3}', tag)
+          PY
+          gh release view "$RELEASE_TAG" --json isDraft,isPrerelease > draft.json
+          python -c 'import json; d=json.load(open("draft.json")); assert d["isDraft"] and not d["isPrerelease"]'
+      - name: Download and verify the actual draft attachment
+        run: |
+          mkdir candidate
+          gh release download "$RELEASE_TAG" --pattern "${PLUGIN_ID}-*.zip" --dir candidate
+          python - <<'PY'
+          import os, pathlib, subprocess, sys
+          archives = list(pathlib.Path('candidate').glob('*.zip'))
+          assert len(archives) == 1, 'One standard plugin ZIP is required'
+          subprocess.run([sys.executable, 'tools/verify_plugin_release.py',
+                          '--plugin', os.environ['PLUGIN_ID'], '--tag', os.environ['RELEASE_TAG'],
+                          '--archive', str(archives[0])], check=True)
+          PY
+      - name: Publish only after verification
+        run: gh release edit "$RELEASE_TAG" --draft=false
