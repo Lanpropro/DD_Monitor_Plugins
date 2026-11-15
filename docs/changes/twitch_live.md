@@ -10,7 +10,8 @@
 
 - 更新内容：网页/官方授权账号与关注、频道资料、公开HTTP/URL校验和HLS媒体各由对应模块维护；实例画质缓存与原会话时序不变。包内自足，旧入口保留兼容导出；源码职责见[六平台矩阵](../development/platform-responsibilities.md)。
 - 验收：本平台隔离装卸、单包构建、升级/备份回滚、设置/映射、独立禁用重启及其他包保持不变通过；相关边界/协议专项通过。根 `run.cmd`临时安装六个新包和两个旧组合包，独立所有者、关注/分组/画质及UID保留通过，未读取真实账号或尝试外网。
-- 追踪：本次职责拆分 PR；源码分支 `function/platform-functional-modules`，基于[拆包PR67](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/67)的`0233ff5`。
+- 补充验收：三种安装顺序、六个平台分别禁用重启及继承设置保留在独立进程通过；包含控件/Logo 的原六项包回归单独通过。混合启动与GUI触发的宿主主题错误按既有边界保留。
+- 追踪：[职责拆分 PR76](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/76)；源码分支 `function/platform-functional-modules`，基于[拆包PR67](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/67)的`0233ff5`。
 - 集成状态：尚未合入 develop，未公开发布；自动回归与真实平台验收分开记录。
 - 发布注意：真实登录、关注完整性与播放/声音待人工验收，不修改缓存、代理或授权策略。清单保持0.1，测试0.2仅在临时ZIP；支持范围与待验收项按上述边界执行。
 

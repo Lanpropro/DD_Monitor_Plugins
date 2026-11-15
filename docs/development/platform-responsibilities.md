@@ -26,7 +26,7 @@
 | 国内账号、离线关注、分页和映射恢复 | `check_douyu_follows`、`check_douyin_accounts`、`check_douyin_lookup` | 根入口人工核对已有账号、关注与文件夹；不自动读取个人配置 |
 | 海外网页/官方账号 | `check_global_web_accounts`、`check_youtube_account_errors` | 官方权限与真实账号由用户操作；不自动发送 |
 | 原画质、授权、CDN 和分享链接 | `check_huya_high_resolution`、`check_huya_playback_auth`、`check_douyu_playback_auth`、`check_douyu_recovery`、`check_domestic_share_links`、`check_chzzk` | 真实多路播放、网络/缓存表现另验；斗鱼缓冲尚未根治 |
-| 独立包、组合包共存与迁移 | `check_packages`、`check_platform_packages`及宿主迁移专项 | 六包隔离装卸、共存、控件/Logo 所有者、逐平台升级/备份回滚、设置与禁用重启分别验证；真实资料另验 |
+| 独立包、组合包共存与迁移 | `check_packages`、`check_platform_packages`、独立进程的 `check_platform_install_orders`及宿主迁移专项 | 六包隔离装卸、三种安装顺序、控件/Logo 所有者、逐平台升级/备份回滚、设置与逐平台禁用重启分别验证；真实资料另验 |
 | 根开发版集成 | 从根 `run.cmd` 使用临时插件和配置复测 | 不结束用户客户端，不将专项通过写成真实直播/登录/发送验收 |
 
 平台插件的入口只组装和注册；共享源码以打包清单选择进入单平台包，不通过本机安装目录导入，也不要求另一个平台插件存在。账号功能新模块随对应平台包交付；新增依赖必须同步更新拆包清单并验证包内容，不以源码可导入代替包独立性。
