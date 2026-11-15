@@ -8,7 +8,7 @@
 
 ## 待发布
 
-当前 `develop` 的运行源码与 v1.7.0 标签一致，暂无经核对属于该版本之后的增量。[PR #65](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/65) 的完整独立框选接线仍在未合并的 Draft PR 中；其验收范围以该 PR 为准。
+当前 `develop` 的运行源码与 v1.7.0 标签一致，暂无经核对属于该版本之后的增量。[PR #65](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/65) 已按维护者要求关闭，未合并；实现分支保留，完整独立框选接线未纳入当前开发基线，也不记为已验收。
 
 ## 已发布 v1.7.0（2026-11-13）
 

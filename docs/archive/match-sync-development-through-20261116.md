@@ -4,6 +4,8 @@
 
 以下为 develop 集成二路 1.7.0 后的原增量页正文。旧“待发布”“未合并”描述以当时记录为准；原文中的相对链接沿用原目录写法，当前状态见[增量页](../changes/match_sync.md)。
 
+2026-11-16 状态补记：[PR #65](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/65) 已按维护者要求关闭，未合并，实现分支保留。以下“等待审阅”“Draft”是历史记录，不代表当前仍在等待合并。
+
 # 比赛二路同步增量记录
 
 插件 ID：`match_sync`。

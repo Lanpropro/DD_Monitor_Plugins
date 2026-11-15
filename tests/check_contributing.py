@@ -241,6 +241,13 @@ class ContributionGuideTests(unittest.TestCase):
         self.assertTrue((ROOT / 'docs/archive' / relative).is_file())
 
     def test_documentation_center_matches_manifests_and_local_links(self):
+        current = (ROOT / 'docs/changes/match_sync.md').read_text(encoding='utf-8')
+        self.assertIn('pull/65) 已按维护者要求关闭，未合并', current)
+        self.assertIn('实现分支保留', current)
+        self.assertNotIn('仍在未合并的 Draft PR 中', current)
+        history = (ROOT / 'docs/archive/match-sync-development-through-20261116.md').read_text(encoding='utf-8')
+        self.assertIn('状态补记', history)
+        self.assertIn('Draft PR65', history)
         center = (ROOT / 'docs/README.md').read_text(encoding='utf-8')
         self.assertIn('(docs/README.md)', (ROOT / 'README.md').read_text(encoding='utf-8'))
         self.assertIn('(docs/README.md)', (ROOT / 'CONTRIBUTING.md').read_text(encoding='utf-8'))
