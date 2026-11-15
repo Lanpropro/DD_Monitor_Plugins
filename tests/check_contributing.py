@@ -30,7 +30,9 @@ class ContributionGuideTests(unittest.TestCase):
         self.assertNotIn('RELEASE-domestic-live-v1.5.md', online)
 
     def test_accepted_douyu_quality_change_records_scope_and_source(self):
-        source = (ROOT / 'docs/changes/domestic_live.md').read_text(encoding='utf-8')
+        current = (ROOT / 'docs/changes/domestic_live.md').read_text(encoding='utf-8')
+        self.assertIn('(../archive/domestic-live-v2.0-development.md)', current)
+        source = (ROOT / 'docs/archive/domestic-live-v2.0-development.md').read_text(encoding='utf-8')
         for text in ('2026-11-02', '清晰度验收通过', '9f533b6', 'ba058ef',
                      '尚未合入 develop', 'BUG-071 仍待定位'):
             self.assertIn(text, source)
@@ -159,6 +161,7 @@ class ContributionGuideTests(unittest.TestCase):
             'twitch_live': {'twitch'},
             'youtube_live': {'youtube'},
             'chzzk_live': set(),
+            'proxy_control': set(),
         }
         for path in manifests:
             manifest = json.loads(path.read_text(encoding='utf-8'))
@@ -243,6 +246,40 @@ class ContributionGuideTests(unittest.TestCase):
         relative = 'plans/2026-10-23-bili-live-experience.md'
         self.assertFalse((ROOT / 'docs/superpowers' / relative).exists())
         self.assertTrue((ROOT / 'docs/archive' / relative).is_file())
+
+    def test_documentation_center_matches_manifests_and_local_links(self):
+        current = (ROOT / 'docs/changes/match_sync.md').read_text(encoding='utf-8')
+        self.assertIn('pull/65) 已按维护者要求关闭，未合并', current)
+        self.assertIn('实现分支保留', current)
+        self.assertNotIn('仍在未合并的 Draft PR 中', current)
+        history = (ROOT / 'docs/archive/match-sync-development-through-20261116.md').read_text(encoding='utf-8')
+        self.assertIn('状态补记', history)
+        self.assertIn('Draft PR65', history)
+        center = (ROOT / 'docs/README.md').read_text(encoding='utf-8')
+        self.assertIn('(docs/README.md)', (ROOT / 'README.md').read_text(encoding='utf-8'))
+        self.assertIn('(docs/README.md)', (ROOT / 'CONTRIBUTING.md').read_text(encoding='utf-8'))
+        for manifest in (ROOT / 'plugins').glob('*/plugin.json'):
+            version = json.loads(manifest.read_text(encoding='utf-8'))['version']
+            self.assertRegex(
+                center,
+                rf'\|[^\n]*\| {re.escape(version)} \| \[README\]\(\.\./plugins/{manifest.parent.name}/README\.md\) \|',
+            )
+
+        documents = [
+            ROOT / 'docs/README.md', ROOT / 'docs/development/README.md',
+            ROOT / 'docs/standards/documentation.md', ROOT / 'docs/archive/README.md',
+            ROOT / 'docs/changes/domestic_live.md', ROOT / 'docs/changes/match_sync.md',
+            ROOT / 'plugins/bili_live/README.md', ROOT / 'plugins/domestic_live/README.md',
+            ROOT / 'plugins/match_sync/README.md',
+            ROOT / 'plugins/chzzk_live/README.md', ROOT / 'plugins/chzzk_live/ACCEPTANCE.md',
+        ]
+        for document in documents:
+            for target in re.findall(r'\]\(([^)]+)\)', document.read_text(encoding='utf-8')):
+                if '://' in target or target.startswith(('#', 'mailto:')):
+                    continue
+                destination = document.parent / target.split('#', 1)[0]
+                with self.subTest(document=document, target=target):
+                    self.assertTrue(destination.exists())
 
     def test_public_release_sources_have_matching_local_notes(self):
         directory = ROOT / 'docs/releases'
