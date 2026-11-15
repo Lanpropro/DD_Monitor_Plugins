@@ -36,7 +36,7 @@
 | `__pycache__/`、`*.pyc` | 可再生成的 Python 缓存，已被忽略；不纳入归档或提交 |
 | 本地 `AGENTS.md` | 仅本机开发规则，不提交或上传 |
 
-本次本机归档移动 58 个顶层条目、317 个文件，约 271.2 MiB；移动前后逐文件校验 SHA256，无永久删除。具体文件以本机 `moves.json` 为准；其他电脑不要求存在这些本机路径。
+2026-10-31 的本机归档数量与核对结果见[整理记录](archive/plugin-repository-organization-202610.md)；其他电脑不要求存在这些本机路径。
 
 ## 分支与工作树
 
@@ -46,6 +46,4 @@ git worktree list
 git log --oneline --left-right HEAD...origin/develop
 ```
 
-2026-10-31 整理时，根目录 `function/douyin-room-follow-reliability` 与 `origin/develop` 各有独立提交，因此根目录保留原分支，受版本管理的整理从 `origin/develop` 建立 `function/plugin-repository-organization`，通过独立 worktree 提交。此记录是当时的快照，不代表后续分支状态。
-
-不根据分支名、日期或工作树干净就认定工作已经合入；squash 合并也不能只靠祖先关系判断。删除工作树或分支前另行核对 PR、提交差异和保留需求，本次不删除。
+不根据分支名、日期或工作树干净就认定工作已经合入；squash 合并也不能只靠祖先关系判断。删除工作树或分支前另行核对 PR、提交差异和保留需求。

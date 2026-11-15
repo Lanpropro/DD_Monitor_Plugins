@@ -30,7 +30,7 @@
 - `dist/`、`node_modules/`、`work/`、网站构建输出：本机产物，遵循 Git 忽略规则。
 - 发布说明集中在 [docs/releases/](docs/releases/README.md)，已完成的实施计划放入 [docs/archive/](docs/archive/README.md)；具体分类与保留原则见[仓库目录说明](docs/repository-layout.md)。
 
-已有 `function/domestic-huya-4k` 和 `function/website` 是整理后的功能快照，已汇总到 `develop`，无需重复合并。三个 `release/` 分支分别对应国内插件 1.2、海外插件 1.1 和二路插件 1.2 的既有标签。插件独立管理版本，不沿用软件本体的 0.4.1 开发标识。
+已集成的功能快照无需重复合并；判断分支状态时核对实际提交与 PR。插件独立管理版本，不沿用软件本体版本号。2026-10-31 的具体分支整理记录见[历史归档](docs/archive/plugin-repository-organization-202610.md)。
 
 ## 日常开发与 PR
 
