@@ -6,9 +6,9 @@
 
 | 平台 | 账号与关注 | 房间、协议与媒体 | 状态所有者与后续边界 |
 | --- | --- | --- | --- |
-| 斗鱼 | `douyu_accounts` 确认身份、头像与分页关注 | `douyu_platform` 房间/靓号、原生画质和 CDN；`douyu_interaction` 发送；`douyu_danmaku` 连接 | 画质、CDN 失败及请求/实际线路仍在平台实例；输入展示由既有控件拥有 |
-| 虎牙 | `huya_accounts` 登录 JSONP 校验和关注资料 | `huya_protocol` WUP/Tars；`huya_platform` 房间、授权与取流；`huya_interaction` 发送 | CDN 锁/失败记录仍在平台；授权及媒体探测需继续按功能审查；不新增礼物支持 |
-| 抖音 | `douyin_accounts` 身份、稳定 UID 引用、关注/主页/头像 | `douyin_platform` 房间规范化、公开页面及流解析；`douyin_interaction` 与 `douyin_browser` 处理原生发送 | 映射、资料缓存和广播匹配器只在平台构造；主线程协调保存；房间查询与媒体解析仍需进一步审查 |
+| 斗鱼 | `douyu_accounts` 确认身份、头像与分页关注 | `douyu_platform` 房间/靓号；`douyu_playback` 原生画质和 CDN；`douyu_interaction` 发送；`douyu_danmaku` 连接 | 画质、CDN 失败及请求/实际线路仍在平台实例；输入展示由既有控件拥有 |
+| 虎牙 | `huya_accounts` 登录 JSONP 校验和关注资料 | `huya_protocol` WUP/Tars；`huya_platform` 房间；`huya_playback` 授权、签名、取流与探测；`huya_interaction` 发送 | CDN 锁/失败记录仍在平台，调用线程创建/关闭会话并维持 FLV 交接；不新增礼物支持 |
+| 抖音 | `douyin_accounts` 身份、稳定 UID 引用、关注/主页/头像 | `douyin_platform` 身份接线；`douyin_rooms` 查询；`douyin_room_data` 解码校验；`douyin_playback` 媒体；`douyin_interaction` 与 `douyin_browser` 原生发送 | 映射、资料缓存和广播匹配器只在平台构造；主线程协调保存；查询与媒体不新建状态副本 |
 | Twitch | `twitch_accounts` 网页和官方授权身份及关注 | `twitch_platform` 频道校验和公开资料；`public_live` HLS；宿主弹幕协议 | 画质缓存属于平台；账号会话在调用线程使用，OAuth 与加密属于宿主 |
 | YouTube | `youtube_accounts` 网页/Google 身份与订阅；`youtube_account_errors` 错误分类 | `youtube_platform` 频道/视频校验和直播资料；`public_live` HLS；宿主弹幕协议 | 画质缓存属于平台；保留网页函数和原入口导出，不复制账号/订阅状态 |
 | CHZZK | 当前没有账号关注接口 | `chzzk` 是完整的公开频道适配；`public_live` HLS | 画质缓存属于平台；不为缩短模块将简单频道适配机械切碎 |
@@ -18,6 +18,7 @@
 | 范围 | 离线验证入口 | 人工验收或交付边界 |
 | --- | --- | --- |
 | 账号模块独立性、取消、覆写和映射 | `check_platform_accounts`、`check_domestic_modules`、`check_global_modules` | 使用替身账号，不登录真实网站 |
+| 国内媒体、查询与解析边界 | `check_platform_media`、`check_domestic_modules` | 旧异常导出与静态助手保留；不意外装载另一平台或界面 |
 | 国内账号、离线关注、分页和映射恢复 | `check_douyu_follows`、`check_douyin_accounts`、`check_douyin_lookup` | 根入口人工核对已有账号、关注与文件夹；不自动读取个人配置 |
 | 海外网页/官方账号 | `check_global_web_accounts`、`check_youtube_account_errors` | 官方权限与真实账号由用户操作；不自动发送 |
 | 原画质、授权、CDN 和分享链接 | `check_huya_high_resolution`、`check_huya_playback_auth`、`check_douyu_playback_auth`、`check_douyu_recovery`、`check_domestic_share_links`、`check_chzzk` | 真实多路播放、网络/缓存表现另验；斗鱼缓冲尚未根治 |

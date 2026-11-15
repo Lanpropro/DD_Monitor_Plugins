@@ -29,6 +29,7 @@ def main():
     manager.load()
     platform = manager.platforms["douyu"]
     module = sys.modules[type(platform).__module__]
+    media = sys.modules[platform._streams.__func__.__module__]
     base_module = sys.modules["ddm_plugin_domestic_live.platform_base"]
     room = {"room_id": 6979222, "vipId": 6657, "show_status": 1, "videoLoop": 0,
             "nickname": "Machine", "room_name": "6657",
@@ -81,7 +82,7 @@ def main():
     session = base_module.Streamlink()
     try:
         with patch.object(platform, "room_info", return_value=RoomInfo("douyu:6979222", live=True)), \
-                patch.object(module, "Douyu") as douyu, \
+                patch.object(media, "Douyu") as douyu, \
                 patch.object(platform, "_request_source", return_value={
                     "rtmp_url": "https://cdn.test", "rtmp_live": "source.flv", "rate": 0}) as source:
             assert platform._streams(session, "douyu:6657")["source"].ddm_quality == 10000

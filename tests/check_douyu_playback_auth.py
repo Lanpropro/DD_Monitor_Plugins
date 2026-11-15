@@ -19,7 +19,7 @@ def main():
     manager = plugins.PluginManager(plugins_dir=str(ROOT / "plugins"), enabled=["domestic_live"])
     manager.load()
     platform = manager.platforms["douyu"]
-    module = sys.modules[type(platform).__module__]
+    module = sys.modules[platform._streams.__func__.__module__]
     base_module = sys.modules["ddm_plugin_domestic_live.platform_base"]
     saved = ["auth=fixture; Domain=.douyu.com; Path=/; Secure; HttpOnly",
              "expired=old; Domain=.douyu.com; Expires=Sat, 01 Jan 2000 00:00:00 GMT",
