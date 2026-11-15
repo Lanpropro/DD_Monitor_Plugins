@@ -273,6 +273,17 @@ class ContributionGuideTests(unittest.TestCase):
                 with self.subTest(document=document, target=target):
                     self.assertTrue(destination.exists())
 
+    def test_integrated_pending_changes_keep_acceptance_and_release_separate(self):
+        for plugin_id, commit in (('bili_live', 'ddd502a'), ('domestic_live', '7c1e8bf')):
+            current = (ROOT / 'docs/changes' / (plugin_id + '.md')).read_text(encoding='utf-8')
+            pending = current.split('## 待发布', 1)[1].split('## 已发布', 1)[0]
+            with self.subTest(plugin=plugin_id):
+                self.assertIn(commit, pending)
+                self.assertIn('源码已合入 `develop`', pending)
+                self.assertNotIn('尚未合入 develop', pending)
+                self.assertIn('待人工验收', pending)
+                self.assertIn('尚未公开发布', pending)
+
     def test_public_release_sources_have_matching_local_notes(self):
         directory = ROOT / 'docs/releases'
         index = (directory / 'README.md').read_text(encoding='utf-8')
