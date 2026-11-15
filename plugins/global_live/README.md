@@ -19,7 +19,7 @@
   关注频道会在下次刷新/取流时解析该频道当前直播，适合继续观看后续直播。
   直接关注视频链接则固定该场直播，不会自动换到频道的另一场直播。
 
-关注卡片支持昵称、标题、开播状态、头像与封面；拖入格子由 VLC 播放。
+关注卡片支持昵称、标题、开播状态、头像与封面；拖入格子由本体的 libmpv 播放。
 平台标识只用图标，关注栏仅有一个平台时隐藏。
 人数不查询、不显示。网络失败保留上次开播状态。
 关闭插件后关注及格子转为暂存，重新启用恢复位置和画质等设置。
@@ -77,7 +77,7 @@ Twitch 使用匿名只读 IRC WebSocket，处理 PING/PONG；YouTube 使用网�
 
 ## 实现范围
 
-使用项目已固定的 Streamlink 8.6.1 解析公开直播 HLS，由 FFmpeg 复制音视频并转封装后交给 VLC。
+使用本体固定的 Streamlink 8.6.1 解析公开直播 HLS，将地址与请求头交给本体，经本机 HLS 转发后由 libmpv 解码播放。
 不重新编码、不写录像文件、不保存带签名的媒体 URL 或访客 continuation。
 播放、图片和聊天遵循当前系统/环境 HTTP 代理；需网络能够访问对应平台。
 海外 HLS 经本机转发，清单/分片与取流使用相同 HTTP/TLS 栈及代理，
@@ -88,9 +88,11 @@ Twitch 使用匿名只读 IRC WebSocket，处理 PING/PONG；YouTube 使用网�
 参考：[Streamlink 插件文档](https://streamlink.github.io/plugins.html)、
 [Twitch IRC 协议](https://dev.twitch.tv/docs/chat/irc/)、
 [YouTube 网页聊天协议研究实现](https://github.com/xenova/chat-downloader/blob/master/chat_downloader/sites/youtube.py)。
-图标为平台官网 favicon，仅用于来源识别，出处见 `assets/platforms/README.md`。
+图标为平台官网 favicon，仅用于来源识别，出处见[平台图标说明](../../docs/assets/platforms/README.md)。
 
 ## 验收
+
+以下命令从本体源码根目录执行。宿主集成专项使用 `plugins_user` 中已安装的插件，运行前安装要验收的版本；插件源码与正式包的一致性仍由插件仓库的发布检查负责。标注真实直播的命令需要明确选择当前开播房间，离线或本机服务通过不代表真实直播已验收。
 
 - `python dev/selfcheck_oauth_guide.py`：编号步骤与官方链接、配置收起与滚动布局、JSON 导入、浏览器重试、授权码复制和取消隔离。
 - `python dev/selfcheck_oauth.py`：真实本机 HTTP 回调、PKCE/state 校验、取消清理、设备轮询和刷新令牌轮换。
@@ -101,9 +103,9 @@ Twitch 使用匿名只读 IRC WebSocket，处理 PING/PONG；YouTube 使用网�
   PING/PONG、YouTube 轮询/全部聊天 continuation、去重、Unicode、线程取消。
 - `python dev/selfcheck_auto_quality.py`：带宽升降、缓冲降档、迟滞、手动/预览隔离、保存恢复与真实 Qt 取流接线。
 - `python dev/selfcheck_auto_quality_live.py youtube:@LofiGirl` 或 `twitch:正在直播的频道`：
-  真实分片下载与 VLC 播放、限速降档、取消限速后升档，以及进程/本机转发清理。
+  真实分片下载与 libmpv 播放、限速降档、取消限速后升档，以及进程/本机转发清理。
 - `python dev/selfcheck_platform_quality_live.py twitch:sodapoppin` 或 `youtube:@LofiGirl`：
-  逐档 VLC 解码、尺寸、保存值及进程释放。
+  逐档 libmpv 解码、尺寸、保存值及进程释放。
 - `python dev/selfcheck_platform_preview_live.py youtube:@LofiGirl 15`：
   四种预览形态、静音、持续解码、主格子不刷新和关闭/旋转/禁用后的资源释放；也可指定 Twitch。
 - `python dev/selfcheck_live_danmaku_live.py 90 twitch:sodapoppin youtube:@LofiGirl`：

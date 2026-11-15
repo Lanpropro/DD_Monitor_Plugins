@@ -6,7 +6,7 @@
 
 为 DD监控室CE 扩展直播平台、比赛二路与直播互动。
 
-[![DD监控室CE](https://img.shields.io/badge/DD监控室CE-插件扩展-5cd6ff)](https://github.com/Lanpropro/DD_Monitor_CE) [![插件](https://img.shields.io/badge/插件-5_款含开发预览-5cd6ff)](#插件一览) [![许可](https://img.shields.io/badge/License-LGPL--2.1-blue.svg)](LICENSE)
+[![DD监控室CE](https://img.shields.io/badge/DD监控室CE-插件扩展-5cd6ff)](https://github.com/Lanpropro/DD_Monitor_CE) [![插件](https://img.shields.io/badge/插件-5_款-5cd6ff)](#插件一览) [![许可](https://img.shields.io/badge/License-LGPL--2.1-blue.svg)](LICENSE)
 
 [下载插件](https://github.com/Lanpropro/DD_Monitor_Plugins/releases) · [插件一览](#插件一览) · [安装与更新](#安装与更新) · [开发与文档](#开发与文档) · [反馈问题](https://github.com/Lanpropro/DD_Monitor_Plugins/issues)
 
@@ -75,7 +75,7 @@
 
 1. 从上方插件下载入口或 [Releases](https://github.com/Lanpropro/DD_Monitor_Plugins/releases) 下载对应的插件 ZIP。
 2. 在软件“设置 → 插件”选择“装载插件…”，或将 ZIP 拖入插件页面。
-3. 勾选插件，点击“保存并重启”。
+3. 启用插件，点击“重启以应用”；旧版本按页面提示保存并重启。
 
 更新优先使用软件内的插件更新入口，并按提示重启。各插件独立更新，无需一起替换。
 
@@ -84,7 +84,7 @@
 
 ZIP 内只有插件 ID 对应的顶层文件夹。GitHub 自动生成的 **Source code ZIP** 包含整个仓库，不能作为单插件安装包导入。
 
-手动复制时，将插件文件夹放入软件的 `plugins_user/<ID>/`。已存在同 ID 的插件不能重复导入；手动更新前请退出软件，按对应 Release 的步骤操作。
+手动复制时，将插件文件夹放入当前数据目录的 `plugins_user/<ID>/`。安装版默认在当前用户的 AppData，便携版和源码版默认在程序旁；迁移后以软件“数据与存储”显示的目录为准。已存在同 ID 的插件不能重复导入；手动更新前请退出软件，按对应 Release 的步骤操作。
 
 源码运行需要安装本体的 `requirements.txt`；安装版与便携版使用本体随附的运行环境。平台请求使用本体的网络与代理配置。
 
