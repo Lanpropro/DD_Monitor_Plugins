@@ -274,6 +274,15 @@
           "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/domestic-live-v2.0/plugin-catalog.json"
         }
       ]
+    },
+    {
+      "tag": "match-sync-v1.6.1",
+      "file": "RELEASE-match-sync-v1.6.1.md",
+      "status": "historical",
+      "source_kind": "repository_history",
+      "source_commit": "fc84870f5b1e1e149c63f1aef5538dfb79a2b247",
+      "last_edit_verified": false,
+      "sha256": "5e88239273ce571229dddcd8f98162d2ebe585a937dc09fc0679ad76d4bfa869"
     }
   ],
   "tags_without_recoverable_body": [
