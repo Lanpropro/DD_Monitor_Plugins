@@ -249,5 +249,63 @@ class EntryIconTests(unittest.TestCase):
             button.deleteLater()
 
 
+class BottomBarLayoutTests(unittest.TestCase):
+    def setUp(self):
+        from ddm.tile_widgets import Tile
+        from ddm.plugin_controls import TileControls
+        self.plugin = plugin_module.BiliWatchLaterPlugin()
+        self.tile = Tile({'room_id': 'BV1xx411c7mD', 'live': False})
+        self.tile.set_recording_available(False)
+        self.controls = TileControls(self.tile)
+        self.tile._plugin_controls = self.controls
+        self.controls.add('bili_watchlater', 'progress', self.plugin._make_progress_control, 61, 0)
+        self.controls.add('bili_watchlater', 'subtitle', self.plugin._make_subtitle_control, 59, 1)
+        self.progress = self.plugin._bar_progress[id(self.tile)]['widget']
+        self.subtitle = self.plugin._subtitle_controls[id(self.tile)]['widget']
+        self.progress.show()
+        self.subtitle.show()
+        self.tile.show()
+
+    def tearDown(self):
+        self.controls.shutdown()
+        self.tile.close()
+        self.tile.deleteLater()
+        APP.sendPostedEvents(None, QEvent.DeferredDelete)
+
+    def test_progress_and_subtitle_share_allocated_width_without_overlap(self):
+        for width in (520, 800, 1100, 520):
+            with self.subTest(width=width):
+                self.tile.resize(width, 400)
+                self.controls.invalidate()
+                APP.processEvents()
+                self.plugin._fit_vod_bottom_bar(self.tile)
+                APP.processEvents()
+                visible = [entry.wrapper for entry in self.controls.entries if not entry.wrapper.isHidden()]
+                self.assertLessEqual(sum(widget.width() for widget in visible), self.controls.widget.width())
+                if not self.progress.parentWidget().isHidden():
+                    self.assertTrue(self.progress.rect().contains(self.progress.duration_label.geometry()))
+                    right = self.progress.duration_label.mapTo(self.controls.widget, QPoint(self.progress.duration_label.width(), 0)).x()
+                    subtitle_left = self.subtitle.mapTo(self.controls.widget, QPoint()).x()
+                    if not self.subtitle.parentWidget().isHidden():
+                        self.assertLessEqual(right, subtitle_left)
+
+    def test_progress_width_declares_both_clocks_and_seek_handle(self):
+        entry = next(entry for entry in self.controls.entries if entry.key == 'progress')
+        self.assertGreaterEqual(entry.control.minimum_width, self.progress.minimumSizeHint().width())
+
+    def test_narrow_tile_uses_line_then_restores_full_bar_when_widened(self):
+        binding = SimpleNamespace(tile=self.tile, state='playing', line=Mock(), strip=None)
+        with patch.object(self.plugin, '_binding_for_tile', return_value=binding), \
+                patch.object(self.plugin, '_sync_position_badge'), \
+                patch.object(self.plugin, '_sync_shortcut_hosts'):
+            for width, visible in ((300, False), (1100, True), (300, False), (1100, True)):
+                self.tile.resize(width, 400)
+                self.controls.invalidate()
+                APP.processEvents()
+                self.plugin._sync_fullscreen_state(self.tile)
+                self.assertEqual(self.plugin._bar_progress[id(self.tile)]['visible'], visible)
+                binding.line.setVisible.assert_called_with(not visible)
+
+
 if __name__ == '__main__':
     unittest.main()

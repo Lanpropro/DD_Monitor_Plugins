@@ -1087,8 +1087,11 @@ class BiliWatchLaterPlugin(api.Plugin):
         class ProgressControl(api.TileControl):
             def __init__(self) -> None:
                 widget = VodBarProgress()
+                widget.ensurePolished()
                 super().__init__(
-                    widget, minimum_width=160, preferred_width=100000
+                    widget, minimum_width=max(BAR_PROGRESS_MIN_WIDTH,
+                                              widget.minimumSizeHint().width()),
+                    preferred_width=100000
                 )
                 self.widget = widget
                 widget.hide()
@@ -1591,18 +1594,7 @@ class BiliWatchLaterPlugin(api.Plugin):
             self._pip_filter = None
 
     def _fit_vod_bottom_bar(self, tile) -> int:
-        """把底栏中间区让给进度条：只做「等量搬移」，绝不改变整行总宽。
-
-        v1.0 用「重算余量」的方式接管宽度，理论上有溢出风险；v1.0 换成更
-        安全的做法：把宿主算出来的两个空白占位（``status_label``、
-        ``TileControls.spacer``）的宽度**原样加给进度条容器**，再把它们清零
-        —— 整行总宽一分不变，因此不可能挤到右侧的「弹/字幕/设置/全屏」。
-        v1.0 需求：的根因正是「插件往布局里插了控件、宿主预算不认它」，
-        现在字幕回到 TileControls，连这个前提都不存在了，这里只负责把空白
-        让给进度条（需求：）。
-
-        返回进度条容器宽度（0 = 结构不认识，交回宿主自己算）。
-        """
+        """Share spare bar width through the host allocator, including subtitles."""
         entry = self._bar_progress.get(id(tile))
         if entry is None:
             return 0
@@ -1636,16 +1628,11 @@ class BiliWatchLaterPlugin(api.Plugin):
                 # v1.0 需求：：宿主在动画帧里可能反复重设空白占位，这里按底栏
                 # 宽度硬钳一次，绝不让容器无限长大（退出/进入全屏时的「鬼畜生长」）。
                 width = max(0, min(width, bar.width() - 4))
-                container.setFixedWidth(width)
-                wrapper.setFixedWidth(width)
+                controls.allocate(width)
+                layout.activate()
             except RuntimeError:
                 return 0
-        try:
-            if not container.isVisible():
-                container.show()
-        except RuntimeError:
-            return 0
-        return max(0, container.width())
+        return max(0, wrapper.width()) if not wrapper.isHidden() else 0
 
     def _sync_fullscreen_state(self, tile) -> None:
         """按 tile.property('fullscreen') / PiP 切换进度控件形态（需求：/8/15）。
@@ -1666,23 +1653,19 @@ class BiliWatchLaterPlugin(api.Plugin):
         binding = self._binding_for_tile(tile)
         active = binding is not None and binding.state in ("playing", "paused")
         entry = self._bar_progress.get(id(tile))
+        if entry is not None:
+            # Keep the widget eligible while the host hides only its wrapper
+            # for lack of space; widening the tile must restore it naturally.
+            requested = bool(active and not pip)
+            if entry["widget"].isHidden() == requested:
+                entry["widget"].setVisible(requested)
+                entry["ctx"].invalidate_layout()
         free = 0
         if entry is not None and active and not pip:
             free = self._fit_vod_bottom_bar(tile)
         bar_visible = bool(entry is not None and active and free > 0)
         if entry is not None:
-            should = bar_visible
-            if should != entry.get("visible"):
-                entry["visible"] = should
-                try:
-                    entry["widget"].setVisible(should)
-                    entry["ctx"].invalidate_layout()
-                except (RuntimeError, Exception):
-                    pass
-                # invalidate_layout 会让宿主按自己的预算重排一次，再贴回来。
-                if should:
-                    free = self._fit_vod_bottom_bar(tile)
-                    bar_visible = free > 0
+            entry["visible"] = bar_visible
         if binding is not None:
             # v1.0 需求：：交互式进度条在底栏时，蓝线只在「没有底栏条」的
             # 形态（小窗 / 窄格）保留，避免画面底部重复两套进度。
