@@ -1,5 +1,6 @@
 """YouTube live sq readers and copy-only VP9/AAC muxing; each playback owns its state."""
 from collections import deque
+from contextlib import suppress
 import io
 import os
 import queue
@@ -116,10 +117,25 @@ class Muxer(FFMPEGMuxer):
     def close(self):
         if self.closed:
             return
-        super().close()
-        if self.process is not None:
-            self.process.wait(timeout=5)
-            self.process.stdin.close()
+        # Streamlink's close creates a ThreadPoolExecutor. During interpreter
+        # shutdown new executors are unavailable, so clean these owned resources
+        # directly on the host's existing background close thread.
+        try:
+            if self.process is not None:
+                if self.process.poll() is None:
+                    self.process.kill()
+                self.process.wait(timeout=5)
+                self.process.stdout.close()
+                self.process.stdin.close()
+            for stream in self.streams:
+                stream.close()
+            for pipe in self.pipes:
+                with suppress(OSError):
+                    pipe.close()
+            for thread in self.pipe_threads:
+                thread.join(timeout=2)
+        finally:
+            io.IOBase.close(self)
 
 
 class AdaptiveReader:

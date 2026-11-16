@@ -173,6 +173,21 @@ class SegmentTests(unittest.TestCase):
 
 
 class IsolationTests(unittest.TestCase):
+    def test_mux_cleanup_needs_no_new_executor_during_process_shutdown(self):
+        mux = adaptive.Muxer.__new__(adaptive.Muxer)
+        mux.process = Mock()
+        mux.process.poll.return_value = None
+        stream, pipe, thread = Mock(), Mock(), Mock()
+        mux.streams, mux.pipes, mux.pipe_threads = [stream], [pipe], [thread]
+        with patch('concurrent.futures.ThreadPoolExecutor', side_effect=RuntimeError('interpreter shutdown')):
+            mux.close()
+        mux.process.kill.assert_called_once()
+        mux.process.wait.assert_called_once()
+        stream.close.assert_called_once()
+        pipe.close.assert_called_once()
+        thread.join.assert_called_once()
+        self.assertTrue(mux.closed)
+
     def test_fixed_errors_hide_extractor_urls_and_do_not_offer_unused_login(self):
         text = tools.failure_message('Sign in to confirm not a bot: https://private/?token=secret')
         self.assertNotIn('secret', text)
