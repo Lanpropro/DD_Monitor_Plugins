@@ -115,7 +115,8 @@ class PageControlsTests(unittest.TestCase):
         self.assertFalse(dialog.card_size.isEnabled())
         dialog.autoplay.setChecked(True)
         dialog._apply()
-        self.assertEqual(self.values, dict(default_view='grid', grid_columns=4, card_size='standard', autoplay=True))
+        self.assertEqual(self.values, dict(default_view='grid', grid_columns=4, card_size='standard', autoplay=True,
+            remember_state=True, auto_play=True, prefetch_next=False, video_preview=True))
         self.card()
         self.page._fit_grid()
         self.assertEqual(self.page._grid_columns, 4)
@@ -266,7 +267,7 @@ class AutoplayTests(unittest.TestCase):
         plugin = plugin_module.BiliWatchLaterPlugin()
         item = SimpleNamespace(parts=2)
         target = TileFixture({})
-        binding = SimpleNamespace(item=item, bvid='first', part=0, tile=target, preview=None, subtitles=[])
+        binding = SimpleNamespace(item=item, bvid='first', part=0, quality=0, tile=target, preview=None, subtitles=[])
         plugin._host_tiles = lambda: [target]
         with patch.object(plugin, '_cancel_binding_media'), patch.object(plugin, '_start_resolution') as resolve, \
                 patch.object(plugin, '_next_item_for') as next_item:

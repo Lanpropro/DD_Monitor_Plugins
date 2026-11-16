@@ -630,6 +630,7 @@ class CoverWidget(QWidget):
         super().__init__(parent)
         self._item: WatchLaterItem | None = None
         self._pixmap: QPixmap | None = None
+        self._preview_frame = None
         self._scaled: QPixmap | None = None
         self._scaled_key: tuple[int, int, int] | None = None
         self._render_cache: QPixmap | None = None
@@ -695,6 +696,11 @@ class CoverWidget(QWidget):
         self._scaled_key = None
         self._render_cache = None
         self._render_key = None
+
+    def set_preview_frame(self, pixmap):
+        self._preview_frame = pixmap
+        self._invalidate_scaled()
+        self.update()
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
@@ -786,7 +792,8 @@ class CoverWidget(QWidget):
         item = self._item
         data = (tuple(cover_badges(item)), item.duration, item.progress, item.is_finished) if item else None
         palette = self.palette()
-        key = (self._pixmap.cacheKey() if self._pixmap is not None else None,
+        pixmap = self._preview_frame if self._preview_frame is not None else self._pixmap
+        key = (pixmap.cacheKey() if pixmap is not None else None,
                self.width(), self.height(), self.devicePixelRatioF(), data, self.font().toString(),
                palette.color(QPalette.Mid).rgba(), palette.color(QPalette.PlaceholderText).rgba())
         if self._render_cache is not None and key == self._render_key:
@@ -820,14 +827,15 @@ class CoverWidget(QWidget):
         path.addRoundedRect(rect, 8, 8)
         painter.setClipPath(path)
 
-        if self._pixmap is not None and not self._pixmap.isNull():
+        pixmap = self._preview_frame if self._preview_frame is not None else self._pixmap
+        if pixmap is not None and not pixmap.isNull():
             key = (
-                self._pixmap.cacheKey(),
+                pixmap.cacheKey(),
                 self.width(),
                 self.height(),
             )
             if self._scaled is None or self._scaled_key != key:
-                self._scaled = self._pixmap.scaled(
+                self._scaled = pixmap.scaled(
                     self.size(),
                     Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                     Qt.TransformationMode.SmoothTransformation,

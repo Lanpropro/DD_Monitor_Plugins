@@ -1,5 +1,6 @@
 """Plugin-only preferences, persisted through the public host context."""
-DEFAULTS = dict(default_view='grid', grid_columns=0, card_size='standard', autoplay=False)
+DEFAULTS = dict(default_view='grid', grid_columns=0, card_size='standard', autoplay=False,
+                remember_state=True, auto_play=True, prefetch_next=False, video_preview=True)
 CARD_WIDTHS = dict(compact=240, standard=300, large=360)
 
 
@@ -13,7 +14,9 @@ def read_preferences(context):
         values['grid_columns'] = 0
     if not isinstance(values['card_size'], str) or values['card_size'] not in CARD_WIDTHS:
         values['card_size'] = 'standard'
-    values['autoplay'] = values['autoplay'] is True
+    for key in ('autoplay', 'remember_state', 'auto_play', 'prefetch_next', 'video_preview'):
+        values[key] = values[key] is True
+    values['prefetch_next'] = values['prefetch_next'] and values['autoplay']
     return values
 
 

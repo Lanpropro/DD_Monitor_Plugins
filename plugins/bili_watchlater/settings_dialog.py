@@ -1,6 +1,6 @@
-"""Appearance and playback defaults for the watch-later plugin."""
+"""Grouped video-card, navigation and playback settings."""
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QDialog, QFormLayout, QHBoxLayout, QVBoxLayout
+from PySide6.QtWidgets import QDialog, QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
 from ddm.ui import ActionButton, HintLabel, SelectControl, SettingsSurface, TitleLabel, ToggleSwitch
 
 
@@ -11,30 +11,47 @@ class WatchLaterSettings(QDialog):
         super().__init__(parent)
         self.setWindowTitle('稍后再看设置')
         self.setAttribute(Qt.WA_DeleteOnClose)
-        self.setMinimumWidth(440)
+        self.setMinimumWidth(500)
+        self.resize(620, min(740, self.screen().availableGeometry().height() - 80))
         outer = QVBoxLayout(self)
         outer.setContentsMargins(24, 20, 24, 20)
         outer.setSpacing(16)
         outer.addWidget(TitleLabel('稍后再看设置', self))
-        outer.addWidget(HintLabel('仅影响此插件，不改变画面墙或本体设置', self))
-        surface = SettingsSurface(self)
-        form = QFormLayout(surface)
-        form.setContentsMargins(18, 16, 18, 16)
-        form.setSpacing(14)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        content = QWidget(scroll)
+        body = QVBoxLayout(content)
+        body.setContentsMargins(0, 0, 6, 0)
+        body.setSpacing(14)
+        scroll.setWidget(content)
+        outer.addWidget(scroll, 1)
+
+        appearance = self._section(body, '视频卡片', '配置卡片布局、预览和关闭页面后的浏览状态。')
         self.view = self._select([('网格', 'grid'), ('列表', 'list')], values['default_view'])
-        form.addRow('默认视图', self.view)
+        self._row(appearance, '默认视图', '首次打开时使用的展示方式。', self.view)
         self.columns = self._select([('自动', 0)] + [(f'{n} 列', n) for n in range(2, 7)], values['grid_columns'])
-        form.addRow('每行视频数', self.columns)
+        self._row(appearance, '每行视频数', '固定列数时，卡片随窗口宽度缩放。', self.columns)
         self.card_size = self._select([('紧凑', 'compact'), ('标准', 'standard'), ('宽大', 'large')], values['card_size'])
-        form.addRow('卡片大小', self.card_size)
-        form.addRow(HintLabel('自动列数时按卡片大小排列；固定列数时随窗口宽度缩放。', self))
-        self.autoplay = ToggleSwitch('自动连播', self)
-        self.autoplay.setChecked(values['autoplay'])
-        form.addRow('自动连播', self.autoplay)
-        form.addRow(HintLabel('开启后先播放下一 P，再播放列表下一条；列表末尾停止。默认关闭。', self))
+        self._row(appearance, '卡片大小', '自动列数时，按此大小排列卡片。', self.card_size)
+        self.video_preview = self._toggle(values['video_preview'], '启用视频预览')
+        self._row(appearance, '启用视频预览（如果支持）', '悬停卡片显示 B 站预览帧；同时控制进度条预览。关闭后不请求预览数据。', self.video_preview)
+        self.remember_state = self._toggle(values['remember_state'], '留存状态')
+        self._row(appearance, '留存状态', '再次打开选片页面时，恢复上次的浏览位置、视图、搜索和筛选。', self.remember_state)
+
+        playback = self._section(body, '播放行为', '自动播放决定进入格子后的状态；自动连播决定结束后的行为。')
+        self.auto_play = self._toggle(values['auto_play'], '自动播放')
+        self._row(playback, '自动播放', '视频进入格子后立即播放；关闭后保持暂停，手动点击播放。', self.auto_play)
+        self.autoplay = self._toggle(values['autoplay'], '自动连播')
+        self._row(playback, '自动连播', '自然播放结束后先下一 P，再列表下一条；列表末尾停止。', self.autoplay)
+        self.prefetch_next = self._toggle(values['prefetch_next'], '提前加载下一条')
+        self._row(playback, '提前加载下一条', '仅在自动连播开启时可用。接近结束时预取下一项；每路最多约 10 MiB 音视频缓冲，会额外占用内存和流量，用于减少切换等待。', self.prefetch_next)
         self.columns.currentIndexChanged.connect(self._sync_size)
+        self.autoplay.toggled.connect(self._sync_prefetch)
         self._sync_size()
-        outer.addWidget(surface)
+        self._sync_prefetch()
+        body.addStretch()
         buttons = QHBoxLayout()
         buttons.addStretch()
         cancel = ActionButton('取消', self)
@@ -46,6 +63,35 @@ class WatchLaterSettings(QDialog):
         buttons.addWidget(apply)
         outer.addLayout(buttons)
 
+    def _section(self, body, title, hint):
+        heading = QLabel(title, self)
+        heading.setObjectName('SectionLabel')
+        body.addWidget(heading)
+        body.addWidget(HintLabel(hint, self))
+        surface = SettingsSurface(self)
+        layout = QVBoxLayout(surface)
+        layout.setContentsMargins(18, 8, 18, 8)
+        layout.setSpacing(0)
+        body.addWidget(surface)
+        return layout
+
+    def _row(self, layout, title, hint, control):
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 12, 0, 12)
+        row.setSpacing(16)
+        labels = QVBoxLayout()
+        labels.setSpacing(5)
+        label = QLabel(title, self)
+        label.setWordWrap(True)
+        label.setTextFormat(Qt.PlainText)
+        label.setBuddy(control)
+        control.setAccessibleName(title)
+        labels.addWidget(label)
+        labels.addWidget(HintLabel(hint, self))
+        row.addLayout(labels, 1)
+        row.addWidget(control, 0, Qt.AlignVCenter)
+        layout.addLayout(row)
+
     def _select(self, options, value):
         control = SelectControl(self)
         for label, data in options:
@@ -53,10 +99,23 @@ class WatchLaterSettings(QDialog):
         control.setCurrentIndex(control.findData(value))
         return control
 
+    def _toggle(self, checked, title):
+        control = ToggleSwitch(title, self)
+        control.setChecked(checked)
+        return control
+
     def _sync_size(self):
         self.card_size.setEnabled(self.columns.currentData() == 0)
 
+    def _sync_prefetch(self):
+        enabled = self.autoplay.isChecked()
+        self.prefetch_next.setEnabled(enabled)
+        if not enabled:
+            self.prefetch_next.setChecked(False)
+
     def _apply(self):
         self.applied.emit(dict(default_view=self.view.currentData(), grid_columns=self.columns.currentData(),
-                               card_size=self.card_size.currentData(), autoplay=self.autoplay.isChecked()))
+            card_size=self.card_size.currentData(), autoplay=self.autoplay.isChecked(),
+            remember_state=self.remember_state.isChecked(), auto_play=self.auto_play.isChecked(),
+            prefetch_next=self.prefetch_next.isChecked(), video_preview=self.video_preview.isChecked()))
         self.accept()

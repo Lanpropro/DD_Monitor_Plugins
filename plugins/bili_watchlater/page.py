@@ -63,6 +63,8 @@ from .page_panels import BusyRefreshButton, GalleryToolButton, PlacementSelector
 from .placement_picker import PlacementPicker
 from .preferences import CARD_WIDTHS, read_preferences, save_preferences
 from .settings_dialog import WatchLaterSettings
+from .browse_state import BrowseState
+from .card_preview import CardPreview
 from .entry_icon import GalleryIcon
 
 from .bili_api import BiliAPIError, describe_error
@@ -435,6 +437,7 @@ class _Account:
 
 class WatchLaterPage(QWidget):
     closed = Signal()
+    preferences_changed = Signal(object)
     #: v1.0 需求：：选片模式的取消出口。v1.0 删掉了横幅上的「退出选片」
     #: 按钮（需求：），页面侧不再主动 emit；信号本身必须保留——plugin.py
     #: 仍连接它，删掉会让插件在挂接页面时 AttributeError。
@@ -572,6 +575,8 @@ class WatchLaterPage(QWidget):
         self._grow_settle_timer.timeout.connect(self._grow_page)
 
         self._build_ui()
+        self.browse_state = BrowseState(self)
+        self.card_preview = CardPreview(self)
         self._refresh_multi_button()
         self._connect_scroll_refetch()
         self._show_loading()
@@ -710,7 +715,7 @@ class WatchLaterPage(QWidget):
         self.filter_combo.setToolTip("按观看状态筛选")
         self.filter_combo.setAccessibleName("筛选观看状态")
         self.filter_combo.currentIndexChanged.connect(
-            lambda _index: self._render(reset_scroll=True)
+            self._browse_filter_changed
         )
         self.filter_combo.hide()  # Keep filtering data in this existing single source of truth.
         self.filter_tabs = SegmentedControl(FILTER_OPTIONS, FILTER_ALL, self)
@@ -728,7 +733,7 @@ class WatchLaterPage(QWidget):
         self.sort_combo.setToolTip("选择排序方式")
         self.sort_combo.setAccessibleName("排序方式")
         self.sort_combo.currentIndexChanged.connect(
-            lambda _index: self._render(reset_scroll=True)
+            self._browse_filter_changed
         )
         filters.addWidget(self.sort_combo, 0)
 
@@ -949,6 +954,7 @@ class WatchLaterPage(QWidget):
         self._open_placement_picker(item)
 
     def _open_settings(self):
+        self.card_preview.stop()
         if self._settings_dialog is not None:
             self._settings_dialog.raise_()
             self._settings_dialog.activateWindow()
@@ -963,10 +969,16 @@ class WatchLaterPage(QWidget):
         if callable(getattr(self.context, 'set_setting', None)):
             save_preferences(self.context, values)
         self.preferences = values
+        if not values['video_preview']:
+            self.card_preview.stop()
+        if not values['remember_state']:
+            self.browse_state.clear()
         self._on_view_mode_changed(values['default_view'])
         self._fit_grid()
+        self.preferences_changed.emit(values)
 
     def _open_placement_picker(self, item):
+        self.card_preview.stop()
         if not callable(self._layout_provider):
             return
         if self._placement_picker is not None:
@@ -1260,6 +1272,7 @@ class WatchLaterPage(QWidget):
             self.grid_layout.addWidget(card, row, col)
 
     def _search_changed(self, _text: str) -> None:
+        self.browse_state.pending = None
         self._search_timer.start()
 
     def _clear_filters(self) -> None:
@@ -1389,6 +1402,10 @@ class WatchLaterPage(QWidget):
         self.stack.setCurrentWidget(self.error_view)
         self._set_refreshing(False)
 
+    def _browse_filter_changed(self, _index):
+        self.browse_state.pending = None
+        self._render(reset_scroll=True)
+
     def _render(self, reset_scroll: bool = False, *,
                 keep_position: bool = False) -> None:
         """重排当前视图。
@@ -1404,6 +1421,7 @@ class WatchLaterPage(QWidget):
             # 避免两个 _rebuild_rows 同时改写 _rows / _rows_by_key。
             self._render_pending = True
             return
+        self.browse_state.validate_account()
         total = len(self._items)
         if not total:
             self._clear_rows()
@@ -1460,6 +1478,7 @@ class WatchLaterPage(QWidget):
         # 控件；删除一条时跳过它，避免下次切换视图看到一片重新加载。
         if not keep_position:
             self._prune_inactive_view(selected)
+        self.browse_state.materialize()
         if self._view_mode == "grid":
             self._rebuild_cards(selected)
         else:
@@ -1472,17 +1491,21 @@ class WatchLaterPage(QWidget):
         self._update_destructive_controls()
         if reset_scroll:
             scroll.verticalScrollBar().setValue(0)
+        self.browse_state.restore()
         self._update_fabs()
         # 分批构建期间被跳过的可见区补取，在整页落定后再排一次。
         if self._visible:
             self._schedule_visible_covers()
 
     def _release_covers(self) -> None:
+        self.card_preview.stop()
         for view in self._cover_views:
             view.cover.set_pixmap(None)
         self._cover_views.clear()
 
     def _drop_view(self, view, layout) -> None:
+        if self.card_preview.target is view.cover:
+            self.card_preview.stop()
         self._cover_views.discard(view)
         layout.removeWidget(view)
         view.hide()
@@ -1556,6 +1579,7 @@ class WatchLaterPage(QWidget):
         row.copy_requested.connect(self._copy_item)
         row.remove_requested.connect(self._confirm_remove)
         row.play_requested.connect(self._play_item)
+        self.card_preview.watch(row.cover)
         row.selection_requested.connect(self._select_item)
         self._sync_card_action(row)
         row.double_play_requested.connect(self._on_double_play)
@@ -1592,6 +1616,7 @@ class WatchLaterPage(QWidget):
                 card.copy_requested.connect(self._copy_item)
                 card.remove_requested.connect(self._confirm_remove)
                 card.play_requested.connect(self._play_item)
+                self.card_preview.watch(card.cover)
                 card.selection_requested.connect(self._select_item)
                 self._sync_card_action(card)
                 card.double_play_requested.connect(self._on_double_play)
@@ -2041,6 +2066,7 @@ class WatchLaterPage(QWidget):
     def on_account_changed(self, generation: Any = None) -> None:
         if self._shutting_down:
             return
+        self.browse_state.clear()
         self._request_seq += 1
         self._operation_seq += 1
         self._cancel_request(self._active_list)
@@ -2752,6 +2778,7 @@ class WatchLaterPage(QWidget):
         if changed:
             return
         self._visible = True
+        self.browse_state.prepare()
         self.placement.refresh()
         self._update_fabs()
         self.covers.resume()
@@ -2985,6 +3012,7 @@ class WatchLaterPage(QWidget):
             self._settings_dialog.reject()
         self._grow_pending = False
         self._flush_wheel_scrollers()
+        self.browse_state.capture()
         self._grow_settle_timer.stop()
         self._cancel_autoscroll()
         self._search_timer.stop()
@@ -3038,6 +3066,7 @@ class WatchLaterPage(QWidget):
         if self._shutting_down:
             return
         self._shutting_down = True
+        self.card_preview.stop()
         self._visible = False
         if self._placement_picker is not None:
             self._placement_picker.reject()

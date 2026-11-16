@@ -469,6 +469,8 @@ class _VodBinding:
         self.cid = _as_int(getattr(item, "cid", 0))
         self.state = "resolving"  # resolving/playing/paused/error/ended
         self.stream = None
+        self.warm_lease = None
+        self.pending_warm_lease = None
         self.progress = 0.0
         self.duration = 0.0
         self.pending_seek = 0.0
@@ -522,6 +524,7 @@ class BiliWatchLaterPlugin(api.Plugin):
         self._vod_context: dict[int, dict] = {}
         self._cell_vod: dict[int, int] = {}
         self._vod_seq = 0
+        self._next_prefetch = None
         self._account_generation = 0
         self._dm_requests: set = set()
         self._dm_context: dict[int, tuple] = {}
@@ -979,7 +982,7 @@ class BiliWatchLaterPlugin(api.Plugin):
         except Exception as error:
             self._log("host tile start failed type=" + type(error).__name__)
 
-    def _play_on_host(self, tile, url: str, headers: dict) -> bool:
+    def _play_on_host(self, tile, url: str, headers: dict, *, start_paused=False) -> bool:
         """v1.0 核心：把点播直链注入宿主自己的格子播放器。
 
         ``_play_on``（app.py）会创建/复用 ``window.players[tile]``、
@@ -990,11 +993,25 @@ class BiliWatchLaterPlugin(api.Plugin):
         play_on = getattr(window, "_play_on", None)
         if not callable(play_on):
             return False
+        muted = bool(getattr(tile, 'muted', False))
+        if start_paused:
+            tile.muted = True  # Suppress audio until the host player has accepted pause.
         try:
             play_on(tile, url, profile="web", headers=headers)
+            if start_paused:
+                tile.set_paused(True)
+                player = self._host_player(tile)
+                if player is not None:
+                    player.set_paused(True)
         except Exception as error:
             self._log("host play_on failed type=" + type(error).__name__)
             return False
+        finally:
+            if start_paused:
+                tile.muted = muted
+                player = self._host_player(tile)
+                if player is not None:
+                    player.set_muted(muted or bool(getattr(window, '_match_sync_active', False)))
         return True
 
     # --------------------------------------------------------- tile watching
@@ -2790,7 +2807,7 @@ class BiliWatchLaterPlugin(api.Plugin):
             except Exception:
                 pass
 
-    def _start_vod_for_tile(self, tile, item) -> None:
+    def _start_vod_for_tile(self, tile, item, *, prepared=None) -> None:
         if self._shutting_down or tile is None or item is None:
             return
         bvid = str(getattr(item, "bvid", "") or "")
@@ -2834,6 +2851,8 @@ class BiliWatchLaterPlugin(api.Plugin):
         if str(room.get("room_id") or "") and not room.get("watchlater_bvid"):
             prev_room = dict(room)
         binding = _VodBinding(item, cell, tile)
+        from .preferences import read_preferences
+        binding.resume_paused = not read_preferences(self.context)['auto_play']
         binding.part = 0          # v1.0 需求：：新片从第一 P 开始
         binding.prev_room = prev_room
         self._bindings[bvid] = binding
@@ -2846,7 +2865,10 @@ class BiliWatchLaterPlugin(api.Plugin):
             tile.set_status("正在取流…")
         except Exception:
             pass
-        self._start_resolution(binding, start=self._resume_seconds(item))
+        if prepared is not None:
+            self._start_resolution(binding, start=self._resume_seconds(item), prepared=prepared)
+        else:
+            self._start_resolution(binding, start=self._resume_seconds(item))
         self._ensure_tick_timer()
 
     @staticmethod
@@ -2894,7 +2916,7 @@ class BiliWatchLaterPlugin(api.Plugin):
 
     # ------------------------------------------------------------ VOD workers
     def _start_resolution(self, binding, *, start: float,
-                          qn: int | None = None) -> None:
+                          qn: int | None = None, prepared=None) -> None:
         """起一次取流（首播/重试/重播/秒切回退续播/清晰度切换共用）。"""
         cookies = self._cookie_snapshot()
         generation = self._account_generation
@@ -2925,6 +2947,19 @@ class BiliWatchLaterPlugin(api.Plugin):
             "expected_room": str(room.get("room_id") or ""),
         }
         self._cell_vod[id(cell)] = request_id
+        if prepared is not None:
+            try:
+                stream, lease = prepared.activate()
+                binding.pending_warm_lease = lease
+                self._on_vod_completed(request_id, generation, stream)
+                self._retire_vod(request_id)
+                return
+            except Exception as error:
+                lease = getattr(binding, 'pending_warm_lease', None)
+                if lease is not None:
+                    lease.close()
+                    binding.pending_warm_lease = None
+                self._log('prefetch handoff fallback type=' + type(error).__name__)
         worker = VodResolveRequest(
             cookies, generation, request_id, binding.bvid,
             # 多 P：第 2 页起不再用列表里的 cid，交给 resolve 按 page 取。
@@ -3120,6 +3155,11 @@ class BiliWatchLaterPlugin(api.Plugin):
             # 红线：网页 URL 绝不喂宿主播放器（ytdl=False 必错）。
             self._show_card_error(binding, "取流结果异常，请用浏览器打开")
             return
+        old_lease = getattr(binding, 'warm_lease', None)
+        if old_lease is not None:
+            old_lease.close()
+        binding.warm_lease = getattr(binding, 'pending_warm_lease', None)
+        binding.pending_warm_lease = None
         self._stop_host_tile(tile)
         current = getattr(tile, "room", None) or {}
         danmaku_enabled = bool(current.get("video_danmaku_enabled", True)) \
@@ -3153,7 +3193,7 @@ class BiliWatchLaterPlugin(api.Plugin):
             except RuntimeError:
                 pass
         if not self._play_on_host(tile, url.strip(), merge_headers(
-                getattr(stream, "headers", None))):
+                getattr(stream, "headers", None)), start_paused=binding.resume_paused):
             self._release_binding(binding, restart=True)
             self._notify_warning("播放器启动失败，请用浏览器打开该视频。")
             return
@@ -3202,7 +3242,7 @@ class BiliWatchLaterPlugin(api.Plugin):
         except Exception:
             binding.qualities = []
         self._apply_tile_chrome(binding)
-        binding.state = "playing"
+        binding.state = "paused" if binding.resume_paused else "playing"
         binding.progress = start
         # v1.0 任务 3：左上角立刻换成「N/总数」，不留一个空洞。
         self._sync_position_badge(binding)
@@ -3225,7 +3265,8 @@ class BiliWatchLaterPlugin(api.Plugin):
         except Exception:
             pass
         # 需求：：预览雪碧图 provider（懒加载，首次悬停才抓取）。
-        if binding.preview is None:
+        from .preferences import read_preferences
+        if binding.preview is None and read_preferences(self.context)['video_preview']:
             try:
                 from .vod_preview import VodPreviewProvider
 
@@ -3609,6 +3650,7 @@ class BiliWatchLaterPlugin(api.Plugin):
         parts = int(getattr(binding.item, "parts", 1) or 1)
         if binding.part + 1 < parts:
             # v1.0 需求：：同一个多 P 视频先播下一 P，播完所有 P 再进下一条。
+            prepared = self._take_prefetched(binding, binding.item, binding.part + 1, int(binding.quality or 0))
             self._cancel_binding_media(binding)
             if binding.preview is not None:
                 binding.preview.release()
@@ -3619,9 +3661,14 @@ class BiliWatchLaterPlugin(api.Plugin):
             binding.danmaku = None
             binding.cid = 0
             binding.part += 1
+            from .preferences import read_preferences
+            binding.resume_paused = not read_preferences(self.context)['auto_play']
             binding.dm_cursor = 0
             binding.dm_last_pos = 0.0
-            self._start_resolution(binding, start=0.0)
+            if prepared is not None:
+                self._start_resolution(binding, start=0.0, prepared=prepared)
+            else:
+                self._start_resolution(binding, start=0.0)
             return
         item = self._next_item_for(binding.bvid)
         if item is None:
@@ -3632,7 +3679,11 @@ class BiliWatchLaterPlugin(api.Plugin):
         if tile is None or tile not in self._host_tiles():
             self._notify_warning("这个格子已经不在了，无法播放下一个视频。")
             return
-        self._start_vod_for_tile(tile, item)
+        prepared = self._take_prefetched(binding, item, 0, 0)
+        if prepared is not None:
+            self._start_vod_for_tile(tile, item, prepared=prepared)
+        else:
+            self._start_vod_for_tile(tile, item)
 
     def _open_url(self, url: str) -> None:
         if isinstance(url, str) and url.startswith("https://"):
@@ -3680,6 +3731,13 @@ class BiliWatchLaterPlugin(api.Plugin):
 
     def _cancel_binding_media(self, binding) -> None:
         """Invalidate a binding's subtitle/danmaku deliveries before replacing it."""
+        if self._next_prefetch is not None:
+            self._next_prefetch.drop(id(binding))
+        for name in ('warm_lease', 'pending_warm_lease'):
+            lease = getattr(binding, name, None)
+            if lease is not None:
+                lease.close()
+                setattr(binding, name, None)
         for contexts, workers in ((self._dm_context, self._dm_requests),
                                   (self._sub_context, self._sub_requests)):
             for request_id, ctx in tuple(contexts.items()):
@@ -3889,6 +3947,55 @@ class BiliWatchLaterPlugin(api.Plugin):
                 and self._has_next(binding)):
             self._next_binding(binding)
 
+    def _maybe_prefetch(self, binding):
+        from .preferences import read_preferences
+        enabled = read_preferences(self.context)['prefetch_next']
+        if not enabled:
+            if self._next_prefetch is not None:
+                self._next_prefetch.drop(id(binding))
+            return
+        if binding.state != 'playing' or binding.duration <= 0 or binding.duration - binding.progress > 30:
+            return
+        parts = int(getattr(binding.item, 'parts', 1) or 1)
+        if binding.part + 1 < parts:
+            item, part, quality = binding.item, binding.part + 1, int(binding.quality or 0)
+        else:
+            item, part, quality = self._next_item_for(binding.bvid), 0, 0
+            if item is None or item.bvid in self._bindings:
+                return
+        cookies = self._cookie_snapshot()
+        if self._next_prefetch is None:
+            from .next_prefetch import NextPrefetch
+            self._next_prefetch = NextPrefetch(QApplication.instance())
+        key = (self._account_generation, item.bvid, part, quality)
+        self._next_prefetch.prepare(id(binding), key, cookies, int(getattr(item, 'cid', 0)) if part == 0 else 0)
+
+    def _take_prefetched(self, binding, item, part, quality):
+        from .preferences import read_preferences
+        if self._next_prefetch is None or not read_preferences(self.context)['prefetch_next']:
+            return None
+        return self._next_prefetch.take(id(binding), (self._account_generation, item.bvid, part, quality))
+
+    def _preferences_changed(self, values):
+        if self._next_prefetch is not None and not values['prefetch_next']:
+            self._next_prefetch.clear()
+        for binding in self._bindings.values():
+            self._configure_preview(binding, values['video_preview'])
+
+    def _configure_preview(self, binding, enabled):
+        if not enabled and binding.preview is not None:
+            from .card_preview import retire_preview
+            retire_preview(binding.preview)
+            binding.preview = None
+        elif enabled and binding.preview is None:
+            from .vod_preview import VodPreviewProvider
+            binding.preview = VodPreviewProvider(binding.bvid, binding.cid)
+        if binding.strip is not None:
+            binding.strip.set_preview_provider(binding.preview)
+        entry = self._bar_progress.get(id(binding.tile))
+        if entry is not None:
+            entry['widget'].set_preview_provider(binding.preview)
+
     def _tick_binding(self, binding, tiles) -> None:
         bvid = binding.bvid
         tile = next(
@@ -4030,6 +4137,7 @@ class BiliWatchLaterPlugin(api.Plugin):
             binding.progress = position
         if duration > 0:
             binding.duration = duration
+        self._maybe_prefetch(binding)
         self._sync_fullscreen_state(tile)
         self._sync_subtitle_control(tile)
         # v1.0 任务 3/8：列表刷新/删除后序号与总数要跟着变。
@@ -4108,6 +4216,8 @@ class BiliWatchLaterPlugin(api.Plugin):
                 and payload.get("platform") == "bilibili"
             ):
                 self._account_generation += 1
+                if self._next_prefetch is not None:
+                    self._next_prefetch.clear()
                 self._cancel_all_requests()
                 for binding in list(self._bindings.values()):
                     self._release_binding(binding, restart=True)
@@ -4136,6 +4246,10 @@ class BiliWatchLaterPlugin(api.Plugin):
         if self._shutting_down:
             return
         self._shutting_down = True
+        if self._next_prefetch is not None:
+            self._next_prefetch.clear()
+            self._next_prefetch.deleteLater()
+            self._next_prefetch = None
         if self._dpi_flush_timer is not None:
             self._dpi_flush_timer.stop()
             self._dpi_flush_timer.deleteLater()
@@ -4308,6 +4422,7 @@ class BiliWatchLaterPlugin(api.Plugin):
 
             self.page = WatchLaterPage(self.context, wall=self.wall)
             self.page.closed.connect(self._page_closed)
+            self.page.preferences_changed.connect(self._preferences_changed)
             # v1.0 需求：：横幅「退出选片」→ 清目标格，「播放」回浏览语义。
             cancelled = getattr(self.page, "pick_cancelled", None)
             if cancelled is not None:
