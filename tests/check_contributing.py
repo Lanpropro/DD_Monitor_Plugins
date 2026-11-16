@@ -273,6 +273,36 @@ class ContributionGuideTests(unittest.TestCase):
                 with self.subTest(document=document, target=target):
                     self.assertTrue(destination.exists())
 
+    def test_development_guide_preserves_candidate_build_and_verified_draft_release(self):
+        guide = (ROOT / 'docs/development/README.md').read_text(encoding='utf-8')
+        for entry in ('python tools/build_plugins.py', 'python tests/check_packages.py',
+                      'tools/verify_plugin_release.py', '--build', '草稿 Release',
+                      '../../CONTRIBUTING.md#新版本发布门槛', '../../.github/workflows/publish-plugin.yml'):
+            with self.subTest(entry=entry):
+                self.assertIn(entry, guide)
+        workflow = (ROOT / '.github/workflows/publish-plugin.yml').read_text(encoding='utf-8')
+        self.assertIn('tools/verify_plugin_release.py', workflow)
+        self.assertLess(workflow.index('tools/verify_plugin_release.py'), workflow.index('--draft=false'))
+
+    def test_global_readme_names_current_host_playback_and_test_root(self):
+        guide = (ROOT / 'plugins/global_live/README.md').read_text(encoding='utf-8')
+        self.assertIn('libmpv', guide)
+        self.assertNotIn('VLC', guide)
+        self.assertIn('本体源码根目录', guide)
+        self.assertIn('(../../docs/assets/platforms/README.md)', guide)
+        self.assertTrue((ROOT / 'docs/assets/platforms/README.md').is_file())
+
+    def test_integrated_pending_changes_keep_acceptance_and_release_separate(self):
+        for plugin_id, commit in (('bili_live', 'ddd502a'), ('domestic_live', '7c1e8bf')):
+            current = (ROOT / 'docs/changes' / (plugin_id + '.md')).read_text(encoding='utf-8')
+            pending = current.split('## 待发布', 1)[1].split('## 已发布', 1)[0]
+            with self.subTest(plugin=plugin_id):
+                self.assertIn(commit, pending)
+                self.assertIn('源码已合入 `develop`', pending)
+                self.assertNotIn('尚未合入 develop', pending)
+                self.assertIn('待人工验收', pending)
+                self.assertIn('尚未公开发布', pending)
+
     def test_public_release_sources_have_matching_local_notes(self):
         directory = ROOT / 'docs/releases'
         index = (directory / 'README.md').read_text(encoding='utf-8')

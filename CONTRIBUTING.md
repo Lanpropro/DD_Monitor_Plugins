@@ -114,6 +114,6 @@ python -m compileall -q plugins tests tools
 - 从 [插件增量记录](docs/changes/README.md) 汇总本次实际包含且已验收的条目，并核对上次公开标签之后的源码差异；正式发布后归入各插件记录的已发布段，更新基线，未包含的条目保留待发布。
 - 新增发布说明放入 `docs/releases/`，同步更新该目录索引；公开版本与 GitHub Releases 正文对齐并标注来源，历史说明保留原始内容，不随新版本改写。
 - 版本标签对应的源码清单必须与公开附件一致；不能只改版本号来认定与发布包一致。
-- 先明确暂存并提交发布文件，确认工作树和暂存区无改动，再运行 `python tools/build_plugins.py`。它用 Git 跟踪清单选择路径，ZIP 内容读取工作树文件；包结构及源码一致性检查使用 `python tests/check_packages.py --host ../DD_Monitor_CE`。
+- 日常候选先明确暂存并提交文件，确认工作树和暂存区无改动，再运行 `python tools/build_plugins.py`。它用 Git 跟踪清单选择路径，ZIP 内容读取工作树文件；包结构及源码一致性检查使用 `python tests/check_packages.py --host ../DD_Monitor_CE`。正式包按上述发布门槛从标签 Git 对象生成并核验。
 - 网站下载数据与 SHA256 在独立网站仓库维护，来自已发布附件；本机重新打包的哈希不能替代公开附件哈希。
 - 提交源码、推送分支、发布插件 ZIP 与部署网站是不同动作。发布或部署前准备可审阅的产物、版本和验证结果，再按维护者授权执行。
