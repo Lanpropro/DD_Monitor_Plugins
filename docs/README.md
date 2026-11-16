@@ -45,6 +45,7 @@
 | 比赛二路同步 | 1.7.0 | [README](../plugins/match_sync/README.md) |
 | B站直播互动 | 1.1 | [README](../plugins/bili_live/README.md) |
 | 网络代理 | 1.0 | [README](../plugins/proxy_control/README.md) |
+| B站稍后再看（验收候选） | 1.0 | [README](../plugins/bili_watchlater/README.md) |
 
 源码版本取自各插件 `plugin.json` 的当前分支值，不代表已发布的安装包。线上公开版本以[发布记录](releases/README.md)和 GitHub Releases 为准。
 

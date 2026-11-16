@@ -61,6 +61,15 @@
 <p><a href="plugins/proxy_control/README.md">安装与使用</a> · <a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/proxy-control-v1.0">下载插件</a></p>
 </td>
 </tr>
+<tr>
+<td colspan="2" valign="top">
+<h3><a href="plugins/bili_watchlater/README.md">B站稍后再看（验收候选）</a></h3>
+<p><img src="docs/assets/platforms/bilibili.png" alt="哔哩哔哩" width="24" height="24"></p>
+<p>使用本体登录，浏览稍后再看并将点播视频放入画面墙。尚未公开发布。</p>
+<p>兼容维护：<a href="https://github.com/Lanpropro">@Lanpropro</a>；原提交包未标注作者。</p>
+<p><a href="plugins/bili_watchlater/ACCEPTANCE.md">本地候选包与验收步骤</a></p>
+</td>
+</tr>
 </table>
 
 比赛二路同步 [v1.7.0 发布说明](docs/releases/RELEASE-match-sync-v1.7.0.md)。
@@ -108,6 +117,7 @@ ZIP 内只有插件 ID 对应的顶层文件夹。GitHub 自动生成的 **Sourc
 | 比赛二路同步 | `match_sync` | 1.7.0 |
 | B站直播互动 | `bili_live` | 1.1 |
 | 网络代理 | `proxy_control` | 1.0 |
+| B站稍后再看（验收候选） | `bili_watchlater` | 1.0 |
 
 先按文件明确暂存需要发布的源码，再执行：
 
