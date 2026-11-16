@@ -3412,13 +3412,17 @@ class BiliWatchLaterPlugin(api.Plugin):
         except Exception:
             return None
 
+    def _has_next(self, binding) -> bool:
+        parts = int(getattr(binding.item, "parts", 1) or 1)
+        return binding.part + 1 < parts or self._next_item_for(binding.bvid) is not None
+
     def _sync_next_button(self, binding) -> None:
         """结束卡上的「下一个视频」可用性跟随列表变化（删除/刷新后仍准）。"""
         card = binding.card
         if card is None:
             return
         try:
-            card.set_next_available(self._next_item_for(binding.bvid) is not None)
+            card.set_next_available(self._has_next(binding))
         except (AttributeError, RuntimeError):
             pass
 
@@ -3697,7 +3701,7 @@ class BiliWatchLaterPlugin(api.Plugin):
                 binding.strip = None
         if binding.card is not None:
             binding.card.sync_geometry(tile)
-            binding.card.show_ended(self._next_item_for(binding.bvid) is not None)
+            binding.card.show_ended(self._has_next(binding))
         self._sync_position_badge(binding)
         self._sync_subtitle_control(tile)
 

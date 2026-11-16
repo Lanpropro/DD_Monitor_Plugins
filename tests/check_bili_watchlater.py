@@ -3,6 +3,7 @@ import argparse
 import importlib
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -26,9 +27,11 @@ from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeyEvent, QPixmap
 from PySide6.QtWidgets import QApplication, QLineEdit
 from ddm import plugins as api
+from ddm import theme
 from ddm.app import MainWindow
 
 APP = QApplication.instance() or QApplication([])
+APP.setStyleSheet(theme.qss())  # Match ddm.app.run before constructing MainWindow.
 installation = tempfile.TemporaryDirectory() if ARCHIVE else None
 PLUGIN_DIR = Path(installation.name) if installation else ROOT / 'plugins'
 loader = api.PluginManager(plugins_dir=str(PLUGIN_DIR), enabled=[])
@@ -43,6 +46,16 @@ http_api = importlib.import_module('ddm_plugin_bili_watchlater.bili_api')
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_last_list_video_can_still_advance_to_its_next_part(self):
+        plugin = plugin_module.BiliWatchLaterPlugin()
+        binding = SimpleNamespace(item=SimpleNamespace(parts=2), part=0, bvid='fixture', card=Mock())
+        with patch.object(plugin, '_next_item_for', return_value=None):
+            plugin._sync_next_button(binding)
+            binding.card.set_next_available.assert_called_with(True)
+            binding.part = 1
+            plugin._sync_next_button(binding)
+            binding.card.set_next_available.assert_called_with(False)
+
     def test_headless_load_and_unload(self):
         manager = api.PluginManager(plugins_dir=str(PLUGIN_DIR), enabled=['bili_watchlater'])
         manager.load()
@@ -103,17 +116,17 @@ class HostTests(unittest.TestCase):
                         patch('ddm.config.save'),
                         patch('ddm.account_store.AccountStore.load_account', return_value={})]
         for name in ('refresh_account', 'refresh_status', 'refresh_stats',
-                     'load_room_avatars', '_check_startup_plugins', 'sync_danmaku',
+                     'load_room_avatars', 'load_cached_covers', 'load_cached_avatars',
+                     '_start_startup_tiles', '_check_startup_plugins', 'sync_danmaku',
                      'stop_danmaku'):
             self.patches.append(patch.object(MainWindow, name))
         for item in self.patches:
             item.start()
             self.addCleanup(item.stop)
-        with patch('ddm.app.QTimer.singleShot'):
-            self.window = MainWindow([], [{'room_id': '90001', 'uname': 'Fixture', 'live': False}],
-                layout_id='1x1', state={'sessdata': 'fixture', 'bili_jct': 'fixture-csrf',
-                'buvid3': 'fixture-device', 'plugins_enabled': ['bili_watchlater'],
-                'settings': {'auto_update': False}})
+        self.window = MainWindow([], [{'room_id': '90001', 'uname': 'Fixture', 'live': False}],
+            layout_id='1x1', state={'sessdata': 'fixture', 'bili_jct': 'fixture-csrf',
+            'buvid3': 'fixture-device', 'plugins_enabled': ['bili_watchlater'],
+            'settings': {'auto_update': False}})
         self.window.resize(1000, 600)
         self.window.show()
         APP.processEvents()
@@ -241,4 +254,32 @@ class HostTests(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    if len(sys.argv) > 1:
+        unittest.main()
+    else:
+        # Each real application window gets its own process, as in production.
+        # Repeated MainWindow construction shares host-global Qt theme filters.
+        cases = [*unittest.defaultTestLoader.loadTestsFromTestCase(HostTests),
+                 *unittest.defaultTestLoader.loadTestsFromTestCase(ProtocolTests)]
+        logs = ROOT / 'work/bili-watchlater-checks'
+        logs.mkdir(parents=True, exist_ok=True)
+        failures = 0
+        for case in cases:
+            name = case.id().removeprefix('__main__.')
+            command = [sys.executable, str(HOST / 'dev/checks/bootstrap.py'),
+                       str(Path(__file__).resolve()), '--host', str(HOST)]
+            if ARCHIVE:
+                command += ['--archive', str(ARCHIVE)]
+            command.append(name)
+            result = subprocess.run(command, cwd=HOST, capture_output=True,
+                text=True, encoding='utf-8', errors='replace', timeout=60,
+                env=dict(os.environ, DDM_CHECK_MODE='offline', PYTHONIOENCODING='utf-8'))
+            output = result.stdout + result.stderr
+            (logs / (name + '.log')).write_text(output, encoding='utf-8')
+            failed = result.returncode != 0 or 'Error calling Python override' in output
+            failures += int(failed)
+            print(('FAIL' if failed else 'PASS') + ': ' + name, flush=True)
+            if failed:
+                print(output[-4000:], flush=True)
+        print(f'{len(cases) - failures}/{len(cases)} passed; logs: {logs}')
+        raise SystemExit(bool(failures))
