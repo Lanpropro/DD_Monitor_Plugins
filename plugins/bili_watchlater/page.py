@@ -2680,14 +2680,13 @@ class WatchLaterPage(QWidget):
         self._flash_status("未连接画面墙，无法播放到格子")
 
     def _on_double_play(self, item: WatchLaterItem) -> None:
-        """v1.0 需求 4：双击 = 播放到格子 + 关闭窗口（选片模式除外）。
+        """Close after the card has already dispatched its playback signal.
 
-        双击走既有 play 回调派发播放，随后关窗。快速选片/右键选片（
-        ``_quick_pick_active``）时投放由 plugin._play_item_from_page 自己
-        ``set_pick_target(None)`` + ``close()`` 收尾，这里不重复关窗。
+        Row/card double clicks emit play_requested first. Grid covers dispatch
+        on the first release. Replaying here would select another empty tile
+        and turn one double click into an unintended tile swap.
         """
         was_pick = self._quick_pick_active
-        self._play_item(item)
         if not was_pick and not self._shutting_down:
             self.close()
 

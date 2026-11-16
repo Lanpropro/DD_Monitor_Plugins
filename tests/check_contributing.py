@@ -238,7 +238,7 @@ class ContributionGuideTests(unittest.TestCase):
                 self.assertIn('## 待发布', source)
                 if plugin_id == 'bili_watchlater':
                     self.assertIn('尚无公开发布', source)
-                    self.assertIn('尚无已人工验收的发布条目', source)
+                    self.assertIn('尚无完整播放流程已人工验收的发布条目', source)
                 else:
                     self.assertRegex(source, r'https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/')
         self.assertIn('(docs/changes/README.md)', (ROOT / 'README.md').read_text(encoding='utf-8'))

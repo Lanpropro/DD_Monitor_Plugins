@@ -2635,6 +2635,10 @@ class BiliWatchLaterPlugin(api.Plugin):
         if tile is not None and tile not in self._host_tiles():
             tile = None
         if tile is None:
+            existing = self._bindings.get(str(getattr(item, "bvid", "") or ""))
+            if existing is not None and existing.tile in self._host_tiles():
+                tile = existing.tile
+        if tile is None:
             tile = next(
                 (t for t in self._host_tiles()
                  if not str((getattr(t, "room", None) or {}).get("room_id") or "")),

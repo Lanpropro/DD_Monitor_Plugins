@@ -11,6 +11,7 @@
 python tools/build_plugins.py
 python tests/check_packages.py --host ../DD_Monitor_CE
 python tests/check_bili_watchlater.py --host ../DD_Monitor_CE --archive dist/bili_watchlater-1.0.zip
+python tests/check_bili_watchlater_interactions.py --host ../DD_Monitor_CE --archive dist/bili_watchlater-1.0.zip
 ```
 
 生成 `dist/bili_watchlater-1.0.zip`，包含许可证、来源说明和本插件文档。
@@ -22,7 +23,8 @@ python tests/check_bili_watchlater.py --host ../DD_Monitor_CE --archive dist/bil
 | 步骤 | 操作 | 预期 |
 | --- | --- | --- |
 | 1 | 打开功能中心“稍后再看”，加载列表，搜索、筛选、切换列表/网格 | 单个窗口复用，无重复请求或界面异常 |
-| 2 | 点播放到空格，拖另一个视频到目标格 | 正常画面与声音；直播格替换后可通过“还原”恢复 |
+| 2 | 单击网格封面播放到空格，关闭列表查看画面墙；再双击另一张卡片 | 每次手势只派发一次播放；双击关闭列表；不产生意外换格提示 |
+| 2a | 从关注列表拖直播回点播格 | 新直播替换点播，不被迟到结果覆盖；当前画面右键未直接提供还原入口 |
 | 3 | 在播放格按空格、左右键、B；再在搜索框打字 | 暂停、±5 秒和弹幕键有效；输入框不触发播放动作 |
 | 4 | 对视频切画质，开启字幕，悬停进度条 | 画质恢复进度，字幕与预览对应当前视频 |
 | 5 | 多 P 视频播到结束卡，点击下一项 | 使用下一 P，弹幕/字幕/预览不串上一 P；所有 P 播完再到下一视频 |
@@ -40,3 +42,8 @@ python tests/check_bili_watchlater.py --host ../DD_Monitor_CE --archive dist/bil
 `theme.py` 调色板刷新异常（`QWidgetItem` 没有 `unpolish`），不能将最终 GUI 检查写成全绿。
 本体历史检查也有同类 Qt 对象映射异常；本轮未修复其根因，原生试验未完成。
 协议与包检查单独验证；人工验收请优先检查启动、播放结束卡及主题切换，若复现保留真实日志。
+
+2026-11-16 人工反馈：用户已确认插件启用且读取当前账号的稍后再看列表成功。
+双击视频后出现「当前布局暂不能无中断换格，视频保持原位」。已用真实卡片/页面信号接线复现
+一次双击派发两次播放，并补充网格/列表、封面/卡片、单击、多选及目标选择回归。
+重复派发与已播视频复选修复的真实软件复测仍待用户确认，不将其记录为播放验收通过。
