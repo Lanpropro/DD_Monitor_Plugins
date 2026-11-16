@@ -126,7 +126,7 @@ class HostTests(unittest.TestCase):
         self.window = MainWindow([], [{'room_id': '90001', 'uname': 'Fixture', 'live': False}],
             layout_id='1x1', state={'sessdata': 'fixture', 'bili_jct': 'fixture-csrf',
             'buvid3': 'fixture-device', 'plugins_enabled': ['bili_watchlater'],
-            'settings': {'auto_update': False}})
+            'settings': {'auto_update': False, 'close_behavior': 'exit'}})
         self.window.resize(1000, 600)
         self.window.show()
         APP.processEvents()
