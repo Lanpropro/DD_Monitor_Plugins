@@ -154,6 +154,10 @@ class HostTests(unittest.TestCase):
         self.assertEqual(keys, {'watchlater', 'watchlater_progress', 'watchlater_subtitle'})
         self.assertIn(self.tile, self.plugin._cell_tiles.values())
         self.assertIsNotNone(self.plugin._ensure_page())
+        snapshot = self.plugin._placement_snapshot()
+        self.assertEqual(len(snapshot.cells), 1)
+        self.assertIs(snapshot.cells[0].target, self.tile)
+        self.assertEqual(snapshot.cells[0].kind, 'video')
 
     def test_host_player_injection_and_restore(self):
         binding = self.binding()

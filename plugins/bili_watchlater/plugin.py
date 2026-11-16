@@ -2733,6 +2733,13 @@ class BiliWatchLaterPlugin(api.Plugin):
             options.append((tile, f'第 {cell + 1} 格 · {name}', occupied))
         return options
 
+    def _placement_snapshot(self):
+        from .placement_layout import snapshot_wall
+        page = self.page
+        cached = page.covers.cached if page is not None else lambda _url: None
+        return snapshot_wall(getattr(self._host_window(), 'wall', None), self._playback_tiles(),
+                             self._binding_for_tile, cached)
+
     def _place_item_from_page(self, item, target):
         if self._shutting_down or item is None:
             return
@@ -3846,6 +3853,8 @@ class BiliWatchLaterPlugin(api.Plugin):
           :meth:`_tick_binding` 的 ended 早退，后者靠
           :meth:`_cancel_host_retries`。这里先清掉所有待续播状态。
         """
+        if binding.state == 'ended':
+            return
         binding.state = "ended"
         binding.ended = True
         binding.pending_seek = 0.0
@@ -3869,6 +3878,16 @@ class BiliWatchLaterPlugin(api.Plugin):
             binding.card.show_ended(self._has_next(binding))
         self._sync_position_badge(binding)
         self._sync_subtitle_control(tile)
+        from .preferences import read_preferences
+        if read_preferences(self.context)['autoplay'] and self._has_next(binding):
+            QTimer.singleShot(0, lambda: self._auto_advance(binding))
+
+    def _auto_advance(self, binding):
+        from .preferences import read_preferences
+        if (not self._shutting_down and self._bindings.get(binding.bvid) is binding
+                and binding.state == 'ended' and read_preferences(self.context)['autoplay']
+                and self._has_next(binding)):
+            self._next_binding(binding)
 
     def _tick_binding(self, binding, tiles) -> None:
         bvid = binding.bvid
@@ -4297,7 +4316,7 @@ class BiliWatchLaterPlugin(api.Plugin):
                 except Exception:
                     pass
             self.page.set_play_handler(self._play_item_from_page)
-            self.page.set_placement_handlers(self._placement_targets, self._place_item_from_page)
+            self.page.set_placement_handlers(self._placement_targets, self._place_item_from_page, self._placement_snapshot)
             if self.wall is not None:
                 self.wall.set_cover_provider(self.page.covers.get)
         except Exception as error:

@@ -140,11 +140,11 @@ class CardPlaybackTests(unittest.TestCase):
             QTest.mouseClick(card.play_button, Qt.LeftButton)
             self.handler.assert_called_once_with(self.item, self.target)
 
-    def test_occupied_target_changes_button_to_replace(self):
+    def test_legacy_occupied_destination_still_reaches_the_same_target(self):
         card = self.card('grid')
         self.targets[:] = [(self.target, '第 1 格 · 主播', True)]
         self.page.refresh_targets()
-        self.assertEqual(card.play_button.text(), '替换视频')
+        self.assertEqual(card.play_button.text(), '置入视频')
         QTest.mouseClick(card.play_button, Qt.LeftButton)
         self.handler.assert_called_once_with(self.item, self.target)
 
@@ -155,7 +155,7 @@ class CardPlaybackTests(unittest.TestCase):
         QTest.mouseClick(card.play_button, Qt.LeftButton)
         self.handler.assert_not_called()
         self.assertIsNone(self.page.placement.target())
-        self.assertFalse(card.play_button.isEnabled())
+        self.assertTrue(card.play_button.isEnabled())  # The spatial picker can offer the remaining cell.
 
     def test_no_target_disables_placement(self):
         self.targets.clear()
@@ -178,11 +178,11 @@ class CardPlaybackTests(unittest.TestCase):
         from ddm.ui import ActionButton, SegmentedControl, SelectControl, SettingsSurface, TitleLabel
         from ddm_plugin_bili_watchlater.page_panels import PlacementButton, ThumbnailSurface
         self.assertIsInstance(self.page.title_label, TitleLabel)
-        self.assertIsInstance(self.page.browse_tools, SettingsSurface)
+        self.assertNotIsInstance(self.page.browse_tools, SettingsSurface)
         self.assertIsInstance(self.page.filter_combo, SelectControl)
         self.assertIsInstance(self.page.sort_combo, SelectControl)
         self.assertIsInstance(self.page.filter_tabs, SegmentedControl)
-        self.assertIsInstance(self.page.fab_refresh, ActionButton)
+        self.assertEqual(self.page.fab_refresh.text(), '')
         self.assertGreaterEqual(self.page.header_layout.indexOf(self.page.fab_refresh), 0)
         self.assertEqual(self.page.column.body_layout.indexOf(self.page.fab_bar),
                          self.page.column.body_layout.count() - 1)
@@ -287,7 +287,7 @@ class CardPlaybackTests(unittest.TestCase):
                                 self.assertTrue(self.page.rect().contains(rect), repr(widget))
             self.page.set_pick_target('第 1 格')
             APP.processEvents()
-            self.assertIs(self.page.pick_banner.parentWidget(), self.page.placement)
+            self.assertIs(self.page.pick_banner.parentWidget(), self.page.browse_tools)
             self.assertGreater(self.page.pick_banner.mapTo(self.page, QPoint()).y(), self.page.search.y())
 
 

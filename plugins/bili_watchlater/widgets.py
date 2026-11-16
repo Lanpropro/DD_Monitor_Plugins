@@ -62,8 +62,9 @@ from .models import (
     format_views,
 )
 
-from .entry_icon import BrowserIcon, GalleryIcon
+from .entry_icon import BrowserIcon
 from .page_panels import GalleryToolButton, PlacementButton, ThumbnailSurface, two_line_title
+from ddm.ui import ActionButton
 
 
 def browser_button(parent):
@@ -154,22 +155,6 @@ PAGE_ROW_SPACING = 8
 # 需求 10：多选快速删除的状态机（纯逻辑，可单测，不依赖 Qt 事件）。
 MULTISELECT_IDLE = "idle"
 MULTISELECT_SELECT = "select"
-
-
-def multiselect_click(state: str) -> tuple[str, str]:
-    """垃圾桶 / 确认删除按钮的点击状态机（纯函数）。
-
-    返回 ``(新状态, 动作)``：
-
-    * 第一次点（idle）→ ``(select, "enter")``：进入多选，按钮变红色二次确认态；
-    * 第二次点（select）→ ``(idle, "delete")``：真正执行删除。
-
-    按钮态本身即二次确认（不是静默删除），调用方在 ``delete`` 前还要检查
-    选中集合非空。
-    """
-    if state == MULTISELECT_SELECT:
-        return MULTISELECT_IDLE, "delete"
-    return MULTISELECT_SELECT, "enter"
 
 
 def multiselect_cancel(_state: str) -> str:
@@ -970,7 +955,7 @@ class RowCard(ThumbnailSurface):
         self.cover = CoverWidget(self)
         layout.addWidget(self.cover, 0, Qt.AlignTop)
         self.cover.clicked.connect(self._select)
-        self.cover.set_hint("点击选中缩略图；使用置入／替换按钮操作")
+        self.cover.set_hint("点击选中缩略图；在布局缩略图中选择位置")
         self.cover.double_clicked.connect(self._double_close)
 
         # v1.0 需求：：文字块与封面上下贴齐 —— 标题顶边 = 封面上边、
@@ -1028,25 +1013,12 @@ class RowCard(ThumbnailSurface):
         self.open_button.clicked.connect(self._open)
         actions.addWidget(self.open_button)
 
-        self.more_button = GalleryToolButton(self)
-        self.more_button.setIcon(QIcon(GalleryIcon("more")))
-        self.more_button.setToolButtonStyle(
-            Qt.ToolButtonStyle.ToolButtonIconOnly
-        )
-        self.more_button.setPopupMode(
-            QToolButton.ToolButtonPopupMode.InstantPopup
-        )
-        self.more_button.setCursor(Qt.PointingHandCursor)
-        self.more_button.setToolTip("更多操作")
-        self.more_button.setAccessibleName("更多操作")
-        self.menu = QMenu(self.more_button)
-        self.menu.setToolTipsVisible(True)
-        self.copy_action = self.menu.addAction("复制链接")
-        self.remove_action = self.menu.addAction("从稍后再看移除…")
-        self.copy_action.triggered.connect(self._copy)
-        self.remove_action.triggered.connect(self._remove)
-        self.more_button.setMenu(self.menu)
-        actions.addWidget(self.more_button)
+        self.remove_button = GalleryToolButton(self)
+        self.remove_button.setIcon(action_icon('trash', 18))
+        self.remove_button.setToolTip('从稍后再看移除…')
+        self.remove_button.setAccessibleName('从稍后再看移除')
+        self.remove_button.clicked.connect(self._remove)
+        actions.addWidget(self.remove_button)
 
         layout.addLayout(actions, 0)
         self.set_remove_available(True)
@@ -1155,12 +1127,8 @@ class RowCard(ThumbnailSurface):
     def set_remove_available(self, destructive_ready: bool) -> None:
         self._destructive_ready = bool(destructive_ready)
         reason = self._remove_reason(self.item)
-        self.remove_action.setEnabled(self._destructive_ready and not reason)
-        if reason:
-            self.remove_action.setToolTip(reason)
-        else:
-            self.remove_action.setToolTip("从稍后再看移除…")
-        self.remove_action.setStatusTip(reason or "")
+        self.remove_button.setEnabled(self._destructive_ready and not reason)
+        self.remove_button.setToolTip(reason or '从稍后再看移除…')
 
     def set_multi_mode(self, active: bool, selected: bool = False) -> None:
         """v1.0 需求 10：开关多选态 / 刷新选中高亮（不重建卡片）。"""
@@ -1262,6 +1230,15 @@ class RowCard(ThumbnailSurface):
             self._press_pos = event.position().toPoint()
             self._dragged = False
         super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if (event.button() == Qt.LeftButton and self._press_pos is not None
+                and not self._dragged and not self._multi_active):
+            self._press_pos = None
+            self._select()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
         start = self._press_pos
@@ -1367,7 +1344,7 @@ class GridCard(ThumbnailSurface):
         layout.setSpacing(8)
 
         self.cover = CoverWidget(self, flexible=True)
-        self.cover.set_hint("点击选中缩略图；使用置入／替换按钮操作")
+        self.cover.set_hint("点击选中缩略图；在布局缩略图中选择位置")
         self.cover.clicked.connect(self._select)
         # 双击的后半程只吞掉，保留第一次单击的选中状态。
         self.cover.double_clicked.connect(self._double_close)
@@ -1405,13 +1382,12 @@ class GridCard(ThumbnailSurface):
         self.open_button = browser_button(self)
         self.open_button.clicked.connect(self._open)
         actions.addWidget(self.open_button)
-        self.more_button = GalleryToolButton(self)
-        self.more_button.setIcon(QIcon(GalleryIcon("more")))
-        self.more_button.setToolTip("更多操作")
-        self.more_button.setAccessibleName("更多操作")
-        self.more_button.clicked.connect(lambda: popup_item_context_menu(
-            self, self.more_button.pos() + QPoint(0, self.more_button.height())))
-        actions.addWidget(self.more_button)
+        self.remove_button = GalleryToolButton(self)
+        self.remove_button.setIcon(action_icon('trash', 18))
+        self.remove_button.setToolTip('从稍后再看移除…')
+        self.remove_button.setAccessibleName('从稍后再看移除')
+        self.remove_button.clicked.connect(self._remove)
+        actions.addWidget(self.remove_button)
         layout.addLayout(actions)
         layout.addStretch(1)
 
@@ -1431,6 +1407,10 @@ class GridCard(ThumbnailSurface):
         截，左边缘对不齐。改为优先用满可用宽度（16:9 由宽度推高度），只有
         整格高度真的放不下时才退回按高度反算。
         """
+        side = 24 if width < 125 else 30
+        self.play_button.set_compact(width < 270, side)
+        self.open_button.setFixedSize(side, side)
+        self.remove_button.setFixedSize(side, side)
         layout = self.layout()
         margins = layout.contentsMargins()
         title_h = self.title_label.fontMetrics().lineSpacing() * 2 + 4
@@ -1517,8 +1497,10 @@ class GridCard(ThumbnailSurface):
         self.cover.set_item(self.item, pixmap)
 
     def set_remove_available(self, destructive_ready: bool) -> None:
-        # 菜单每次右键重建，这里只记状态，菜单动作按需读它。
         self._destructive_ready = bool(destructive_ready)
+        reason = self._remove_reason(self.item)
+        self.remove_button.setEnabled(self._destructive_ready and not reason)
+        self.remove_button.setToolTip(reason or '从稍后再看移除…')
 
     def set_multi_mode(self, active: bool, selected: bool = False) -> None:
         """v1.0 需求 10：开关多选态 / 刷新选中高亮（不重建卡片）。"""
@@ -1619,6 +1601,15 @@ class GridCard(ThumbnailSurface):
             self._press_pos = event.position().toPoint()
             self._dragged = False
         super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if (event.button() == Qt.LeftButton and self._press_pos is not None
+                and not self._dragged and not self._multi_active):
+            self._press_pos = None
+            self._select()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
         start = self._press_pos
@@ -2278,10 +2269,14 @@ class StatusView(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 40, 24, 40)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(24, 40, 24, 40)
+        outer.addStretch(1)
+        self.content = QWidget(self)
+        self.content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        layout = QVBoxLayout(self.content)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
-        layout.addStretch(1)
 
         self.title = QLabel(self)
         self.title.setTextFormat(Qt.PlainText)
@@ -2307,18 +2302,19 @@ class StatusView(QWidget):
         buttons = QHBoxLayout()
         buttons.setSpacing(8)
         buttons.addStretch(1)
-        self.primary_button = QPushButton(self)
+        self.primary_button = ActionButton("", self)
         self.primary_button.setAutoDefault(False)
         self.primary_button.setMinimumWidth(104)
         self.primary_button.clicked.connect(self.primary_requested)
         buttons.addWidget(self.primary_button)
-        self.secondary_button = QPushButton(self)
+        self.secondary_button = ActionButton("", self)
         self.secondary_button.setAutoDefault(False)
         self.secondary_button.clicked.connect(self.secondary_requested)
         buttons.addWidget(self.secondary_button)
         buttons.addStretch(1)
         layout.addLayout(buttons)
-        layout.addStretch(1)
+        outer.addWidget(self.content, 0, Qt.AlignHCenter)
+        outer.addStretch(1)
 
     def set_state(
         self,
@@ -2339,6 +2335,24 @@ class StatusView(QWidget):
         self.secondary_button.setText(secondary)
         self.secondary_button.setVisible(bool(secondary))
         self.secondary_button.setAccessibleName(secondary or title)
+        self._fit_text()
+
+    def _fit_text(self):
+        width = max(1, min(560, self.width() - 48))
+        self.message.setFixedWidth(width)
+        for label in (self.message, self.title):
+            # heightForWidth includes an existing minimum; release the previous
+            # fixed height before measuring or each render would grow the group.
+            label.setMinimumHeight(0)
+            label.setMaximumHeight(16777215)
+            label.setFixedHeight(max(label.fontMetrics().lineSpacing(), label.heightForWidth(width)) + 4)
+        self.content.layout().invalidate()
+        self.content.setFixedHeight(self.content.layout().sizeHint().height())
+        self.content.layout().activate()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit_text()
 
 
 class CenteredColumn(QWidget):

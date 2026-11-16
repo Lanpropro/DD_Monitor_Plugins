@@ -1,4 +1,5 @@
 """Watch-later glyph and pointer feedback, painted at the requested resolution."""
+import math
 from PySide6.QtCore import QRect, QRectF, Qt, QVariantAnimation
 from PySide6.QtGui import QIcon, QIconEngine, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QToolButton
@@ -101,11 +102,17 @@ class GalleryIcon(WatchLaterIcon):
             path.moveTo(7, 15)
             path.lineTo(12, 10)
             path.lineTo(17, 15)
-        elif self.kind == 'more':
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(theme.qcolor(theme.TEXT2))
-            for x in (5, 12, 19):
-                painter.drawEllipse(QRectF(x - 1.5, 10.5, 3, 3))
+        elif self.kind == 'settings':
+            for index in range(32):
+                angle = index * math.pi / 16
+                radius = 9 if index % 4 in (1, 2) else 7
+                point = (12 + math.cos(angle) * radius, 12 + math.sin(angle) * radius)
+                if index == 0:
+                    path.moveTo(*point)
+                else:
+                    path.lineTo(*point)
+            path.closeSubpath()
+            painter.drawEllipse(QRectF(9, 9, 6, 6))
         painter.drawPath(path)
         painter.restore()
 

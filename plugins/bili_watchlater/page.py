@@ -58,8 +58,11 @@ from PySide6.QtWidgets import (
 )
 
 from ddm import theme
-from ddm.ui import ActionButton, HintLabel, SegmentedControl, SelectControl, SettingsSurface, TitleLabel
-from .page_panels import PlacementSelector
+from ddm.ui import ActionButton, SegmentedControl, SelectControl, TitleLabel
+from .page_panels import BusyRefreshButton, GalleryToolButton, PlacementSelector
+from .placement_picker import PlacementPicker
+from .preferences import CARD_WIDTHS, read_preferences, save_preferences
+from .settings_dialog import WatchLaterSettings
 from .entry_icon import GalleryIcon
 
 from .bili_api import BiliAPIError, describe_error
@@ -94,7 +97,6 @@ from .widgets import (
     ViewModeSwitch,
     action_icon,
     multiselect_cancel,
-    multiselect_click,
     multiselect_is_confirming,
     relative_font,
     selection_toggle,
@@ -446,6 +448,10 @@ class WatchLaterPage(QWidget):
     ) -> None:
         super().__init__(parent)
         self.context = context
+        self.preferences = read_preferences(context)
+        self._settings_dialog = None
+        self._placement_picker = None
+        self._layout_provider = None
         self.wall = wall
         self._shutting_down = False
         self._visible = False
@@ -460,7 +466,7 @@ class WatchLaterPage(QWidget):
         self._cards_by_key: dict[str, GridCard] = {}
         self._cards_by_cover: dict[str, list[GridCard]] = {}
         # v1.0 需求 5：打开稍后再看窗口优先以网格模式排列视频。
-        self._view_mode = "grid"
+        self._view_mode = self.preferences["default_view"]
         self._cover_views: set[RowCard | GridCard] = set()
         # v1.0 需求 4：当前网格列数（按 viewport 宽度自适应，见 _fit_grid）。
         self._grid_columns = GRID_COLUMNS
@@ -675,9 +681,9 @@ class WatchLaterPage(QWidget):
         # pick_cancelled 信号保留：plugin.py 仍连接到它，删掉会 AttributeError。
         self.pick_banner.hide()
         # 右键选片提示挂在目标格条内，不占用页头或覆盖标题。
-        self.browse_tools = SettingsSurface(self)
+        self.browse_tools = QWidget(self)
         tools = QVBoxLayout(self.browse_tools)
-        tools.setContentsMargins(14, 8, 14, 8)
+        tools.setContentsMargins(4, 0, 4, 0)
         tools.setSpacing(0)
         filters = QHBoxLayout()
         self.filters_layout = filters  # v1.0 需求 12：便于对齐回归断言
@@ -728,8 +734,7 @@ class WatchLaterPage(QWidget):
 
         # v1.0 需求 10：排序「最近添加」(sort_combo) 旁的垃圾桶 →
         # 多选快速删除。图标复用 widgets.action_icon 画的 16×16 主题色线条。
-        self.multi_delete_button = ActionButton("", self)
-        self.multi_delete_button.setAutoDefault(False)
+        self.multi_delete_button = GalleryToolButton(self)
         self.multi_delete_button.setCursor(Qt.PointingHandCursor)
         self.multi_delete_button.setIcon(action_icon("trash", 16))
         self.multi_delete_button.setToolTip("多选快速删除")
@@ -743,7 +748,6 @@ class WatchLaterPage(QWidget):
         self.multi_cancel_button.setToolTip("退出多选，不删除任何视频")
         self.multi_cancel_button.setAccessibleName("取消多选删除")
         self.multi_cancel_button.clicked.connect(self._cancel_multiselect)
-        filters.addWidget(self.multi_cancel_button, 0)
 
         # Esc 退出多选（只在多选态启用，避免抢菜单/其它快捷键的 Esc）。
         self._multi_cancel_shortcut = QShortcut(
@@ -752,11 +756,21 @@ class WatchLaterPage(QWidget):
         self._multi_cancel_shortcut.setContext(Qt.WindowShortcut)
         self._multi_cancel_shortcut.activated.connect(self._cancel_multiselect)
         filters.addWidget(self.view_switch)
+        self.settings_button = GalleryToolButton(self)
+        self.settings_button.setIcon(QIcon(GalleryIcon('settings')))
+        self.settings_button.setToolTip('稍后再看设置')
+        self.settings_button.setAccessibleName('稍后再看设置')
+        self.settings_button.clicked.connect(self._open_settings)
+        filters.addWidget(self.settings_button)
         body.addLayout(filters)
         self.placement = PlacementSelector(self.browse_tools)
         self.placement.changed.connect(self._sync_placement_actions)
-        self.placement.layout().addWidget(self.pick_banner)
-        tools.addWidget(self.placement)
+        self.placement.hide()  # Retain destination state for the context-menu entry.
+        self.layout_hint = ElidedLabel(self.browse_tools)
+        self.layout_hint.setForegroundRole(QPalette.PlaceholderText)
+        self.layout_hint.set_full_text('点击视频，在当前布局缩略图中选择置入位置')
+        tools.addWidget(self.layout_hint)
+        tools.addWidget(self.pick_banner)
         body.addWidget(self.browse_tools)
 
         self.error_bar = ErrorBar(self)
@@ -856,29 +870,33 @@ class WatchLaterPage(QWidget):
 
         # 刷新进入页头；回顶和状态提示留在滚动区外。
         self.fab_bar = QWidget(self)
+        self.fab_bar.setObjectName("WatchLaterFooter")
         fab_layout = QHBoxLayout(self.fab_bar)
-        fab_layout.setContentsMargins(0, 0, 0, 0)
+        fab_layout.setContentsMargins(12, 10, 12, 4)
         fab_layout.setSpacing(8)
-        self.fab_refresh = ActionButton("刷新", self)
+        self.fab_refresh = BusyRefreshButton(self)
         self.fab_refresh.setToolTip("刷新稍后再看（F5）")
         self.fab_refresh.setAccessibleName("刷新稍后再看")
-        self.fab_refresh.setAutoDefault(False)
         self.fab_refresh.setIcon(QIcon(GalleryIcon('refresh')))
         self.fab_refresh.setIconSize(QSize(18, 18))
-        self.footer_hint = HintLabel('点击缩略图选中 · 使用置入或替换按钮播放', self.fab_bar)
-        fab_layout.addWidget(self.footer_hint)
+        self.footer_hint = ElidedLabel(self.fab_bar)
+        self.footer_hint.setForegroundRole(QPalette.PlaceholderText)
+        self.footer_hint.set_full_text('选择视频后点选布局位置')
+        fab_layout.addWidget(self.footer_hint, 1)
         fab_layout.addWidget(self.status_label, 1)
-        fab_layout.addStretch(1)
         self.fab_refresh.clicked.connect(lambda: self._load(manual=True))
         header.addWidget(self.fab_refresh)
-        self.fab_top = ActionButton("回到顶部", self.fab_bar)
+        self.fab_top = GalleryToolButton(self)
         self.fab_top.setToolTip("回到列表顶部")
         self.fab_top.setAccessibleName("回到顶部")
-        self.fab_top.setAutoDefault(False)
 
         self.fab_top.setIcon(QIcon(GalleryIcon("top")))
         self.fab_top.clicked.connect(self._scroll_to_top)
-        fab_layout.addWidget(self.fab_top)
+        filters.addWidget(self.fab_top)
+        self.multi_confirm_button = ActionButton('删除选中', self.fab_bar)
+        self.multi_confirm_button.clicked.connect(self._execute_multiselect_delete)
+        fab_layout.addWidget(self.multi_confirm_button)
+        fab_layout.addWidget(self.multi_cancel_button)
         body.addWidget(self.fab_bar)
         self.fab_bar.hide()
         self.fab_bar.raise_()
@@ -902,18 +920,23 @@ class WatchLaterPage(QWidget):
                 padding: 6px 10px; min-height: 22px;
             }}
             QLineEdit#WatchLaterSearch:focus {{border-color: {theme.ACCENT};}}
+            QWidget#WatchLaterFooter {{
+                background: {theme.mix(theme.BG, theme.CONTENT, .3)};
+                border-top: 1px solid {theme.BORDER_STRONG};
+            }}
         """)
 
-    def set_placement_handlers(self, provider, handler):
+    def set_placement_handlers(self, provider, handler, layout_provider=None):
         self.placement.provider = provider
         self._placement_handler = handler
+        self._layout_provider = layout_provider
         self.placement.refresh()
 
     def refresh_targets(self, preferred=None):
         self.placement.refresh(preferred)
 
     def _sync_card_action(self, card):
-        card.set_placement_action(self.placement.action_text(), self.placement.target() is not None)
+        card.set_placement_action("置入视频", self.placement.combo.count() > 0)
         card.set_browse_selected(card.item.key == self._selected_key)
 
     def _sync_placement_actions(self):
@@ -923,6 +946,51 @@ class WatchLaterPage(QWidget):
     def _select_item(self, item):
         self._selected_key = item.key
         self._sync_placement_actions()
+        self._open_placement_picker(item)
+
+    def _open_settings(self):
+        if self._settings_dialog is not None:
+            self._settings_dialog.raise_()
+            self._settings_dialog.activateWindow()
+            return
+        dialog = WatchLaterSettings(self.preferences, self)
+        self._settings_dialog = dialog
+        dialog.applied.connect(self._apply_preferences)
+        dialog.finished.connect(lambda _result: setattr(self, '_settings_dialog', None))
+        dialog.open()
+
+    def _apply_preferences(self, values):
+        if callable(getattr(self.context, 'set_setting', None)):
+            save_preferences(self.context, values)
+        self.preferences = values
+        self._on_view_mode_changed(values['default_view'])
+        self._fit_grid()
+
+    def _open_placement_picker(self, item):
+        if not callable(self._layout_provider):
+            return
+        if self._placement_picker is not None:
+            self._placement_picker.raise_()
+            return
+        snapshot = self._layout_provider()
+        picker = PlacementPicker(item, snapshot, self.placement.target(), self)
+        self._placement_picker = picker
+        picker.cell_chosen.connect(lambda index: self._commit_placement(item, picker, index))
+        picker.finished.connect(lambda _result: setattr(self, '_placement_picker', None))
+        picker.open()
+
+    def _commit_placement(self, item, picker, index):
+        snapshot = self._layout_provider()
+        if snapshot.signature() != picker.map.snapshot.signature():
+            picker.map.set_snapshot(snapshot)
+            picker.hint.setText('布局或格子内容已变化，请重新选择位置')
+            return
+        cell = next((cell for cell in snapshot.cells if cell.index == index), None)
+        if cell is None or cell.target is None:
+            return
+        picker.accept()
+        self._placement_handler(item, cell.target)
+        self.placement.refresh(cell.target)
 
     def _active_scroll(self) -> QScrollArea:
         return self.grid_scroll if self._view_mode == "grid" else self.list_scroll
@@ -1128,7 +1196,7 @@ class WatchLaterPage(QWidget):
             return
         scroll = self._active_scroll()
         has_view = self.stack.currentWidget() is scroll
-        self.fab_top.setVisible(has_view)
+        self.fab_top.setVisible(True)
         self.fab_top.setEnabled(has_view and scroll.verticalScrollBar().value() > 0)
         self.fab_bar.setVisible(self._visible and not self._shutting_down)
 
@@ -1150,7 +1218,8 @@ class WatchLaterPage(QWidget):
             return
         viewport = self.grid_scroll.viewport()
         gap = self.grid_layout.spacing()
-        columns = grid_columns_for_width(viewport.width())
+        columns = self.preferences['grid_columns'] or grid_columns_for_width(
+            viewport.width(), target=CARD_WIDTHS[self.preferences['card_size']])
         columns_changed = columns != self._grid_columns
         # 先记锚点再重排：重排会改所有卡片的行列，滚动值就没意义了。
         anchor = self._visible_anchor_key() if columns_changed else ""
@@ -1239,7 +1308,7 @@ class WatchLaterPage(QWidget):
                  and not self._shutting_down)
         self.refresh_button.setText("刷新中…" if active else "刷新")
         self.refresh_button.setEnabled(ready)
-        self.fab_refresh.setText("刷新中…" if active else "刷新")
+        self.fab_refresh.set_busy(active)
         self.fab_refresh.setEnabled(ready)
         self._refresh_shortcut.setEnabled(ready)
         self._update_fabs()
@@ -1261,6 +1330,7 @@ class WatchLaterPage(QWidget):
             self._destructive_ready = ready
             for row in (*self._rows, *self._cards):
                 row.set_remove_available(ready)
+        self._refresh_multi_button()
 
     def _remove_reason(self, item: WatchLaterItem) -> str:
         if self._shutting_down:
@@ -2382,50 +2452,29 @@ class WatchLaterPage(QWidget):
 
     # -------------------------------------------------- v1.0 多选快速删除 UI
     def _refresh_multi_button(self) -> None:
-        """按状态机刷新垃圾桶按钮：普通图标 ↔ 透明红底红字的二次确认态。"""
-        button = getattr(self, "multi_delete_button", None)
-        if button is None:
-            return
         confirming = multiselect_is_confirming(self._multiselect_state)
-        shortcut = getattr(self, "_multi_cancel_shortcut", None)
-        if shortcut is not None:
-            shortcut.setEnabled(confirming)
-        cancel = getattr(self, "multi_cancel_button", None)
-        if cancel is not None:
-            cancel.setVisible(confirming)
+        self._multi_cancel_shortcut.setEnabled(confirming)
+        self.multi_cancel_button.setVisible(confirming)
+        self.multi_confirm_button.setVisible(confirming)
         count = len(self._multi_selected_keys)
-        if confirming:
-            button.setText(f"确认删除（{count}）" if count else "确认删除")
-            button.setIcon(QIcon())
-            # 透明红底 + 红字（不是实心红块）：明确「再点一次才删」。
-            button.setStyleSheet(
-                "QPushButton { background: rgba(255, 59, 48, 0.10);"
-                " color: #ff3b30; border: 1px solid rgba(255, 59, 48, 0.45);"
-                " border-radius: 6px; padding: 4px 10px; font-weight: 600; }"
-                "QPushButton:hover { background: rgba(255, 59, 48, 0.20); }"
-            )
-            button.setToolTip("再点一次删除选中视频；Esc 或「取消」退出多选")
-        else:
-            button.setText("")
-            button.setIcon(action_icon("trash", 16))
-            button.setStyleSheet("")
-            button.setToolTip("多选快速删除")
+        self.multi_confirm_button.setText(f'删除选中（{count}）')
+        self.multi_confirm_button.setEnabled(bool(count) and bool(self._destructive_ready))
+        self.multi_delete_button.setToolTip('退出多选' if confirming else '多选删除')
 
     def _on_multi_delete_clicked(self) -> None:
         if self._shutting_down:
             return
-        state, action = multiselect_click(self._multiselect_state)
-        if action == "enter":
-            self._multiselect_state = state
+        if multiselect_is_confirming(self._multiselect_state):
+            self._cancel_multiselect()
+        else:
+            self._multiselect_state = MULTISELECT_SELECT
             self._enter_multiselect()
-        elif action == "delete":
-            self._execute_multiselect_delete()
 
     def _enter_multiselect(self) -> None:
         self._multi_selected_keys = set()
         self._apply_multiselect_to_views()
         self._refresh_multi_button()
-        self._flash_status("多选删除：点视频选中，再点红色按钮确认")
+        self._flash_status("点视频进行多选，使用底部按钮删除或取消")
 
     def _cancel_multiselect(self) -> None:
         """取消/退出多选：清空选中且不删任何东西。"""
@@ -2434,6 +2483,7 @@ class WatchLaterPage(QWidget):
         self._multi_remove_queue.clear()
         self._apply_multiselect_to_views()
         self._refresh_multi_button()
+        self._clear_status()
 
     def _apply_multiselect_to_views(self) -> None:
         active = multiselect_is_confirming(self._multiselect_state)
@@ -2483,6 +2533,9 @@ class WatchLaterPage(QWidget):
         self._begin_remove(item)
 
     def _play_item(self, item: WatchLaterItem) -> None:
+        if callable(self._layout_provider):
+            self._select_item(item)
+            return
         if callable(self._placement_handler):
             self.placement.refresh()
             target = self.placement.target()
@@ -2926,6 +2979,10 @@ class WatchLaterPage(QWidget):
             super().hideEvent(event)
             return
         self._visible = False
+        if self._placement_picker is not None:
+            self._placement_picker.reject()
+        if self._settings_dialog is not None:
+            self._settings_dialog.reject()
         self._grow_pending = False
         self._flush_wheel_scrollers()
         self._grow_settle_timer.stop()
@@ -2953,6 +3010,10 @@ class WatchLaterPage(QWidget):
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
         self._visible = False
+        if self._placement_picker is not None:
+            self._placement_picker.reject()
+        if self._settings_dialog is not None:
+            self._settings_dialog.reject()
         self._grow_pending = False
         self._flush_wheel_scrollers()
         self._grow_settle_timer.stop()
@@ -2978,6 +3039,10 @@ class WatchLaterPage(QWidget):
             return
         self._shutting_down = True
         self._visible = False
+        if self._placement_picker is not None:
+            self._placement_picker.reject()
+        if self._settings_dialog is not None:
+            self._settings_dialog.reject()
         self._grid_resize_timer.stop()
         self._grow_settle_timer.stop()
         self._shutdown_wheel_scrollers()
