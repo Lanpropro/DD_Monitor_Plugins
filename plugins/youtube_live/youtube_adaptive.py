@@ -55,7 +55,7 @@ class Track(io.RawIOBase):
                     if not head.isdigit():
                         raise YouTubeMediaError('YouTube 未返回有效的直播分片位置')
                     head = int(head)
-                    if probe and response.status_code == 404:
+                    if probe and response.status_code in (200, 404):
                         return head, b''
                     if response.status_code == 404 and number > head and attempt < 2:
                         if self._stop.wait(self.duration):

@@ -135,10 +135,12 @@ class SegmentTests(unittest.TestCase):
             track.close()
 
     def test_head_probe_tolerates_missing_initial_segment(self):
-        response = Mock(status_code=404, headers={'X-Head-Seqnum': '99'})
-        track = self.track(response)
-        self.assertEqual(track._segment(0, probe=True), (99, b''))
-        track.close()
+        for status in (200, 404):
+            response = Mock(status_code=status, headers={'X-Head-Seqnum': '99'})
+            track = self.track(response)
+            self.assertEqual(track._segment(0, probe=True), (99, b''))
+            response.iter_content.assert_not_called()
+            track.close()
 
     def test_stopped_request_does_not_access_network(self):
         track = self.track(Mock())
