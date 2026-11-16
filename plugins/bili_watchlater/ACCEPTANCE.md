@@ -12,6 +12,7 @@ python tools/build_plugins.py
 python tests/check_packages.py --host ../DD_Monitor_CE
 python tests/check_bili_watchlater.py --host ../DD_Monitor_CE --archive dist/bili_watchlater-1.0.zip
 python tests/check_bili_watchlater_interactions.py --host ../DD_Monitor_CE --archive dist/bili_watchlater-1.0.zip
+python tests/check_bili_watchlater_merge.py --host ../DD_Monitor_CE --archive dist/bili_watchlater-1.0.zip
 ```
 
 生成 `dist/bili_watchlater-1.0.zip`，包含许可证、来源说明和本插件文档。
@@ -89,3 +90,18 @@ python tests/check_bili_watchlater_interactions.py --host ../DD_Monitor_CE --arc
 
 快捷键合并检查覆盖应用过滤器的相对 seek 派发、本体快捷键优先、无同键重复注册，
 以及浮窗只切当前目标格的弹幕，不采用外部版本的多浮窗广播行为。
+
+本轮交付范围与人工操作：
+
+1. 重启根 run.cmd，确认入口图标、默认三列卡片、外链按钮保持上一候选样式。
+2. 保留 1+5（三个主播、两格弹幕、一格空视频）布局，单击播放进入空视频格；双击只派发一次。
+3. 连续滚轮、中键滚动、反向和到顶／到底；关闭再打开，切换列表／网格，检查无残余滚动、可继续加载到末尾。
+4. 向下滚后回看邻行，封面与统计不串条目；删除由用户选定的测试项后，不回到首屏分页。
+5. 连续按左右键，墙面／全屏／PiP 均逐次快进；输入框打字不触发播放操作，弹幕键不重复切换且不广播到其他浮窗。
+6. 拖动 PiP 跨缩放不同的显示器，检查黑遮盖不残留、画面与控制条位置正常。
+7. 在列表刷新过程中退出或卸载再启用；不向已销毁页面回投、不留运行线程销毁报错。整个进程仍可能等待真实 HTTP 超时。
+
+本轮自动检查以当前包为准：24 项既有交互、18 项合并专项（含原生 Windows alpha 上传与线程收尾），
+本体兼容及协议 14 项、文档 14 项、包结构与源码一致性，并通过根播放控件／公共 UI 专项。
+Qt6 快捷键旧用例已按本体拥有弹幕键的约定更新；其他主播放行为断言保留。
+此前广泛检查中的 Qt 清理／原生换格历史失败记录保留，不以本轮定向检查推断所有本体功能已验收。

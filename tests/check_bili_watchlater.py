@@ -201,11 +201,19 @@ class HostTests(unittest.TestCase):
             self.tile.pause_button.setFocus()
             APP.processEvents()
             for key, action in ((Qt.Key_Space, 'space'), (Qt.Key_Left, 'left'),
-                                (Qt.Key_Right, 'right'), (Qt.Key_B, 'danmaku')):
+                                (Qt.Key_Right, 'right')):
                 event = QKeyEvent(QEvent.KeyPress, key, Qt.NoModifier)
                 result = self.plugin._vod_key_action(event, self.tile)
                 self.assertIsNotNone(result)
                 self.assertEqual(result, (action, self.tile, binding))
+            danmaku = QKeyEvent(QEvent.KeyPress, Qt.Key_B, Qt.NoModifier)
+            self.assertIsNone(self.plugin._vod_key_action(danmaku, self.tile))
+            self.assertIsNone(self.plugin._danmaku_shortcut)
+            # Windows without the host shortcut still use the same Qt6 key
+            # parsing, while the main window remains owned by the host.
+            with patch.object(self.plugin, '_host_danmaku_shortcut_reachable', return_value=False):
+                self.assertEqual(self.plugin._vod_key_action(danmaku, self.tile),
+                                 ('danmaku', self.tile, binding))
             edit = QLineEdit(self.window)
             edit.show()
             edit.setFocus()
