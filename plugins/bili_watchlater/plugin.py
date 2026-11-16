@@ -4479,7 +4479,7 @@ class BiliWatchLaterPlugin(api.Plugin):
                 if page.parentWidget() is None:
                     window = self._host_window()
                     if window is not None:
-                        page.setParent(window, Qt.Window)
+                        page.setParent(window, Qt.Window | Qt.FramelessWindowHint)
                     else:
                         page.setWindowFlags(page.windowFlags() | Qt.Window)
                     page.setWindowTitle("B站稍后再看")

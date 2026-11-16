@@ -1,22 +1,20 @@
 """Grouped video-card, navigation and playback settings."""
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QDialog, QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
 from ddm.ui import ActionButton, HintLabel, SelectControl, SettingsSurface, TitleLabel, ToggleSwitch
+from .page_shell import InlinePanel
+from .preferences import DEFAULTS
 
 
-class WatchLaterSettings(QDialog):
+class WatchLaterSettings(InlinePanel):
     applied = Signal(object)
 
     def __init__(self, values, parent=None):
         super().__init__(parent)
-        self.setWindowTitle('稍后再看设置')
-        self.setAttribute(Qt.WA_DeleteOnClose)
-        self.setMinimumWidth(500)
-        self.resize(620, min(740, self.screen().availableGeometry().height() - 80))
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(24, 20, 24, 20)
+        outer.setContentsMargins(28, 12, 28, 18)
         outer.setSpacing(16)
-        outer.addWidget(TitleLabel('稍后再看设置', self))
+        outer.addWidget(TitleLabel('视频卡片与播放', self))
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -28,17 +26,19 @@ class WatchLaterSettings(QDialog):
         scroll.setWidget(content)
         outer.addWidget(scroll, 1)
 
-        appearance = self._section(body, '视频卡片', '配置卡片布局、预览和关闭页面后的浏览状态。')
+        appearance = self._section(body, '显示与预览', '选择页面的展示方式，以及浏览与预览行为。')
         self.view = self._select([('网格', 'grid'), ('列表', 'list')], values['default_view'])
         self._row(appearance, '默认视图', '首次打开时使用的展示方式。', self.view)
-        self.columns = self._select([('自动', 0)] + [(f'{n} 列', n) for n in range(2, 7)], values['grid_columns'])
-        self._row(appearance, '每行视频数', '固定列数时，卡片随窗口宽度缩放。', self.columns)
-        self.card_size = self._select([('紧凑', 'compact'), ('标准', 'standard'), ('宽大', 'large')], values['card_size'])
-        self._row(appearance, '卡片大小', '自动列数时，按此大小排列卡片。', self.card_size)
         self.video_preview = self._toggle(values['video_preview'], '启用视频预览')
         self._row(appearance, '启用视频预览（如果支持）', '悬停卡片显示 B 站预览帧；同时控制进度条预览。关闭后不请求预览数据。', self.video_preview)
         self.remember_state = self._toggle(values['remember_state'], '留存状态')
         self._row(appearance, '留存状态', '再次打开选片页面时，恢复上次的浏览位置、视图、搜索和筛选。', self.remember_state)
+
+        grid = self._section(body, '视频卡片网格', '按窗口宽度自动排列，也可以指定每行的视频数量。')
+        self.columns = self._select([('自动', 0)] + [(f'{n} 列', n) for n in range(2, 7)], values['grid_columns'])
+        self._row(grid, '每行视频数', '固定列数时，卡片随窗口宽度缩放。', self.columns)
+        self.card_size = self._select([('紧凑', 'compact'), ('标准', 'standard'), ('宽大', 'large')], values['card_size'])
+        self._row(grid, '卡片大小', '自动列数时生效；固定列数时由可用宽度决定。', self.card_size)
 
         playback = self._section(body, '播放行为', '自动播放决定进入格子后的状态；自动连播决定结束后的行为。')
         self.auto_play = self._toggle(values['auto_play'], '自动播放')
@@ -53,6 +53,10 @@ class WatchLaterSettings(QDialog):
         self._sync_prefetch()
         body.addStretch()
         buttons = QHBoxLayout()
+        self.reset_button = ActionButton('恢复默认', self)
+        self.reset_button.setToolTip('恢复默认选项，点击应用后保存')
+        self.reset_button.clicked.connect(self._reset)
+        buttons.addWidget(self.reset_button)
         buttons.addStretch()
         cancel = ActionButton('取消', self)
         cancel.clicked.connect(self.reject)
@@ -70,18 +74,24 @@ class WatchLaterSettings(QDialog):
         body.addWidget(HintLabel(hint, self))
         surface = SettingsSurface(self)
         layout = QVBoxLayout(surface)
-        layout.setContentsMargins(18, 8, 18, 8)
+        layout.setContentsMargins(18, 0, 18, 0)
         layout.setSpacing(0)
         body.addWidget(surface)
         return layout
 
     def _row(self, layout, title, hint, control):
+        if layout.count():
+            separator = QFrame(self)
+            separator.setObjectName('WatchLaterSettingsDivider')
+            separator.setFixedHeight(1)
+            layout.addWidget(separator)
         row = QHBoxLayout()
-        row.setContentsMargins(0, 12, 0, 12)
+        row.setContentsMargins(0, 16, 0, 16)
         row.setSpacing(16)
         labels = QVBoxLayout()
         labels.setSpacing(5)
         label = QLabel(title, self)
+        label.setObjectName('WatchLaterSettingTitle')
         label.setWordWrap(True)
         label.setTextFormat(Qt.PlainText)
         label.setBuddy(control)
@@ -98,6 +108,13 @@ class WatchLaterSettings(QDialog):
             control.addItem(label, data)
         control.setCurrentIndex(control.findData(value))
         return control
+
+    def _reset(self):
+        for name, key in (('view', 'default_view'), ('columns', 'grid_columns'), ('card_size', 'card_size')):
+            control = getattr(self, name)
+            control.setCurrentIndex(control.findData(DEFAULTS[key]))
+        for name in ('autoplay', 'video_preview', 'remember_state', 'auto_play', 'prefetch_next'):
+            getattr(self, name).setChecked(DEFAULTS[name])
 
     def _toggle(self, checked, title):
         control = ToggleSwitch(title, self)

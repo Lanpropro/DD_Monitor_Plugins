@@ -48,7 +48,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -65,6 +64,7 @@ from .preferences import CARD_WIDTHS, read_preferences, save_preferences
 from .settings_dialog import WatchLaterSettings
 from .browse_state import BrowseState
 from .card_preview import CardPreview
+from .page_shell import BrowserTitleBar, BrowserWindow, InlineConfirmation, background_color
 from .entry_icon import GalleryIcon
 
 from .bili_api import BiliAPIError, describe_error
@@ -435,7 +435,7 @@ class _Account:
     error: BaseException | None = None
 
 
-class WatchLaterPage(QWidget):
+class WatchLaterPage(BrowserWindow):
     closed = Signal()
     preferences_changed = Signal(object)
     #: v1.0 需求：：选片模式的取消出口。v1.0 删掉了横幅上的「退出选片」
@@ -585,16 +585,27 @@ class WatchLaterPage(QWidget):
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self) -> None:
-        root = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(8, 6, 8, 8)
+        outer.setSpacing(0)
+        self.window_header = BrowserTitleBar(self)
+        self.window_header.back_requested.connect(self._back_to_browser)
+        outer.addWidget(self.window_header)
+        self.navigation = QStackedWidget(self)
+        outer.addWidget(self.navigation, 1)
+        self.browser_view = QWidget(self.navigation)
+        self.navigation.addWidget(self.browser_view)
+        self._inline_panel = None
+        root = QVBoxLayout(self.browser_view)
         # 页面底部为固定操作行，不遮挡缩略图。
-        root.setContentsMargins(28, 24, 28, 18)
+        root.setContentsMargins(20, 12, 20, 10)
         root.setSpacing(0)
         self.column = CenteredColumn(self)
         root.addWidget(self.column)
         body = self.column.body_layout
         body.setSpacing(16)
         self.setObjectName("WatchLaterPage")
-        self.setAutoFillBackground(True)
+        self.setAutoFillBackground(False)
         theme.signals().changed.connect(self._sync_browser_palette)
         self._sync_browser_palette()
 
@@ -759,7 +770,7 @@ class WatchLaterPage(QWidget):
             QKeySequence(Qt.Key_Escape), self
         )
         self._multi_cancel_shortcut.setContext(Qt.WindowShortcut)
-        self._multi_cancel_shortcut.activated.connect(self._cancel_multiselect)
+        self._multi_cancel_shortcut.activated.connect(self._escape_navigation)
         filters.addWidget(self.view_switch)
         self.settings_button = GalleryToolButton(self)
         self.settings_button.setIcon(QIcon(GalleryIcon('settings')))
@@ -915,8 +926,9 @@ class WatchLaterPage(QWidget):
         self._update_header(0, 0)
 
     def _sync_browser_palette(self):
+        self.setProperty('appearanceLight', theme.is_light())
         palette = self.palette()
-        palette.setColor(QPalette.Window, theme.qcolor(theme.BG))
+        palette.setColor(QPalette.Window, theme.qcolor(background_color()))
         self.setPalette(palette)
         self.setStyleSheet(f"""
             QLineEdit#WatchLaterSearch {{
@@ -926,10 +938,53 @@ class WatchLaterPage(QWidget):
             }}
             QLineEdit#WatchLaterSearch:focus {{border-color: {theme.ACCENT};}}
             QWidget#WatchLaterFooter {{
-                background: {theme.mix(theme.BG, theme.CONTENT, .3)};
+                background: transparent;
                 border-top: 1px solid {theme.BORDER_STRONG};
             }}
+            QFrame#WatchLaterSettingsDivider {{background: {theme.BORDER}; border: none;}}
+            QLabel#WatchLaterSettingTitle {{font-weight: 500;}}
         """)
+        self.update()
+
+    def _show_inline_panel(self, panel, title):
+        self._inline_panel = panel
+        self.navigation.addWidget(panel)
+        self.navigation.setCurrentWidget(panel)
+        self.window_header.set_page(title)
+        self._refresh_shortcut.setEnabled(False)
+        self._multi_cancel_shortcut.setEnabled(True)
+        self._cover_scroll_timer.stop()
+        self._grow_settle_timer.stop()
+        self._grow_pending = False
+        self.covers.pause()
+        panel.finished.connect(lambda _result: self._finish_inline_panel(panel))
+        panel.setFocus(Qt.OtherFocusReason)
+
+    def _finish_inline_panel(self, panel):
+        if self._inline_panel is not panel:
+            return
+        self._inline_panel = None
+        self.navigation.setCurrentWidget(self.browser_view)
+        self.navigation.removeWidget(panel)
+        panel.deleteLater()
+        self.window_header.set_page()
+        self._refresh_shortcut.setEnabled(True)
+        self._refresh_multi_button()
+        if self._visible and not self._shutting_down:
+            self.covers.resume()
+            self._schedule_visible_covers()
+            (self.settings_button if isinstance(panel, WatchLaterSettings) else self.search).setFocus(Qt.OtherFocusReason)
+        self._sync_browser_palette()
+
+    def _back_to_browser(self):
+        if self._inline_panel is not None:
+            self._inline_panel.reject()
+
+    def _escape_navigation(self):
+        if self._inline_panel is not None:
+            self._back_to_browser()
+        else:
+            self._cancel_multiselect()
 
     def set_placement_handlers(self, provider, handler, layout_provider=None):
         self.placement.provider = provider
@@ -956,16 +1011,16 @@ class WatchLaterPage(QWidget):
     def _open_settings(self):
         self.card_preview.stop()
         if self._settings_dialog is not None:
-            self._settings_dialog.raise_()
-            self._settings_dialog.activateWindow()
             return
+        self._back_to_browser()
         dialog = WatchLaterSettings(self.preferences, self)
         self._settings_dialog = dialog
         dialog.applied.connect(self._apply_preferences)
         dialog.finished.connect(lambda _result: setattr(self, '_settings_dialog', None))
-        dialog.open()
+        self._show_inline_panel(dialog, '设置')
 
     def _apply_preferences(self, values):
+        previous_default = self.preferences['default_view']
         if callable(getattr(self.context, 'set_setting', None)):
             save_preferences(self.context, values)
         self.preferences = values
@@ -973,7 +1028,8 @@ class WatchLaterPage(QWidget):
             self.card_preview.stop()
         if not values['remember_state']:
             self.browse_state.clear()
-        self._on_view_mode_changed(values['default_view'])
+        if values['default_view'] != previous_default:
+            self._on_view_mode_changed(values['default_view'])
         self._fit_grid()
         self.preferences_changed.emit(values)
 
@@ -982,14 +1038,14 @@ class WatchLaterPage(QWidget):
         if not callable(self._layout_provider):
             return
         if self._placement_picker is not None:
-            self._placement_picker.raise_()
             return
+        self._back_to_browser()
         snapshot = self._layout_provider()
         picker = PlacementPicker(item, snapshot, self.placement.target(), self)
         self._placement_picker = picker
         picker.cell_chosen.connect(lambda index: self._commit_placement(item, picker, index))
         picker.finished.connect(lambda _result: setattr(self, '_placement_picker', None))
-        picker.open()
+        self._show_inline_panel(picker, '选择置入位置')
 
     def _commit_placement(self, item, picker, index):
         snapshot = self._layout_provider()
@@ -1169,16 +1225,17 @@ class WatchLaterPage(QWidget):
 
     # ------------------------------------------- v1.0 需求 3：禁止最小化
     def _apply_window_flags(self) -> bool:
-        """摘掉标题栏的最小化按钮；返回 True 表示这次真的改过标志。
+        """使用自绘无边框窗口并禁用最小化；返回是否修改过窗口标志。
 
         只在窗口模式（``isWindow()``）生效：内嵌到宿主面板时标志归宿主管，
         改了会连带把嵌入式页面变成独立窗口。
         """
         if self._shutting_down or not self.isWindow():
             return False
-        if not (self.windowFlags() & Qt.WindowMinimizeButtonHint):
+        flags = (self.windowFlags() | Qt.FramelessWindowHint) & ~Qt.WindowMinimizeButtonHint
+        if self.windowFlags() == flags:
             return False
-        self.setWindowFlag(Qt.WindowMinimizeButtonHint, False)
+        self.setWindowFlags(flags)
         return True
 
     def _refuse_minimize(self) -> None:
@@ -1849,7 +1906,7 @@ class WatchLaterPage(QWidget):
         self._scroll_refetch_connected = False
 
     def _schedule_visible_covers(self, *_args) -> None:
-        if self._shutting_down or not self._visible or self._building_rows:
+        if self._shutting_down or not self._visible or self._building_rows or self._inline_panel is not None:
             return
         # Deliveries and scrollbar signals must not indefinitely reset refill.
         if not self._cover_scroll_timer.isActive():
@@ -1894,6 +1951,7 @@ class WatchLaterPage(QWidget):
         if (
             self._shutting_down
             or not self._visible
+            or self._inline_panel is not None
             or self._building_rows
             or self.stack.currentWidget() is not self._active_scroll()
             or self._render_limit >= self._render_total
@@ -1938,7 +1996,7 @@ class WatchLaterPage(QWidget):
         「之前加载好的封面又要重新加载一次，很卡」。现在只有离视口超过保留带
         的卡片才释放，正常来回滚不会再触发重建。
         """
-        if self._shutting_down or not self._visible or self._building_rows:
+        if self._shutting_down or not self._visible or self._building_rows or self._inline_panel is not None:
             return
         grid = self._view_mode == "grid"
         rows = self._cards if grid else self._rows
@@ -2236,25 +2294,17 @@ class WatchLaterPage(QWidget):
         if reason:
             self._flash_status(reason)
             return
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Question)
-        box.setWindowTitle("移除稍后再看")
-        box.setTextFormat(Qt.PlainText)
-        box.setText(f"从稍后再看移除《{item.title}》？")
-        box.setInformativeText("此操作会修改当前 B 站账号，无法撤销。")
-        box.setStandardButtons(
-            QMessageBox.StandardButton.Yes
-            | QMessageBox.StandardButton.No
-        )
-        box.setDefaultButton(QMessageBox.StandardButton.No)
-        yes = box.button(QMessageBox.StandardButton.Yes)
-        no = box.button(QMessageBox.StandardButton.No)
-        if yes is not None:
-            yes.setText("移除")
-        if no is not None:
-            no.setText("取消")
-        if box.exec() == QMessageBox.StandardButton.Yes:
-            self._begin_remove(item)
+        self._confirm_action('移除稍后再看', f'从稍后再看移除《{item.title}》？\n此操作会修改当前 B 站账号，无法撤销。',
+                             '移除', lambda: self._begin_remove(item))
+
+    def _confirm_action(self, title, message, action, callback):
+        self.card_preview.stop()
+        self._back_to_browser()
+        generation = self._generation
+        panel = InlineConfirmation(title, message, action, self)
+        self._show_inline_panel(panel, title)
+        panel.finished.connect(lambda result: callback() if result == 1 and not self._shutting_down
+                               and generation == self._generation else None)
 
     def _begin_remove(self, item: WatchLaterItem) -> None:
         if self._busy_operation or not self._has_csrf:
@@ -2318,27 +2368,8 @@ class WatchLaterPage(QWidget):
         if not self._items:
             self._flash_status("稍后再看已经是空的")
             return
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Warning)
-        box.setWindowTitle("清空稍后再看")
-        box.setTextFormat(Qt.PlainText)
-        box.setText("清空稍后再看？")
-        box.setInformativeText(
-            "此操作会删除当前 B 站账号的全部稍后再看，无法撤销。"
-        )
-        box.setStandardButtons(
-            QMessageBox.StandardButton.Yes
-            | QMessageBox.StandardButton.No
-        )
-        box.setDefaultButton(QMessageBox.StandardButton.No)
-        yes = box.button(QMessageBox.StandardButton.Yes)
-        no = box.button(QMessageBox.StandardButton.No)
-        if yes is not None:
-            yes.setText("清空")
-        if no is not None:
-            no.setText("取消")
-        if box.exec() == QMessageBox.StandardButton.Yes:
-            self._begin_clear()
+        self._confirm_action('清空稍后再看', '此操作会删除当前 B 站账号的全部稍后再看，无法撤销。',
+                             '清空', self._begin_clear)
 
     def _begin_clear(self) -> None:
         if self._busy_operation or not self._has_csrf:
@@ -2479,7 +2510,7 @@ class WatchLaterPage(QWidget):
     # -------------------------------------------------- v1.0 多选快速删除 UI
     def _refresh_multi_button(self) -> None:
         confirming = multiselect_is_confirming(self._multiselect_state)
-        self._multi_cancel_shortcut.setEnabled(confirming)
+        self._multi_cancel_shortcut.setEnabled(confirming or self._inline_panel is not None)
         self.multi_cancel_button.setVisible(confirming)
         self.multi_confirm_button.setVisible(confirming)
         count = len(self._multi_selected_keys)
@@ -3006,10 +3037,7 @@ class WatchLaterPage(QWidget):
             super().hideEvent(event)
             return
         self._visible = False
-        if self._placement_picker is not None:
-            self._placement_picker.reject()
-        if self._settings_dialog is not None:
-            self._settings_dialog.reject()
+        self._back_to_browser()
         self._grow_pending = False
         self._flush_wheel_scrollers()
         self.browse_state.capture()
@@ -3038,10 +3066,7 @@ class WatchLaterPage(QWidget):
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
         self._visible = False
-        if self._placement_picker is not None:
-            self._placement_picker.reject()
-        if self._settings_dialog is not None:
-            self._settings_dialog.reject()
+        self._back_to_browser()
         self._grow_pending = False
         self._flush_wheel_scrollers()
         self._grow_settle_timer.stop()
@@ -3068,10 +3093,7 @@ class WatchLaterPage(QWidget):
         self._shutting_down = True
         self.card_preview.stop()
         self._visible = False
-        if self._placement_picker is not None:
-            self._placement_picker.reject()
-        if self._settings_dialog is not None:
-            self._settings_dialog.reject()
+        self._back_to_browser()
         self._grid_resize_timer.stop()
         self._grow_settle_timer.stop()
         self._shutdown_wheel_scrollers()

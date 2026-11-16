@@ -102,6 +102,17 @@ class GalleryIcon(WatchLaterIcon):
             path.moveTo(7, 15)
             path.lineTo(12, 10)
             path.lineTo(17, 15)
+        elif self.kind == 'back':
+            path.moveTo(14, 5)
+            path.lineTo(7, 12)
+            path.lineTo(14, 19)
+        elif self.kind == 'close':
+            path.moveTo(6, 6)
+            path.lineTo(18, 18)
+            path.moveTo(18, 6)
+            path.lineTo(6, 18)
+        elif self.kind == 'maximize':
+            path.addRoundedRect(QRectF(5, 5, 14, 14), 2, 2)
         elif self.kind == 'settings':
             for index in range(32):
                 angle = index * math.pi / 16

@@ -1,9 +1,10 @@
 """Keyboard-accessible destination map, using a read-only wall snapshot."""
 from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
-from PySide6.QtWidgets import QAbstractButton, QDialog, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QAbstractButton, QHBoxLayout, QVBoxLayout, QWidget
 from ddm import theme
 from ddm.ui import ActionButton, HintLabel, TitleLabel, continuous_path
+from .page_shell import InlinePanel, card_color
 
 
 class CellChoice(QAbstractButton):
@@ -32,7 +33,8 @@ class CellChoice(QAbstractButton):
         rect = QRectF(self.rect()).adjusted(2, 2, -2, -2)
         path = continuous_path(rect, theme.RADIUS_MD)
         painter.setClipPath(path)
-        painter.fillPath(path, theme.qcolor(theme.CONTENT_HOVER if self.underMouse() and self.isEnabled() else theme.CONTENT))
+        fill = theme.mix(card_color(), theme.TEXT1, .05) if self.underMouse() and self.isEnabled() else card_color()
+        painter.fillPath(path, theme.qcolor(fill))
         image = self.cell.image
         if image is not None and not image.isNull():
             source = QRectF(image.rect())
@@ -105,17 +107,13 @@ class LayoutMap(QWidget):
         self._arrange()
 
 
-class PlacementPicker(QDialog):
+class PlacementPicker(InlinePanel):
     cell_chosen = Signal(int)
 
     def __init__(self, item, snapshot, preferred=None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle('选择置入位置')
-        self.setAttribute(Qt.WA_DeleteOnClose)
-        self.setWindowModality(Qt.WindowModal)
-        self.resize(540, 410)
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(20, 18, 20, 18)
+        outer.setContentsMargins(28, 12, 28, 18)
         outer.setSpacing(12)
         outer.addWidget(TitleLabel('选择置入位置', self))
         title = HintLabel(item.title, self)
