@@ -7,3 +7,5 @@
 旧组合包仍保留兼容。新插件首次启动继承旧启用状态和声明的设置，房间ID、账号身份、关注、分组及画质不改名；安装新插件后，对应平台由它接管，禁用后不会由组合包重新启用。
 
 详情与验证见[平台独立包迁移](../../docs/development/platform-packages.md)。构建：`python tools/build_plugins.py`，验证：`python tests/check_platform_packages.py --host <宿主目录>`。候选包：`youtube_live-0.1.zip`。
+
+当前沿用H.264 HLS播放；部分仅通过VP9自适应分片提供的1440p及以上直播尚不支持。Issue #235的1440p60实例已核验，连续高画质播放仍待实现，详见[实况核验记录](../../docs/changes/youtube_live.md)。

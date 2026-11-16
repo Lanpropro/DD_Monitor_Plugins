@@ -6,6 +6,14 @@
 
 ## 待发布
 
+### 1440p60 直播实况核验（2026-11-17，尚未实现）
+
+- 来源：[本体 Issue #235](https://github.com/Lanpropro/DD_Monitor_CE/issues/235)，以及维护者提供的公开直播 `dklfSqHUu4c`。维护者官网统计截图确认2560×1440@60、VP9（itag 308）与AAC（itag 140）；匿名公开页面也返回对应两路自适应格式，当前取得的响应没有HLS/DASH清单。
+- 当前缺口：插件只接受H.264 HLS；Streamlink 8.6.1的YouTube直播路径不返回这些自适应格式。只移除编码筛选无法补齐分离音视频、直播分片与请求授权。
+- 实际探测：公开页面中的308和140媒体地址直接请求均返回HTTP403。核验固定版本yt-dlp 2026.10.26后，普通提取遇到登录/客户端验证提示，Android VR客户端明确缺少GVS PO Token，Safari/iOS测试未成功取得格式，公开嵌入客户端对这场视频返回不可用（152-18）。网络超时/TLS失败与403并存，尚未确认403的唯一根因；这些结果不证明所有YouTube频道都需要登录。
+- 结果：尚无可验收的2K连续播放修复，本轮没有改播放协议、清单版本或代理设置。后续仍需实现并真实验证高画质来源校验、连续分片、VP9视频与AAC音频同步、切档/停止清理；不能以菜单出现1440p或合成测试代替实播通过。
+- 状态：原[PR #67](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/67)中保留此待实现边界；本条仅记录调查，不将Issue标为完成或发布新版本。技术依据：[Streamlink YouTube源码](https://github.com/streamlink/streamlink/blob/8.6.1/src/streamlink/plugins/youtube.py)、[yt-dlp PO Token说明](https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide)。
+
 ### 按平台独立打包（2026-11-15，待人工验收）
 
 - 只注册`youtube`平台；按显式清单内置共享代码，运行时不依赖其他插件。原平台取流／账号行为沿用，房间ID、关注与账号存储键不变。
