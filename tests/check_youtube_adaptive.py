@@ -89,6 +89,18 @@ class QualityTests(unittest.TestCase):
                 provider.play_url('youtube:dklfSqHUu4c')
         self.assertFalse(provider._metadata)
 
+    def test_first_open_can_keep_hls_but_manual_advertised_2k_never_silently_downgrades(self):
+        provider = playback.YouTubePlayback(Mock())
+        legacy = ('https://fixture/live.m3u8', 10000, 'youtube', {})
+        with patch.object(playback, 'ensure_runtime', side_effect=tools.YouTubeMediaError('network')), \
+             patch.object(playback, 'request_proxy', return_value=''), \
+             patch.object(playback.YouTubePlatform, 'play_url', return_value=legacy) as hls:
+            self.assertEqual(provider.play_url('youtube:dklfSqHUu4c'), legacy)
+            provider._qualities['youtube:dklfSqHUu4c'] = playback.quality_formats(formats())
+            with self.assertRaises(tools.YouTubeMediaError):
+                provider.play_url('youtube:dklfSqHUu4c', 10000)
+            self.assertEqual(hls.call_count, 1)
+
 
 class SegmentTests(unittest.TestCase):
     def track(self, response):

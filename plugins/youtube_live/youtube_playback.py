@@ -59,6 +59,18 @@ class YouTubePlayback(YouTubePlatform):
         self._metadata_lock = threading.Lock()
 
     def play_url(self, room_id, quality=10000, *, preview=False, cancelled=lambda: False):
+        canonical = self.normalize(room_id)
+        advertised = any('video' in item for item in self._qualities.get(canonical, []))
+        try:
+            return self._adaptive_play_url(canonical, quality, preview=preview, cancelled=cancelled)
+        except YouTubeMediaError:
+            if cancelled() or (quality != AUTO_QUALITY and (quality != 10000 or advertised)):
+                raise
+            # First-open/auto remains usable where the original HLS route works.
+            # A previously advertised manual high tier must fail explicitly instead.
+            return super().play_url(canonical, quality, preview=preview)
+
+    def _adaptive_play_url(self, room_id, quality=10000, *, preview=False, cancelled=lambda: False):
         # Existing hosts remain able to use this candidate's original HLS playback.
         if not callable(getattr(self._context, 'retain_media_source', None)):
             return super().play_url(room_id, quality, preview=preview)
