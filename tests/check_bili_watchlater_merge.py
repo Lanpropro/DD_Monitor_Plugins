@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 from check_bili_watchlater import APP, plugin_module
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QThread, Qt, Signal
-from PySide6.QtGui import QImage, QPainter, QPixmap, QWheelEvent
+from PySide6.QtGui import QImage, QKeyEvent, QKeySequence, QPainter, QPixmap, QShortcut, QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QScrollArea, QWidget
 from shiboken6 import isValid
@@ -39,6 +39,40 @@ class PlaybackMergeTests(unittest.TestCase):
         with patch.object(self.plugin, '_player_for_binding', return_value=player):
             self.plugin._seek_binding_relative(binding, 10)
             player._set.assert_called_once_with('time-pos', 100)
+
+    def test_key_filter_dispatches_relative_seek(self):
+        event = QKeyEvent(QEvent.KeyPress, Qt.Key_Right, Qt.NoModifier)
+        binding, tile = SimpleNamespace(progress=10), object()
+        with patch.object(self.plugin, '_vod_key_action', return_value=('right', tile, binding)), \
+                patch.object(self.plugin, '_claim_key', return_value=True), \
+                patch.object(self.plugin, '_seek_binding_relative') as relative:
+            self.assertTrue(self.plugin._handle_vod_key(event))
+        relative.assert_called_once_with(binding, 5)
+
+    def test_host_shortcut_has_priority_without_broadcasting_to_other_windows(self):
+        host, floating = QWidget(), QWidget()
+        host.shortcuts = {'video_danmaku': 'B'}
+        shortcut = QShortcut(QKeySequence('B'), host)
+        shortcut.setContext(Qt.WindowShortcut)
+        host._window_shortcuts = [shortcut]
+        tile = QWidget(floating)
+        binding = SimpleNamespace(state='playing')
+        event = QKeyEvent(QEvent.KeyPress, Qt.Key_B, Qt.NoModifier)
+        try:
+            with patch.object(self.plugin, '_host_window', return_value=host), \
+                    patch.object(self.plugin, '_key_window_ok', return_value=True), \
+                    patch.object(self.plugin, '_active_vod_tile', return_value=tile), \
+                    patch.object(self.plugin, '_binding_for_tile', return_value=binding):
+                self.plugin._ensure_danmaku_shortcut()
+                self.assertEqual(len(host.findChildren(QShortcut)), 1)
+                self.assertIsNone(self.plugin._vod_key_action(event, host))
+                self.assertEqual(self.plugin._vod_key_action(event, tile), ('danmaku', tile, binding))
+                with patch.object(self.plugin, '_toggle_danmaku') as toggle:
+                    self.plugin._handle_vod_key(event, tile)
+                toggle.assert_called_once_with(tile, binding)
+        finally:
+            host.deleteLater()
+            floating.deleteLater()
 
     def test_dpi_notifications_coalesce_and_ignore_cooldown(self):
         tile = QWidget()

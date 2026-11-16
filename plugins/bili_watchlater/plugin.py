@@ -2030,6 +2030,8 @@ class BiliWatchLaterPlugin(api.Plugin):
             focus, (QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox)
         ):
             return None  # 输入框里的空格/方向键是打字和移动光标
+        if action == 'danmaku' and self._host_danmaku_shortcut_reachable(watched):
+            return None
         tile = self._active_vod_tile()
         binding = self._binding_for_tile(tile)
         if action == "danmaku":
@@ -2078,9 +2080,7 @@ class BiliWatchLaterPlugin(api.Plugin):
             self._toggle_pause(tile, binding)
         elif action in ("left", "right"):
             step = -5.0 if action == "left" else 5.0
-            target = max(0.0, float(getattr(binding, "progress", 0.0) or 0.0)
-                         + step)
-            self._seek_binding(binding, target)
+            self._seek_binding_relative(binding, step)
         elif action == "danmaku":
             self._toggle_danmaku(tile, binding)
         try:
@@ -2167,25 +2167,21 @@ class BiliWatchLaterPlugin(api.Plugin):
 
     # ------------------------------------------------ PiP 弹幕键 / 跨屏黑遮罩
     def _ensure_danmaku_shortcut(self) -> None:
-        """QShortcut 兜底：补一个与宿主同键的弹幕开关（默认 B）。
+        """The host owns this QShortcut; floating VOD windows use our key filter."""
+        return
 
-        全屏窗口与画中画浮窗的按键由应用级过滤器接管；这一路只用于过滤器
-        未能安装时，仍用 0ms 延迟检查避免与宿主重复 toggle。
-        """
-        if self._danmaku_shortcut is not None or self._shutting_down:
-            return
+    def _host_danmaku_shortcut_reachable(self, watched=None) -> bool:
         window = self._host_window()
-        if window is None:
-            return
-        try:
-            shortcut = QShortcut(QKeySequence(self._danmaku_key_text()), window)
-            shortcut.setContext(Qt.WindowShortcut)
-            shortcut.setAutoRepeat(False)
-            shortcut.activated.connect(self._on_danmaku_shortcut)
-            self._danmaku_shortcut = shortcut
-            self._danmaku_host = window
-        except Exception as error:
-            self._log("danmaku shortcut failed type=" + type(error).__name__)
+        target = watched.window() if isinstance(watched, QWidget) else QApplication.activeWindow()
+        sequence = QKeySequence(self._danmaku_key_text())
+        for shortcut in getattr(window, '_window_shortcuts', ()):
+            try:
+                if (shortcut.isEnabled() and shortcut.key() == sequence
+                        and shortcut.parent().window() is target):
+                    return True
+            except RuntimeError:
+                continue
+        return False
 
     def _on_danmaku_shortcut(self) -> None:
         focus = QApplication.focusWidget()
