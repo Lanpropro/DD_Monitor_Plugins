@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from check_bili_watchlater import APP, models, plugin_module
-from PySide6.QtCore import QEvent, QPoint, Qt
+from PySide6.QtCore import QEvent, QPoint, QRect, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtGui import QImage
 from ddm.pane_danmaku import PaneDanmaku
@@ -174,19 +174,22 @@ class CardPlaybackTests(unittest.TestCase):
         self.assertIs(self.page.placement.target(), occupied)
         self.assertEqual(self.page.placement.action_text(), '替换视频')
 
-    def test_settings_components_and_footer_stay_outside_scroll(self):
-        from ddm.ui import ActionButton, SelectControl, SettingsSurface, TitleLabel
+    def test_shared_controls_and_custom_gallery_preserve_page_regions(self):
+        from ddm.ui import ActionButton, SegmentedControl, SelectControl, SettingsSurface, TitleLabel
+        from ddm_plugin_bili_watchlater.page_panels import PlacementButton, ThumbnailSurface
         self.assertIsInstance(self.page.title_label, TitleLabel)
         self.assertIsInstance(self.page.browse_tools, SettingsSurface)
         self.assertIsInstance(self.page.filter_combo, SelectControl)
         self.assertIsInstance(self.page.sort_combo, SelectControl)
+        self.assertIsInstance(self.page.filter_tabs, SegmentedControl)
         self.assertIsInstance(self.page.fab_refresh, ActionButton)
+        self.assertGreaterEqual(self.page.header_layout.indexOf(self.page.fab_refresh), 0)
         self.assertEqual(self.page.column.body_layout.indexOf(self.page.fab_bar),
                          self.page.column.body_layout.count() - 1)
         for mode in ('grid', 'list'):
             card = self.card(mode)
-            self.assertIsInstance(card, SettingsSurface)
-            self.assertIsInstance(card.play_button, ActionButton)
+            self.assertIsInstance(card, ThumbnailSurface)
+            self.assertIsInstance(card.play_button, PlacementButton)
 
     def test_grid_button_fits_below_natural_cover_at_supported_widths(self):
         card = self.card('grid')
@@ -195,8 +198,97 @@ class CardPlaybackTests(unittest.TestCase):
             card.fit_cell(width, round(width * 9 / 16) + 140)
             card.layout().activate()
             self.assertAlmostEqual(card.cover.width() / card.cover.height(), 16 / 9, delta=.03)
-            self.assertGreaterEqual(card.play_button.y(), card.meta_label.geometry().bottom())
+            self.assertGreater(card.play_button.y(), card.owner_label.geometry().bottom())
             self.assertTrue(card.rect().contains(card.play_button.geometry()))
+
+    def test_filter_segments_use_existing_filter_state_in_both_directions(self):
+        self.page.filter_tabs.setValue('unfinished')
+        self.assertEqual(self.page.filter_combo.currentData(), 'unfinished')
+        self.page.filter_combo.setCurrentIndex(self.page.filter_combo.findData('finished'))
+        self.assertTrue(self.page.filter_tabs.buttons['finished'].isChecked())
+        self.page._clear_filters()
+        self.assertTrue(self.page.filter_tabs.buttons['all'].isChecked())
+
+    def test_two_line_titles_preserve_unicode_and_plain_text(self):
+        from ddm_plugin_bili_watchlater.page_panels import two_line_title
+        from PySide6.QtGui import QFontMetrics
+        text = '🌟看星星<b>保留纯文本</b> —— 一起看看遥远的夜空和宇宙' * 3
+        label = self.card('grid').title_label
+        label.set_full_text(text)
+        label.resize(230, 50)
+        label._apply_elide()
+        self.assertEqual(label.full_text(), text)
+        self.assertEqual(label.textFormat(), Qt.PlainText)
+        lines = label.text().split('\n')
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(label.text().startswith('🌟'))
+        metrics = QFontMetrics(label.font())
+        self.assertTrue(all(metrics.horizontalAdvance(line) <= 230 for line in lines))
+        emoji_line = two_line_title('🌟abc XYZ', label.font(), metrics.horizontalAdvance('🌟abc') + 2)
+        self.assertEqual(emoji_line.replace('\n', '').replace(' ', ''), '🌟abcXYZ')
+
+    def test_multiselect_mark_is_above_the_cover_and_does_not_intercept_clicks(self):
+        for mode in ('list', 'grid'):
+            card = self.card(mode)
+            card.set_multi_mode(True, True)
+            mark = card._selection_mark
+            self.assertIs(mark.parentWidget(), card.cover)
+            self.assertTrue(mark.testAttribute(Qt.WA_TransparentForMouseEvents))
+            self.assertFalse(mark.isHidden())
+            self.assertTrue(mark.selected)
+            card.set_multi_mode(False)
+            self.assertTrue(mark.isHidden())
+
+    def test_cached_context_menu_refreshes_placement_label_and_availability(self):
+        from ddm_plugin_bili_watchlater.widgets import refresh_item_context_menu
+        card = self.card('grid')
+        menu = card._context_menu()
+        card.set_placement_action('替换视频', True)
+        refresh_item_context_menu(menu, card)
+        self.assertEqual(menu.wl_play_action.text(), '替换视频')
+        card.set_placement_action('置入视频', False)
+        refresh_item_context_menu(menu, card)
+        self.assertFalse(menu.wl_play_action.isEnabled())
+
+    def test_owner_and_statistics_update_without_losing_the_item_title(self):
+        card = self.card('grid')
+        replacement = models.WatchLaterItem(aid=2, bvid='BV1yy411c7mD',
+            title='新的测试标题', owner_name='新的 UP 主', view_count=12345, danmaku_count=456)
+        card.update_item(replacement)
+        self.assertEqual(card.owner_label.full_text(), '新的 UP 主')
+        self.assertEqual(card.title_label.full_text(), replacement.title)
+        self.assertIn('播放', card.meta_label.full_text())
+        card.set_danmaku_count(789)
+        self.assertIn('789弹幕', card.meta_label.full_text())
+
+    def test_visible_controls_fit_normal_and_multiselect_at_minimum_width(self):
+        self.item.view_count = self.item.danmaku_count = 0
+        self.page._items = [self.item]
+        self.page._loaded_once = True
+        self.page._has_session = self.page._has_csrf = True
+        with patch.object(self.page, '_load'), patch.object(self.page, '_cache_fresh', return_value=True), \
+                patch.object(self.page, '_apply_saved_geometry', return_value=True), \
+                patch.object(self.page, '_start_entrance'):
+            self.page.show()
+            self.page._render()
+            for width in (720, 980, 1320):
+                for multi in (False, True):
+                    with self.subTest(width=width, multi=multi):
+                        self.page.resize(width, 660)
+                        self.page._cancel_multiselect()
+                        if multi:
+                            self.page._on_multi_delete_clicked()
+                        APP.processEvents()
+                        for widget in (self.page.search, self.page.filter_tabs, self.page.sort_combo,
+                                       self.page.multi_delete_button, self.page.multi_cancel_button,
+                                       self.page.view_switch, self.page.placement.combo, self.page.fab_refresh):
+                            if widget.isVisible():
+                                rect = QRect(widget.mapTo(self.page, QPoint()), widget.size())
+                                self.assertTrue(self.page.rect().contains(rect), repr(widget))
+            self.page.set_pick_target('第 1 格')
+            APP.processEvents()
+            self.assertIs(self.page.pick_banner.parentWidget(), self.page.placement)
+            self.assertGreater(self.page.pick_banner.mapTo(self.page, QPoint()).y(), self.page.search.y())
 
 
 class PlaybackDestinationTests(unittest.TestCase):

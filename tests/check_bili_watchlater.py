@@ -263,6 +263,8 @@ class HostTests(unittest.TestCase):
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:
+        import faulthandler
+        faulthandler.dump_traceback_later(20)
         unittest.main()
     else:
         # Each real application window gets its own process, as in production.
@@ -279,13 +281,20 @@ if __name__ == '__main__':
             if ARCHIVE:
                 command += ['--archive', str(ARCHIVE)]
             command.append(name)
-            result = subprocess.run(command, cwd=HOST, capture_output=True,
-                text=True, encoding='utf-8', errors='replace', timeout=60,
-                env=dict(os.environ, DDM_CHECK_MODE='offline', PYTHONIOENCODING='utf-8',
-                         PYTHONFAULTHANDLER='1', PYTHONUNBUFFERED='1'))
-            output = f'exit_code={result.returncode}\n' + result.stdout + result.stderr
+            try:
+                result = subprocess.run(command, cwd=HOST, capture_output=True,
+                    text=True, encoding='utf-8', errors='replace', timeout=60,
+                    env=dict(os.environ, DDM_CHECK_MODE='offline', PYTHONIOENCODING='utf-8',
+                             PYTHONFAULTHANDLER='1', PYTHONUNBUFFERED='1'))
+                code, stdout, stderr = result.returncode, result.stdout, result.stderr
+            except subprocess.TimeoutExpired as error:
+                code = 124
+                stdout, stderr = error.stdout or b'', error.stderr or b''
+                stdout = stdout.decode('utf-8', 'replace') if isinstance(stdout, bytes) else stdout
+                stderr = stderr.decode('utf-8', 'replace') if isinstance(stderr, bytes) else stderr
+            output = f'exit_code={code}\n' + stdout + stderr
             (logs / (name + '.log')).write_text(output, encoding='utf-8')
-            failed = result.returncode != 0 or 'Error calling Python override' in output
+            failed = code != 0 or 'Error calling Python override' in output
             failures += int(failed)
             print(('FAIL' if failed else 'PASS') + ': ' + name, flush=True)
             if failed:

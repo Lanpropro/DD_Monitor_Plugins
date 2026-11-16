@@ -58,8 +58,9 @@ from PySide6.QtWidgets import (
 )
 
 from ddm import theme
-from ddm.ui import ActionButton, HintLabel, SelectControl, SettingsSurface, TitleLabel
+from ddm.ui import ActionButton, HintLabel, SegmentedControl, SelectControl, SettingsSurface, TitleLabel
 from .page_panels import PlacementSelector
+from .entry_icon import GalleryIcon
 
 from .bili_api import BiliAPIError, describe_error
 from .covers import CoverLoader
@@ -575,7 +576,7 @@ class WatchLaterPage(QWidget):
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
         # 页面底部为固定操作行，不遮挡缩略图。
-        root.setContentsMargins(24, 18, 24, 18)
+        root.setContentsMargins(28, 24, 28, 18)
         root.setSpacing(0)
         self.column = CenteredColumn(self)
         root.addWidget(self.column)
@@ -595,7 +596,9 @@ class WatchLaterPage(QWidget):
         header.setSpacing(PAGE_ROW_SPACING)
         self.title_label = TitleLabel("稍后再看", self)
         self.title_label.setTextFormat(Qt.PlainText)
-        header.addWidget(self.title_label, 0, Qt.AlignVCenter)
+        identity = QVBoxLayout()
+        identity.setSpacing(5)
+        identity.addWidget(self.title_label)
 
         self.count_label = QLabel("", self)
         self.count_label.setTextFormat(Qt.PlainText)
@@ -604,14 +607,13 @@ class WatchLaterPage(QWidget):
         self.count_label.setSizePolicy(
             QSizePolicy.Preferred, QSizePolicy.Preferred
         )
-        header.addWidget(self.count_label, 0, Qt.AlignVCenter)
-        header.addStretch(1)
+        identity.addWidget(self.count_label)
+        header.addLayout(identity, 1)
 
-        self.status_label = QLabel("", self)
+        self.status_label = ElidedLabel(self)
         self.status_label.setTextFormat(Qt.PlainText)
         self.status_label.setForegroundRole(QPalette.PlaceholderText)
         self.status_label.hide()
-        header.addWidget(self.status_label, 0, Qt.AlignVCenter)
 
         self.refresh_button = QPushButton("刷新", self)
         self.refresh_button.setAutoDefault(False)
@@ -641,10 +643,7 @@ class WatchLaterPage(QWidget):
 
         self.view_switch = ViewModeSwitch(self, self._view_mode)
         self.view_switch.mode_changed.connect(self._on_view_mode_changed)
-        header.addWidget(self.view_switch, 0, Qt.AlignVCenter)
-
         body.addLayout(header)
-        body.addWidget(HintLabel("选择目标格，再点击视频卡片上的置入或替换按钮", self))
 
         # v1.0 选片模式提示：右键「选择稍后再看视频…」进入时显示目标格。
         # v1.0 需求：：删除顶部整条蓝 bar —— 改为内联进 header 的一行普通
@@ -675,13 +674,11 @@ class WatchLaterPage(QWidget):
         # v1.0 需求：：删除「退出选片」按钮，横幅只剩「播放至 第 N 格」文字。
         # pick_cancelled 信号保留：plugin.py 仍连接到它，删掉会 AttributeError。
         self.pick_banner.hide()
-        # 内联进 header（标题/计数之后），不单独占一条顶部横幅。
-        header.insertWidget(2, self.pick_banner)
-
+        # 右键选片提示挂在目标格条内，不占用页头或覆盖标题。
         self.browse_tools = SettingsSurface(self)
         tools = QVBoxLayout(self.browse_tools)
-        tools.setContentsMargins(18, 16, 18, 16)
-        tools.setSpacing(12)
+        tools.setContentsMargins(14, 8, 14, 8)
+        tools.setSpacing(0)
         filters = QHBoxLayout()
         self.filters_layout = filters  # v1.0 需求 12：便于对齐回归断言
         # v1.0 需求 12：筛选行按钮与网格卡片内容共用同一套左右边距/间距。
@@ -690,13 +687,16 @@ class WatchLaterPage(QWidget):
         )
         filters.setSpacing(PAGE_ROW_SPACING)
         self.search = QLineEdit(self)
-        self.search.setObjectName("Search")
+        self.search.setObjectName("WatchLaterSearch")
         self.search.setPlaceholderText("搜索标题 / UP主 / BV号")
         self.search.setClearButtonEnabled(True)
         self.search.setToolTip("在本地搜索标题、UP 主或 BV 号")
         self.search.setAccessibleName("搜索稍后再看")
         self.search.textChanged.connect(self._search_changed)
-        filters.addWidget(self.search, 1)
+        self.search.setMinimumWidth(120)
+        self.search.setMaximumWidth(320)
+        self.search.addAction(QIcon(GalleryIcon('search')), QLineEdit.LeadingPosition)
+        header.addWidget(self.search, 1)
 
         self.filter_combo = SelectControl(self)
         for value, label in FILTER_OPTIONS:
@@ -706,7 +706,14 @@ class WatchLaterPage(QWidget):
         self.filter_combo.currentIndexChanged.connect(
             lambda _index: self._render(reset_scroll=True)
         )
-        filters.addWidget(self.filter_combo, 0)
+        self.filter_combo.hide()  # Keep filtering data in this existing single source of truth.
+        self.filter_tabs = SegmentedControl(FILTER_OPTIONS, FILTER_ALL, self)
+        self.filter_tabs.valueChanged.connect(
+            lambda value: self.filter_combo.setCurrentIndex(self.filter_combo.findData(value)))
+        self.filter_combo.currentIndexChanged.connect(
+            lambda _index: self.filter_tabs.setValue(self.filter_combo.currentData()))
+        filters.addWidget(self.filter_tabs)
+        filters.addStretch(1)
 
         self.sort_combo = SelectControl(self)
         for value, label in SORT_OPTIONS:
@@ -721,7 +728,7 @@ class WatchLaterPage(QWidget):
 
         # v1.0 需求 10：排序「最近添加」(sort_combo) 旁的垃圾桶 →
         # 多选快速删除。图标复用 widgets.action_icon 画的 16×16 主题色线条。
-        self.multi_delete_button = QPushButton(self)
+        self.multi_delete_button = ActionButton("", self)
         self.multi_delete_button.setAutoDefault(False)
         self.multi_delete_button.setCursor(Qt.PointingHandCursor)
         self.multi_delete_button.setIcon(action_icon("trash", 16))
@@ -730,7 +737,7 @@ class WatchLaterPage(QWidget):
         self.multi_delete_button.clicked.connect(self._on_multi_delete_clicked)
         filters.addWidget(self.multi_delete_button, 0)
 
-        self.multi_cancel_button = QPushButton("取消", self)
+        self.multi_cancel_button = ActionButton("取消", self)
         self.multi_cancel_button.setAutoDefault(False)
         self.multi_cancel_button.setCursor(Qt.PointingHandCursor)
         self.multi_cancel_button.setToolTip("退出多选，不删除任何视频")
@@ -744,9 +751,11 @@ class WatchLaterPage(QWidget):
         )
         self._multi_cancel_shortcut.setContext(Qt.WindowShortcut)
         self._multi_cancel_shortcut.activated.connect(self._cancel_multiselect)
-        tools.addLayout(filters)
+        filters.addWidget(self.view_switch)
+        body.addLayout(filters)
         self.placement = PlacementSelector(self.browse_tools)
         self.placement.changed.connect(self._sync_placement_actions)
+        self.placement.layout().addWidget(self.pick_banner)
         tools.addWidget(self.placement)
         body.addWidget(self.browse_tools)
 
@@ -801,7 +810,7 @@ class WatchLaterPage(QWidget):
         # v1.0 需求 12：右 margin 归零，最右列卡片内容右边缘正好等于
         # header/filters 的右边缘（两边都只内缩 PAGE_CONTENT_MARGIN）。
         self.grid_layout.setContentsMargins(0, 0, 0, 0)
-        self.grid_layout.setSpacing(PAGE_ROW_SPACING)
+        self.grid_layout.setSpacing(18)
         self.grid_layout.setAlignment(Qt.AlignTop)
         self.grid_scroll.viewport().installEventFilter(self)
         for col in range(GRID_MAX_COLUMNS):
@@ -845,23 +854,29 @@ class WatchLaterPage(QWidget):
             MiddleDragScroller(self.grid_scroll),
         )
 
-        # v1.0 需求：：右下角悬浮 刷新(F5) / 回到顶部 按钮。
+        # 刷新进入页头；回顶和状态提示留在滚动区外。
         self.fab_bar = QWidget(self)
         fab_layout = QHBoxLayout(self.fab_bar)
         fab_layout.setContentsMargins(0, 0, 0, 0)
         fab_layout.setSpacing(8)
-        self.fab_refresh = ActionButton("刷新 (F5)", self.fab_bar)
+        self.fab_refresh = ActionButton("刷新", self)
         self.fab_refresh.setToolTip("刷新稍后再看（F5）")
         self.fab_refresh.setAccessibleName("刷新稍后再看")
         self.fab_refresh.setAutoDefault(False)
+        self.fab_refresh.setIcon(QIcon(GalleryIcon('refresh')))
+        self.fab_refresh.setIconSize(QSize(18, 18))
+        self.footer_hint = HintLabel('点击缩略图选中 · 使用置入或替换按钮播放', self.fab_bar)
+        fab_layout.addWidget(self.footer_hint)
+        fab_layout.addWidget(self.status_label, 1)
         fab_layout.addStretch(1)
         self.fab_refresh.clicked.connect(lambda: self._load(manual=True))
-        fab_layout.addWidget(self.fab_refresh)
+        header.addWidget(self.fab_refresh)
         self.fab_top = ActionButton("回到顶部", self.fab_bar)
         self.fab_top.setToolTip("回到列表顶部")
         self.fab_top.setAccessibleName("回到顶部")
         self.fab_top.setAutoDefault(False)
 
+        self.fab_top.setIcon(QIcon(GalleryIcon("top")))
         self.fab_top.clicked.connect(self._scroll_to_top)
         fab_layout.addWidget(self.fab_top)
         body.addWidget(self.fab_bar)
@@ -880,6 +895,14 @@ class WatchLaterPage(QWidget):
         palette = self.palette()
         palette.setColor(QPalette.Window, theme.qcolor(theme.BG))
         self.setPalette(palette)
+        self.setStyleSheet(f"""
+            QLineEdit#WatchLaterSearch {{
+                background: {theme.CONTENT}; color: {theme.TEXT1};
+                border: 1px solid {theme.BORDER}; border-radius: {theme.RADIUS_MD}px;
+                padding: 6px 10px; min-height: 22px;
+            }}
+            QLineEdit#WatchLaterSearch:focus {{border-color: {theme.ACCENT};}}
+        """)
 
     def set_placement_handlers(self, provider, handler):
         self.placement.provider = provider
@@ -1179,16 +1202,19 @@ class WatchLaterPage(QWidget):
             combo.blockSignals(True)
             combo.setCurrentIndex(0)
             combo.blockSignals(False)
+        self.filter_tabs.setValue(self.filter_combo.currentData())
         self._render(reset_scroll=True)
 
     def _flash_status(self, text: str) -> None:
-        self.status_label.setText(text)
+        self.status_label.set_full_text(text)
+        self.footer_hint.hide()
         self.status_label.show()
         self._status_timer.start(3000)
 
     def _clear_status(self) -> None:
-        self.status_label.clear()
+        self.status_label.set_full_text('')
         self.status_label.hide()
+        self.footer_hint.show()
 
     def _update_header(
         self, shown: int, total: int, filtered: bool = False
@@ -1213,7 +1239,7 @@ class WatchLaterPage(QWidget):
                  and not self._shutting_down)
         self.refresh_button.setText("刷新中…" if active else "刷新")
         self.refresh_button.setEnabled(ready)
-        self.fab_refresh.setText("刷新中…" if active else "刷新 (F5)")
+        self.fab_refresh.setText("刷新中…" if active else "刷新")
         self.fab_refresh.setEnabled(ready)
         self._refresh_shortcut.setEnabled(ready)
         self._update_fabs()

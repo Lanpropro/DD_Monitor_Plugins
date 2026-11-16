@@ -62,16 +62,14 @@ from .models import (
     format_views,
 )
 
-from .entry_icon import BrowserIcon
-from .page_panels import ThumbnailSurface
-from ddm.ui import ActionButton
+from .entry_icon import BrowserIcon, GalleryIcon
+from .page_panels import GalleryToolButton, PlacementButton, ThumbnailSurface, two_line_title
 
 
 def browser_button(parent):
-    button = QToolButton(parent)
+    button = GalleryToolButton(parent)
     button.setIcon(QIcon(BrowserIcon()))
     button.setIconSize(QSize(18, 18))
-    button.setFixedSize(28, 28)
     button.setCursor(Qt.PointingHandCursor)
     button.setToolTip("在浏览器中打开视频页")
     button.setAccessibleName("在浏览器中打开视频页")
@@ -496,6 +494,7 @@ def build_item_context_menu(widget) -> QMenu:
     remove.setToolTip(reason or "从稍后再看移除…")
     remove.triggered.connect(widget._remove)
     # v1.0 需求 2：复用菜单时要能就地刷新可变状态，记下动作与配色。
+    menu.wl_play_action = play
     menu.wl_remove_action = remove
     menu.wl_icon_color = _icon_color(widget.palette())
     return menu
@@ -508,6 +507,10 @@ def refresh_item_context_menu(menu: QMenu, widget) -> None:
     ``deleteLater``，边隐藏边销毁，Windows 上那块区域要晚一帧才重画）。
     改为一张卡片只建一次菜单、每次右键复用，这里只更新会变的部分。
     """
+    play = getattr(menu, "wl_play_action", None)
+    if play is not None:
+        play.setText(widget.play_button.text())
+        play.setEnabled(widget.play_button.isEnabled())
     remove = getattr(menu, "wl_remove_action", None)
     if remove is None:  # 不是本模块建的菜单，别乱改
         return
@@ -577,15 +580,27 @@ class ElidedLabel(QLabel):
 
 
 class ClickableLabel(ElidedLabel):
-    """A single-line title label that opens the video on a left click."""
+    """Plain title selection with optional two-line wrapping."""
 
     clicked = Signal()
     double_clicked = Signal()
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, *, lines=1) -> None:
+        self._lines = lines
         super().__init__(parent)
         self.setCursor(Qt.PointingHandCursor)
         self._double_release = False
+
+    def _apply_elide(self):
+        if self._lines == 1:
+            return super()._apply_elide()
+        QLabel.setText(self, two_line_title(self._full_text, self.font(), self.contentsRect().width()))
+
+    def sizeHint(self):
+        size = super().sizeHint()
+        if self._lines == 2:
+            size.setHeight(self.fontMetrics().lineSpacing() * 2 + 4)
+        return size
 
     def mouseDoubleClickEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
@@ -612,7 +627,7 @@ class ClickableLabel(ElidedLabel):
 class CoverWidget(QWidget):
     """16:9 cover with duration, part and progress overlays.
 
-    单击即播放；双击后半程只通知页面关闭，避免重复派发播放。
+    封面只发选择手势；放入画面墙由独立操作按钮负责。
     """
 
     clicked = Signal()
@@ -623,7 +638,7 @@ class CoverWidget(QWidget):
     COVER_WIDTH = 224
     COVER_HEIGHT = 126
     #: 悬停提示里的操作说明（标题/UP 主由 item_tooltip 拼在前面）。
-    DEFAULT_HINT = "点击在浏览器打开；拖拽到画面墙格子直接播放"
+    DEFAULT_HINT = "点击选中缩略图；拖拽到画面墙格子直接置入"
 
     def __init__(self, parent: QWidget | None = None,
                  flexible: bool = False) -> None:
@@ -966,7 +981,7 @@ class RowCard(ThumbnailSurface):
         info.setContentsMargins(0, 0, 0, 0)
         info.setSpacing(4)
 
-        self.title_label = ClickableLabel(self)
+        self.title_label = ClickableLabel(self, lines=2)
         self.title_label.set_full_text(item.title)
         self.title_label.setFont(relative_font(self.font(), 1.08, bold=True))
         self.title_label.clicked.connect(self._select)
@@ -1000,7 +1015,7 @@ class RowCard(ThumbnailSurface):
         actions.setContentsMargins(0, 0, 0, 0)
         actions.setSpacing(6)
         # 放入目标格使用独立按钮；封面只选中，拖拽仍可直接置入。
-        self.play_button = ActionButton("置入视频", self)
+        self.play_button = PlacementButton("置入视频", self)
         self.play_button.setAutoDefault(False)
         self.play_button.setDefault(False)
         self.play_button.setCursor(Qt.PointingHandCursor)
@@ -1013,10 +1028,10 @@ class RowCard(ThumbnailSurface):
         self.open_button.clicked.connect(self._open)
         actions.addWidget(self.open_button)
 
-        self.more_button = QToolButton(self)
-        self.more_button.setText("更多")
+        self.more_button = GalleryToolButton(self)
+        self.more_button.setIcon(QIcon(GalleryIcon("more")))
         self.more_button.setToolButtonStyle(
-            Qt.ToolButtonStyle.ToolButtonTextOnly
+            Qt.ToolButtonStyle.ToolButtonIconOnly
         )
         self.more_button.setPopupMode(
             QToolButton.ToolButtonPopupMode.InstantPopup
@@ -1154,6 +1169,7 @@ class RowCard(ThumbnailSurface):
             return
         self._multi_active = active
         self._multi_selected = selected
+        self._sync_selection_marker()
         self.update()
 
     def _context_menu(self) -> QMenu:
@@ -1305,7 +1321,7 @@ class GridCard(ThumbnailSurface):
     """带 16:9 大封面的自适应网格视频卡。
 
     封面随列宽 16:9 伸缩，底边蓝线进度 + 时长/分P/已看完徽章由 CoverWidget
-    绘制；标题单行省略、UP 主一行。单击封面=播放到格子，双击卡片=播放，
+    绘制；标题两行省略、UP 主一行。封面和标题只选中，独立按钮置入或替换，
     右键=播放/打开/复制/移除；封面与卡片均可拖拽进画面墙格子。
     信号与 RowCard 完全一致，页面可统一接线。
     """
@@ -1347,8 +1363,8 @@ class GridCard(ThumbnailSurface):
         self.customContextMenuRequested.connect(self._show_menu)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(6)
+        layout.setContentsMargins(4, 4, 4, 8)
+        layout.setSpacing(8)
 
         self.cover = CoverWidget(self, flexible=True)
         self.cover.set_hint("点击选中缩略图；使用置入／替换按钮操作")
@@ -1359,30 +1375,44 @@ class GridCard(ThumbnailSurface):
         # 同宽），否则 Expanding 策略只在 sizeHint 宽度内居中。
         layout.addWidget(self.cover, 0)
 
-        self.title_label = ClickableLabel(self)
+        self.title_label = ClickableLabel(self, lines=2)
         self.title_label.set_full_text(item.title)
         self.title_label.setFont(relative_font(self.font(), 1.0, bold=True))
         self.title_label.clicked.connect(self._select)
         self.title_label.double_clicked.connect(self._double_close)
-        title_row = QHBoxLayout()
-        title_row.setContentsMargins(0, 0, 0, 0)
-        title_row.addWidget(self.title_label, 1)
-        self.open_button = browser_button(self)
-        self.open_button.clicked.connect(self._open)
-        title_row.addWidget(self.open_button)
-        layout.addLayout(title_row)
+        layout.addWidget(self.title_label)
+        self.owner_label = ElidedLabel(self)
+        self.owner_label.setForegroundRole(QPalette.PlaceholderText)
+        self.owner_label.setFont(relative_font(self.font(), .9))
+        self.owner_label.set_full_text(item.owner_name)
+        self.owner_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        layout.addWidget(self.owner_label)
 
+        actions = QHBoxLayout()
+        actions.setContentsMargins(0, 0, 0, 0)
+        actions.setSpacing(4)
         self.meta_label = ElidedLabel(self)
         self.meta_label.setForegroundRole(QPalette.PlaceholderText)
         self.meta_label.setFont(relative_font(self.font(), 0.9))
         self.meta_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.meta_label.set_full_text(self._meta_text(item))
-        layout.addWidget(self.meta_label)
-        self.play_button = ActionButton("置入视频", self)
+        actions.addWidget(self.meta_label, 1)
+        self.play_button = PlacementButton("置入视频", self)
         self.play_button.setAccessibleName("置入或替换视频")
         self.play_button.setAutoDefault(False)
         self.play_button.clicked.connect(self._play)
-        layout.addWidget(self.play_button)
+        actions.addWidget(self.play_button)
+        self.open_button = browser_button(self)
+        self.open_button.clicked.connect(self._open)
+        actions.addWidget(self.open_button)
+        self.more_button = GalleryToolButton(self)
+        self.more_button.setIcon(QIcon(GalleryIcon("more")))
+        self.more_button.setToolTip("更多操作")
+        self.more_button.setAccessibleName("更多操作")
+        self.more_button.clicked.connect(lambda: popup_item_context_menu(
+            self, self.more_button.pos() + QPoint(0, self.more_button.height())))
+        actions.addWidget(self.more_button)
+        layout.addLayout(actions)
         layout.addStretch(1)
 
         self._destructive_ready = False
@@ -1391,7 +1421,7 @@ class GridCard(ThumbnailSurface):
         # v1.0 需求 8：卡片任意位置悬停都主动弹出完整标题 + UP 主。
         self._title_tip = HoverTitleTip(self, lambda: item_tooltip(self.item))
         self._title_tip.watch(
-            self, self.cover, self.title_label, self.meta_label
+            self, self.cover, self.title_label, self.owner_label, self.meta_label
         )
 
     def fit_cell(self, width: int, height: int) -> None:
@@ -1403,8 +1433,8 @@ class GridCard(ThumbnailSurface):
         """
         layout = self.layout()
         margins = layout.contentsMargins()
-        title_h = max(self.title_label.sizeHint().height(), self.open_button.height())
-        meta_h = self.meta_label.sizeHint().height()
+        title_h = self.title_label.fontMetrics().lineSpacing() * 2 + 4
+        meta_h = self.owner_label.sizeHint().height()
         # cover/title/meta/stretch 共 count() 项 → count()-1 个 spacing 间隙；
         # 旧写法只算 2 个间隙，固定高比布局最小高少约 2px，meta 行底部被裁。
         gaps = max(0, layout.count() - 1) * layout.spacing()
@@ -1422,12 +1452,12 @@ class GridCard(ThumbnailSurface):
         self.cover.setFixedHeight(cover_h)
         self.cover.resize(cover_w, cover_h)
         self.title_label.setFixedHeight(title_h)
-        self.meta_label.setFixedHeight(meta_h)
+        self.owner_label.setFixedHeight(meta_h)
         self.setFixedHeight(cover_h + overhead)
 
     @staticmethod
     def _meta_text(item: WatchLaterItem) -> str:
-        parts = [item.owner_name]
+        parts = []
         # v1.0 需求：：播放量未知时不显示。
         views = format_views(item.view_count)
         if views:
@@ -1469,6 +1499,7 @@ class GridCard(ThumbnailSurface):
         self.setAccessibleName(item.title)
         self.title_label.set_full_text(item.title)
         self.meta_label.set_full_text(self._meta_text(item))
+        self.owner_label.set_full_text(item.owner_name)
         self._sync_tooltips()
         self._sync_cover_item()
 
@@ -1496,6 +1527,7 @@ class GridCard(ThumbnailSurface):
             return
         self._multi_active = active
         self._multi_selected = selected
+        self._sync_selection_marker()
         self.update()
 
     def _open(self) -> None:

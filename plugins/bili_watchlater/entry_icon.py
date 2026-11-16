@@ -68,6 +68,48 @@ class BrowserIcon(WatchLaterIcon):
         painter.restore()
 
 
+class GalleryIcon(WatchLaterIcon):
+    """Monochrome gallery actions, painted at the actual icon resolution."""
+    def __init__(self, kind):
+        super().__init__()
+        self.kind = kind
+
+    def clone(self):
+        return GalleryIcon(self.kind)
+
+    def paint(self, painter, rect, mode, state):
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.translate(rect.topLeft())
+        painter.scale(rect.width() / 24, rect.height() / 24)
+        painter.setPen(QPen(theme.qcolor(theme.TEXT2), 1.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.setBrush(Qt.NoBrush)
+        path = QPainterPath()
+        if self.kind == 'search':
+            painter.drawEllipse(QRectF(4, 4, 12, 12))
+            painter.drawLine(15, 15, 20, 20)
+        elif self.kind == 'refresh':
+            painter.drawArc(QRectF(4, 4, 16, 16), 40 * 16, 285 * 16)
+            path.moveTo(20, 4)
+            path.lineTo(20, 10)
+            path.lineTo(14, 10)
+        elif self.kind == 'top':
+            path.moveTo(5, 5)
+            path.lineTo(19, 5)
+            path.moveTo(12, 20)
+            path.lineTo(12, 10)
+            path.moveTo(7, 15)
+            path.lineTo(12, 10)
+            path.lineTo(17, 15)
+        elif self.kind == 'more':
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(theme.qcolor(theme.TEXT2))
+            for x in (5, 12, 19):
+                painter.drawEllipse(QRectF(x - 1.5, 10.5, 3, 3))
+        painter.drawPath(path)
+        painter.restore()
+
+
 class WatchLaterButton(QToolButton):
     """Keep the outer ring still; rebound only the play triangle on hover."""
     def __init__(self):
