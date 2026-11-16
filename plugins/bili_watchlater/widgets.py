@@ -61,6 +61,19 @@ from .models import (
     format_views,
 )
 
+from .entry_icon import BrowserIcon
+
+
+def browser_button(parent):
+    button = QToolButton(parent)
+    button.setIcon(QIcon(BrowserIcon()))
+    button.setIconSize(QSize(18, 18))
+    button.setFixedSize(28, 28)
+    button.setCursor(Qt.PointingHandCursor)
+    button.setToolTip("在浏览器中打开视频页")
+    button.setAccessibleName("在浏览器中打开视频页")
+    return button
+
 
 def _start_vod_drag(source: QWidget, item: WatchLaterItem,
                     pixmap: QPixmap | None) -> None:
@@ -593,12 +606,26 @@ class ClickableLabel(ElidedLabel):
     """A single-line title label that opens the video on a left click."""
 
     clicked = Signal()
+    double_clicked = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setCursor(Qt.PointingHandCursor)
+        self._double_release = False
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self._double_release = True
+            self.double_clicked.emit()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
+        if event.button() == Qt.LeftButton and self._double_release:
+            self._double_release = False
+            event.accept()
+            return
         if event.button() == Qt.LeftButton and self.rect().contains(
             event.position().toPoint()
         ):
@@ -611,9 +638,7 @@ class ClickableLabel(ElidedLabel):
 class CoverWidget(QWidget):
     """16:9 cover with duration, part and progress overlays.
 
-    v1.0 需求 16：单击/双击分开报。列表与网格的单击语义不同（列表=开浏览器、
-    网格=播放到格子），双击统一为「播放到格子」——双击的后半程不会再当单击
-    发出去，所以列表里双击封面不会顺手把浏览器也打开。
+    单击即播放；双击后半程只通知页面关闭，避免重复派发播放。
     """
 
     clicked = Signal()
@@ -923,12 +948,9 @@ class RowCard(QWidget):
 
         self.cover = CoverWidget(self)
         layout.addWidget(self.cover, 0, Qt.AlignTop)
-        self.cover.clicked.connect(self._open)
-        # v1.0 需求 16：双击封面 = 播放到格子（与网格一致）；单击仍是开浏览器，
-        # 所以单击延迟一个双击区间再发，双击时不会顺手打开浏览器。
-        # v1.0 需求 4：双击走 _double_play（播放 + 通知页面关窗）。
-        self.cover.double_clicked.connect(self._double_play)
-        self.cover.set_click_delay(QApplication.doubleClickInterval())
+        self.cover.clicked.connect(self._play)
+        self.cover.set_hint("点击播放到格子；拖拽到画面墙格子直接播放")
+        self.cover.double_clicked.connect(self._double_close)
 
         # v1.0 需求：：文字块与封面上下贴齐 —— 标题顶边 = 封面上边、
         # 进度行底边 = 封面下边。info 布局高度就等于行内容高度（封面 126），
@@ -941,7 +963,8 @@ class RowCard(QWidget):
         self.title_label = ClickableLabel(self)
         self.title_label.set_full_text(item.title)
         self.title_label.setFont(relative_font(self.font(), 1.08, bold=True))
-        self.title_label.clicked.connect(self._open)
+        self.title_label.clicked.connect(self._play)
+        self.title_label.double_clicked.connect(self._double_close)
         info.addWidget(self.title_label)
 
         self.meta_label = ElidedLabel(self)
@@ -988,12 +1011,7 @@ class RowCard(QWidget):
         self.play_button.clicked.connect(self._play)
         actions.addWidget(self.play_button)
 
-        self.open_button = QPushButton("打开", self)
-        self.open_button.setAutoDefault(False)
-        self.open_button.setDefault(False)
-        self.open_button.setCursor(Qt.PointingHandCursor)
-        self.open_button.setToolTip("在浏览器中打开视频页")
-        self.open_button.setAccessibleName("打开视频")
+        self.open_button = browser_button(self)
         self.open_button.clicked.connect(self._open)
         actions.addWidget(self.open_button)
 
@@ -1172,6 +1190,10 @@ class RowCard(QWidget):
         self.play_requested.emit(self.item)
         self.double_play_requested.emit(self.item)
 
+    def _double_close(self) -> None:
+        if not self._multi_active:
+            self.double_play_requested.emit(self.item)
+
     def _copy(self) -> None:
         self.copy_requested.emit(self.item)
 
@@ -1299,7 +1321,7 @@ def fit_grid_cover(
 
 
 class GridCard(QWidget):
-    """v1.0 需求：：4x4 网格视频卡（B 站客户端同款）。
+    """带 16:9 大封面的自适应网格视频卡。
 
     封面随列宽 16:9 伸缩，底边蓝线进度 + 时长/分P/已看完徽章由 CoverWidget
     绘制；标题单行省略、UP 主一行。单击封面=播放到格子，双击卡片=播放，
@@ -1365,8 +1387,15 @@ class GridCard(QWidget):
         self.title_label = ClickableLabel(self)
         self.title_label.set_full_text(item.title)
         self.title_label.setFont(relative_font(self.font(), 1.0, bold=True))
-        self.title_label.clicked.connect(self._open)
-        layout.addWidget(self.title_label)
+        self.title_label.clicked.connect(self._play)
+        self.title_label.double_clicked.connect(self._double_close)
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.addWidget(self.title_label, 1)
+        self.open_button = browser_button(self)
+        self.open_button.clicked.connect(self._open)
+        title_row.addWidget(self.open_button)
+        layout.addLayout(title_row)
 
         self.meta_label = ElidedLabel(self)
         self.meta_label.setForegroundRole(QPalette.PlaceholderText)
@@ -1386,7 +1415,7 @@ class GridCard(QWidget):
         )
 
     def fit_cell(self, width: int, height: int) -> None:
-        """四行预算内保留两行文字；封面占满列宽，与下方文字严格同宽。
+        """按列宽保留自然封面和文字高度，与下方文字同宽。
 
         v1.0 需求 7：旧实现按高度反算宽度，高度受限时封面比标题/UP 主窄一
         截，左边缘对不齐。改为优先用满可用宽度（16:9 由宽度推高度），只有
@@ -1394,7 +1423,7 @@ class GridCard(QWidget):
         """
         layout = self.layout()
         margins = layout.contentsMargins()
-        title_h = self.title_label.sizeHint().height()
+        title_h = max(self.title_label.sizeHint().height(), self.open_button.height())
         meta_h = self.meta_label.sizeHint().height()
         # cover/title/meta/stretch 共 count() 项 → count()-1 个 spacing 间隙；
         # 旧写法只算 2 个间隙，固定高比布局最小高少约 2px，meta 行底部被裁。

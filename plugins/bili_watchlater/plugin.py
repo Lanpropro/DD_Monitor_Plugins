@@ -607,7 +607,8 @@ class BiliWatchLaterPlugin(api.Plugin):
         if context.window is None:
             return  # Package validation hosts have no Qt widgets or sidebar.
 
-        self.button = QToolButton()
+        from .entry_icon import WatchLaterButton
+        self.button = WatchLaterButton()
         self.action = QAction("稍后再看", self.button)
         self.action.setCheckable(True)
         self.action.setToolTip("B站稍后再看")
@@ -925,6 +926,17 @@ class BiliWatchLaterPlugin(api.Plugin):
             return list(tiles) if tiles is not None else []
         except TypeError:
             return []
+
+    def _playback_tiles(self):
+        """Chat cells keep backing Tiles, but are not video destinations."""
+        tiles = self._host_tiles()
+        wall = getattr(self._host_window(), 'wall', None)
+        panes = getattr(wall, 'pane_danmaku', None)
+        if panes is None:
+            return tiles
+        chat_cells = panes.bindings()
+        return [tile for cell, tile in panes.cell_tiles().items()
+                if cell not in chat_cells and tile in tiles]
 
     def _host_player(self, tile):
         window = self._host_window()
@@ -2631,16 +2643,17 @@ class BiliWatchLaterPlugin(api.Plugin):
         """弹窗「播放」按钮：选片模式进目标格，浏览模式进第一个空格。"""
         if self._shutting_down or item is None:
             return
+        candidates = self._playback_tiles()
         tile = self._pick_target_tile
-        if tile is not None and tile not in self._host_tiles():
+        if tile is not None and tile not in candidates:
             tile = None
         if tile is None:
             existing = self._bindings.get(str(getattr(item, "bvid", "") or ""))
-            if existing is not None and existing.tile in self._host_tiles():
+            if existing is not None and existing.tile in candidates:
                 tile = existing.tile
         if tile is None:
             tile = next(
-                (t for t in self._host_tiles()
+                (t for t in candidates
                  if not str((getattr(t, "room", None) or {}).get("room_id") or "")),
                 None,
             )
@@ -2651,6 +2664,8 @@ class BiliWatchLaterPlugin(api.Plugin):
             return
         picked = self._pick_target_tile is not None
         self._pick_target_tile = None
+        self._log(f"play selection tile_index={self._host_tiles().index(tile) + 1} "
+                  f"video_candidates={len(candidates)}")
         self._start_vod_for_tile(tile, item)
         if picked and self.page is not None:
             try:
@@ -2670,7 +2685,6 @@ class BiliWatchLaterPlugin(api.Plugin):
             self._notify_warning(
                 "当前宿主版本不支持内嵌播放，请用浏览器打开。"
             )
-            self._open_url(_video_page_url(item))
             return
         cell = self._resolve_cell_from_tile(tile)
         if cell is None:
@@ -4269,29 +4283,8 @@ class BiliWatchLaterPlugin(api.Plugin):
     # ----------------------------------------------------------------- icon
     @staticmethod
     def _make_icon() -> QIcon:
-        pixmap = QPixmap(36, 36)
-        pixmap.setDevicePixelRatio(2)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-        pen = QPen(QColor(235, 240, 250), 2.0)
-        pen.setCapStyle(Qt.RoundCap)
-        pen.setJoinStyle(Qt.RoundJoin)
-        painter.setPen(pen)
-
-        # List page.
-        painter.drawRoundedRect(QRectF(3.5, 3.5, 21, 29), 4, 4)
-        painter.drawLine(QPointF(9.5, 12.5), QPointF(19, 12.5))
-        painter.drawLine(QPointF(9.5, 18.5), QPointF(16.5, 18.5))
-        painter.drawLine(QPointF(9.5, 24.5), QPointF(14, 24.5))
-
-        # Clock badge for "watch later".
-        painter.setBrush(Qt.NoBrush)
-        painter.drawEllipse(QPointF(26, 26), 7.0, 7.0)
-        painter.drawLine(QPointF(26, 22.5), QPointF(26, 26))
-        painter.drawLine(QPointF(26, 26), QPointF(29, 27.5))
-        painter.end()
-        return QIcon(pixmap)
+        from .entry_icon import WatchLaterIcon
+        return QIcon(WatchLaterIcon())
 
 
 plugin = BiliWatchLaterPlugin()

@@ -172,6 +172,7 @@ class _DecodeTask(QRunnable):
 
 class CoverLoader(QObject):
     image_ready = Signal(str)
+    diagnostic = Signal(str)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -197,6 +198,9 @@ class CoverLoader(QObject):
         self._decoding: set[str] = set()
         self._paused = True
         self._shutdown = False
+        self._timings: dict[str, list[float]] = {}
+        self._diagnostics_left = 12
+        self._resumed_at = time.monotonic()
 
     # ------------------------------------------------------------------ API
     def get(self, url: str) -> QPixmap | None:
@@ -221,6 +225,7 @@ class CoverLoader(QObject):
                 return None
             self._queued.add(normalized)
             self._pending.append(normalized)
+            self._timings[normalized] = [time.monotonic()]
             self._pump()
         return None
 
@@ -237,6 +242,8 @@ class CoverLoader(QObject):
         if self._shutdown:
             return
         self._paused = False
+        self._diagnostics_left = 12
+        self._resumed_at = time.monotonic()
         # Never re-inject a long historical queue in one go; keep at most the
         # earliest MAX_PENDING entries (the rows most likely to be visible).
         if len(self._pending) > MAX_PENDING:
@@ -249,6 +256,26 @@ class CoverLoader(QObject):
         self._paused = True
         self._pending.clear()
         self._queued.clear()
+        self._timings = {url: times for url, times in self._timings.items()
+                         if url in self._by_url or url in self._decoding}
+
+    def prioritize(self, urls: list[str]) -> None:
+        """Drop stale waiting rows, then queue current viewport before prefetch."""
+        wanted = list(dict.fromkeys(filter(None, map(normalize_cover_url, urls))))
+        previous = self._timings
+        self._pending.clear()
+        self._queued.clear()
+        self._timings = {url: times for url, times in previous.items()
+                         if url in self._by_url or url in self._decoding}
+        # Queue as one batch so _pump cannot start an old prefetch first.
+        paused = self._paused
+        self._paused = True
+        for url in wanted[:MAX_PENDING]:
+            self.get(url)
+            if url in self._queued and url in previous:
+                self._timings[url] = previous[url]
+        self._paused = paused
+        self._pump()
 
     def clear(self) -> None:
         self._cache.clear()
@@ -257,6 +284,7 @@ class CoverLoader(QObject):
         self._pending.clear()
         self._queued.clear()
         self._abort_all()
+        self._timings.clear()
 
     def shutdown(self) -> None:
         if self._shutdown:
@@ -269,6 +297,7 @@ class CoverLoader(QObject):
         self._pending.clear()
         self._queued.clear()
         self._abort_all()
+        self._timings.clear()
         # 丢弃未开始的解码任务，短暂等待在跑的 1-2 个收尾（每个几十 ms），
         # 避免任务向已销毁的载体投结果。与 page.shutdown 的 worker join 同级。
         try:
@@ -302,6 +331,7 @@ class CoverLoader(QObject):
             ):
                 continue
             request = QNetworkRequest(QUrl(url))
+            self._timings.setdefault(url, [time.monotonic()]).append(time.monotonic())
             request.setRawHeader(b"User-Agent", UA.encode("utf-8"))
             request.setRawHeader(
                 b"Referer", b"https://www.bilibili.com/"
@@ -339,6 +369,7 @@ class CoverLoader(QObject):
             QNetworkRequest.Attribute.HttpStatusCodeAttribute
         )
         failed = reply.error() != QNetworkReply.NetworkError.NoError
+        self._timings.setdefault(url, [time.monotonic(), time.monotonic()]).append(time.monotonic())
         try:
             payload = bytes(reply.readAll())
         except RuntimeError:
@@ -366,6 +397,7 @@ class CoverLoader(QObject):
         # and only give up for good once MAX_FAILURES attempts were used up, so
         # a later get() can still re-enqueue the URL.
         self._failures[url] = self._failures.get(url, 0) + 1
+        self._report_timing(url, 'network_failed')
         if self._failures[url] >= MAX_FAILURES:
             self._failed.add(url)
         self._pump()
@@ -385,12 +417,27 @@ class CoverLoader(QObject):
                 while len(self._cache) > MAX_CACHE:
                     self._cache.popitem(last=False)
                 self.image_ready.emit(url)
+                self._report_timing(url, 'ready')
                 self._pump()
                 return
         self._failures[url] = self._failures.get(url, 0) + 1
+        self._report_timing(url, 'decode_failed')
         if self._failures[url] >= MAX_FAILURES:
             self._failed.add(url)
         self._pump()
+
+    def _report_timing(self, url: str, result: str) -> None:
+        times = self._timings.pop(url, None)
+        if times is None or len(times) < 3 or self._diagnostics_left <= 0:
+            return
+        self._diagnostics_left -= 1
+        queued, started, received = times[:3]
+        self.diagnostic.emit(
+            f'cover timing result={result} queue_ms={(started-queued)*1000:.0f} '
+            f'network_ms={(received-started)*1000:.0f} '
+            f'decode_ms={(time.monotonic()-received)*1000:.0f} '
+            f'since_open_ms={(time.monotonic()-self._resumed_at)*1000:.0f} '
+            f'active={len(self._active)} pending={len(self._pending)}')
 
     def _abort_all(self) -> None:
         for reply in list(self._active):

@@ -677,10 +677,10 @@ PAGE_PREFETCH_PX = 700
 # v1.0 需求：：网格视图（默认 4 列，B 站客户端 4x4 观感），行随滚动分页追加。
 # v1.0 需求 4：列数改为按可用宽度自适应 —— 目标单元格 240px，窗口越大列越多
 # （1200px 出 5 列、1400px 出 6 列…），上下限 4/8 列。
-GRID_COLUMNS = 4
-GRID_MIN_COLUMNS = 4
-GRID_MAX_COLUMNS = 8
-GRID_TARGET_CELL_WIDTH = 240
+GRID_COLUMNS = 3
+GRID_MIN_COLUMNS = 2
+GRID_MAX_COLUMNS = 6
+GRID_TARGET_CELL_WIDTH = 300
 # v1.0 需求 1：首屏只物化可视区能装下的卡片（980×660 默认窗口约 2~3 行，
 # 每行 4 列 ≈ 8~12 张），从 32 降到 16，滚动接近底部再按 GRID_GROW_CARDS 补。
 GRID_INITIAL_CARDS = 16
@@ -716,9 +716,9 @@ def grid_columns_for_width(
 
     以 ``target`` 为目标单元格宽度四舍五入，再夹到 ``[minimum, maximum]``：
 
-    * 932px（980 默认窗口）→ 4 列，与旧版固定 4 列完全一致；
-    * 1218px（1280 窗口）→ 5 列；
-    * 1373px（1440 窗口）→ 6 列。
+    * 932px（980 默认窗口）→ 3 列；
+    * 1218px（1280 窗口）→ 4 列；
+    * 1373px（1440 窗口）→ 5 列。
 
     只用整数运算，避免 ``round(4.5) == 4`` 这种银行家舍入在临界点上跳变。
     """
@@ -865,6 +865,7 @@ class WatchLaterPage(QWidget):
 
         self.covers = CoverLoader(self)
         self.covers.image_ready.connect(self._cover_ready)
+        self.covers.diagnostic.connect(self._log)
 
         # v1.0 需求：：弹幕数提供器懒创建（首次可见区补取时才建）。
         self._danmaku: DanmakuCountProvider | None = None
@@ -1410,7 +1411,8 @@ class WatchLaterPage(QWidget):
         width = max(
             80, (viewport.width() - 4 - (columns - 1) * gap) // columns
         )
-        height = max(1, (viewport.height() - 3 * gap) // 4)
+        # Card height follows its 16:9 cover, independent of viewport height.
+        height = round(width * 9 / 16) + 80
         size = (width, height)
         if size != self._grid_cell_size or columns_changed:
             self._grid_cell_size = size
@@ -1987,7 +1989,9 @@ class WatchLaterPage(QWidget):
     def _schedule_visible_covers(self, *_args) -> None:
         if self._shutting_down or not self._visible or self._building_rows:
             return
-        self._cover_scroll_timer.start(COVER_REFETCH_DEBOUNCE_MS)
+        # Deliveries and scrollbar signals must not indefinitely reset refill.
+        if not self._cover_scroll_timer.isActive():
+            self._cover_scroll_timer.start(COVER_REFETCH_DEBOUNCE_MS)
         self._maybe_grow_page()
 
     # ------------------------------------------------------ incremental paging
@@ -2093,6 +2097,10 @@ class WatchLaterPage(QWidget):
         for row in self._cover_views - keep:
             row.cover.set_pixmap(None)
         self._cover_views = keep
+        visible.sort(key=lambda row: not (
+            row.geometry().bottom() >= offset
+            and row.geometry().top() <= offset + viewport_rect.height()))
+        self.covers.prioritize([row.item.cover_url for row in visible])
         provider = self._danmaku_provider()
         for row in visible:
             row.refresh_cover(self.covers.get)
