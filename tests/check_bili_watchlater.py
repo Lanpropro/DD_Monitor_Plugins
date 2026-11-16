@@ -281,8 +281,9 @@ if __name__ == '__main__':
             command.append(name)
             result = subprocess.run(command, cwd=HOST, capture_output=True,
                 text=True, encoding='utf-8', errors='replace', timeout=60,
-                env=dict(os.environ, DDM_CHECK_MODE='offline', PYTHONIOENCODING='utf-8'))
-            output = result.stdout + result.stderr
+                env=dict(os.environ, DDM_CHECK_MODE='offline', PYTHONIOENCODING='utf-8',
+                         PYTHONFAULTHANDLER='1', PYTHONUNBUFFERED='1'))
+            output = f'exit_code={result.returncode}\n' + result.stdout + result.stderr
             (logs / (name + '.log')).write_text(output, encoding='utf-8')
             failed = result.returncode != 0 or 'Error calling Python override' in output
             failures += int(failed)

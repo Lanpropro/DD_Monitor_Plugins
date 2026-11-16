@@ -2717,6 +2717,37 @@ class BiliWatchLaterPlugin(api.Plugin):
             return
         self._start_vod_for_tile(tile, item)
 
+    def _placement_targets(self):
+        wall = getattr(self._host_window(), 'wall', None)
+        panes = getattr(wall, 'pane_danmaku', None)
+        options = []
+        for index, tile in enumerate(self._playback_tiles()):
+            if sip_deleted(tile):
+                continue
+            cell = panes.cell_for_tile(tile) if panes is not None else index
+            if cell is None:
+                continue
+            room = getattr(tile, 'room', None) or {}
+            occupied = bool(room.get('room_id') or self._binding_for_tile(tile))
+            name = str(room.get('uname') or room.get('title') or '已有视频') if occupied else '空格'
+            options.append((tile, f'第 {cell + 1} 格 · {name}', occupied))
+        return options
+
+    def _place_item_from_page(self, item, target):
+        if self._shutting_down or item is None:
+            return
+        if target not in self._playback_tiles():
+            self._notify_warning('目标格已变化，请重新选择目标格。')
+            if self.page is not None:
+                self.page.refresh_targets()
+            return
+        picked = self._pick_target_tile is not None
+        self._pick_target_tile = None
+        self._start_vod_for_tile(target, item)
+        if picked and self.page is not None:
+            self.page.set_pick_target(None)
+            self.page.close()
+
     def _play_item_from_page(self, item) -> None:
         """弹窗「播放」按钮：选片模式进目标格，浏览模式进第一个空格。"""
         if self._shutting_down or item is None:
@@ -4266,6 +4297,7 @@ class BiliWatchLaterPlugin(api.Plugin):
                 except Exception:
                     pass
             self.page.set_play_handler(self._play_item_from_page)
+            self.page.set_placement_handlers(self._placement_targets, self._place_item_from_page)
             if self.wall is not None:
                 self.wall.set_cover_provider(self.page.covers.get)
         except Exception as error:
@@ -4301,6 +4333,7 @@ class BiliWatchLaterPlugin(api.Plugin):
                 except ValueError:
                     label = "目标格子"
             page.set_pick_target(label)
+            page.refresh_targets(pick_tile)
         except Exception:
             pass
         try:

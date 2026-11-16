@@ -2,8 +2,8 @@
 
 Opened by the sidebar workspace button and by the tile right-click picker as
 the SAME window (user requirement 7).  Video cards can be dragged straight
-onto wall tiles (VOD_MIME, requirement 6); the 「播放」 button plays into the
-pick target tile, or the first empty tile in browse mode.
+onto wall tiles (VOD_MIME, requirement 6); explicit placement buttons use the
+selected destination. Covers and titles only select a thumbnail.
 """
 from __future__ import annotations
 
@@ -26,7 +26,6 @@ from PySide6.QtCore import (
     QPoint,
     QPointF,
     QRect,
-    QRectF,
     QSettings,
     QSize,
     Qt,
@@ -36,23 +35,15 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtGui import (
-    QColor,
     QDesktopServices,
-    QFont,
-    QFontMetrics,
     QGuiApplication,
     QIcon,
     QKeySequence,
-    QPainter,
-    QPainterPath,
     QPalette,
-    QPen,
-    QPixmap,
     QShortcut,
 )
 from PySide6.QtWidgets import (
     QApplication,
-    QComboBox,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -62,11 +53,13 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QStackedWidget,
-    QStyle,
-    QStyleOptionButton,
     QVBoxLayout,
     QWidget,
 )
+
+from ddm import theme
+from ddm.ui import ActionButton, HintLabel, SelectControl, SettingsSurface, TitleLabel
+from .page_panels import PlacementSelector
 
 from .bili_api import BiliAPIError, describe_error
 from .covers import CoverLoader
@@ -311,363 +304,6 @@ def geometry_from_store(store: Any, key: str = GEOMETRY_KEY) -> QRect | None:
     return _rect_from_geometry(raw)
 
 
-# ---------------------------------------------------------------- v1.0 需求 9
-def _blend(base: QColor, other: QColor, ratio: float) -> QColor:
-    """按比例把 other 混进 base（ratio=0 → base，1 → other）。"""
-    ratio = max(0.0, min(1.0, float(ratio)))
-    return QColor(
-        round(base.red() + (other.red() - base.red()) * ratio),
-        round(base.green() + (other.green() - base.green()) * ratio),
-        round(base.blue() + (other.blue() - base.blue()) * ratio),
-    )
-
-
-def host_theme_hint() -> tuple[bool | None, QColor | None]:
-    """尽力从宿主 ``ddm.theme`` 取「浅色主题?」和浮层底色。
-
-    宿主主题模块不一定存在、也不保证有这些名字（宿主自己还在演进），所以
-    全程 try/except：拿不到就返回 ``(None, None)``，由 QPalette 兜底。
-    """
-    try:
-        from ddm import theme as host_theme  # type: ignore
-    except Exception:
-        return None, None
-    is_light: bool | None = None
-    for name in ("is_light", "is_light_theme"):
-        value = getattr(host_theme, name, None)
-        try:
-            candidate = value() if callable(value) else value
-        except Exception:
-            continue
-        if isinstance(candidate, bool):
-            is_light = candidate
-            break
-    overlay: QColor | None = None
-    for name in ("overlay_color", "panel_color"):
-        value = getattr(host_theme, name, None)
-        if value is None:
-            continue
-        try:
-            candidate = value() if callable(value) else value
-            color = candidate if isinstance(candidate, QColor) else QColor(candidate)
-        except Exception:
-            continue
-        if isinstance(color, QColor) and color.isValid():
-            overlay = color
-            break
-    return is_light, overlay
-
-
-FAB_RADIUS = 16
-FAB_MIN_HEIGHT = 32
-FAB_PADDING_X = 14
-# v1.0 需求 15：悬浮按钮图标（逻辑 16×16，QPainter 线条，颜色跟主题）。
-FAB_ICON_SIZE = 16
-FAB_ICON_GAP = 6
-FAB_GLYPH_KINDS = ("refresh", "top")
-
-
-def _paint_fab_glyph(
-    painter: QPainter, kind: str, rect: QRectF, color: QColor
-) -> None:
-    """在 ``rect`` 内的 16×16 逻辑网格上画线条图标（refresh / top）。
-
-    纯几何绘制，颜色由调用方给（跟随 :func:`fab_colors` 的主题色），所以深浅
-    主题、hover、disabled 都能各自上色，且不引入任何图片资源。
-    """
-    painter.save()
-    try:
-        painter.translate(rect.left(), rect.top())
-        if rect.width() > 0 and rect.height() > 0:
-            painter.scale(rect.width() / 16.0, rect.height() / 16.0)
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        pen = QPen(color, 2.0)
-        pen.setCapStyle(Qt.RoundCap)
-        pen.setJoinStyle(Qt.RoundJoin)
-        painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
-        if kind == "refresh":
-            # 环形箭头：留一个缺口的圆弧 + 端点的三角形箭头（顺时针刷新）。
-            arc = QRectF(2.8, 2.8, 10.4, 10.4)
-            start, sweep = 100.0, 280.0
-            path = QPainterPath()
-            path.arcMoveTo(arc, start)
-            path.arcTo(arc, start, sweep)
-            painter.drawPath(path)
-            radius = arc.width() / 2.0
-            cx, cy = arc.center().x(), arc.center().y()
-            angle = math.radians(start + sweep)
-            tip = QPointF(cx + radius * math.cos(angle),
-                          cy - radius * math.sin(angle))
-            # 切线（角度增大方向）与径向量：箭头沿切线指出去。
-            tx, ty = -math.sin(angle), -math.cos(angle)
-            nx, ny = math.cos(angle), -math.sin(angle)
-            size = 2.6
-            head = QPainterPath()
-            head.moveTo(tip.x() + tx * size, tip.y() + ty * size)
-            head.lineTo(tip.x() - nx * size * 0.95, tip.y() - ny * size * 0.95)
-            head.lineTo(tip.x() + nx * size * 0.95, tip.y() + ny * size * 0.95)
-            head.closeSubpath()
-            painter.fillPath(head, color)
-        elif kind == "top":
-            # 向上箭头：竖线 + 上方人字。
-            painter.drawLine(QPointF(8.0, 13.5), QPointF(8.0, 3.0))
-            painter.drawLine(QPointF(3.6, 7.4), QPointF(8.0, 3.0))
-            painter.drawLine(QPointF(8.0, 3.0), QPointF(12.4, 7.4))
-        else:  # pragma: no cover - 防御性分支
-            painter.drawEllipse(QRectF(3.0, 3.0, 10.0, 10.0))
-    finally:
-        painter.restore()
-
-
-def fab_glyph_pixmap(
-    kind: str, size: int = FAB_ICON_SIZE, color: QColor | None = None,
-    scale: int = 1,
-) -> QPixmap:
-    """悬浮按钮图标的位图（``scale=2`` 给 2x DPR，线宽跟着缩放不糊）。"""
-    tint = color if isinstance(color, QColor) and color.isValid() else QColor(
-        "#e6eaf0"
-    )
-    size = max(1, int(size))
-    scale = max(1, int(scale))
-    pixmap = QPixmap(size * scale, size * scale)
-    pixmap.fill(Qt.transparent)
-    if scale > 1:
-        pixmap.setDevicePixelRatio(scale)
-    painter = QPainter(pixmap)
-    try:
-        _paint_fab_glyph(painter, kind, QRectF(0, 0, size, size), tint)
-    finally:
-        painter.end()
-    return pixmap
-
-
-def fab_glyph_icon(
-    kind: str, size: int = FAB_ICON_SIZE, color: QColor | None = None
-) -> QIcon:
-    """1x + 2x 两档位图组成的 QIcon。"""
-    icon = QIcon()
-    icon.addPixmap(fab_glyph_pixmap(kind, size, color, 1))
-    icon.addPixmap(fab_glyph_pixmap(kind, size, color, 2))
-    return icon
-
-
-def fab_colors(
-    palette: QPalette,
-    *,
-    is_light: bool | None = None,
-    overlay: QColor | None = None,
-) -> dict[str, QColor]:
-    """右下角悬浮按钮的配色：完全由宿主调色板推出来，深浅主题都不刺眼。
-
-    深色主题：底色 = 窗口色往 WindowText 提亮一点（半透明炭黑），绝不出现
-    白底；浅色主题：底色 = 窗口色往 WindowText 压一点（浅灰玻璃）。hover 用
-    Highlight，与宿主按钮的选中态一致。
-    """
-    window = palette.color(QPalette.Window)
-    text = palette.color(QPalette.WindowText)
-    highlight = palette.color(QPalette.Highlight)
-    highlighted = palette.color(QPalette.HighlightedText)
-    if not text.isValid():
-        text = QColor("#e6eaf0")
-    if is_light is None:
-        is_light = window.lightness() >= 128
-    base = QColor(overlay) if overlay is not None and overlay.isValid() else window
-    if is_light:
-        background = _blend(base, text, 0.05)
-        border = _blend(base, text, 0.22)
-        pressed = _blend(highlight, text, 0.18)
-    else:
-        background = _blend(base, text, 0.12)
-        border = _blend(base, text, 0.26)
-        pressed = _blend(highlight, QColor(0, 0, 0), 0.25)
-    colors = {
-        "background": background,
-        "border": border,
-        "text": text,
-        "hover_background": highlight,
-        "hover_text": highlighted,
-        "pressed_background": pressed,
-        "pressed_text": highlighted,
-    }
-    colors["disabled_background"] = QColor(background)
-    colors["disabled_text"] = QColor(text)
-    colors["disabled_border"] = QColor(border)
-    colors["disabled_background"].setAlpha(140)
-    colors["disabled_text"].setAlpha(120)
-    colors["disabled_border"].setAlpha(90)
-    colors["background"].setAlpha(235)
-    colors["border"].setAlpha(150)
-    colors["hover_background"].setAlpha(245)
-    colors["pressed_background"].setAlpha(235)
-    return colors
-
-
-def fab_button_style(
-    palette: QPalette,
-    *,
-    is_light: bool | None = None,
-    overlay: QColor | None = None,
-) -> str:
-    """悬浮按钮的文字样式（字体 + 文字色 + 透明底）。
-
-    胶囊形状由 :class:`FabButton.paintEvent` 用同一套 :func:`fab_colors`
-    自绘 —— QSS 的 ``border-radius`` 在本机 Qt 6.12 上不会裁掉纯色背景
-    （实测四角仍是直角），只画得出方块。这里负责 QSS 能做好的部分：字重与
-    文字色，并显式把背景/边框设成透明，免得 QSS 再铺一层方块盖住胶囊。
-    """
-    colors = fab_colors(palette, is_light=is_light, overlay=overlay)
-    text = colors["text"]
-    return (
-        "QPushButton { background: transparent; border: none;"
-        " color: rgba(%d, %d, %d, 235); font-weight: 600; }"
-        "QPushButton:disabled { color: rgba(%d, %d, %d, 120); }"
-        % (text.red(), text.green(), text.blue(), text.red(), text.green(),
-           text.blue())
-    )
-
-
-class FabButton(QPushButton):
-    """v1.0 需求 9：右下角悬浮「胶囊」按钮（自绘，跟随宿主主题）。
-
-    QSS 的 ``border-radius`` 在本机 Qt 6.12 上对纯色背景不生效（实测四角仍
-    被背板填成直角），所以直接 QPainter 画圆角胶囊：底色/描边/文字全部来自
-    宿主 QPalette（优先 ``ddm.theme``），hover 用 Highlight，深浅主题都不会
-    出现亮底；``NoFocus`` 保证不抢搜索框焦点、不吃快捷键。
-    """
-
-    def __init__(self, text: str, parent: QWidget | None = None) -> None:
-        super().__init__(text, parent)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setFocusPolicy(Qt.NoFocus)
-        self.setAttribute(Qt.WA_Hover, True)
-        self.setMinimumHeight(FAB_MIN_HEIGHT)
-        # 与宿主 TileButton 一样的半粗字重（旧 QSS 是 font-weight: 600）。
-        font = QFont(self.font())
-        font.setWeight(QFont.Weight.DemiBold)
-        self.setFont(font)
-        self._colors = fab_colors(self.palette())
-        self._icon_kind = ""
-
-    # ------------------------------------------------------------- theme
-    def refresh_theme(self, palette: QPalette | None = None) -> None:
-        """跟随宿主调色板/主题刷新配色（PaletteChange 时由页面调用）。
-
-        默认取**父容器**的调色板：按钮自己设了 QSS，``self.palette()`` 会被
-        样式表接管（Window 角色可能为空），取不到宿主的真实主题色。
-        """
-        try:
-            is_light, overlay = host_theme_hint()
-        except Exception:
-            is_light, overlay = None, None
-        if palette is None:
-            parent = self.parentWidget()
-            palette = parent.palette() if parent is not None else self.palette()
-        self._colors = fab_colors(
-            palette, is_light=is_light, overlay=overlay
-        )
-        style = fab_button_style(palette, is_light=is_light, overlay=overlay)
-        if self.styleSheet() != style:
-            self.setStyleSheet(style)
-        self._sync_icon()
-        self.update()
-
-    def colors(self) -> dict[str, QColor]:
-        return dict(self._colors)
-
-    # -------------------------------------------------------- v1.0 需求 15
-    def set_icon_kind(self, kind: str) -> None:
-        """给按钮配一个线条图标（``refresh`` / ``top``），文字保留。"""
-        self._icon_kind = kind if kind in FAB_GLYPH_KINDS else ""
-        self._sync_icon()
-        self.updateGeometry()
-        self.update()
-
-    def icon_kind(self) -> str:
-        return self._icon_kind
-
-    def _sync_icon(self) -> None:
-        if not getattr(self, "_icon_kind", ""):
-            return
-        self.setIcon(
-            fab_glyph_icon(self._icon_kind, FAB_ICON_SIZE, self._colors["text"])
-        )
-        self.setIconSize(QSize(FAB_ICON_SIZE, FAB_ICON_SIZE))
-
-    # ------------------------------------------------------------ layout
-    def sizeHint(self) -> QSize:  # type: ignore[override]
-        metrics = self.fontMetrics()
-        extra = (FAB_ICON_SIZE + FAB_ICON_GAP) if self._icon_kind else 0
-        return QSize(
-            metrics.horizontalAdvance(self.text()) + 2 * FAB_PADDING_X + extra,
-            max(FAB_MIN_HEIGHT, metrics.height() + 12),
-        )
-
-    def minimumSizeHint(self) -> QSize:  # type: ignore[override]
-        return self.sizeHint()
-
-    # ------------------------------------------------------------- paint
-    def paintEvent(self, event) -> None:  # type: ignore[override]
-        option = QStyleOptionButton()
-        self.initStyleOption(option)
-        state = option.state
-        if not self.isEnabled():
-            fill = self._colors["disabled_background"]
-            border = self._colors["disabled_border"]
-            text = self._colors["disabled_text"]
-        elif state & QStyle.State_Sunken:
-            fill = self._colors["pressed_background"]
-            border = self._colors["pressed_background"]
-            text = self._colors["pressed_text"]
-        elif state & QStyle.State_MouseOver:
-            fill = self._colors["hover_background"]
-            border = self._colors["hover_background"]
-            text = self._colors["hover_text"]
-        else:
-            fill = self._colors["background"]
-            border = self._colors["border"]
-            text = self._colors["text"]
-        painter = QPainter(self)
-        try:
-            painter.setRenderHint(QPainter.Antialiasing, True)
-            rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-            radius = min(FAB_RADIUS, rect.height() / 2.0)
-            painter.setPen(QPen(border, 1.0))
-            painter.setBrush(fill)
-            painter.drawRoundedRect(rect, radius, radius)
-            painter.setPen(text)
-            if not self._icon_kind:
-                painter.drawText(self.rect(), Qt.AlignCenter, self.text())
-                return
-            # 图标 + 文字整体居中：图标在左，文字紧跟其后。
-            metrics = QFontMetrics(self.font())
-            text_w = metrics.horizontalAdvance(self.text())
-            content = FAB_ICON_SIZE + FAB_ICON_GAP + text_w
-            left = max(2.0, (self.width() - content) / 2.0)
-            _paint_fab_glyph(
-                painter,
-                self._icon_kind,
-                QRectF(
-                    left,
-                    (self.height() - FAB_ICON_SIZE) / 2.0,
-                    FAB_ICON_SIZE,
-                    FAB_ICON_SIZE,
-                ),
-                text,
-            )
-            painter.drawText(
-                QRectF(
-                    left + FAB_ICON_SIZE + FAB_ICON_GAP, 0,
-                    max(1, self.width() - left - FAB_ICON_SIZE - FAB_ICON_GAP),
-                    self.height(),
-                ),
-                Qt.AlignLeft | Qt.AlignVCenter,
-                self.text(),
-            )
-        finally:
-            painter.end()
-
-
 # v1.0 首屏分页：642 行全量构建约 1.2 s GUI 线程开销、约 7000 个 QObject，
 # 但首屏只看得到十几行。首次只物化 PAGE_INITIAL_ROWS 行，滚动接近底部时
 # 再按 PAGE_GROW_ROWS 追加。数据层（搜索/筛选/排序/计数）仍是完整列表，
@@ -813,6 +449,8 @@ class WatchLaterPage(QWidget):
         self._shutting_down = False
         self._visible = False
         self._items: list[WatchLaterItem] = []
+        self._selected_key = None
+        self._placement_handler = None
         self._rows: list[RowCard] = []
         self._rows_by_key: dict[str, RowCard] = {}
         self._rows_by_cover: dict[str, list[RowCard]] = {}
@@ -936,12 +574,17 @@ class WatchLaterPage(QWidget):
     # ------------------------------------------------------------------ UI
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        # 底部留给悬浮按钮，不遮住第四行视频/操作。
-        root.setContentsMargins(24, 18, 24, 52)
+        # 页面底部为固定操作行，不遮挡缩略图。
+        root.setContentsMargins(24, 18, 24, 18)
         root.setSpacing(0)
         self.column = CenteredColumn(self)
         root.addWidget(self.column)
         body = self.column.body_layout
+        body.setSpacing(16)
+        self.setObjectName("WatchLaterPage")
+        self.setAutoFillBackground(True)
+        theme.signals().changed.connect(self._sync_browser_palette)
+        self._sync_browser_palette()
 
         header = QHBoxLayout()
         self.header_layout = header  # v1.0 需求 12：便于对齐回归断言
@@ -950,11 +593,8 @@ class WatchLaterPage(QWidget):
             PAGE_CONTENT_MARGIN, 0, PAGE_CONTENT_MARGIN, 0
         )
         header.setSpacing(PAGE_ROW_SPACING)
-        self.title_label = QLabel("稍后再看", self)
+        self.title_label = TitleLabel("稍后再看", self)
         self.title_label.setTextFormat(Qt.PlainText)
-        self.title_label.setFont(
-            relative_font(self.font(), 1.4, bold=True)
-        )
         header.addWidget(self.title_label, 0, Qt.AlignVCenter)
 
         self.count_label = QLabel("", self)
@@ -997,13 +637,14 @@ class WatchLaterPage(QWidget):
         self.quick_pick_button.setToolTip("选择稍后再看视频…（进入选片模式）")
         self.quick_pick_button.setAccessibleName("快速选片")
         self.quick_pick_button.clicked.connect(self._on_quick_pick_clicked)
-        header.addWidget(self.quick_pick_button, 0, Qt.AlignVCenter)
+        self.quick_pick_button.hide()
 
         self.view_switch = ViewModeSwitch(self, self._view_mode)
         self.view_switch.mode_changed.connect(self._on_view_mode_changed)
         header.addWidget(self.view_switch, 0, Qt.AlignVCenter)
 
         body.addLayout(header)
+        body.addWidget(HintLabel("选择目标格，再点击视频卡片上的置入或替换按钮", self))
 
         # v1.0 选片模式提示：右键「选择稍后再看视频…」进入时显示目标格。
         # v1.0 需求：：删除顶部整条蓝 bar —— 改为内联进 header 的一行普通
@@ -1037,6 +678,10 @@ class WatchLaterPage(QWidget):
         # 内联进 header（标题/计数之后），不单独占一条顶部横幅。
         header.insertWidget(2, self.pick_banner)
 
+        self.browse_tools = SettingsSurface(self)
+        tools = QVBoxLayout(self.browse_tools)
+        tools.setContentsMargins(18, 16, 18, 16)
+        tools.setSpacing(12)
         filters = QHBoxLayout()
         self.filters_layout = filters  # v1.0 需求 12：便于对齐回归断言
         # v1.0 需求 12：筛选行按钮与网格卡片内容共用同一套左右边距/间距。
@@ -1045,6 +690,7 @@ class WatchLaterPage(QWidget):
         )
         filters.setSpacing(PAGE_ROW_SPACING)
         self.search = QLineEdit(self)
+        self.search.setObjectName("Search")
         self.search.setPlaceholderText("搜索标题 / UP主 / BV号")
         self.search.setClearButtonEnabled(True)
         self.search.setToolTip("在本地搜索标题、UP 主或 BV 号")
@@ -1052,7 +698,7 @@ class WatchLaterPage(QWidget):
         self.search.textChanged.connect(self._search_changed)
         filters.addWidget(self.search, 1)
 
-        self.filter_combo = QComboBox(self)
+        self.filter_combo = SelectControl(self)
         for value, label in FILTER_OPTIONS:
             self.filter_combo.addItem(label, value)
         self.filter_combo.setToolTip("按观看状态筛选")
@@ -1062,7 +708,7 @@ class WatchLaterPage(QWidget):
         )
         filters.addWidget(self.filter_combo, 0)
 
-        self.sort_combo = QComboBox(self)
+        self.sort_combo = SelectControl(self)
         for value, label in SORT_OPTIONS:
             self.sort_combo.addItem(label, value)
         self.sort_combo.setCurrentIndex(0)
@@ -1098,7 +744,11 @@ class WatchLaterPage(QWidget):
         )
         self._multi_cancel_shortcut.setContext(Qt.WindowShortcut)
         self._multi_cancel_shortcut.activated.connect(self._cancel_multiselect)
-        body.addLayout(filters)
+        tools.addLayout(filters)
+        self.placement = PlacementSelector(self.browse_tools)
+        self.placement.changed.connect(self._sync_placement_actions)
+        tools.addWidget(self.placement)
+        body.addWidget(self.browse_tools)
 
         self.error_bar = ErrorBar(self)
         self.error_bar.retry_requested.connect(
@@ -1200,24 +850,21 @@ class WatchLaterPage(QWidget):
         fab_layout = QHBoxLayout(self.fab_bar)
         fab_layout.setContentsMargins(0, 0, 0, 0)
         fab_layout.setSpacing(8)
-        self.fab_refresh = FabButton("刷新 (F5)", self.fab_bar)
+        self.fab_refresh = ActionButton("刷新 (F5)", self.fab_bar)
         self.fab_refresh.setToolTip("刷新稍后再看（F5）")
         self.fab_refresh.setAccessibleName("刷新稍后再看")
         self.fab_refresh.setAutoDefault(False)
-        # v1.0 需求 15：图标 + 文字（环形箭头），颜色跟 fab_colors 主题色。
-        self.fab_refresh.set_icon_kind("refresh")
+        fab_layout.addStretch(1)
         self.fab_refresh.clicked.connect(lambda: self._load(manual=True))
         fab_layout.addWidget(self.fab_refresh)
-        self.fab_top = FabButton("顶部", self.fab_bar)
+        self.fab_top = ActionButton("回到顶部", self.fab_bar)
         self.fab_top.setToolTip("回到列表顶部")
         self.fab_top.setAccessibleName("回到顶部")
         self.fab_top.setAutoDefault(False)
-        self.fab_top.set_icon_kind("top")
+
         self.fab_top.clicked.connect(self._scroll_to_top)
         fab_layout.addWidget(self.fab_top)
-        # v1.0 需求 9：配色由 FabButton 自绘（宿主 QPalette / ddm.theme），
-        # NoFocus 在 FabButton 里设置，悬浮按钮不抢搜索框焦点与快捷键。
-        self._apply_fab_style()
+        body.addWidget(self.fab_bar)
         self.fab_bar.hide()
         self.fab_bar.raise_()
         # F5 全局（窗口内）刷新。
@@ -1228,6 +875,31 @@ class WatchLaterPage(QWidget):
         self.stack.currentChanged.connect(self._update_fabs)
 
         self._update_header(0, 0)
+
+    def _sync_browser_palette(self):
+        palette = self.palette()
+        palette.setColor(QPalette.Window, theme.qcolor(theme.BG))
+        self.setPalette(palette)
+
+    def set_placement_handlers(self, provider, handler):
+        self.placement.provider = provider
+        self._placement_handler = handler
+        self.placement.refresh()
+
+    def refresh_targets(self, preferred=None):
+        self.placement.refresh(preferred)
+
+    def _sync_card_action(self, card):
+        card.set_placement_action(self.placement.action_text(), self.placement.target() is not None)
+        card.set_browse_selected(card.item.key == self._selected_key)
+
+    def _sync_placement_actions(self):
+        for card in (*self._rows, *self._cards):
+            self._sync_card_action(card)
+
+    def _select_item(self, item):
+        self._selected_key = item.key
+        self._sync_placement_actions()
 
     def _active_scroll(self) -> QScrollArea:
         return self.grid_scroll if self._view_mode == "grid" else self.list_scroll
@@ -1387,24 +1059,9 @@ class WatchLaterPage(QWidget):
     def _scroll_to_top(self) -> None:
         self._active_scroll().verticalScrollBar().setValue(0)
 
-    def _apply_fab_style(self) -> None:
-        """v1.0 需求 9：按宿主主题（ddm.theme 优先，QPalette 兜底）刷悬浮按钮。
-
-        宿主切深浅主题会重发 PaletteChange，所以这里同时被 changeEvent 调用。
-        """
-        if not hasattr(self, "fab_refresh"):
-            return
-        for button in (self.fab_refresh, self.fab_top):
-            try:
-                button.refresh_theme(self.palette())
-            except Exception:
-                pass
-
     def changeEvent(self, event) -> None:  # type: ignore[override]
         super().changeEvent(event)
-        if event.type() == QEvent.PaletteChange:
-            self._apply_fab_style()
-        elif event.type() == QEvent.WindowStateChange:
+        if event.type() == QEvent.WindowStateChange:
             self._refuse_minimize()
 
     # ------------------------------------------- v1.0 需求 3：禁止最小化
@@ -1444,26 +1101,13 @@ class WatchLaterPage(QWidget):
             self._minimize_guard = False
 
     def _update_fabs(self, *_args) -> None:
-        if not hasattr(self, "fab_bar"):
+        if not hasattr(self, 'fab_bar'):
             return
         scroll = self._active_scroll()
         has_view = self.stack.currentWidget() is scroll
-        corner = self.column.body.mapTo(self, QPoint(self.column.body.width(), 0))
-        state = (has_view, scroll.verticalScrollBar().value() > 0,
-                 self._visible, self._shutting_down, corner.x(), corner.y(), self.height(),
-                 tuple((button.text(), button.font().toString()) for button in (self.fab_top, self.fab_refresh)))
-        if state == getattr(self, '_fabs_state', None):
-            return
-        self._fabs_state = state
         self.fab_top.setVisible(has_view)
         self.fab_top.setEnabled(has_view and scroll.verticalScrollBar().value() > 0)
-        self.fab_bar.adjustSize()
-        self.fab_bar.move(
-            max(0, corner.x() - self.fab_bar.width() - PAGE_CONTENT_MARGIN),
-            max(0, self.height() - self.fab_bar.height() - 10),
-        )
         self.fab_bar.setVisible(self._visible and not self._shutting_down)
-        self.fab_bar.raise_()
 
     def eventFilter(self, watched, event) -> bool:
         if (event.type() == QEvent.Resize
@@ -1493,7 +1137,7 @@ class WatchLaterPage(QWidget):
             80, (viewport.width() - 4 - (columns - 1) * gap) // columns
         )
         # Card height follows its 16:9 cover, independent of viewport height.
-        height = round(width * 9 / 16) + 80
+        height = round(width * 9 / 16) + 140
         size = (width, height)
         if size != self._grid_cell_size or columns_changed:
             self._grid_cell_size = size
@@ -1816,6 +1460,8 @@ class WatchLaterPage(QWidget):
         row.copy_requested.connect(self._copy_item)
         row.remove_requested.connect(self._confirm_remove)
         row.play_requested.connect(self._play_item)
+        row.selection_requested.connect(self._select_item)
+        self._sync_card_action(row)
         row.double_play_requested.connect(self._on_double_play)
         row.selection_toggled.connect(self._on_multi_toggle)
         row.set_multi_mode(
@@ -1850,6 +1496,8 @@ class WatchLaterPage(QWidget):
                 card.copy_requested.connect(self._copy_item)
                 card.remove_requested.connect(self._confirm_remove)
                 card.play_requested.connect(self._play_item)
+                card.selection_requested.connect(self._select_item)
+                self._sync_card_action(card)
                 card.double_play_requested.connect(self._on_double_play)
                 card.selection_toggled.connect(self._on_multi_toggle)
                 existing[item.key] = card
@@ -2668,7 +2316,7 @@ class WatchLaterPage(QWidget):
             if len(short) > 14:
                 short = short[:13] + "…"
             self.pick_banner_label.set_full_text("播放至 " + short)
-            tip = f"正在为「{self._pick_label}」选片；点击播放或网格封面即播到该格"
+            tip = f"正在为「{self._pick_label}」选片；点击卡片上的置入／替换按钮操作"
             self.pick_banner_label.setToolTip(tip)
             self.pick_banner.setToolTip(tip)
             self.pick_banner.show()
@@ -2809,6 +2457,15 @@ class WatchLaterPage(QWidget):
         self._begin_remove(item)
 
     def _play_item(self, item: WatchLaterItem) -> None:
+        if callable(self._placement_handler):
+            self.placement.refresh()
+            target = self.placement.target()
+            if target is None:
+                self._flash_status("请先选择可用的目标格")
+                return
+            self._placement_handler(item, target)
+            self.placement.refresh(target)
+            return
         handler = self._play_handler
         if callable(handler):
             try:
@@ -3016,6 +2673,7 @@ class WatchLaterPage(QWidget):
         if changed:
             return
         self._visible = True
+        self.placement.refresh()
         self._update_fabs()
         self.covers.resume()
         if self._danmaku is not None:

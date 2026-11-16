@@ -25,7 +25,9 @@ class CardPlaybackTests(unittest.TestCase):
         self.page = pages.WatchLaterPage(context)
         self.page._geometry_settings = Mock()  # Never read or write real QSettings.
         self.handler = Mock()
-        self.page.set_play_handler(self.handler)
+        self.target = TileFixture({})
+        self.targets = [(self.target, '第 1 格 · 空格', False)]
+        self.page.set_placement_handlers(lambda: self.targets, self.handler)
         self.closed = patch.object(self.page, 'close')
         self.close = self.closed.start()
         self.item = models.WatchLaterItem(aid=1, bvid='BV1xx411c7mD', title='Fixture')
@@ -51,39 +53,42 @@ class CardPlaybackTests(unittest.TestCase):
         QTest.mouseDClick(widget, Qt.LeftButton, pos=QPoint(5, 5))
         QTest.mouseRelease(widget, Qt.LeftButton, pos=QPoint(5, 5))
 
-    def test_list_card_double_click_dispatches_once(self):
+    def test_list_card_double_click_only_selects(self):
         self.double_click(self.card('list'))
-        self.handler.assert_called_once_with(self.item)
-        self.close.assert_called_once()
+        self.handler.assert_not_called()
+        self.close.assert_not_called()
+        self.assertEqual(self.page._selected_key, self.item.key)
 
-    def test_list_cover_double_click_dispatches_once(self):
+    def test_list_cover_double_click_only_selects(self):
         self.double_click(self.card('list').cover)
-        self.handler.assert_called_once_with(self.item)
-        self.close.assert_called_once()
-
-    def test_grid_card_double_click_dispatches_once(self):
-        self.double_click(self.card('grid'))
-        self.handler.assert_called_once_with(self.item)
-        self.close.assert_called_once()
-
-    def test_grid_cover_double_click_dispatches_once(self):
-        self.double_click(self.card('grid').cover)
-        self.handler.assert_called_once_with(self.item)
-        self.close.assert_called_once()
-
-    def test_grid_cover_single_click_still_dispatches_immediately(self):
-        QTest.mouseClick(self.card('grid').cover, Qt.LeftButton, pos=QPoint(5, 5))
-        self.handler.assert_called_once_with(self.item)
+        self.handler.assert_not_called()
         self.close.assert_not_called()
 
-    def test_covers_and_titles_play_without_opening_browser(self):
+    def test_grid_card_double_click_only_selects(self):
+        self.double_click(self.card('grid'))
+        self.handler.assert_not_called()
+        self.close.assert_not_called()
+
+    def test_grid_cover_double_click_only_selects(self):
+        self.double_click(self.card('grid').cover)
+        self.handler.assert_not_called()
+        self.close.assert_not_called()
+
+    def test_grid_cover_single_click_only_selects(self):
+        QTest.mouseClick(self.card('grid').cover, Qt.LeftButton, pos=QPoint(5, 5))
+        self.handler.assert_not_called()
+        self.assertEqual(self.page._selected_key, self.item.key)
+        self.close.assert_not_called()
+
+    def test_covers_and_titles_select_without_playing_or_opening_browser(self):
         with patch.object(self.page, '_open_item') as browser:
             for mode in ('list', 'grid'):
                 card = self.card(mode)
                 for target in (card.cover, card.title_label):
                     self.handler.reset_mock()
                     QTest.mouseClick(target, Qt.LeftButton, pos=QPoint(5, 5))
-                    self.handler.assert_called_once_with(self.item)
+                    self.handler.assert_not_called()
+                    self.assertEqual(self.page._selected_key, self.item.key)
             browser.assert_not_called()
 
     def test_browser_icon_is_the_explicit_external_action(self):
@@ -95,18 +100,18 @@ class CardPlaybackTests(unittest.TestCase):
         self.handler.assert_not_called()
         self.close.assert_not_called()
 
-    def test_title_double_click_dispatches_once_and_closes(self):
+    def test_title_double_click_neither_plays_nor_closes(self):
         for mode in ('list', 'grid'):
             with self.subTest(mode=mode):
                 self.handler.reset_mock()
                 self.close.reset_mock()
                 self.double_click(self.card(mode).title_label)
-                self.handler.assert_called_once_with(self.item)
-                self.close.assert_called_once()
+                self.handler.assert_not_called()
+                self.close.assert_not_called()
 
     def test_grid_cover_keeps_natural_aspect_in_short_window(self):
         card = self.card('grid')
-        card.fit_cell(310, 255)
+        card.fit_cell(310, 315)
         self.assertGreaterEqual(card.cover.height(), 150)
         self.assertAlmostEqual(card.cover.width() / card.cover.height(), 16 / 9, delta=.03)
         self.assertEqual(pages.grid_columns_for_width(932), 3)
@@ -126,6 +131,72 @@ class CardPlaybackTests(unittest.TestCase):
         card._play()
         card._play()
         self.assertEqual(self.handler.call_count, 2)
+
+    def test_explicit_button_places_into_selected_empty_cell(self):
+        for mode in ('list', 'grid'):
+            card = self.card(mode)
+            self.assertEqual(card.play_button.text(), '置入视频')
+            self.handler.reset_mock()
+            QTest.mouseClick(card.play_button, Qt.LeftButton)
+            self.handler.assert_called_once_with(self.item, self.target)
+
+    def test_occupied_target_changes_button_to_replace(self):
+        card = self.card('grid')
+        self.targets[:] = [(self.target, '第 1 格 · 主播', True)]
+        self.page.refresh_targets()
+        self.assertEqual(card.play_button.text(), '替换视频')
+        QTest.mouseClick(card.play_button, Qt.LeftButton)
+        self.handler.assert_called_once_with(self.item, self.target)
+
+    def test_removed_target_does_not_silently_place_into_another_cell(self):
+        card = self.card('grid')
+        other = TileFixture({})
+        self.targets[:] = [(other, '第 2 格 · 空格', False)]
+        QTest.mouseClick(card.play_button, Qt.LeftButton)
+        self.handler.assert_not_called()
+        self.assertIsNone(self.page.placement.target())
+        self.assertFalse(card.play_button.isEnabled())
+
+    def test_no_target_disables_placement(self):
+        self.targets.clear()
+        self.page.refresh_targets()
+        card = self.card('grid')
+        self.assertFalse(card.play_button.isEnabled())
+        self.page._play_item(self.item)
+        self.handler.assert_not_called()
+
+    def test_target_preference_and_initial_empty_selection(self):
+        occupied = TileFixture({'room_id': 'fixture'})
+        self.targets.insert(0, (occupied, '第 2 格 · 主播', True))
+        self.page.refresh_targets()
+        self.assertIs(self.page.placement.target(), self.target)
+        self.page.refresh_targets(occupied)
+        self.assertIs(self.page.placement.target(), occupied)
+        self.assertEqual(self.page.placement.action_text(), '替换视频')
+
+    def test_settings_components_and_footer_stay_outside_scroll(self):
+        from ddm.ui import ActionButton, SelectControl, SettingsSurface, TitleLabel
+        self.assertIsInstance(self.page.title_label, TitleLabel)
+        self.assertIsInstance(self.page.browse_tools, SettingsSurface)
+        self.assertIsInstance(self.page.filter_combo, SelectControl)
+        self.assertIsInstance(self.page.sort_combo, SelectControl)
+        self.assertIsInstance(self.page.fab_refresh, ActionButton)
+        self.assertEqual(self.page.column.body_layout.indexOf(self.page.fab_bar),
+                         self.page.column.body_layout.count() - 1)
+        for mode in ('grid', 'list'):
+            card = self.card(mode)
+            self.assertIsInstance(card, SettingsSurface)
+            self.assertIsInstance(card.play_button, ActionButton)
+
+    def test_grid_button_fits_below_natural_cover_at_supported_widths(self):
+        card = self.card('grid')
+        for width in (280, 310, 420):
+            card.resize(width, 400)
+            card.fit_cell(width, round(width * 9 / 16) + 140)
+            card.layout().activate()
+            self.assertAlmostEqual(card.cover.width() / card.cover.height(), 16 / 9, delta=.03)
+            self.assertGreaterEqual(card.play_button.y(), card.meta_label.geometry().bottom())
+            self.assertTrue(card.rect().contains(card.play_button.geometry()))
 
 
 class PlaybackDestinationTests(unittest.TestCase):
@@ -196,6 +267,35 @@ class PlaybackDestinationTests(unittest.TestCase):
             self.plugin._play_item_from_page(self.item)
         play.assert_not_called()
         warning.assert_called_once()
+
+    def test_selector_lists_visible_cells_with_occupancy(self):
+        tiles = self.pane_layout()
+        options = self.plugin._placement_targets()
+        self.assertEqual([option[0] for option in options], tiles[:3] + [tiles[5]])
+        self.assertEqual([option[2] for option in options], [True, True, True, False])
+        self.assertEqual(options[-1][1], '第 6 格 · 空格')
+
+    def test_explicit_placement_replaces_occupied_target(self):
+        with patch.object(self.plugin, '_start_vod_for_tile') as play:
+            self.plugin._place_item_from_page(self.item, self.playing)
+        play.assert_called_once_with(self.playing, self.item)
+
+    def test_explicit_stale_target_never_falls_back_to_empty_cell(self):
+        tiles = self.pane_layout()
+        with patch.object(self.plugin, '_start_vod_for_tile') as play, \
+                patch.object(self.plugin, '_notify_warning') as warning:
+            self.plugin._place_item_from_page(self.item, tiles[3])
+        play.assert_not_called()
+        warning.assert_called_once()
+
+    def test_cell_context_placement_closes_after_explicit_action(self):
+        self.plugin.page = Mock()
+        self.plugin._pick_target_tile = self.playing
+        with patch.object(self.plugin, '_start_vod_for_tile') as play:
+            self.plugin._place_item_from_page(self.item, self.playing)
+        play.assert_called_once_with(self.playing, self.item)
+        self.plugin.page.close.assert_called_once()
+        self.assertIsNone(self.plugin._pick_target_tile)
 
 
 class CoverSchedulingTests(unittest.TestCase):

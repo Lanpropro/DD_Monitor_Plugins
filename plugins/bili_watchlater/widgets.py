@@ -63,6 +63,8 @@ from .models import (
 )
 
 from .entry_icon import BrowserIcon
+from .page_panels import ThumbnailSurface
+from ddm.ui import ActionButton
 
 
 def browser_button(parent):
@@ -190,36 +192,6 @@ def selection_toggle(keys, key: str) -> set:
     else:
         result.add(key)
     return result
-
-
-def paint_selection_overlay(painter: QPainter, rect: QRectF,
-                            palette: QPalette) -> None:
-    """需求 10：多选模式下选中卡片的高亮边框 + 右上角勾选圈（纯绘制）。"""
-    painter.save()
-    try:
-        highlight = palette.color(QPalette.Highlight)
-        fill = QColor(highlight)
-        fill.setAlpha(45)
-        painter.setBrush(fill)
-        pen = QPen(highlight)
-        pen.setWidthF(2.0)
-        painter.setPen(pen)
-        painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 10, 10)
-        radius = 9.0
-        cx = rect.right() - radius - 6
-        cy = rect.top() + radius + 6
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(highlight)
-        painter.drawEllipse(QPointF(cx, cy), radius, radius)
-        check = QPen(QColor(255, 255, 255))
-        check.setWidthF(2.0)
-        check.setCapStyle(Qt.RoundCap)
-        painter.setPen(check)
-        painter.setBrush(Qt.NoBrush)
-        painter.drawLine(QPointF(cx - 4, cy), QPointF(cx - 1, cy + 3))
-        painter.drawLine(QPointF(cx - 1, cy + 3), QPointF(cx + 4.5, cy - 3.5))
-    finally:
-        painter.restore()
 
 
 #: v1.0 需求 9：Enter 后延迟这么久才弹一次标题，避免鼠标掠过就闪。
@@ -505,7 +477,8 @@ def build_item_context_menu(widget) -> QMenu:
     menu = QMenu(widget)
     menu.setToolTipsVisible(True)
     icons = item_action_icons(widget.palette())
-    play = menu.addAction("播放到格子")
+    play = menu.addAction(widget.play_button.text())
+    play.setEnabled(widget.play_button.isEnabled())
     play.setIcon(icons[0])
     play.triggered.connect(widget._play)
     open_action = menu.addAction("在浏览器打开")
@@ -932,9 +905,10 @@ class CoverWidget(QWidget):
         )
 
 
-class RowCard(QWidget):
+class RowCard(ThumbnailSurface):
     """One focusable list row.  No child holds a network reply."""
 
+    selection_requested = Signal(object)
     open_requested = Signal(object)
     copy_requested = Signal(object)
     remove_requested = Signal(object)
@@ -980,8 +954,8 @@ class RowCard(QWidget):
 
         self.cover = CoverWidget(self)
         layout.addWidget(self.cover, 0, Qt.AlignTop)
-        self.cover.clicked.connect(self._play)
-        self.cover.set_hint("点击播放到格子；拖拽到画面墙格子直接播放")
+        self.cover.clicked.connect(self._select)
+        self.cover.set_hint("点击选中缩略图；使用置入／替换按钮操作")
         self.cover.double_clicked.connect(self._double_close)
 
         # v1.0 需求：：文字块与封面上下贴齐 —— 标题顶边 = 封面上边、
@@ -995,7 +969,7 @@ class RowCard(QWidget):
         self.title_label = ClickableLabel(self)
         self.title_label.set_full_text(item.title)
         self.title_label.setFont(relative_font(self.font(), 1.08, bold=True))
-        self.title_label.clicked.connect(self._play)
+        self.title_label.clicked.connect(self._select)
         self.title_label.double_clicked.connect(self._double_close)
         info.addWidget(self.title_label)
 
@@ -1025,21 +999,13 @@ class RowCard(QWidget):
         actions = QHBoxLayout()
         actions.setContentsMargins(0, 0, 0, 0)
         actions.setSpacing(6)
-        # v1.0：主操作是「播放到格子」，B 站蓝实心按钮一眼可辨；
-        # 封面/卡片背景可直接拖拽进格子（需求 6）。
-        self.play_button = QPushButton("播放", self)
+        # 放入目标格使用独立按钮；封面只选中，拖拽仍可直接置入。
+        self.play_button = ActionButton("置入视频", self)
         self.play_button.setAutoDefault(False)
         self.play_button.setDefault(False)
         self.play_button.setCursor(Qt.PointingHandCursor)
-        self.play_button.setToolTip("播放到格子（也可把视频卡直接拖进格子）")
-        self.play_button.setAccessibleName("播放到格子")
-        self.play_button.setStyleSheet(
-            "QPushButton { background: #00a1d6; color: #ffffff;"
-            " border: none; border-radius: 6px; padding: 4px 14px;"
-            " font-weight: 600; }"
-            "QPushButton:hover { background: #00b5e5; }"
-            "QPushButton:pressed { background: #008ec0; }"
-        )
+        self.play_button.setToolTip("将视频置入或替换到选定的目标格")
+        self.play_button.setAccessibleName("置入或替换视频")
         self.play_button.clicked.connect(self._play)
         actions.addWidget(self.play_button)
 
@@ -1207,6 +1173,12 @@ class RowCard(QWidget):
             return
         self.open_requested.emit(self.item)
 
+    def _select(self) -> None:
+        if self._multi_active:
+            self.selection_toggled.emit(self.item)
+        else:
+            self.selection_requested.emit(self.item)
+
     def _play(self) -> None:
         # v1.0 需求 2：多选模式下点播放 = 切换选中，绝不播放。
         if self._multi_active:
@@ -1215,16 +1187,10 @@ class RowCard(QWidget):
         self.play_requested.emit(self.item)
 
     def _double_play(self) -> None:
-        """v1.0 需求 4：双击 = 播放到格子 + 通知页面关窗（多选短路到选中）。"""
-        if self._multi_active:
-            self.selection_toggled.emit(self.item)
-            return
-        self.play_requested.emit(self.item)
-        self.double_play_requested.emit(self.item)
+        self._select()
 
     def _double_close(self) -> None:
-        if not self._multi_active:
-            self.double_play_requested.emit(self.item)
+        pass
 
     def _copy(self) -> None:
         self.copy_requested.emit(self.item)
@@ -1252,7 +1218,7 @@ class RowCard(QWidget):
 
     def keyPressEvent(self, event) -> None:  # type: ignore[override]
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
-            self._play()
+            self._select()
             event.accept()
             return
         super().keyPressEvent(event)
@@ -1264,7 +1230,7 @@ class RowCard(QWidget):
             if self._multi_active:
                 event.accept()
                 return
-            # v1.0 需求 4：双击卡片走 _double_play（播放 + 关窗）。
+            # 双击也只选择缩略图。
             self._double_play()
             event.accept()
             return
@@ -1296,32 +1262,8 @@ class RowCard(QWidget):
             return
         super().mouseMoveEvent(event)
 
-    def paintEvent(self, event) -> None:  # type: ignore[override]
-        # 滚动时整屏每帧重绘，绝大多数卡片既没悬停也没焦点：先判断再建
-        # QPainter。省下的是每卡每帧的 painter 构造 + 调色板解码，
-        # 24 张卡一屏就是 0.5ms 量级。
-        if not (self._hover or self._multi_selected or self.hasFocus()):
-            return
-        painter = QPainter(self)
-        try:
-            painter.setRenderHint(QPainter.Antialiasing)
-            rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-            palette = self.palette()
-            if self._hover:
-                background = QColor(palette.color(QPalette.Highlight))
-                background.setAlpha(28)
-                painter.setPen(Qt.NoPen)
-                painter.setBrush(background)
-                painter.drawRoundedRect(rect, 10, 10)
-            if self.hasFocus():
-                pen = palette.color(QPalette.Highlight)
-                painter.setPen(pen)
-                painter.setBrush(Qt.NoBrush)
-                painter.drawRoundedRect(rect, 10, 10)
-            if self._multi_selected:
-                paint_selection_overlay(painter, rect, palette)
-        finally:
-            painter.end()
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
 
 
 #: 网格封面最小高度（低于它就完全看不出画面了）。
@@ -1359,7 +1301,7 @@ def fit_grid_cover(
     return cover_w, cover_h
 
 
-class GridCard(QWidget):
+class GridCard(ThumbnailSurface):
     """带 16:9 大封面的自适应网格视频卡。
 
     封面随列宽 16:9 伸缩，底边蓝线进度 + 时长/分P/已看完徽章由 CoverWidget
@@ -1368,6 +1310,7 @@ class GridCard(QWidget):
     信号与 RowCard 完全一致，页面可统一接线。
     """
 
+    selection_requested = Signal(object)
     open_requested = Signal(object)
     copy_requested = Signal(object)
     remove_requested = Signal(object)
@@ -1404,20 +1347,13 @@ class GridCard(QWidget):
         self.customContextMenuRequested.connect(self._show_menu)
 
         layout = QVBoxLayout(self)
-        # v1.0 需求 12：左右边距与页面 header/filters 共用同一常量，
-        # 保证按钮与卡片内容严格同左/同右边缘。
-        layout.setContentsMargins(
-            PAGE_CONTENT_MARGIN, 4, PAGE_CONTENT_MARGIN, 4
-        )
-        layout.setSpacing(2)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(6)
 
         self.cover = CoverWidget(self, flexible=True)
-        self.cover.set_hint("点击播放到格子；拖拽到画面墙格子直接播放")
-        self.cover.clicked.connect(self._play)
-        # v1.0 需求 16：网格封面「单击即播放」，双击的第一次松手已经把播放发
-        # 出去了（double_clicked 只用于抑制第二次单击），所以双击只补「关窗」
-        # 通知，不再重复播放 —— 一次手势只播一次。
-        # v1.0 需求 4：双击 = 播放到格子 + 关窗。
+        self.cover.set_hint("点击选中缩略图；使用置入／替换按钮操作")
+        self.cover.clicked.connect(self._select)
+        # 双击的后半程只吞掉，保留第一次单击的选中状态。
         self.cover.double_clicked.connect(self._double_close)
         # v1.0 需求 7：不加 AlignHCenter —— 要让封面横向占满内容宽（与标题
         # 同宽），否则 Expanding 策略只在 sizeHint 宽度内居中。
@@ -1426,7 +1362,7 @@ class GridCard(QWidget):
         self.title_label = ClickableLabel(self)
         self.title_label.set_full_text(item.title)
         self.title_label.setFont(relative_font(self.font(), 1.0, bold=True))
-        self.title_label.clicked.connect(self._play)
+        self.title_label.clicked.connect(self._select)
         self.title_label.double_clicked.connect(self._double_close)
         title_row = QHBoxLayout()
         title_row.setContentsMargins(0, 0, 0, 0)
@@ -1442,6 +1378,11 @@ class GridCard(QWidget):
         self.meta_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.meta_label.set_full_text(self._meta_text(item))
         layout.addWidget(self.meta_label)
+        self.play_button = ActionButton("置入视频", self)
+        self.play_button.setAccessibleName("置入或替换视频")
+        self.play_button.setAutoDefault(False)
+        self.play_button.clicked.connect(self._play)
+        layout.addWidget(self.play_button)
         layout.addStretch(1)
 
         self._destructive_ready = False
@@ -1467,7 +1408,7 @@ class GridCard(QWidget):
         # cover/title/meta/stretch 共 count() 项 → count()-1 个 spacing 间隙；
         # 旧写法只算 2 个间隙，固定高比布局最小高少约 2px，meta 行底部被裁。
         gaps = max(0, layout.count() - 1) * layout.spacing()
-        overhead = margins.top() + margins.bottom() + title_h + meta_h + gaps
+        overhead = margins.top() + margins.bottom() + title_h + meta_h + self.play_button.sizeHint().height() + gaps
         cover_w, cover_h = fit_grid_cover(
             width,
             height,
@@ -1564,6 +1505,12 @@ class GridCard(QWidget):
             return
         self.open_requested.emit(self.item)
 
+    def _select(self) -> None:
+        if self._multi_active:
+            self.selection_toggled.emit(self.item)
+        else:
+            self.selection_requested.emit(self.item)
+
     def _play(self) -> None:
         # v1.0 需求 2：多选模式下点封面 = 切换选中，绝不播放。
         if self._multi_active:
@@ -1572,21 +1519,10 @@ class GridCard(QWidget):
         self.play_requested.emit(self.item)
 
     def _double_play(self) -> None:
-        """v1.0 需求 4：双击卡片 = 播放到格子 + 通知页面关窗（多选短路）。"""
-        if self._multi_active:
-            self.selection_toggled.emit(self.item)
-            return
-        self.play_requested.emit(self.item)
-        self.double_play_requested.emit(self.item)
+        self._select()
 
     def _double_close(self) -> None:
-        """v1.0 需求 4：网格封面双击只补关窗通知（播放已由首次单击发出）。
-
-        多选模式下首次单击（封面立即单击）已切换过选中，双击只吞掉不二次切换。
-        """
-        if self._multi_active:
-            return
-        self.double_play_requested.emit(self.item)
+        pass
 
     def _copy(self) -> None:
         self.copy_requested.emit(self.item)
@@ -1605,7 +1541,7 @@ class GridCard(QWidget):
 
     def keyPressEvent(self, event) -> None:  # type: ignore[override]
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
-            self._play()
+            self._select()
             event.accept()
             return
         super().keyPressEvent(event)
@@ -1635,7 +1571,7 @@ class GridCard(QWidget):
             if self._multi_active:
                 event.accept()
                 return
-            # v1.0 需求 4：双击卡片走 _double_play（播放 + 关窗）。
+            # 双击也只选择缩略图。
             self._double_play()
             event.accept()
             return
@@ -1667,30 +1603,8 @@ class GridCard(QWidget):
             return
         super().mouseMoveEvent(event)
 
-    def paintEvent(self, event) -> None:  # type: ignore[override]
-        # 与 RowCard 同一套早退：静止卡片不建 QPainter。封面放大动画由
-        # CoverWidget 自己负责，卡片底只在悬停 / 焦点 / 多选时才需要画。
-        if not (self._hover or self._multi_selected or self.hasFocus()):
-            return
-        painter = QPainter(self)
-        try:
-            painter.setRenderHint(QPainter.Antialiasing)
-            rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-            palette = self.palette()
-            if self._hover:
-                background = QColor(palette.color(QPalette.Highlight))
-                background.setAlpha(28)
-                painter.setPen(Qt.NoPen)
-                painter.setBrush(background)
-                painter.drawRoundedRect(rect, 10, 10)
-            if self.hasFocus():
-                painter.setPen(palette.color(QPalette.Highlight))
-                painter.setBrush(Qt.NoBrush)
-                painter.drawRoundedRect(rect, 10, 10)
-            if self._multi_selected:
-                paint_selection_overlay(painter, rect, palette)
-        finally:
-            painter.end()
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
 
 
 #: v1.0 旧换算（autoscroll_value 用）：鼠标每离开锚点这么多像素，倍率 +1。
