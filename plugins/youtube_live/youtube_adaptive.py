@@ -32,10 +32,11 @@ def sequence_url(url, number):
 
 
 class Track(io.RawIOBase):
-    def __init__(self, url, number, duration, proxy, stopped, metrics, *, session=None):
+    def __init__(self, url, number, duration, proxy, stopped, metrics, *, session=None, invalidated=lambda: None):
         self.url, self.number, self.duration = media_url(url), number, duration
         self._proxy = {'https': proxy, 'http': proxy} if proxy else {}
         self._stop, self._metrics = stopped, metrics
+        self._invalidated = invalidated
         self._session = session or requests.Session()
         self._session.trust_env = False
         self._buffer = b''
@@ -50,6 +51,7 @@ class Track(io.RawIOBase):
                 with self._session.get(sequence_url(self.url, number), proxies=self._proxy,
                         timeout=(4, 12), stream=True, allow_redirects=False) as response:
                     if response.status_code in (401, 403, 410):
+                        self._invalidated()
                         raise YouTubeMediaError('YouTube 高画质地址已失效，请刷新直播')
                     head = response.headers.get('X-Head-Seqnum', '')
                     if not head.isdigit():
@@ -139,15 +141,15 @@ class Muxer(FFMPEGMuxer):
 
 
 class AdaptiveReader:
-    def __init__(self, video, audio, duration, proxy, ffmpeg, cancelled=lambda: False):
+    def __init__(self, video, audio, duration, proxy, ffmpeg, cancelled=lambda: False, *, invalidated=lambda: None):
         self._stop = threading.Event()
         self._metrics = deque(maxlen=12)
         self._close_lock = threading.Lock()
         self._closed = False
         self._prefix = b''
         self._session = Streamlink({'ffmpeg-ffmpeg': ffmpeg, 'stream-timeout': 12})
-        self._video = Track(video, 0, duration, proxy, self._stop, self._metrics)
-        self._audio = Track(audio, 0, duration, proxy, self._stop, self._metrics)
+        self._video = Track(video, 0, duration, proxy, self._stop, self._metrics, invalidated=invalidated)
+        self._audio = Track(audio, 0, duration, proxy, self._stop, self._metrics, invalidated=invalidated)
         self._mux = None
         try:
             if not ffmpeg:

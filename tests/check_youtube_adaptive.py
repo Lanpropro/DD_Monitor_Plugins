@@ -78,7 +78,7 @@ class QualityTests(unittest.TestCase):
             with patch.object(playback, 'ensure_runtime'), patch.object(playback, 'extract_live', return_value=formats()), \
                  patch.object(playback, 'request_proxy', return_value=''), patch.object(playback, 'AdaptiveReader', return_value=reader):
                 result = provider.play_url('youtube:dklfSqHUu4c', quality, preview=preview)
-            self.assertEqual(result[1], expected or provider._qualities['youtube:dklfSqHUu4c'][-1]['qn'])
+            self.assertEqual(result[1], expected or playback.quality_formats(formats())[-1]['qn'])
             context.retain_media_source.assert_called_once()
 
     def test_failed_reader_invalidates_short_metadata_cache(self):
@@ -100,6 +100,54 @@ class QualityTests(unittest.TestCase):
             with self.assertRaises(tools.YouTubeMediaError):
                 provider.play_url('youtube:dklfSqHUu4c', 10000)
             self.assertEqual(hls.call_count, 1)
+
+    @staticmethod
+    def legacy_stream(legacy, canonical, _quality=10000, *, preview=False):
+        legacy._qualities[canonical] = [{'qn': 10000, 'label': '1080p60', 'desc': '1080p60'}]
+        return 'https://fixture/live.m3u8', 10000, 'youtube', {}
+
+    def test_hls_fallback_preserves_2k_and_reports_real_1080_qn(self):
+        provider = playback.YouTubePlayback(Mock())
+        known = playback.quality_formats(formats())
+        provider._qualities['youtube:dklfSqHUu4c'] = known
+        with patch.object(playback.YouTubePlatform, 'play_url', autospec=True, side_effect=self.legacy_stream):
+            result = provider._hls_play_url('youtube:dklfSqHUu4c', playback.AUTO_QUALITY)
+        options = provider.room_quality_options('youtube:dklfSqHUu4c')
+        self.assertIn('1440p60', [item['label'] for item in options])
+        self.assertNotEqual(result[1], 10000)
+        self.assertEqual(next(item['label'] for item in options if item['qn'] == result[1]), '1080p60')
+
+    def test_hover_preview_never_overwrites_main_quality_catalogue(self):
+        provider = playback.YouTubePlayback(Mock())
+        known = playback.quality_formats(formats())
+        provider._qualities['youtube:dklfSqHUu4c'] = known
+        with patch.object(playback.YouTubePlatform, 'play_url', autospec=True, side_effect=self.legacy_stream):
+            provider.preview_url('youtube:dklfSqHUu4c')
+        self.assertIs(provider._qualities['youtube:dklfSqHUu4c'], known)
+
+    def test_adaptive_preview_does_not_publish_main_qualities(self):
+        provider = playback.YouTubePlayback(Mock())
+        known = playback.quality_formats(formats())
+        provider._qualities['youtube:dklfSqHUu4c'] = known
+        with patch.object(playback, 'ensure_runtime'), patch.object(playback, 'extract_live', return_value=formats()), \
+             patch.object(playback, 'request_proxy', return_value=''), patch.object(playback, 'AdaptiveReader', return_value=Mock()):
+            provider._adaptive_play_url('youtube:dklfSqHUu4c', preview=True)
+        self.assertIs(provider._qualities['youtube:dklfSqHUu4c'], known)
+
+    def test_running_reader_expiry_refreshes_urls_without_losing_known_qualities(self):
+        provider = playback.YouTubePlayback(Mock())
+        with patch.object(playback, 'ensure_runtime'), patch.object(playback, 'extract_live', return_value=formats()) as extract, \
+             patch.object(playback, 'request_proxy', return_value=''), patch.object(playback, 'AdaptiveReader', return_value=Mock()) as reader:
+            provider.play_url('youtube:dklfSqHUu4c')
+            expired = reader.call_args.kwargs['invalidated']
+            known = provider._qualities['youtube:dklfSqHUu4c']
+            expired()
+            self.assertFalse(provider._metadata)
+            self.assertIs(provider._qualities['youtube:dklfSqHUu4c'], known)
+            provider.play_url('youtube:dklfSqHUu4c')
+            self.assertEqual(extract.call_count, 2)
+            expired()  # A late old reader cannot invalidate the newer catalogue.
+            self.assertTrue(provider._metadata)
 
 
 class SegmentTests(unittest.TestCase):
@@ -133,6 +181,14 @@ class SegmentTests(unittest.TestCase):
                 track.read(1)
             self.assertNotIn('token', str(error.exception))
             track.close()
+
+    def test_expired_track_notifies_source_owner(self):
+        track = self.track(Mock(status_code=403, headers={}))
+        track._invalidated = Mock()
+        with self.assertRaises(OSError):
+            track.read(1)
+        track._invalidated.assert_called_once()
+        track.close()
 
     def test_head_probe_tolerates_missing_initial_segment(self):
         for status in (200, 404):

@@ -58,6 +58,28 @@ class YouTubePlayback(YouTubePlatform):
         self._metadata = {}
         self._metadata_lock = threading.Lock()
 
+    def _hls_play_url(self, room_id, quality=10000, *, preview=False):
+        canonical = self.normalize(room_id)
+        # A preview/fallback probe must not mutate the main adaptive catalogue.
+        legacy = YouTubePlatform()
+        result = legacy.play_url(canonical, quality, preview=preview)
+        options = legacy._qualities.get(canonical, [])
+        if preview:
+            return result
+        known = self._qualities.get(canonical, [])
+        if not any('video' in item for item in known):
+            self._qualities[canonical] = options
+            return result
+        selected = next((item for item in options if item['qn'] == result[1]), None)
+        if selected is None:
+            raise YouTubeMediaError('YouTube 回退未返回实际画质信息')
+        label = selected['label']
+        actual = next((item['qn'] for item in known if item['label'] == label), None)
+        if actual is None:
+            actual = 5000000 + (zlib.crc32(label.encode()) & 0xFFFFFF)
+            self._qualities[canonical] = [*known, dict(selected, qn=actual)]
+        return result[0], actual, result[2], result[3]
+
     def play_url(self, room_id, quality=10000, *, preview=False, cancelled=lambda: False):
         canonical = self.normalize(room_id)
         advertised = any('video' in item for item in self._qualities.get(canonical, []))
@@ -68,12 +90,12 @@ class YouTubePlayback(YouTubePlatform):
                 raise
             # First-open/auto remains usable where the original HLS route works.
             # A previously advertised manual high tier must fail explicitly instead.
-            return super().play_url(canonical, quality, preview=preview)
+            return self._hls_play_url(canonical, quality, preview=preview)
 
     def _adaptive_play_url(self, room_id, quality=10000, *, preview=False, cancelled=lambda: False):
         # Existing hosts remain able to use this candidate's original HLS playback.
         if not callable(getattr(self._context, 'retain_media_source', None)):
-            return super().play_url(room_id, quality, preview=preview)
+            return self._hls_play_url(room_id, quality, preview=preview)
         canonical = self.normalize(room_id)
         proxy = request_proxy(self.room_url(canonical))
         runtime = ensure_runtime(proxy, cancelled)
@@ -88,20 +110,25 @@ class YouTubePlayback(YouTubePlatform):
                 raise YouTubeMediaError('YouTube 未返回可用的直播音视频格式')
             with self._metadata_lock:
                 self._metadata[canonical] = (time.monotonic(), proxy, options)
-        self._qualities[canonical] = options
+        if not preview:
+            self._qualities[canonical] = options
         selected = options[-1] if preview or quality == AUTO_QUALITY else next(
             (item for item in options if item['qn'] == quality), None)
         if selected is None:
             raise YouTubeMediaError('YouTube 当前不提供所选画质，请从最新列表选择')
         ffmpeg = self._context.ffmpeg_executable()
+        def invalidate():
+            with self._metadata_lock:
+                current = self._metadata.get(canonical)
+                if current is not None and current[2] is options:
+                    self._metadata.pop(canonical, None)
         def create(stopped):
             return AdaptiveReader(selected['video'], selected['audio'], selected['duration'],
-                                  proxy, ffmpeg, stopped)
+                                  proxy, ffmpeg, stopped, invalidated=invalidate)
         try:
             reader = create(cancelled)
         except OSError:
-            with self._metadata_lock:
-                self._metadata.pop(canonical, None)
+            invalidate()
             raise
         if cancelled():
             reader.close()
@@ -111,6 +138,6 @@ class YouTubePlayback(YouTubePlatform):
     def preview_url(self, room_id, *, cancelled=lambda: False):
         # Preview remains the original low-bitrate HLS route where available.
         try:
-            return super().play_url(room_id, preview=True)
+            return self._hls_play_url(room_id, preview=True)
         except RuntimeError:
             return self.play_url(room_id, preview=True, cancelled=cancelled)
