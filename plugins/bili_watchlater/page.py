@@ -105,6 +105,7 @@ from .widgets import (
     relative_font,
     selection_toggle,
 )
+from .wheel_scroll import WheelScrollAccumulator
 from .workers import ClearRequest, ListRequest, RemoveRequest
 
 # v1.0 性能：缓存 60s 太短，超过一分钟的每次重开都要重新拉列表并走
@@ -685,7 +686,10 @@ GRID_TARGET_CELL_WIDTH = 300
 # 每行 4 列 ≈ 8~12 张），从 32 降到 16，滚动接近底部再按 GRID_GROW_CARDS 补。
 GRID_INITIAL_CARDS = 16
 GRID_GROW_CARDS = 16
-GRID_PREFETCH_PX = 160
+GRID_PREFETCH_PX = 640
+GRID_KEEP_ROWS = 4
+GRID_BUILD_BATCH = 4
+GROW_SETTLE_MS = 60
 GRID_VISIBLE_MARGIN = 1
 GRID_COVER_BUDGET = 32
 
@@ -916,6 +920,10 @@ class WatchLaterPage(QWidget):
         self._grid_resize_timer.setSingleShot(True)
         self._grid_resize_timer.setInterval(100)
         self._grid_resize_timer.timeout.connect(self._fit_grid)
+
+        self._grow_settle_timer = QTimer(self)
+        self._grow_settle_timer.setSingleShot(True)
+        self._grow_settle_timer.timeout.connect(self._grow_page)
 
         self._build_ui()
         self._refresh_multi_button()
@@ -1149,6 +1157,8 @@ class WatchLaterPage(QWidget):
             # 预留到最大列数的 stretch；超出当前列数的列为 0 宽，不占地方。
             self.grid_layout.setColumnStretch(col, 1 if col < self._grid_columns else 0)
         self.grid_scroll.setWidget(self.grid_widget)
+        self._wheel_scrollers = tuple(WheelScrollAccumulator(scroll, on_wheel=self._wheel_cancel_autoscroll)
+                                      for scroll in (self.list_scroll, self.grid_scroll))
 
         self.loading_view = SkeletonLoadingView(self)
         self.loading_view.set_state(
@@ -1229,6 +1239,68 @@ class WatchLaterPage(QWidget):
             except Exception:
                 pass
 
+    def _wheel_cancel_autoscroll(self) -> None:
+        """需求 3：滚轮只在中键 autoscroll 真的进行中时才去结束它。
+
+        事件过滤器顺序已保证 MiddleDragScroller 先看到 Wheel 并自行 _end()，
+        这里仅作为与安装顺序解耦的兜底；普通滚轮（未进中键模式）几乎零开销，
+        不会每个 Wheel 都白跑一次 cancel()/releaseMouse()。
+        """
+        for scroller in getattr(self, "_middle_drag", ()) or ():
+            try:
+                if scroller.is_active():
+                    scroller.cancel()
+            except Exception:
+                pass
+
+
+    def _flush_wheel_scrollers(self) -> None:
+        """需求 3：隐藏 / 切视图前把累计但未应用的滚动量一次性落定。"""
+        for scroller in getattr(self, "_wheel_scrollers", ()) or ():
+            try:
+                scroller.flush()
+            except Exception:
+                pass
+
+
+    def _shutdown_wheel_scrollers(self) -> None:
+        """需求 3：真正销毁页面前摘掉两个滚轮事件过滤器（幂等）。"""
+        for scroller in getattr(self, "_wheel_scrollers", ()) or ():
+            try:
+                scroller.shutdown()
+            except Exception:
+                pass
+
+
+    def _render_after_remove(self) -> None:
+        """删除成功后原地重排：保留分页与滚动位置，且只重绘一次。
+
+        旧实现直接 ``_render()``，``_items_version`` 一变就把 ``_render_limit``
+        打回首屏（列表 50 行 / 网格 16 张）：滚动很深时几百个控件被
+        deleteLater、滚动条 maximum 骤降，整页跳一下并逐行闪。现在：
+        * ``keep_position=True`` → 不回退分页、不清隐藏视图的封面；
+        * 重建期间 ``setUpdatesEnabled(False)`` → Qt 只在结束时统一重绘；
+        * 最后把滚动值夹回新的 maximum，保持原来的视觉锚点。
+        多选删除串行推进时每条都走这里，不会越删越回到顶部。
+        """
+        if self._shutting_down:
+            return
+        try:
+            scroll = self._active_scroll()
+            bar = scroll.verticalScrollBar()
+            viewport = scroll.viewport()
+        except (AttributeError, RuntimeError):
+            self._render(keep_position=True)
+            return
+        saved = bar.value()
+        viewport.setUpdatesEnabled(False)
+        try:
+            self._render(keep_position=True)
+            bar.setValue(max(bar.minimum(), min(saved, bar.maximum())))
+        finally:
+            viewport.setUpdatesEnabled(True)
+
+
     def _initial_limit(self) -> int:
         return GRID_INITIAL_CARDS if self._view_mode == "grid" else PAGE_INITIAL_ROWS
 
@@ -1297,6 +1369,8 @@ class WatchLaterPage(QWidget):
         if self._shutting_down or mode == self._view_mode:
             return
         anchor = self._visible_anchor_key()
+        self._flush_wheel_scrollers()
+        self._grow_settle_timer.stop()
         self._cancel_autoscroll()
         self._view_mode = "grid" if mode == "grid" else "list"
         self.view_switch.set_mode(self._view_mode)
@@ -1373,10 +1447,16 @@ class WatchLaterPage(QWidget):
             return
         scroll = self._active_scroll()
         has_view = self.stack.currentWidget() is scroll
+        corner = self.column.body.mapTo(self, QPoint(self.column.body.width(), 0))
+        state = (has_view, scroll.verticalScrollBar().value() > 0,
+                 self._visible, self._shutting_down, corner.x(), corner.y(), self.height(),
+                 tuple((button.text(), button.font().toString()) for button in (self.fab_top, self.fab_refresh)))
+        if state == getattr(self, '_fabs_state', None):
+            return
+        self._fabs_state = state
         self.fab_top.setVisible(has_view)
         self.fab_top.setEnabled(has_view and scroll.verticalScrollBar().value() > 0)
         self.fab_bar.adjustSize()
-        corner = self.column.body.mapTo(self, QPoint(self.column.body.width(), 0))
         self.fab_bar.move(
             max(0, corner.x() - self.fab_bar.width() - PAGE_CONTENT_MARGIN),
             max(0, self.height() - self.fab_bar.height() - 10),
@@ -1398,7 +1478,7 @@ class WatchLaterPage(QWidget):
         状态都保留），并用「首个可见条目 key」把滚动位置钉回去；列数没变且
         单元格尺寸也没变时原地返回，滚动/拖动窗口不会做无谓的布局工作。
         """
-        if self._shutting_down or not self._cards or self._view_mode != "grid":
+        if self._shutting_down or self._building_rows or not self._cards or self._view_mode != "grid":
             return
         viewport = self.grid_scroll.viewport()
         gap = self.grid_layout.spacing()
@@ -1568,7 +1648,14 @@ class WatchLaterPage(QWidget):
         self.stack.setCurrentWidget(self.error_view)
         self._set_refreshing(False)
 
-    def _render(self, reset_scroll: bool = False) -> None:
+    def _render(self, reset_scroll: bool = False, *,
+                keep_position: bool = False) -> None:
+        """重排当前视图。
+
+        ``keep_position`` 用于「删掉一条」这类原地小改：数据版本变了但
+        用户的滚动位置、已展开的分页量、隐藏视图里的封面都应保留，否则
+        几百个控件会被销毁重建、滚动条范围骤降，整页跳一下并逐行闪。
+        """
         if self._shutting_down:
             return
         if self._building_rows:
@@ -1610,7 +1697,8 @@ class WatchLaterPage(QWidget):
             self._filter_cache = (signature, selected)
         # v1.0：新查询（搜索/筛选/排序/数据变化）回到首屏；滚动追加时
         # signature 不变，_render_limit 保持已展开的行数，不重复回退。
-        if reset_scroll or prev_signature != signature:
+        # 删除一条只让筛选结果少一项，不该把用户已经展开的分页打回首屏。
+        if reset_scroll or (prev_signature != signature and not keep_position):
             self._render_limit = self._initial_limit()
         shown = len(selected)
         self._render_total = shown
@@ -1627,7 +1715,10 @@ class WatchLaterPage(QWidget):
             self._update_destructive_controls()
             return
 
-        self._prune_inactive_view(selected)
+        # 隐藏视图的清理会清掉里面所有卡片的封面并 deleteLater 首批之外的
+        # 控件；删除一条时跳过它，避免下次切换视图看到一片重新加载。
+        if not keep_position:
+            self._prune_inactive_view(selected)
         if self._view_mode == "grid":
             self._rebuild_cards(selected)
         else:
@@ -1694,6 +1785,7 @@ class WatchLaterPage(QWidget):
         self._grid_cell_size = None
         self._grid_resize_timer.stop()
         self._cover_scroll_timer.stop()
+        self._grow_settle_timer.stop()
         self._filter_cache = None
         while self.list_layout.count():
             item = self.list_layout.takeAt(0)
@@ -1763,7 +1855,7 @@ class WatchLaterPage(QWidget):
                 if self._grid_cell_size is not None:
                     card.fit_cell(*self._grid_cell_size)
                 created += 1
-                if allow_yield and created % ROW_BUILD_BATCH == 0:
+                if allow_yield and created % GRID_BUILD_BATCH == 0:
                     self._yield_during_build()
             else:
                 card.update_item(item)
@@ -1996,23 +2088,35 @@ class WatchLaterPage(QWidget):
 
     # ------------------------------------------------------ incremental paging
     def _maybe_grow_page(self) -> None:
-        """滚动接近底部时排队追加下一批行，不在滚动事件里同步改布局。"""
+        """接近底部时排一次追加；**不重启**排队中的定时器（节流，不是去抖）。
+
+        旧实现在每个 bar.valueChanged 里 ``timer.start()``：`start()` 会重置
+        计时，于是只要还在滚，settle 就永远不会到期 —— 表现就是「滚到底就没了，
+        必须停一下才长出下一批」，一边滚一边等永远等不到。现在改成节流：
+        已经在排队就直接返回，让它到期后追加一批；持续滚动时每
+        GROW_SETTLE_MS 追加一批，用户不必停手。
+
+        成本可控的前提是 `_rebuild_cards` 已经按 GRID_BUILD_BATCH（4 张）分批
+        让出事件循环，一批 16 张是 4 段 ~5ms，不会出现 20ms 的整块冻结。
+        """
         if (
             self._shutting_down
             or not self._visible
             or self._building_rows
             or self._grow_busy
-            or self._grow_pending
             or self._render_limit >= self._render_total
             or self.stack.currentWidget() is not self._active_scroll()
         ):
+            return
+        if self._grow_settle_timer.isActive():
+            # 已有一批在排队：不要 restart（去抖会让"一直滚"永远等不到追加）。
             return
         bar = self._active_scroll().verticalScrollBar()
         threshold = GRID_PREFETCH_PX if self._view_mode == "grid" else PAGE_PREFETCH_PX
         if bar.maximum() - bar.value() > threshold:
             return
         self._grow_pending = True
-        QTimer.singleShot(0, self._grow_page)
+        self._grow_settle_timer.start(GROW_SETTLE_MS)
 
     def _grow_page(self) -> None:
         """追加一批 RowCard；只有当前分页窗口内的条目会被物化。"""
@@ -2033,16 +2137,21 @@ class WatchLaterPage(QWidget):
         try:
             grow = GRID_GROW_CARDS if self._view_mode == "grid" else PAGE_GROW_ROWS
             self._render_limit = min(self._render_total, self._render_limit + grow)
-            self._render()
+            # keep_position=True：追加是"往下接一段"，不该顺手把隐藏视图里的
+            # 卡片全部 prune 一遍（那是给删除一条准备的路径）。滚动中每 60ms
+            # 追加一批，prune 会把隐藏视图的封面反复扔掉又装回来。
+            self._render(keep_position=True)
         finally:
             self._grow_busy = False
         # 内容仍不足以产生滚动条时（超长窗口）继续补，避免用户永远无法
         # 触发追加；_render_limit 到达总数后自然停止，不会无限排队。
+        # 需求 3：此刻并没有滚动发生，不必等 settle，直接 0ms 续摊
+        # （改成直调 _grow_page，绕开 _maybe_grow_page 的 120ms 停稳闸门）。
         if (
             self._render_limit < self._render_total
             and bar.maximum() == 0
         ):
-            QTimer.singleShot(0, self._maybe_grow_page)
+            QTimer.singleShot(0, self._grow_page)
 
     def _refetch_visible_covers(self) -> None:
         """Re-run get() for the rows currently in (or just outside) the viewport.
@@ -2051,6 +2160,13 @@ class WatchLaterPage(QWidget):
         quiet jump to a far region otherwise leaves permanent placeholders.
         Only a handful of visible rows is touched - never the whole list - so
         the MAX_PENDING memory guard is never re-filled in one pass.
+
+        v1.0 滚动性能：「拉取带」与「保留带」分开。拉取带只有视口 ±1 行（真的
+        要显示的），保留带是 ±GRID_KEEP_ROWS 行。旧实现用同一套 ±1 行同时
+        `set_pixmap(None)`，于是滚过半屏就把刚加载好的封面全部释放，滚回来再
+        逐张重建预合成位图（每张 ~0.35ms，一屏 24 张 ≈ 8ms），肉眼就是
+        「之前加载好的封面又要重新加载一次，很卡」。现在只有离视口超过保留带
+        的卡片才释放，正常来回滚不会再触发重建。
         """
         if self._shutting_down or not self._visible or self._building_rows:
             return
@@ -2066,22 +2182,24 @@ class WatchLaterPage(QWidget):
         spacing = self.grid_layout.spacing() if grid else self.list_layout.spacing()
         stride = max(60, rows[0].geometry().height() + spacing)
         margin_rows = GRID_VISIBLE_MARGIN if grid else _VISIBLE_ROW_MARGIN
+        keep_rows = GRID_KEEP_ROWS if grid else _VISIBLE_ROW_MARGIN + 2
         margin = stride * margin_rows
         offset = scroll.verticalScrollBar().value()
         band_top = offset - margin
         band_bottom = offset + viewport_rect.height() + margin
 
-        # Rows are stacked top-to-bottom in display order, so their geometry
-        # bottoms are monotonic.  Binary-search the first row reaching the band
-        # instead of walking all ~693 rows.
-        lo, hi = 0, len(rows)
-        while lo < hi:
-            mid = (lo + hi) // 2
-            if rows[mid].geometry().bottom() < band_top:
-                lo = mid + 1
-            else:
-                hi = mid
-        index = lo
+        def _first_row_at(top: int) -> int:
+            """Rows are stacked top-to-bottom, so their bottoms are monotonic."""
+            lo, hi = 0, len(rows)
+            while lo < hi:
+                mid = (lo + hi) // 2
+                if rows[mid].geometry().bottom() < top:
+                    lo = mid + 1
+                else:
+                    hi = mid
+            return lo
+
+        index = _first_row_at(band_top)
         # Hard cap also bounds the degenerate "layout not finished" case.
         budget = viewport_rect.height() // stride + 2 * margin_rows + 2
         if grid:
@@ -2093,12 +2211,24 @@ class WatchLaterPage(QWidget):
                 break
             visible.append(row)
             index += 1
-        keep = set(visible)
-        for row in self._cover_views - keep:
+
+        # 保留带：视口上下各 keep_rows 行。只有落在带外的才释放封面。
+        keep_margin = stride * keep_rows
+        retain_top = offset - keep_margin
+        retain_bottom = offset + viewport_rect.height() + keep_margin
+        start = _first_row_at(retain_top)
+        retain = set()
+        walk = start
+        while walk < len(rows):
+            row = rows[walk]
+            if row.geometry().top() > retain_bottom:
+                break
+            retain.add(row)
+            walk += 1
+        for row in self._cover_views - retain:
             row.cover.set_pixmap(None)
-        self._cover_views = keep
-        visible.sort(key=lambda row: not (
-            row.geometry().bottom() >= offset
+        self._cover_views = retain
+        visible.sort(key=lambda row: not (row.geometry().bottom() >= offset
             and row.geometry().top() <= offset + viewport_rect.height()))
         self.covers.prioritize([row.item.cover_url for row in visible])
         provider = self._danmaku_provider()
@@ -2400,7 +2530,7 @@ class WatchLaterPage(QWidget):
         self._loaded_at = time.monotonic()
         self._last_update_epoch = time.time()
         self._end_operation()
-        self._render()
+        self._render_after_remove()
         self._publish_to_wall()
         if not self._multi_remove_queue:
             self._flash_status("已移除")
@@ -3114,6 +3244,8 @@ class WatchLaterPage(QWidget):
             return
         self._visible = False
         self._grow_pending = False
+        self._flush_wheel_scrollers()
+        self._grow_settle_timer.stop()
         self._cancel_autoscroll()
         self._search_timer.stop()
         self._cover_scroll_timer.stop()
@@ -3139,6 +3271,8 @@ class WatchLaterPage(QWidget):
     def closeEvent(self, event) -> None:  # type: ignore[override]
         self._visible = False
         self._grow_pending = False
+        self._flush_wheel_scrollers()
+        self._grow_settle_timer.stop()
         self._cancel_autoscroll()
         self._cover_scroll_timer.stop()
         self._disconnect_scroll_refetch()
@@ -3162,6 +3296,8 @@ class WatchLaterPage(QWidget):
         self._shutting_down = True
         self._visible = False
         self._grid_resize_timer.stop()
+        self._grow_settle_timer.stop()
+        self._shutdown_wheel_scrollers()
         self._cancel_autoscroll()
         self._set_refreshing(False)
         self._grow_pending = False

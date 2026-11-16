@@ -5,6 +5,7 @@ as plain text; covers are drawn from an in-memory QPixmap cache.
 """
 from __future__ import annotations
 
+import math
 import time
 from typing import Callable
 
@@ -658,6 +659,8 @@ class CoverWidget(QWidget):
         self._pixmap: QPixmap | None = None
         self._scaled: QPixmap | None = None
         self._scaled_key: tuple[int, int, int] | None = None
+        self._render_cache: QPixmap | None = None
+        self._render_key = None
         self._last_click = 0.0
         self._press_pos: QPoint | None = None
         self._dragged = False
@@ -717,6 +720,8 @@ class CoverWidget(QWidget):
         """Drop the cached scaled cover when source pixels or size change."""
         self._scaled = None
         self._scaled_key = None
+        self._render_cache = None
+        self._render_key = None
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
@@ -804,8 +809,36 @@ class CoverWidget(QWidget):
         self._last_click = now
         self.clicked.emit()
 
-    def paintEvent(self, event) -> None:  # type: ignore[override]
+    def _composited_cover(self) -> QPixmap:
+        item = self._item
+        data = (tuple(cover_badges(item)), item.duration, item.progress, item.is_finished) if item else None
+        palette = self.palette()
+        key = (self._pixmap.cacheKey() if self._pixmap is not None else None,
+               self.width(), self.height(), self.devicePixelRatioF(), data, self.font().toString(),
+               palette.color(QPalette.Mid).rgba(), palette.color(QPalette.PlaceholderText).rgba())
+        if self._render_cache is not None and key == self._render_key:
+            return self._render_cache
+        dpr = self.devicePixelRatioF()
+        layer = QPixmap(round(self.width() * dpr), round(self.height() * dpr))
+        layer.setDevicePixelRatio(dpr)
+        layer.fill(Qt.transparent)
+        painter = QPainter(layer)
+        try:
+            self._paint_content(painter)
+        finally:
+            painter.end()
+        self._render_cache, self._render_key = layer, key
+        return layer
+
+    def paintEvent(self, event) -> None:
+        layer = self._composited_cover()
         painter = QPainter(self)
+        try:
+            painter.drawPixmap(0, 0, layer)
+        finally:
+            painter.end()
+
+    def _paint_content(self, painter) -> None:
         painter.setRenderHints(
             QPainter.Antialiasing | QPainter.SmoothPixmapTransform
         )
@@ -868,7 +901,6 @@ class CoverWidget(QWidget):
                         QRectF(0, self.height() - 3, self.width() * ratio, 3),
                         QColor(0, 161, 214, 235),
                     )
-        painter.end()
 
     def _draw_badge(
         self,
@@ -1265,24 +1297,31 @@ class RowCard(QWidget):
         super().mouseMoveEvent(event)
 
     def paintEvent(self, event) -> None:  # type: ignore[override]
+        # 滚动时整屏每帧重绘，绝大多数卡片既没悬停也没焦点：先判断再建
+        # QPainter。省下的是每卡每帧的 painter 构造 + 调色板解码，
+        # 24 张卡一屏就是 0.5ms 量级。
+        if not (self._hover or self._multi_selected or self.hasFocus()):
+            return
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        palette = self.palette()
-        if self._hover:
-            background = QColor(palette.color(QPalette.Highlight))
-            background.setAlpha(28)
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(background)
-            painter.drawRoundedRect(rect, 10, 10)
-        if self.hasFocus():
-            pen = palette.color(QPalette.Highlight)
-            painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRoundedRect(rect, 10, 10)
-        if self._multi_selected:
-            paint_selection_overlay(painter, rect, palette)
-        painter.end()
+        try:
+            painter.setRenderHint(QPainter.Antialiasing)
+            rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+            palette = self.palette()
+            if self._hover:
+                background = QColor(palette.color(QPalette.Highlight))
+                background.setAlpha(28)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(background)
+                painter.drawRoundedRect(rect, 10, 10)
+            if self.hasFocus():
+                pen = palette.color(QPalette.Highlight)
+                painter.setPen(pen)
+                painter.setBrush(Qt.NoBrush)
+                painter.drawRoundedRect(rect, 10, 10)
+            if self._multi_selected:
+                paint_selection_overlay(painter, rect, palette)
+        finally:
+            painter.end()
 
 
 #: 网格封面最小高度（低于它就完全看不出画面了）。
@@ -1629,23 +1668,29 @@ class GridCard(QWidget):
         super().mouseMoveEvent(event)
 
     def paintEvent(self, event) -> None:  # type: ignore[override]
+        # 与 RowCard 同一套早退：静止卡片不建 QPainter。封面放大动画由
+        # CoverWidget 自己负责，卡片底只在悬停 / 焦点 / 多选时才需要画。
+        if not (self._hover or self._multi_selected or self.hasFocus()):
+            return
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        palette = self.palette()
-        if self._hover:
-            background = QColor(palette.color(QPalette.Highlight))
-            background.setAlpha(28)
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(background)
-            painter.drawRoundedRect(rect, 10, 10)
-        if self.hasFocus():
-            painter.setPen(palette.color(QPalette.Highlight))
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRoundedRect(rect, 10, 10)
-        if self._multi_selected:
-            paint_selection_overlay(painter, rect, palette)
-        painter.end()
+        try:
+            painter.setRenderHint(QPainter.Antialiasing)
+            rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+            palette = self.palette()
+            if self._hover:
+                background = QColor(palette.color(QPalette.Highlight))
+                background.setAlpha(28)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(background)
+                painter.drawRoundedRect(rect, 10, 10)
+            if self.hasFocus():
+                painter.setPen(palette.color(QPalette.Highlight))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawRoundedRect(rect, 10, 10)
+            if self._multi_selected:
+                paint_selection_overlay(painter, rect, palette)
+        finally:
+            painter.end()
 
 
 #: v1.0 旧换算（autoscroll_value 用）：鼠标每离开锚点这么多像素，倍率 +1。
@@ -1657,13 +1702,42 @@ AUTOSCROLL_INDICATOR_SIZE = 22
 
 # ---------------------------------------------- v1.0 需求 7：浏览器式 autoscroll
 #: QTimer 拍间隔（16~30ms）：持续滚动，而不是「move 一次 setValue 一次」。
-AUTOSCROLL_TICK_MS = 20
+AUTOSCROLL_TICK_MS = 16
 #: 锚点附近 |delta| < zone 视为停住（每拍 step=0）。
 AUTOSCROLL_ZONE = 8
 #: 每远离锚点 divisor 像素，每拍多滚 1 像素（越远越快）。
 AUTOSCROLL_DIVISOR = 8
 #: 每拍滚动增量的上限。
 AUTOSCROLL_MAX_STEP = 30
+
+
+AUTOSCROLL_MAX_SPEED = AUTOSCROLL_MAX_STEP * (1000.0 / AUTOSCROLL_TICK_MS)
+AUTOSCROLL_SMOOTH_TAU = 0.055
+AUTOSCROLL_MAX_DT = 0.05
+
+def autoscroll_speed(
+    delta: float,
+    *,
+    zone: float = AUTOSCROLL_ZONE,
+    divisor: float = AUTOSCROLL_DIVISOR,
+    max_speed: float = AUTOSCROLL_MAX_SPEED,
+) -> float:
+    """中键 autoscroll 的目标速度（像素/秒，带符号），滚轮同款的连续版本。
+
+    与 :func:`autoscroll_step` 语义一致但不再离散取整：锚点附近停住，越远
+    越快（每远离 ``divisor`` 像素 ≈ 每帧多走 1 像素），并有速度上限。
+    ``MiddleDragScroller.tick`` 用它乘以真实 dt 累计位移，从而不受 QTimer
+    抖动影响；旧的 ``autoscroll_step`` 整数版保留给离线验收脚本。
+    """
+    d = float(delta)
+    zone = max(0.0, float(zone))
+    divisor = max(1.0, float(divisor))
+    if abs(d) < zone:
+        return 0.0
+    per_frame_pixel = 1000.0 / AUTOSCROLL_TICK_MS
+    speed = min(float(max_speed),
+                (abs(d) - zone) / divisor * per_frame_pixel)
+    return speed if d > 0 else -speed
 
 
 def autoscroll_step(
@@ -1785,6 +1859,11 @@ class MiddleDragScroller(QObject):
         self._start_value = 0
         # v1.0 需求 7：当前鼠标 Y（move 只更新它），QTimer 每拍据此推进。
         self._current_y = 0
+        # 时间累计滚动状态（与 WheelScrollAccumulator 同一套思路）：
+        # 上一拍时间戳、平滑后的当前速度、尚未应用的亚像素位移。
+        self._last_tick: float | None = None
+        self._speed = 0.0
+        self._pending = 0.0
         self._tick_timer = QTimer(self)
         self._tick_timer.setInterval(AUTOSCROLL_TICK_MS)
         self._tick_timer.timeout.connect(self.tick)
@@ -1873,6 +1952,9 @@ class MiddleDragScroller(QObject):
 
     def _end(self) -> None:
         self._anchor_y = None
+        self._last_tick = None
+        self._speed = 0.0
+        self._pending = 0.0
         # v1.0 需求 7：退出一定停表，别让 QTimer 继续滚。
         timer = getattr(self, "_tick_timer", None)
         if timer is not None:
@@ -1910,6 +1992,10 @@ class MiddleDragScroller(QObject):
         self._anchor_y = int(position.y())
         self._start_value = start
         self._current_y = int(position.y())
+        # 首拍只建立时间基准，不带入上一次手势的速度 / 残量。
+        self._last_tick = None
+        self._speed = 0.0
+        self._pending = 0.0
         self._tick_timer.start()
         try:
             viewport = self._area.viewport()
@@ -1969,21 +2055,52 @@ class MiddleDragScroller(QObject):
             return event.position().toPoint()
 
     def tick(self) -> None:
-        """v1.0 需求 7：QTimer 每拍推进一次（也可由测试手动驱动）。
+        """滚轮同款：按**真实经过时间**累计位移，每拍只应用整像素。
 
-        速度只由「当前鼠标 Y 与锚点 Y 的距离」决定，见
-        :func:`autoscroll_step`；鼠标回到锚点附近 step=0，自然停住。
+        旧实现每 20ms 直接 ``setValue(value + 整数 autoscroll_step)``，两个
+        问题叠加成「一顿一顿」：① ``|delta| // divisor`` 是离散整数，鼠标
+        稍远就一拍跳十几像素；② QTimer 在 Windows 上有几毫秒抖动，同样的
+        步长遇到 22ms / 28ms 的拍，实际速度忽快忽慢。
+
+        现在改成：距离 → 连续目标速度（:func:`autoscroll_speed`），指数
+        平滑跟随，乘以 ``time.monotonic()`` 的真实 dt 累计成浮点位移，
+        取整后 setValue，亚像素残量留到下一拍。定时器抖动只会改变每拍
+        位移量、不改变整体速度；鼠标回到锚点时速度平滑衰减到 0。
         """
         if self._dead() or self._anchor_y is None:
             return
+        now = time.monotonic()
+        last = self._last_tick
+        self._last_tick = now
+        if last is None:
+            return                       # 首拍只建立时间基准
+        dt = now - last
+        if dt <= 0:
+            return
+        dt = min(dt, AUTOSCROLL_MAX_DT)
         try:
             bar = self._bar()
         except RuntimeError:
             return
-        step = autoscroll_step(self._current_y - self._anchor_y)
-        if step == 0:
+        target = autoscroll_speed(self._current_y - self._anchor_y)
+        alpha = 1.0 - math.exp(-dt / AUTOSCROLL_SMOOTH_TAU)
+        self._speed += (target - self._speed) * alpha
+        if abs(self._speed) < 1.0:
+            self._speed = 0.0
+            self._pending = 0.0
             return
-        bar.setValue(max(bar.minimum(), min(bar.maximum(), bar.value() + step)))
+        self._pending += self._speed * dt
+        amount = int(round(self._pending))
+        if amount == 0:
+            return
+        old = bar.value()
+        value = max(bar.minimum(), min(bar.maximum(), old + amount))
+        if value == old:
+            # 到顶 / 到底：丢掉残量，避免无限堆积。
+            self._pending = 0.0
+            return
+        bar.setValue(value)
+        self._pending -= (bar.value() - old)
 
     # -------------------------------------------------------------- filter
     def eventFilter(self, watched, event) -> bool:  # type: ignore[override]
