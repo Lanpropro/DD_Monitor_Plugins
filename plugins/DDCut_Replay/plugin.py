@@ -1,6 +1,7 @@
 """DDCut Replay entry point for the host's single-file loader."""
 import os
 import sys
+from weakref import WeakSet
 from pathlib import Path
 
 from PySide6.QtCore import QTimer, Qt
@@ -32,6 +33,7 @@ class DDCutReplay(api.Plugin):
         self.capture_mode = 'original'
         self.inputs = None
         self.links = None
+        self.settings_panels = WeakSet()
 
     def on_load(self, context):
         self.context = context
@@ -102,6 +104,21 @@ class DDCutReplay(api.Plugin):
         self.capture_mode = mode
         self.hub.preferences['capture_mode'] = mode
         self.hub.save()
+        if self.workspace is not None:
+            switch = self.workspace.capture_switch
+            previous = switch.blockSignals(True)
+            switch.setChecked(mode == 'clip')
+            switch.blockSignals(previous)
+        for panel in self.settings_panels:
+            panel.sync()
+
+    def recording_settings(self, parent):
+        if self.service is None:
+            return None
+        from .recording_settings import RecordingOptions
+        panel = RecordingOptions(self, parent)
+        self.settings_panels.add(panel)
+        return panel
 
     def on_event(self, event, payload):
         if event != api.EVENT_DANMAKU or self.hub is None or self.hub.closed:
@@ -217,6 +234,9 @@ class DDCutReplay(api.Plugin):
                 self.workspace.refresh_live()
 
     def on_unload(self):
+        for panel in tuple(self.settings_panels):
+            panel.detach()
+        self.settings_panels.clear()
         if self.timer:
             self.timer.stop()
         if self.links:

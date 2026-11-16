@@ -142,6 +142,7 @@ class Workspace(QWidget):
         self.selection_playing = False
         self.task_signature = None
         self.setObjectName('replayWorkspace')
+        self.setAttribute(Qt.WA_StyledBackground, True)
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 12, 16, 10)
         root.setSpacing(10)
@@ -198,6 +199,7 @@ class Workspace(QWidget):
         panel = theme.CONTENT if theme.is_light() else '#171c24'
         stage = theme.BG if theme.is_light() else '#0e1219'
         self.setStyleSheet(f'''
+            QWidget#replayWorkspace {{background: {theme.BG};}}
             #replayReview {{background: {stage};}}
             #replayInspector, #replaySelection {{background: {panel};}}
             #replayInspector {{border-left: 1px solid {theme.BORDER};}}

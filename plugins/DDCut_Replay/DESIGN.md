@@ -192,3 +192,5 @@ rtmp_inputs在GUI线程拥有房间定义、插件设置、快照索引和封面
 ## Windows浏览器快捷添加（2026-11-09）
 
 link_server持有纯链接校验和本机令牌端点，后台只将已校验的直播间链接放进有界队列；不执行外部链接文本。deep_link_windows只管理当前用户ddcut协议及安装所有权，deep_link_relay.ps1通过.NET转交，必要时启动明确的run.cmd/主程序，使用字面参数而非执行URI。DeepLinks在Qt主线程拥有接收状态和唯一添加框，复用本体AddRoomDialog/文件夹/房间解析，确认后才调用原添加入口；普通退出只关端点，停用或已移除插件退出时删除本安装关联。设置沿用TaskHub，默认关闭，不注册bsr，不新增平台账号或自动录制工作流。注册失败回收端点；后台队列不直接操作Qt，卸载先停止插件定时器并关闭添加框和端点。
+
+2026-11-16试用反馈：Workspace根控件启用WA_StyledBackground并绘制theme.BG，不改画面墙皮肤；recording_settings负责录制方式控件，DDCutReplay仍持有capture_mode与持久化，工作区和设置仅同步显示。本体公开Plugin.recording_settings(parent)钩子，懒创建插件区域，独立设置窗口使用本体页；控件随页面销毁，卸载先detach禁用，避免继续调用录制服务。未修改其他录制参数或回放生命周期。
