@@ -56,6 +56,10 @@ class Track(io.RawIOBase):
                     head = int(head)
                     if probe and response.status_code == 404:
                         return head, b''
+                    if response.status_code == 404 and number > head and attempt < 2:
+                        if self._stop.wait(self.duration):
+                            raise YouTubeMediaError('YouTube 媒体读取已停止')
+                        continue
                     response.raise_for_status()
                     chunks, size = [], 0
                     for chunk in response.iter_content(65536):
@@ -132,8 +136,9 @@ class AdaptiveReader:
         try:
             if not ffmpeg:
                 raise YouTubeMediaError('未找到 FFmpeg，请检查程序安装是否完整')
-            head, _ = self._video._segment(0, probe=True)
-            self._video.number = self._audio.number = max(0, head - 2)
+            video_head, _ = self._video._segment(0, probe=True)
+            audio_head, _ = self._audio._segment(0, probe=True)
+            self._video.number = self._audio.number = max(0, min(video_head, audio_head) - 2)
             self._mux = Muxer(self._session, self._video, self._audio,
                               maps=['0:v:0', '1:a:0'], copyts=True, start_at_zero=True).open()
             ready = queue.Queue(1)

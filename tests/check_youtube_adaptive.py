@@ -135,6 +135,30 @@ class SegmentTests(unittest.TestCase):
         track._session.get.assert_not_called()
         track.close()
 
+    def test_future_segment_waits_for_publication(self):
+        track = self.track(Mock())
+        track.duration = .001
+        future = Mock(status_code=404, headers={'X-Head-Seqnum': '40'})
+        ready = Mock(status_code=200, headers={'X-Head-Seqnum': '41'})
+        ready.iter_content.return_value = iter([b'published'])
+        track._session.get.return_value.__enter__.side_effect = [future, ready]
+        self.assertEqual(track.read(), b'published')
+        self.assertEqual(track._session.get.call_count, 2)
+        track.close()
+
+    def test_mux_starts_at_common_audio_and_video_head(self):
+        video, audio, mux = Mock(), Mock(), Mock()
+        video._segment.return_value = (105, b'')
+        audio._segment.return_value = (100, b'')
+        mux.open.return_value = mux
+        mux.process.stdout.read1.return_value = b'matroska-header'
+        with patch.object(adaptive, 'Track', side_effect=[video, audio]), \
+             patch.object(adaptive, 'Muxer', return_value=mux):
+            reader = adaptive.AdaptiveReader(media(), media(140), 2, '', 'ffmpeg')
+        self.assertEqual(video.number, 98)
+        self.assertEqual(audio.number, 98)
+        reader.close()
+
 
 class IsolationTests(unittest.TestCase):
     def test_fixed_errors_hide_extractor_urls_and_do_not_offer_unused_login(self):
