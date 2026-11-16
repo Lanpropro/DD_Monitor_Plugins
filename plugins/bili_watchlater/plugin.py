@@ -244,9 +244,10 @@ class _TileEventFilter(QObject):
                         if kind in (QEvent.Type.DevicePixelRatioChange, _SCREEN_CHANGE):
                             # 跨分辨率屏时先盖住白屏重载，再重排浮层。
                             try:
-                                plugin._cover_pip_dpi(parent)
+                                plugin._on_dpi_event(parent)
                             except Exception:
                                 pass
+                            return False
                         plugin._sync_tile_widgets(parent)
                         return False
                     if plugin._tile_in_pip(parent):
@@ -299,9 +300,10 @@ class _TileEventFilter(QObject):
             # 否则原生子窗口还按旧 DPI 绘制，表现为小窗白屏 / UI 错位。
             if kind in (QEvent.Type.DevicePixelRatioChange, _SCREEN_CHANGE):
                 try:
-                    plugin._cover_pip_dpi(watched)
+                    plugin._on_dpi_event(watched)
                 except Exception:
                     pass
+                return False
             plugin._queue_tile_sync(watched)
         return False
 
@@ -553,6 +555,10 @@ class BiliWatchLaterPlugin(api.Plugin):
         self._dpi_covers = {}
         self._dpi_cover_timers: dict[int, QTimer] = {}
         self._dpi_cover_deadline: dict[int, float] = {}
+        self._dpi_pending = False
+        self._dpi_handling = False
+        self._dpi_ignore_until = 0.0
+        self._dpi_flush_timer: QTimer | None = None
         # Avatars share the async image loader; no independently owned QThreads.
         self._face_loader = None
         self._face_pixmaps = {}
@@ -2157,9 +2163,7 @@ class BiliWatchLaterPlugin(api.Plugin):
         binding = self._binding_for_tile(tile)
         if binding is None or binding.state not in ("playing", "paused"):
             return
-        target = max(0.0, float(getattr(binding, "progress", 0.0) or 0.0)
-                     + float(delta))
-        self._seek_binding(binding, target)
+        self._seek_binding_relative(binding, float(delta))
 
     # ------------------------------------------------ PiP 弹幕键 / 跨屏黑遮罩
     def _ensure_danmaku_shortcut(self) -> None:
@@ -2198,48 +2202,140 @@ class BiliWatchLaterPlugin(api.Plugin):
         self._toggle_danmaku(tile, binding)
 
     def _on_dpi_event(self, watched) -> None:
-        """跨 DPI / 换屏：把受影响浮窗里的点播格全部盖上黑遮罩。
+        """跨 DPI / 换屏事件入口：只登记，绝不在事件派发栈里做重活。
 
-        事件可能落在浮窗顶层、QWindow、tile、video 或任意子控件上，逐层解析；
-        解析不到时退回「扫描所有非主窗口的点播格」。只做本地纯黑遮盖，不联网、
-        不解帧、不阻塞播放。
+        换屏时 Qt 会给窗口树里几乎每个 QObject 投递 ScreenChangeInternal /
+        DevicePixelRatioChange，插件的三个事件过滤器会收到成百上千次。旧实现
+        在每次事件里 ``win.findChildren(QWidget)`` 全树扫描并同步创建 / show
+        原生黑遮罩，遮罩自身又产生同类事件 → 事件风暴与重入；GUI 线程长时间
+        停在扫描循环里（日志 faulthandler 反复抓到 plugin.py 的 getattr 行），
+        宿主看门狗判为卡死，Windows 侧还可能 native access violation。
+
+        现在无论事件落在浮窗顶层、QWindow、tile 还是 video，都只做一次合并：
+        120ms 后的单次定时器里，仅从插件自己维护的 ``_bindings`` 取点播格
+        （不再扫控件树），统一盖遮罩 + 排队几何同步。处理期间与之后 350ms
+        的重入/冷却事件一律忽略，从根上掐断自激循环。
         """
-        if self._shutting_down:
+        if (self._shutting_down or self._dpi_handling
+                or not self._bindings):
             return
-        tiles = []
-        try:
-            if isinstance(getattr(watched, "room", None), dict) \
-                    and hasattr(watched, "video"):
-                tiles.append(watched)
-            parent = None
-            if hasattr(watched, "parentWidget"):
-                parent = watched.parentWidget()
-            if parent is not None and getattr(parent, "room", None) is not None \
-                    and hasattr(parent, "video"):
-                tiles.append(parent)
-            win = watched.window() if isinstance(watched, QWidget) else watched
-            if win is not None and hasattr(win, "findChildren"):
-                for child in win.findChildren(QWidget):
-                    room = getattr(child, "room", None)
-                    if (isinstance(room, dict) and room.get("watchlater_bvid")
-                            and hasattr(child, "video")):
-                        tiles.append(child)
-        except Exception:
-            return
-        if not tiles:
-            tiles = [t for t in self._vod_tiles_anywhere()
-                     if self._tile_in_pip_window(t)
-                     or (self._tile_in_pip(t)
-                         and t.window() is not self._host_window())]
-        seen = set()
-        for tile in tiles:
-            if tile is None or id(tile) in seen:
-                continue
-            seen.add(id(tile))
+        if self._pip_drag_active():
+            # 拖动浮窗时 Move/DPR 事件风暴会让 900ms 遮罩反复续期 → 黑屏。
+            # 拖动期间不盖、已盖的立即撤掉，并给一小段冷却吞掉松手后的
+            # 残余事件；真正的跨 DPI 变化（非拖动）仍走原来的保护逻辑。
+            self._hide_all_dpi_covers()
+            self._dpi_pending = False
             try:
-                self._cover_pip_dpi(tile)
+                timer = self._dpi_flush_timer
+                if timer is not None and not sip_deleted(timer):
+                    timer.stop()
             except Exception:
                 pass
+            self._dpi_ignore_until = time.monotonic() + 0.25
+            return
+        # 自己创建的原生黑遮罩（及其 windowHandle）引发的同类事件不再排队。
+        try:
+            if getattr(watched, "objectName", lambda: "")() == "watchlaterDpiCover":
+                return
+        except Exception:
+            pass
+        now = time.monotonic()
+        if now < self._dpi_ignore_until or self._dpi_pending:
+            return
+        self._dpi_pending = True
+        try:
+            timer = self._dpi_flush_timer
+            if timer is None or sip_deleted(timer):
+                timer = QTimer()          # Plugin 不是 QObject，不能用 self 作 parent
+                timer.setSingleShot(True)
+                timer.timeout.connect(self._flush_dpi_event)
+                self._dpi_flush_timer = timer
+            timer.stop()
+            timer.start(120)
+        except Exception:
+            self._dpi_pending = False
+
+    def _flush_dpi_event(self) -> None:
+        """合并后的跨屏处理：盖遮罩 + 对真实点播格排队一次几何同步。"""
+        self._dpi_pending = False
+        if self._shutting_down or not self._bindings:
+            return
+        if self._pip_drag_active():
+            self._hide_all_dpi_covers()
+            return
+        self._dpi_handling = True
+        try:
+            # 绑定表就是插件自己的「点播格清单」：主墙 / 全屏 / 画中画的
+            # tile 都在里面，不需要（也不允许）遍历整个宿主控件树。
+            vod_tiles = []
+            for binding in list(self._bindings.values()):
+                tile = binding.tile
+                if tile is None:
+                    continue
+                try:
+                    if not sip_deleted(tile):
+                        vod_tiles.append(tile)
+                except Exception:
+                    continue
+            # 黑遮罩只盖点播格；直播格绝不盖。
+            for tile in vod_tiles:
+                try:
+                    self._cover_pip_dpi(tile)
+                except Exception:
+                    continue
+            # 几何/浮层同步保留原来的覆盖面（所有格子），但合并成对真实
+            # tile 各排一次，不给 video / badge / overlay 等子控件各排一次。
+            try:
+                all_tiles = self._host_tiles()
+            except Exception:
+                all_tiles = []
+            seen: set[int] = set()
+            for tile in vod_tiles + all_tiles:
+                if tile is None or id(tile) in seen:
+                    continue
+                seen.add(id(tile))
+                try:
+                    if not sip_deleted(tile):
+                        self._queue_tile_sync(tile)
+                except Exception:
+                    continue
+        finally:
+            self._dpi_handling = False
+            # show()/raise_()/重排触发的后续事件（含异步投递的）全部落进冷却。
+            self._dpi_ignore_until = time.monotonic() + 0.35
+
+
+    def _pip_drag_active(self) -> bool:
+        """浮窗是否正在被鼠标拖动（左键按住移动）。"""
+        try:
+            if QApplication.mouseButtons() & Qt.LeftButton:
+                return True
+        except Exception:
+            pass
+        return False
+
+
+    def _hide_all_dpi_covers(self) -> None:
+        """拖动开始 / 进行中：立刻撤掉所有黑遮罩并停掉续期定时器。
+
+        旧逻辑每来一次 DPI / Move 事件就 ``timer.start(900)`` 续期，拖动时
+        事件连续不断，遮罩因此一直不 hide，纯黑 QWidget 盖在视频上就是
+        「拖动浮窗时视频黑屏」。
+        """
+        for cover in list(self._dpi_covers.values()):
+            try:
+                if not sip_deleted(cover):
+                    cover.hide()
+            except Exception:
+                pass
+        for timer in list(self._dpi_cover_timers.values()):
+            try:
+                if not sip_deleted(timer):
+                    timer.stop()
+            except Exception:
+                pass
+        self._dpi_cover_deadline.clear()
+
 
     def _hide_dpi_cover(self, tile) -> None:
         cover = self._dpi_covers.get(id(tile))
@@ -2265,6 +2361,9 @@ class BiliWatchLaterPlugin(api.Plugin):
     def _cover_pip_dpi(self, tile) -> None:
         """跨分辨率屏的白屏重载期间盖一层纯黑（只盖画中画里的点播格）。"""
         if tile is None or self._shutting_down:
+            return
+        if self._pip_drag_active():
+            self._hide_dpi_cover(tile)
             return
         try:
             in_pip = self._tile_in_pip_window(tile) or (
@@ -3361,6 +3460,44 @@ class BiliWatchLaterPlugin(api.Plugin):
                 return False
         return False
 
+    def _seek_binding_relative(self, binding, delta: float) -> None:
+        """需求 2：B 站原版左右键 —— 以播放器真实 time-pos 为基准 ±5 秒。
+
+        旧实现算 ``binding.progress + 5`` 再发绝对 seek：全屏重排会释放/重建
+        播放器，节拍器也可能滞后，``progress`` 停在旧值时连按几次都跳到同一
+        个位置，肉眼就是「全屏下左右键没反应」。mpv 的相对 seek 以真实播放
+        位置为准，按住连发每次都实打实走 5 秒；节拍器下一拍会从 time-pos
+        把 ``binding.progress`` 修正回真实值。
+        """
+        if binding is None or self._shutting_down:
+            return
+        delta = float(delta)
+        if not delta:
+            return
+        player = self._player_for_binding(binding)
+        if player is None:
+            return
+        current = float(getattr(binding, "progress", 0.0) or 0.0)
+        duration = float(getattr(binding, "duration", 0.0) or 0.0)
+        local_target = max(0.0, current + delta)
+        if duration > 0:
+            local_target = min(local_target, duration)
+        raw = getattr(player, "player", None)
+        command = getattr(raw, "command", None)
+        if not callable(command):
+            command = getattr(player, "command", None)
+        if callable(command):
+            # relative+exact = 精确 ±5 秒（不吸附关键帧），与 B 站网页一致；
+            # 少数 mpv 构建不认组合 flag 时退回普通 relative。
+            if (self._mpv_command(player, "seek", delta, "relative+exact")
+                    or self._mpv_command(player, "seek", delta, "relative")):
+                binding.progress = local_target
+                return
+        # 没有裸 mpv command 的替身播放器：_mpv_command 的 _set 兜底只认
+        # 绝对秒数，所以按本地进度做一次绝对跳。
+        self._seek_binding(binding, local_target)
+
+
     def _seek_binding(self, binding, seconds: float) -> None:
         player = self._player_for_binding(binding)
         if player is None:
@@ -3953,6 +4090,11 @@ class BiliWatchLaterPlugin(api.Plugin):
         if self._shutting_down:
             return
         self._shutting_down = True
+        if self._dpi_flush_timer is not None:
+            self._dpi_flush_timer.stop()
+            self._dpi_flush_timer.deleteLater()
+            self._dpi_flush_timer = None
+        self._dpi_pending = False
         if self._tick_timer is not None:
             self._tick_timer.stop()
             try:

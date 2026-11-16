@@ -70,6 +70,8 @@ _WEBPAGE_MARKERS = (
     "bilibili.com/watchlater",
 )
 
+_SCREEN_CHANGE = getattr(QEvent.Type, 'ScreenChangeInternal', QEvent.Type.DevicePixelRatioChange)
+
 _ACCENT = "#00a1d6"  # B 站蓝，与宿主悬停强调色一致
 _PILL_BG = "rgba(12, 13, 16, 200)"
 _PILL_TEXT = "rgba(214, 218, 224, 235)"
@@ -166,8 +168,13 @@ def _push_layered_alpha(widget: QWidget, image: QImage) -> bool:
     if not hwnd or image.isNull():
         return False
     try:
-        user32 = ctypes.windll.user32
-        gdi32 = ctypes.windll.gdi32
+        # Private function objects keep our Structure signatures independent
+        # of the host's BadgeSurface, which uses the same Windows DLLs.
+        if not hasattr(_push_layered_alpha, '_user32'):
+            _push_layered_alpha._user32 = ctypes.WinDLL('user32')
+            _push_layered_alpha._gdi32 = ctypes.WinDLL('gdi32')
+        user32 = _push_layered_alpha._user32
+        gdi32 = _push_layered_alpha._gdi32
         if not getattr(_push_layered_alpha, "_ready", False):
             class _BITMAPINFOHEADER(ctypes.Structure):
                 _fields_ = [("biSize", wintypes.DWORD),
@@ -190,31 +197,58 @@ def _push_layered_alpha(widget: QWidget, image: QImage) -> bool:
 
             _push_layered_alpha._bmi = _BITMAPINFOHEADER
             _push_layered_alpha._blend = _BLEND
+            user32.GetDC.argtypes = (wintypes.HWND,)
             user32.GetDC.restype = wintypes.HDC
             user32.GetWindowLongW.argtypes = (wintypes.HWND, ctypes.c_int)
             user32.SetWindowLongW.argtypes = (wintypes.HWND, ctypes.c_int,
                                               ctypes.c_long)
             gdi32.CreateCompatibleDC.restype = wintypes.HDC
+            gdi32.CreateCompatibleDC.argtypes = (wintypes.HDC,)
             gdi32.CreateDIBSection.restype = wintypes.HANDLE
+            gdi32.CreateDIBSection.argtypes = (wintypes.HDC, ctypes.POINTER(_BITMAPINFOHEADER),
+                wintypes.UINT, ctypes.POINTER(ctypes.c_void_p), wintypes.HANDLE, wintypes.DWORD)
             gdi32.SelectObject.restype = wintypes.HANDLE
+            gdi32.SelectObject.argtypes = (wintypes.HDC, wintypes.HANDLE)
+            gdi32.DeleteObject.argtypes = (wintypes.HANDLE,)
+            gdi32.DeleteDC.argtypes = (wintypes.HDC,)
+            user32.ReleaseDC.argtypes = (wintypes.HWND, wintypes.HDC)
+            user32.UpdateLayeredWindow.argtypes = (wintypes.HWND, wintypes.HDC,
+                ctypes.POINTER(wintypes.POINT), ctypes.POINTER(wintypes.SIZE), wintypes.HDC,
+                ctypes.POINTER(wintypes.POINT), wintypes.DWORD, ctypes.POINTER(_BLEND), wintypes.DWORD)
+            user32.UpdateLayeredWindow.restype = wintypes.BOOL
             _push_layered_alpha._ready = True
         bmi = _push_layered_alpha._bmi
         blend_t = _push_layered_alpha._blend
         # 宽度按物理像素提交，alpha 通道才不会因 DPR 被拉伸。
         width = int(image.width())
         height = int(image.height())
+        if width <= 0 or height <= 0:
+            return False
+        # 64 位安全：ctypes 对未声明 argtypes 的 int 参数按 32 位 c_int 传，
+        # HWND / HDC 句柄会被截断 → 换屏重绘时 UpdateLayeredWindow 拿到无效
+        # 句柄，Windows 抛 access violation。这里显式包成 c_void_p，且**不改**
+        # 全局函数的 argtypes：宿主 BadgeSurface 也在用同一批 Win32 函数，
+        # 两边各自私有的 Structure 类型会让 argtypes 互相冲突。
+        ptr = ctypes.c_void_p
+        user32.IsWindow.argtypes = (wintypes.HWND,)
+        user32.IsWindow.restype = wintypes.BOOL
+        if not user32.IsWindow(hwnd):   # 跨屏时原生 HWND 可能已被 Qt 重建
+            return False
         screen = user32.GetDC(None)
-        memory = gdi32.CreateCompatibleDC(screen)
+        if not screen:
+            return False
+        memory = gdi32.CreateCompatibleDC(ptr(screen))
         info = bmi(40, width, -height, 1, 32, 0, 0, 0, 0, 0, 0)
         data = ctypes.c_void_p()
         bitmap = gdi32.CreateDIBSection(
-            screen, ctypes.byref(info), 0, ctypes.byref(data), None, 0)
+            ptr(screen), ctypes.byref(info), 0, ctypes.byref(data), None, 0)
         try:
             if not memory or not bitmap:
                 return False
-            previous = gdi32.SelectObject(memory, bitmap)
+            previous = gdi32.SelectObject(ptr(memory), ptr(bitmap))
             try:
-                ctypes.memmove(data, bytes(image.constBits()), image.sizeInBytes())
+                raw = bytes(image.constBits())
+                ctypes.memmove(data, raw, min(len(raw), int(image.sizeInBytes())))
                 style = user32.GetWindowLongW(hwnd, -20)
                 if not style & 0x00080000:
                     user32.SetWindowLongW(hwnd, -20, style | 0x00080000)
@@ -222,17 +256,17 @@ def _push_layered_alpha(widget: QWidget, image: QImage) -> bool:
                 origin = wintypes.POINT(0, 0)
                 blend = blend_t(0, 0, 255, 1)
                 ok = user32.UpdateLayeredWindow(
-                    hwnd, screen, None, ctypes.byref(size), memory,
+                    ptr(hwnd), ptr(screen), None, ctypes.byref(size), ptr(memory),
                     ctypes.byref(origin), 0, ctypes.byref(blend), 2)
                 return bool(ok)
             finally:
-                gdi32.SelectObject(memory, previous)
+                gdi32.SelectObject(ptr(memory), ptr(previous))
         finally:
             if bitmap:
-                gdi32.DeleteObject(bitmap)
+                gdi32.DeleteObject(ptr(bitmap))
             if memory:
-                gdi32.DeleteDC(memory)
-            user32.ReleaseDC(None, screen)
+                gdi32.DeleteDC(ptr(memory))
+            user32.ReleaseDC(None, ptr(screen))
     except Exception:
         return False
 
@@ -348,8 +382,9 @@ class VodPositionBadge(QWidget):
 
     def event(self, event) -> bool:  # type: ignore[override]
         # 跨屏/DPI 变化后必须重传，否则分层窗口还是旧尺寸的位图。
-        if event.type() in (QEvent.DevicePixelRatioChange,
-                            QEvent.ScreenChangeInternal):
+        # 用 getattr 取枚举：个别 PySide6 版本没有 ScreenChangeInternal，
+        # 直接写死会在换屏事件派发时抛 AttributeError（Qt 层不可恢复）。
+        if event.type() in (QEvent.DevicePixelRatioChange, _SCREEN_CHANGE):
             self._render_key = None
             self.update()
         return super().event(event)
