@@ -1,14 +1,16 @@
 """Selected upstream fixes against the current candidate; no real accounts or media."""
 import importlib
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
 from check_bili_watchlater import APP, plugin_module
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QThread, Qt, Signal
 from PySide6.QtGui import QImage, QPainter, QPixmap, QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QScrollArea, QWidget
+from shiboken6 import isValid
 
 pages = importlib.import_module('ddm_plugin_bili_watchlater.page')
 widgets = importlib.import_module('ddm_plugin_bili_watchlater.widgets')
@@ -187,6 +189,7 @@ class ScrollingMergeTests(unittest.TestCase):
         bar.setRange(0, 500)
         bar.setValue(500)
         bar.blockSignals(False)
+
         page._maybe_grow_page()
         first = page._grow_settle_timer.remainingTime()
         QTest.qWait(20)
@@ -230,6 +233,142 @@ class ScrollingMergeTests(unittest.TestCase):
             page._refetch_visible_covers()
             rows[0].cover.set_pixmap.assert_called_once_with(None)
         bar.blockSignals(False)
+
+
+class WaitingRequest(QThread):
+    completed = Signal(int, int, object)
+    failed = Signal(int, int, object)
+
+    def __init__(self):
+        super().__init__()
+        self.gate = threading.Event()
+        self.started_run = threading.Event()
+        self.cookies = {'SESSDATA': 'fixture-only'}
+        self.cancelled = False
+
+    def cancel(self):
+        self.cancelled = True
+
+    def run(self):
+        self.started_run.set()
+        self.gate.wait(3)
+        self.completed.emit(1, 1, [])
+
+
+class WorkerLifecycleTests(unittest.TestCase):
+    def test_request_snapshots_clear_on_success_error_and_cancellation(self):
+        workers = importlib.import_module('ddm_plugin_bili_watchlater.workers')
+        for outcome in ('success', 'error', 'cancelled'):
+            with self.subTest(outcome=outcome):
+                worker = workers.ListRequest({'SESSDATA': 'fixture-only'}, 1, 1)
+                with patch.object(workers, 'BiliWatchLaterAPI') as factory:
+                    if outcome == 'error':
+                        factory.return_value.list_all.side_effect = ValueError('fixture')
+                    elif outcome == 'cancelled':
+                        worker.cancel()
+                    worker.run()
+                    factory.return_value.close.assert_called_once()
+                self.assertEqual(worker.cookies, {})
+                worker.deleteLater()
+
+    def test_worker_start_failure_also_releases_snapshot(self):
+        workers = importlib.import_module('ddm_plugin_bili_watchlater.workers')
+        page = pages.WatchLaterPage(SimpleNamespace(credentials=lambda _platform: None))
+        page._geometry_settings = Mock()
+        worker = workers.ListRequest({'SESSDATA': 'fixture-only'}, 1, 1)
+        try:
+            with patch.object(worker, 'start', side_effect=RuntimeError('fixture')):
+                page._track(worker)
+            self.assertNotIn(worker, page._requests)
+            self.assertEqual(worker.cookies, {})
+        finally:
+            page.shutdown()
+            page.deleteLater()
+            APP.sendPostedEvents(None, QEvent.DeferredDelete)
+
+    def page_with_request(self):
+        page = pages.WatchLaterPage(SimpleNamespace(credentials=lambda _platform: None))
+        page._geometry_settings = Mock()
+        worker = WaitingRequest()
+        receiver = Mock()
+        worker.completed.connect(receiver)
+        worker.failed.connect(receiver)
+        page._track(worker)
+        self.assertTrue(worker.started_run.wait(1))
+        self.addCleanup(self.finish_request, page, worker)
+        return page, worker, receiver
+
+    def finish_request(self, page, worker):
+        if isValid(worker):
+            worker.gate.set()
+            worker.wait(1000)
+        if isValid(page):
+            page.shutdown()
+            page.deleteLater()
+        APP.processEvents()
+        APP.sendPostedEvents(None, QEvent.DeferredDelete)
+
+    def test_page_destroyed_during_request_releases_worker_and_snapshot(self):
+        retirement = importlib.import_module('ddm_plugin_bili_watchlater.request_retirement')
+        page, worker, receiver = self.page_with_request()
+        page.shutdown()
+        self.assertIn(worker, retirement._retirement.pending)
+        self.assertTrue(worker.cancelled)
+        page.deleteLater()
+        APP.sendPostedEvents(None, QEvent.DeferredDelete)
+        self.assertFalse(isValid(page))
+        worker.gate.set()
+        self.assertTrue(worker.wait(1000))
+        QTest.qWait(20)
+        APP.sendPostedEvents(None, QEvent.DeferredDelete)
+        self.assertNotIn(worker, retirement._retirement.pending)
+        self.assertEqual(worker.cookies, {})
+        self.assertFalse(isValid(worker))
+        receiver.assert_not_called()
+
+    def test_application_quit_drains_detached_request(self):
+        retirement = importlib.import_module('ddm_plugin_bili_watchlater.request_retirement')
+        page, worker, receiver = self.page_with_request()
+        page.shutdown()
+        release = threading.Timer(.03, worker.gate.set)
+        release.start()
+        try:
+            APP.aboutToQuit.emit()
+        finally:
+            release.join()
+        self.assertEqual(retirement._retirement.pending, set())
+        self.assertFalse(worker.isRunning())
+        self.assertEqual(worker.cookies, {})
+        APP.sendPostedEvents(None, QEvent.DeferredDelete)
+        receiver.assert_not_called()
+
+    def test_normal_completion_cleans_page_tracking_and_snapshot(self):
+        page, worker, receiver = self.page_with_request()
+        worker.gate.set()
+        worker.wait(1000)
+        QTest.qWait(20)
+        APP.sendPostedEvents(None, QEvent.DeferredDelete)
+        self.assertNotIn(worker, page._requests)
+        self.assertEqual(worker.cookies, {})
+        self.assertFalse(isValid(worker))
+        receiver.assert_called_once()
+
+    def test_completion_between_timeout_and_signal_connection_is_reclaimed(self):
+        retirement = importlib.import_module('ddm_plugin_bili_watchlater.request_retirement')
+        class Completed(QObject):
+            finished = Signal()
+        worker = Completed()
+        worker.cancel = Mock()
+        worker.wait = Mock(side_effect=[False, True])
+        worker.isFinished = lambda: True
+        worker.cookies = {'SESSDATA': 'fixture-only'}
+        registry = retirement.RetiredPageRequests(APP)
+        registry.retire(worker)
+        self.assertEqual(registry.pending, set())
+        self.assertEqual(worker.cookies, {})
+        registry.deleteLater()
+        APP.sendPostedEvents(None, QEvent.DeferredDelete)
+        self.assertFalse(isValid(worker))
 
 
 if __name__ == '__main__':

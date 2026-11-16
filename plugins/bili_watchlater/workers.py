@@ -50,6 +50,7 @@ class _WatchLaterRequest(QThread):
             if not self.cancelled.is_set():
                 self.completed.emit(self.request_id, self.generation, result)
         finally:
+            self.cookies.clear()
             api.close()
 
 

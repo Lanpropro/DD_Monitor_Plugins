@@ -106,6 +106,7 @@ from .widgets import (
     selection_toggle,
 )
 from .wheel_scroll import WheelScrollAccumulator
+from .request_retirement import dispose_finished_request, retire_page_request
 from .workers import ClearRequest, ListRequest, RemoveRequest
 
 # v1.0 性能：缓存 60s 太短，超过一分钟的每次重开都要重新拉列表并走
@@ -2901,7 +2902,7 @@ class WatchLaterPage(QWidget):
     def _track(self, worker: Any) -> None:
         self._requests.add(worker)
         worker.finished.connect(
-            lambda current=worker: self._retire(current),
+            self._request_finished,
             Qt.QueuedConnection,
         )
         try:
@@ -2913,7 +2914,7 @@ class WatchLaterPage(QWidget):
                 self._active_list = None
             if self._active_operation is worker:
                 self._active_operation = None
-            worker.deleteLater()
+            dispose_finished_request(worker)
             self._busy_operation = ""
             self._set_refreshing(False)
             self._update_destructive_controls()
@@ -2927,20 +2928,18 @@ class WatchLaterPage(QWidget):
                     "操作失败：" + describe_error(error)
                 )
 
+    def _request_finished(self) -> None:
+        worker = self.sender()
+        if worker is not None:
+            self._retire(worker)
+
     def _retire(self, worker: Any) -> None:
-        try:
-            worker.wait()
-        except RuntimeError:
-            pass
         self._requests.discard(worker)
         if self._active_list is worker:
             self._active_list = None
         if self._active_operation is worker:
             self._active_operation = None
-        try:
-            worker.deleteLater()
-        except RuntimeError:
-            pass
+        dispose_finished_request(worker)
 
     def _log(self, message: str) -> None:
         try:
@@ -3312,15 +3311,13 @@ class WatchLaterPage(QWidget):
         for worker in tuple(self._requests):
             self._cancel_request(worker)
         for worker in tuple(self._requests):
-            try:
-                worker.wait()
-            except Exception:
-                pass
+            worker.finished.disconnect(self._request_finished)
+            for name in ('completed', 'failed'):
+                signal = getattr(worker, name, None)
+                if signal is not None:
+                    signal.disconnect()
+            retire_page_request(worker)
             self._requests.discard(worker)
-            try:
-                worker.deleteLater()
-            except RuntimeError:
-                pass
         self._active_list = None
         self._active_operation = None
         self._busy_operation = ""
