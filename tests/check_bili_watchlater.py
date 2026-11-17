@@ -200,8 +200,8 @@ class HostTests(unittest.TestCase):
 
     def test_qt6_keyboard_modifiers(self):
         binding = self.binding()
-        with patch.object(self.plugin, '_key_window_ok', return_value=True), \
-                patch.object(self.plugin, '_active_vod_tile', return_value=self.tile):
+        with patch.object(self.plugin.input, 'key_window_ok', return_value=True), \
+                patch.object(self.plugin.input, 'active_vod_tile', return_value=self.tile):
             self.tile.pause_button.setFocus()
             APP.processEvents()
             for key, action in ((Qt.Key_Space, 'space'), (Qt.Key_Left, 'left'),
@@ -215,7 +215,7 @@ class HostTests(unittest.TestCase):
             self.assertIsNone(self.plugin._danmaku_shortcut)
             # Windows without the host shortcut still use the same Qt6 key
             # parsing, while the main window remains owned by the host.
-            with patch.object(self.plugin, '_host_danmaku_shortcut_reachable', return_value=False):
+            with patch.object(self.plugin.input, 'host_danmaku_shortcut_reachable', return_value=False):
                 self.assertEqual(self.plugin._vod_key_action(danmaku, self.tile),
                                  ('danmaku', self.tile, binding))
             edit = QLineEdit(self.window)

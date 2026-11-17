@@ -43,8 +43,8 @@ class PlaybackMergeTests(unittest.TestCase):
     def test_key_filter_dispatches_relative_seek(self):
         event = QKeyEvent(QEvent.KeyPress, Qt.Key_Right, Qt.NoModifier)
         binding, tile = SimpleNamespace(progress=10), object()
-        with patch.object(self.plugin, '_vod_key_action', return_value=('right', tile, binding)), \
-                patch.object(self.plugin, '_claim_key', return_value=True), \
+        with patch.object(self.plugin.input, 'vod_key_action', return_value=('right', tile, binding)), \
+                patch.object(self.plugin.input, 'claim_key', return_value=True), \
                 patch.object(self.plugin.playback, 'seek_binding_relative') as relative:
             self.assertTrue(self.plugin._handle_vod_key(event))
         relative.assert_called_once_with(binding, 5)
@@ -60,14 +60,14 @@ class PlaybackMergeTests(unittest.TestCase):
         event = QKeyEvent(QEvent.KeyPress, Qt.Key_B, Qt.NoModifier)
         try:
             with patch.object(self.plugin.host, 'window', return_value=host), \
-                    patch.object(self.plugin, '_key_window_ok', return_value=True), \
-                    patch.object(self.plugin, '_active_vod_tile', return_value=tile), \
+                    patch.object(self.plugin.input, 'key_window_ok', return_value=True), \
+                    patch.object(self.plugin.input, 'active_vod_tile', return_value=tile), \
                     patch.object(self.plugin, '_binding_for_tile', return_value=binding):
                 self.plugin._ensure_danmaku_shortcut()
                 self.assertEqual(len(host.findChildren(QShortcut)), 1)
                 self.assertIsNone(self.plugin._vod_key_action(event, host))
                 self.assertEqual(self.plugin._vod_key_action(event, tile), ('danmaku', tile, binding))
-                with patch.object(self.plugin, '_toggle_danmaku') as toggle:
+                with patch.object(self.plugin.input, 'toggle_danmaku') as toggle:
                     self.plugin._handle_vod_key(event, tile)
                 toggle.assert_called_once_with(tile, binding)
         finally:
