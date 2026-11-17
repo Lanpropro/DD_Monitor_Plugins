@@ -54,6 +54,9 @@ class CompatibilityTests(unittest.TestCase):
         for name in NEW_APIS:
             self.assertNotIn('def '+name+'(',source)
             self.assertTrue(callable(getattr(PluginContext,name,None)),name)
+        released_api=subprocess.check_output(['git','-C',str(HOST),'show','v0.7.3:ddm/plugins.py'],text=True,encoding='utf-8')
+        self.assertNotIn('ROOM_SUPPORTS_LIVE_DANMAKU',released_api)
+        self.assertEqual(plugin_module.api.ROOM_SUPPORTS_LIVE_DANMAKU,'supports_live_danmaku')
 
     def test_manifest_and_release_draft_record_the_unreleased_dependency(self):
         manifest=json.loads((ROOT/'plugins/bili_watchlater/plugin.json').read_text(encoding='utf-8'))
