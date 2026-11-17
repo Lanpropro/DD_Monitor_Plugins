@@ -35,7 +35,7 @@ class CardStyleTests(unittest.TestCase):
     def shown(self):
         with patch.object(self.page, '_load'), patch.object(self.page, '_cache_fresh', return_value=True), \
                 patch.object(self.page, '_apply_saved_geometry', return_value=True), patch.object(self.page, '_start_entrance'), \
-                patch.object(self.page.covers, '_pump'), patch.object(self.page, '_danmaku_provider', return_value=None):
+                patch.object(self.page.covers, '_pump'), patch.object(self.page.renderer, 'danmaku_provider', return_value=None):
             self.page.resize(980, 700)
             self.page.show()
             APP.processEvents()

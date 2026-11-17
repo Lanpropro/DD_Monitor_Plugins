@@ -23,6 +23,45 @@ class BoundaryTests(unittest.TestCase):
     setUp=controls.PageControlsTests.setUp
     tearDown=controls.PageControlsTests.tearDown
 
+    def test_gallery_renderer_owns_indices_and_page_keeps_qt_widgets_and_timers(self):
+        renderer=self.page.renderer
+        self.assertIs(renderer.parent(),self.page)
+        self.assertIs(renderer.page,self.page)
+        self.assertIs(renderer._cards_by_key,self.page._cards_by_key)
+        self.assertIs(renderer._rows_by_key,self.page._rows_by_key)
+        self.assertNotIn('_cards_by_key',self.page.__dict__)
+        self.assertNotIn('_render_limit',self.page.__dict__)
+        self.page._render_limit=32
+        self.assertEqual(renderer._render_limit,32)
+        for timer,interval in ((self.page._grid_resize_timer,100),(self.page._cover_scroll_timer,200)):
+            self.assertIs(timer.parent(),self.page)
+            self.assertEqual(timer.interval(),interval)
+        self.assertIs(self.page._grow_settle_timer.parent(),self.page)
+        self.page._rebuild_cards([self.item])
+        self.assertIs(self.page._cards[0].parentWidget(),self.page.grid_widget)
+
+    def test_gallery_reentry_defers_without_mutating_materialized_views(self):
+        renderer=self.page.renderer
+        self.page._rebuild_cards([self.item])
+        before=list(self.page._cards)
+        renderer._building_rows=True
+        self.page._render(reset_scroll=True)
+        self.assertTrue(renderer._render_pending)
+        self.assertEqual(self.page._cards,before)
+        renderer._building_rows=False
+        renderer._render_pending=False
+
+    def test_gallery_shutdown_stops_original_timers_and_scroll_connections(self):
+        renderer=self.page.renderer
+        self.page._cover_scroll_timer.start()
+        self.page._grid_resize_timer.start()
+        self.page._grow_settle_timer.start(60)
+        self.assertTrue(renderer._scroll_refetch_connected)
+        self.page.shutdown()
+        self.assertFalse(renderer._scroll_refetch_connected)
+        for timer in (self.page._grid_resize_timer,self.page._cover_scroll_timer,self.page._grow_settle_timer):
+            self.assertFalse(timer.isActive())
+
     def test_legacy_page_state_forwards_to_one_controller_and_qt_owner(self):
         controller=self.page.list_controller
         self.assertIs(controller.parent(),self.page)

@@ -241,7 +241,7 @@ class ScrollingMergeTests(unittest.TestCase):
         page._render(keep_position=True)
         page._items.pop(0)
         page._items_version += 1
-        with patch.object(page, '_prune_inactive_view') as prune:
+        with patch.object(page.renderer, 'prune_inactive_view') as prune:
             page._render_after_remove()
         self.assertEqual(page._render_limit, 32)
         self.assertEqual(len(page._cards), 32)
@@ -259,7 +259,7 @@ class ScrollingMergeTests(unittest.TestCase):
         bar = page.grid_scroll.verticalScrollBar()
         bar.blockSignals(True)
         bar.setRange(0, 4000)
-        with patch.object(page, '_danmaku_provider', return_value=None):
+        with patch.object(page.renderer, 'danmaku_provider', return_value=None):
             bar.setValue(600)
             page._refetch_visible_covers()
             rows[0].cover.set_pixmap.assert_not_called()
