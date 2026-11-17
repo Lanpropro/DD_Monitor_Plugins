@@ -67,6 +67,12 @@ class _TileEventFilter(QObject):
         if plugin._shutting_down:
             return False
         kind = event.type()
+        if kind == QEvent.Type.Drop and watched in plugin._host_tiles():
+            from .acceptance_trace import trace_audio_drop
+            try:
+                trace_audio_drop(plugin, watched, event)
+            except Exception as error:
+                plugin._log('audio swap diagnostic failed type=' + type(error).__name__)
         if kind == QEvent.Type.Show and getattr(watched, "room", None) is not None:
             session = getattr(plugin, 'playback_session', None)
             if session is not None and not session.finished and not session.attempts:

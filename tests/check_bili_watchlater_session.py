@@ -225,6 +225,56 @@ class SessionTests(unittest.TestCase):
 
 
 class AcceptanceTraceTests(unittest.TestCase):
+    def test_swap_probe_records_icon_player_and_paint_state_without_media_identifiers(self):
+        from ddm_plugin_bili_watchlater import acceptance_trace as trace
+        from ddm.tile_widgets import Tile
+        from PySide6.QtWidgets import QWidget
+        owner = QWidget()
+        tiles = [Tile({'room_id':'private-live-title'}, owner),
+                 Tile({'room_id':'private-video', 'watchlater_bvid':'private-video'},owner)]
+        tiles[0].set_muted(True)
+        tiles[1].set_muted(False)
+        players = {tile:Mock(muted=tile.muted) for tile in tiles}
+        for tile, player in players.items():
+            player._prop.side_effect = lambda key, default=None, t=tile: t.muted if key=='mute' else default
+        plugin = SimpleNamespace(_host_player=players.get, _host_tiles=lambda:tiles)
+        try:
+            with patch.object(trace,'record') as record:
+                probe = trace.SwapAudioTrace(plugin, *tiles, 'tile', 1)
+                tiles[0].muted = players[tiles[0]].muted = False
+                probe.after_dispatch()
+                rows = [call.kwargs for call in record.call_args_list]
+                mismatch = next(row for row in rows if row['stage']=='after_dispatch' and row['member']==0)
+                self.assertFalse(mismatch['tile_muted'])
+                self.assertFalse(mismatch['player_muted'])
+                self.assertFalse(mismatch['core_muted'])
+                self.assertTrue(mismatch['button_muted'])
+                self.assertNotIn('private',json.dumps(rows))
+                probe.finish()
+                APP.sendPostedEvents(None,QEvent.DeferredDelete)
+                for player in players.values():
+                    player.set_muted.assert_not_called()
+                    player.set_volume.assert_not_called()
+        finally:
+            owner.deleteLater()
+            APP.sendPostedEvents(None,QEvent.DeferredDelete)
+
+    def test_audio_drop_probe_is_bounded_and_ignores_non_video_swaps(self):
+        from ddm_plugin_bili_watchlater import acceptance_trace as trace
+        from PySide6.QtCore import QMimeData
+        mime = QMimeData()
+        mime.setData('application/x-ddm-tile',b'fixture')
+        source,target = object(),object()
+        plugin = SimpleNamespace(_drag_source_tile=lambda _:source, _binding_for_tile=lambda _:True)
+        event = SimpleNamespace(mimeData=lambda:mime)
+        with patch.object(trace,'_audio_swaps',0),patch.object(trace,'SwapAudioTrace') as probe:
+            for _ in range(8):trace.trace_audio_drop(plugin,target,event)
+            self.assertEqual(probe.call_count,4)
+        plugin._binding_for_tile=lambda _:None
+        with patch.object(trace,'_audio_swaps',0),patch.object(trace,'SwapAudioTrace') as probe:
+            trace.trace_audio_drop(plugin,target,event)
+            probe.assert_not_called()
+
     def test_first_tile_show_restores_synchronously_and_started_is_a_fallback(self):
         from ddm_plugin_bili_watchlater.tile_presentation import _TileEventFilter
         from PySide6.QtWidgets import QWidget

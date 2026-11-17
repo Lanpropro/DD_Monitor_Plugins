@@ -255,6 +255,28 @@ class HostTests(unittest.TestCase):
         self.assertEqual(self.tile.room['room_id'], previous)
         self.assertFalse(composer.isHidden())
 
+    def test_vod_live_swap_icons_match_player_mute_in_both_directions(self):
+        from ddm_plugin_bili_watchlater.tile_swap import swap_tiles_preserving_players
+        self.window.wall.set_layout('2x2')
+        APP.processEvents()
+        video, live = self.window.wall.tiles[:2]
+        video.set_room({'room_id':self.item.bvid, 'watchlater_bvid':self.item.bvid})
+        live.set_room({'room_id':'90002', 'uname':'Fixture live', 'live':True})
+        for tile, muted, volume in ((video, False, 70), (live, True, 25)):
+            tile.set_volume(volume)
+            tile.set_muted(muted)
+            player = Mock(muted=muted, volume=volume)
+            player.set_muted.side_effect = lambda value,p=player:setattr(p,'muted',value)
+            player.set_volume.side_effect = lambda value,p=player:setattr(p,'volume',value)
+            self.window.players[tile] = player
+        for first, second in ((video,live), (live,video)):
+            self.assertTrue(swap_tiles_preserving_players(self.window, first, second))
+            for tile in (video,live):
+                player = self.window.players[tile]
+                self.assertEqual(tile.muted, player.muted)
+                self.assertEqual(tile.volume_button.muted, player.muted)
+                self.assertEqual(tile.volume_button.level, player.volume)
+
     def test_avatar_loader_uses_async_cover_lifecycle(self):
         avatars = importlib.import_module('ddm_plugin_bili_watchlater.avatars')
         pixmap = QPixmap(8, 8)
