@@ -231,6 +231,30 @@ class HostTests(unittest.TestCase):
         self.assertTrue(progress.isHidden())
         self.assertTrue(subtitle.isHidden())
 
+    def test_pending_restore_excludes_real_live_composer_and_skips_live_startup(self):
+        live = loader._load_module('bili_live', str(PLUGIN_DIR / 'bili_live/plugin.py'))
+        live.on_load(self.plugin.context)
+        self.addCleanup(live.on_unload)
+        composer = next(entry.control.widget for entry in self.tile._plugin_controls.entries
+                        if entry.key == 'interaction')
+        self.assertFalse(composer.isHidden())
+        previous = self.tile.room['room_id']
+        with patch.object(self.plugin.playback, 'start_resolution'), \
+                patch.object(self.plugin.playback, 'ensure_tick_timer'):
+            self.plugin._start_vod_for_tile(self.tile, self.item,
+                resume=dict(part=0, quality=80, progress=123., paused=True))
+        self.assertTrue(composer.isHidden())
+        self.assertEqual(self.tile.room.get('watchlater_bvid'), self.item.bvid)
+        self.assertFalse(self.tile.room.get('room_id'))
+        with patch('ddm.app.StreamResolver') as resolver:
+            self.window.start_tile(self.tile)
+        resolver.assert_not_called()
+        self.assertNotEqual(self.tile._status_text, '未开播')
+        binding = self.plugin._bindings[self.item.bvid]
+        self.plugin._release_binding(binding, restart=False)
+        self.assertEqual(self.tile.room['room_id'], previous)
+        self.assertFalse(composer.isHidden())
+
     def test_avatar_loader_uses_async_cover_lifecycle(self):
         avatars = importlib.import_module('ddm_plugin_bili_watchlater.avatars')
         pixmap = QPixmap(8, 8)

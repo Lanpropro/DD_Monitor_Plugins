@@ -35,6 +35,7 @@ class VodBinding:
         self.progress = 0.0
         self.duration = 0.0
         self.pending_seek = 0.0
+        self.seek_issued = False
         self.pending_audio = ""
         self.audio_attempts = 0
         self.strip = None

@@ -75,7 +75,8 @@ class PlaybackSession:
                 prop = getattr(player, '_prop', None)
                 if callable(prop):
                     current = prop('time-pos', None)
-                    if type(current) in (int, float) and math.isfinite(current):
+                    if (not binding.pending_seek and not prop('seeking', False)
+                            and type(current) in (int, float) and math.isfinite(current)):
                         position = seconds(current)
             item = binding.item
             videos.append(dict(cell=cell, bvid=binding.bvid, aid=item.aid, title=item.title,

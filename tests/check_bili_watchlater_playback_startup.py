@@ -26,6 +26,75 @@ class StartupTests(unittest.TestCase):
         owner.playback.maybe_prefetch = Mock()
         return owner, binding, tile, player, properties
 
+    def test_unknown_initial_time_preserves_saved_progress_and_duration(self):
+        owner, binding, tile, _, _ = self.make_playback(ready=False, position=None, duration=0.)
+        binding.progress, binding.duration = 123., 600.
+        widget = Mock()
+        owner._bar_progress[id(tile)] = dict(widget=widget, visible=True)
+        with patch.object(trace, 'record'):
+            owner.playback.tick_binding(binding, [tile])
+        widget.set_position.assert_called_once_with(123.)
+        widget.set_duration.assert_called_once_with(600.)
+        self.assertEqual(binding.progress, 123.)
+
+    def test_restore_seek_keeps_saved_time_until_player_acknowledges_it(self):
+        owner, binding, tile, _, props = self.make_playback(ready=False, position=0.)
+        binding.progress = binding.pending_seek = 123.
+        widget = Mock()
+        owner._bar_progress[id(tile)] = dict(widget=widget, visible=True)
+        owner.playback.mpv_command = Mock(return_value=True)
+        with patch.object(trace, 'record'):
+            for position, seeking in ((0., True), (0., False), (123., False)):
+                props.update({'time-pos': position, 'seeking': seeking})
+                owner.playback.tick_binding(binding, [tile])
+                self.assertEqual(binding.progress, 123.)
+        self.assertEqual([call.args[0] for call in widget.set_position.call_args_list], [123., 123., 123.])
+        owner.playback.mpv_command.assert_called_once_with(owner._host_player(tile), 'seek', 123., 'absolute')
+        self.assertEqual(binding.pending_seek, 0.)
+
+    def test_actual_zero_without_pending_restore_is_not_hidden(self):
+        owner, binding, tile, _, _ = self.make_playback(position=0.)
+        binding.progress = 123.
+        with patch.object(trace, 'record'):
+            owner.playback.tick_binding(binding, [tile])
+        self.assertEqual(binding.progress, 0.)
+
+    def test_manual_seek_to_zero_cancels_pending_restore(self):
+        owner, binding, tile, player, _ = self.make_playback(position=0.)
+        binding.pending_seek, binding.seek_issued = 123., True
+        owner._player_for_binding = lambda _: player
+        owner.playback.mpv_command = Mock(return_value=True)
+        owner.playback.seek_binding(binding, 0.)
+        with patch.object(trace, 'record'):
+            owner.playback.tick_binding(binding, [tile])
+        self.assertEqual((binding.pending_seek, binding.progress), (0., 0.))
+        self.assertFalse(binding.seek_issued)
+        owner.playback.mpv_command.assert_called_once_with(player, 'seek', 0., 'absolute')
+
+    def test_closed_reserved_slot_rejects_late_stream_even_with_same_empty_room_id(self):
+        owner, binding, tile, _, _ = self.make_playback()
+        tile.room = {}
+        binding.request_id = 7
+        owner._host_tiles = lambda: [tile]
+        owner._bindings[binding.bvid] = binding
+        owner.playback.cell_vod[id(binding.cell)] = 7
+        owner.playback.vod_context[7] = dict(tile=tile, cell=binding.cell, generation=0,
+            bvid=binding.bvid, expected_room='', expected_video=binding.bvid)
+        with patch.object(owner.playback, 'inject_playback') as inject:
+            owner.playback.on_vod_completed(7, 0, object())
+        inject.assert_not_called()
+
+    def test_failed_restore_seek_warns_once_and_does_not_retry_forever(self):
+        owner, binding, tile, _, _ = self.make_playback(position=0.)
+        binding.pending_seek = binding.progress = 123.
+        owner.playback.mpv_command = Mock(return_value=False)
+        owner._notify_warning = Mock()
+        with patch.object(trace, 'record'):
+            owner.playback.tick_binding(binding, [tile])
+            owner.playback.tick_binding(binding, [tile])
+        owner._notify_warning.assert_called_once()
+        self.assertEqual(owner.playback.mpv_command.call_count, 1)
+
     def test_paused_loaded_frame_clears_connecting_without_resuming(self):
         owner, binding, tile, player, _ = self.make_playback()
         with patch.object(trace, 'record'):

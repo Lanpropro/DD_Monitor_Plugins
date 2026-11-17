@@ -250,6 +250,18 @@ class PlaybackCoordinator:
                 self.owner.wall.bind(cell, item)
             except Exception:
                 pass
+        if resume is not None:
+            # Reserve the slot now. An empty host room ID hides live composers
+            # and makes startup skip this slot until VOD injects its real ID.
+            self.owner._stop_host_tile(tile)
+            try:
+                tile.set_room(dict(room_id='', live=False, live_known=True,
+                                   watchlater_bvid=bvid, watchlater_part=binding.part))
+            except Exception as error:
+                self.owner._log('reserve restored slot failed type=' + type(error).__name__)
+                self.release_binding(binding, restart=True)
+                return
+            binding.duration = float(item.duration)
         try:
             tile.set_status("正在取流…")
         except Exception:
@@ -342,6 +354,7 @@ class PlaybackCoordinator:
             "qn": int(qn),
             "previous_state": previous_state,
             "expected_room": str(room.get("room_id") or ""),
+            "expected_video": room.get("watchlater_bvid"),
         }
         self.cell_vod[id(cell)] = request_id
         if prepared is not None:
@@ -465,6 +478,8 @@ class PlaybackCoordinator:
         room = getattr(tile, "room", None) or {}
         if str(room.get("room_id") or "") != ctx.get("expected_room", ""):
             return  # 取流期间用户换了台/拖了直播进来：结果作废
+        if ctx.get('expected_video') and room.get('watchlater_bvid') != ctx['expected_video']:
+            return  # Closing a reserved (empty-ID) slot must also invalidate it.
         binding = self.bindings.get(ctx["bvid"])
         if binding is None or binding.request_id != request_id:
             return
@@ -607,6 +622,7 @@ class PlaybackCoordinator:
         except Exception:
             pass
         binding.pending_seek = 0.0
+        binding.seek_issued = False
         if start > 0:
             text = ("%d" % int(start)) if start == int(start) else ("%g" % start)
             try:
@@ -791,6 +807,8 @@ class PlaybackCoordinator:
             if (self.mpv_command(player, "seek", delta, "relative+exact")
                     or self.mpv_command(player, "seek", delta, "relative")):
                 binding.progress = local_target
+                binding.pending_seek = 0.0
+                binding.seek_issued = False
                 return
         # 没有裸 mpv command 的替身播放器：_mpv_command 的 _set 兜底只认
         # 绝对秒数，所以按本地进度做一次绝对跳。
@@ -804,6 +822,8 @@ class PlaybackCoordinator:
         if self.mpv_command(player, "seek", target, "absolute"):
             # 立即回写进度：节拍器下一拍前滑杆/时间显示不闪回。
             binding.progress = target
+            binding.pending_seek = 0.0
+            binding.seek_issued = False
 
     def retry_binding(self, binding) -> None:
         if self.owner._shutting_down or binding.state == "resolving":
@@ -1296,12 +1316,19 @@ class PlaybackCoordinator:
                 binding.audio_attempts += 1
                 if binding.audio_attempts >= 3:
                     binding.pending_audio = ""  # 有画无声胜过没画
-        # start 选项丢失校验（首播内核未 bind 时是空写）。
+        # Keep the saved time until the asynchronous restore seek is observed.
+        seeking = bool(prop('seeking', False))
         if binding.pending_seek > 0 and loaded:
             target = binding.pending_seek
-            binding.pending_seek = 0.0
-            if position is None or position < target - 1.0:
-                self.mpv_command(player, "seek", target, "absolute")
+            if position is not None and position >= target - 1.0 and not seeking:
+                binding.pending_seek = 0.0
+                binding.seek_issued = False
+            elif not binding.seek_issued:
+                binding.seek_issued = True
+                if not self.mpv_command(player, "seek", target, "absolute"):
+                    binding.pending_seek = 0.0
+                    self.owner._notify_warning('恢复进度定位失败，可手动拖动进度条。')
+        position_ready = position is not None and not binding.pending_seek and not seeking
         # EOF：走宿主暂停 API 让 watchdog 安静，再上结束卡。
         if binding.state == "playing" and bool(prop("eof-reached", False)):
             self.enter_ended(binding, tile, player)
@@ -1317,7 +1344,7 @@ class PlaybackCoordinator:
         # The host watchdog returns early while paused, so it cannot acknowledge
         # a frame loaded in that state. Clear startup feedback only for a real
         # configured video frame; metadata alone does not prove readiness.
-        if (paused and position is not None and prop("vo-configured", False)
+        if (paused and position_ready and prop("vo-configured", False)
                 and not getattr(tile, "_player_active", False)):
             tile.set_video_active(True)
             tile.set_buffering(False)
@@ -1325,7 +1352,7 @@ class PlaybackCoordinator:
             tile.set_paused(True)
         from .acceptance_trace import playback_sample
         playback_sample(binding, player)
-        if position is not None:
+        if position_ready:
             binding.progress = position
         if duration > 0:
             binding.duration = duration
@@ -1339,17 +1366,17 @@ class PlaybackCoordinator:
             widget = entry.get("widget")
             try:
                 if widget is not None:
-                    widget.set_duration(duration)
-                    widget.set_position(position or 0.0)
+                    widget.set_duration(binding.duration or binding.item.duration)
+                    widget.set_position(binding.progress)
             except RuntimeError:
                 self.owner._bar_progress.pop(id(tile), None)
         line = binding.line
         if line is not None:
             try:
                 if line.isVisible():
-                    if duration > 0:
+                    if binding.duration > 0:
                         line.set_ratio(max(0.0, min(
-                            1.0, (position or 0.0) / duration)))
+                            1.0, binding.progress / binding.duration)))
                     line.sync_geometry(tile)
             except RuntimeError:
                 binding.line = None
@@ -1360,7 +1387,7 @@ class PlaybackCoordinator:
                     card.sync_geometry(tile)
             except RuntimeError:
                 binding.card = None
-        self.feed_danmaku(binding, tile, position, paused)
+        self.feed_danmaku(binding, tile, position if position_ready else None, paused)
 
     def feed_danmaku(self, binding, tile, position, paused: bool) -> None:
         """按播放进度把点播弹幕喂给宿主原生引擎（需求 5）。

@@ -126,6 +126,7 @@ class SessionTests(unittest.TestCase):
         second = self.make_plugin()
         self.values['auto_play'] = False
         self.tile.room = {}
+        self.tile.set_room = lambda room: setattr(self.tile, 'room', dict(room or {}))
         resume = dict(part=2, progress=321.25, quality=64, paused=False)
         with patch.object(second.playback, 'start_resolution') as resolve, patch.object(second.playback, 'ensure_tick_timer'):
             second._start_vod_for_tile(self.tile, self.item, resume=resume)
@@ -133,6 +134,14 @@ class SessionTests(unittest.TestCase):
             self.assertEqual((binding.part, binding.quality, binding.progress), (2, 64, 321.25))
             self.assertTrue(binding.resume_paused)
             resolve.assert_called_once_with(binding, start=321.25)
+
+    def test_exit_during_restore_keeps_saved_progress_instead_of_initial_zero(self):
+        self.binding.pending_seek = self.binding.progress = 123.
+        player = Mock()
+        player._prop.side_effect = lambda key, default=None: 0. if key == 'time-pos' else default
+        self.plugin._player_for_binding = lambda _: player
+        self.plugin.playback_session.capture()
+        self.assertEqual(self.values[KEY]['videos'][0]['progress'], 123.)
 
     def test_capture_happens_before_closing_cleanup_and_duplicate_close_does_not_erase_it(self):
         def unload():
