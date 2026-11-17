@@ -10,7 +10,7 @@ from .card_presentation import avatar_thumbnail
 from .entry_icon import GalleryIcon
 from .page_panels import GalleryToolButton
 from .undo_entries import AvatarPile, RemovedEntries
-from .widgets import ElidedLabel
+from .gallery_controls import ElidedLabel
 
 
 class UndoNotice(QWidget):

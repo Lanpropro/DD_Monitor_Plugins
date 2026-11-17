@@ -69,5 +69,13 @@ class BoundaryTests(unittest.TestCase):
         self.assertIsNone(plugin._host_player(tile))
         self.assertFalse(plugin._play_on_host(tile,'fixture',{}))
 
+    def test_legacy_widget_exports_keep_the_same_class_identity_as_owning_modules(self):
+        from ddm_plugin_bili_watchlater import widgets,media_cards,gallery_controls,scroll_input
+        self.assertIs(widgets.CoverWidget,media_cards.CoverWidget)
+        self.assertIs(widgets.GridCard,media_cards.GridCard)
+        self.assertIs(widgets.MiddleDragScroller,scroll_input.MiddleDragScroller)
+        self.assertIs(widgets.ElidedLabel,gallery_controls.ElidedLabel)
+        self.assertIs(controls.pages.GridCard,media_cards.GridCard)
+
 
 if __name__=='__main__': unittest.main()

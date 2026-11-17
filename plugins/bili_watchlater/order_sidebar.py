@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QLabel, QListView,
 from ddm import motion, theme
 from .models import VOD_MIME, format_duration
 from .card_presentation import avatar_thumbnail, draw_finished_icon
-from .widgets import relative_font
+from .gallery_controls import relative_font
 from .motion_trace import MotionTrace, measure
 from .order_feedback import OrderFeedback
 from .order_model import OrderModel
