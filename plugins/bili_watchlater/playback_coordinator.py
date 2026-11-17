@@ -503,7 +503,7 @@ class PlaybackCoordinator:
         self.sub_context.clear()
 
     def inject_playback(self, binding, stream, start: float) -> None:
-        from .tile_vod import is_direct_url, merge_headers
+        from .vod_headers import is_direct_url, merge_headers
 
         tile = binding.tile
         url = getattr(stream, "url", "")

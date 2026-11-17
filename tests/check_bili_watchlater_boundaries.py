@@ -23,6 +23,18 @@ class BoundaryTests(unittest.TestCase):
     setUp=controls.PageControlsTests.setUp
     tearDown=controls.PageControlsTests.tearDown
 
+    def test_tile_vod_exports_keep_native_function_cache_and_class_identity(self):
+        from ddm_plugin_bili_watchlater import tile_vod,vod_headers,vod_surface,vod_progress,vod_status
+        for name in ('VodProgressStrip','VodBarProgress','VodProgressLine','format_clock'):
+            self.assertIs(getattr(tile_vod,name),getattr(vod_progress,name))
+        self.assertIs(tile_vod.VodPositionBadge,vod_surface.VodPositionBadge)
+        self.assertIs(tile_vod._push_layered_alpha,vod_surface._push_layered_alpha)
+        self.assertIs(tile_vod.VodStatusCard,vod_status.VodStatusCard)
+        self.assertIs(tile_vod.VodSubtitleButton,vod_status.VodSubtitleButton)
+        self.assertIs(tile_vod.DEFAULT_HEADERS,vod_headers.DEFAULT_HEADERS)
+        self.assertIs(tile_vod.merge_headers,vod_headers.merge_headers)
+        self.assertIs(tile_vod.is_direct_url,vod_headers.is_direct_url)
+
     def test_tile_presentation_state_and_filter_keep_one_owner(self):
         from ddm_plugin_bili_watchlater import tile_presentation
         plugin=plugin_module.BiliWatchLaterPlugin()

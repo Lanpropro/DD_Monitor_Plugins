@@ -364,7 +364,7 @@ class TilePresentation:
         时它跟着一起隐；鼠标唤醒底栏时一起显。非全屏/无点播时隐藏，
         applicable() 把它排除，不占底栏宽度。
         """
-        from .tile_vod import VodBarProgress
+        from .vod_progress import VodBarProgress
 
         plugin = self.owner
         tile = _resolve_tile(tile_context, self.owner._host_window())
@@ -429,7 +429,7 @@ class TilePresentation:
         priority 59 让它在容器里排最后（progress 61 → cell 60 → 字幕 59），
         因此紧贴「弹」的左边；``_allocate`` 把余量给首项，52px 也不会被拉长。
         """
-        from .tile_vod import VodSubtitleButton
+        from .vod_status import VodSubtitleButton
 
         plugin = self.owner
         tile = _resolve_tile(tile_context, self.owner._host_window())
@@ -1089,7 +1089,7 @@ class TilePresentation:
             pass
 
     def ensure_tile_widgets(self, binding) -> None:
-        from .tile_vod import VodStatusCard
+        from .vod_status import VodStatusCard
 
         tile = binding.tile
         # v1.0 需求：：画面墙不再建浮在视频上的 seek 条 —— 进度条统一进
@@ -1110,7 +1110,7 @@ class TilePresentation:
             # 分级导入：进度线是 v1.0 新增控件，模块缺失时降级为无进度线，
             # 绝不连累 strip/card。
             try:
-                from .tile_vod import VodProgressLine
+                from .vod_progress import VodProgressLine
 
                 line = VodProgressLine(tile)
                 line.hide()
@@ -1120,7 +1120,7 @@ class TilePresentation:
         if binding.badge is None and self.owner.POSITION_BADGE_ENABLED:
             # v1.0 任务 3/8：只补左上角的位置徽章，失败就当没这功能。
             try:
-                from .tile_vod import VodPositionBadge
+                from .vod_surface import VodPositionBadge
 
                 binding.badge = VodPositionBadge(tile)
             except Exception as error:

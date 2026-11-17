@@ -36,7 +36,8 @@ from PySide6.QtCore import QObject, QPoint, QRect, QRunnable, QThreadPool, Qt, S
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import QApplication, QWidget
 
-from .tile_vod import DEFAULT_HEADERS, format_clock
+from .vod_headers import DEFAULT_HEADERS
+from .vod_progress import format_clock
 
 SHOT_API = "https://api.bilibili.com/x/player/videoshot"
 
