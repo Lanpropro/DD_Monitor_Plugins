@@ -325,6 +325,9 @@ class BiliWatchLaterPlugin(api.Plugin):
             room = getattr(tile, "room", None)
             if not isinstance(room, dict) or not room.get("watchlater_bvid"):
                 continue
+            binding = self._bindings.get(room.get("watchlater_bvid"))
+            if binding is not None and binding.tile is tile:
+                continue  # A first-show restore may already have injected media.
             try:
                 self._stop_host_tile(tile)
             except Exception:
@@ -1160,7 +1163,7 @@ class BiliWatchLaterPlugin(api.Plugin):
     # ------------------------------------------------------------- lifecycle
     def on_event(self, event, payload) -> None:
         if event == api.EVENT_STARTED:
-            QTimer.singleShot(0, self.playback_session.restore)
+            self.playback_session.restore()
         elif event == api.EVENT_ACCOUNT_CHANGED:
             if (
                 isinstance(payload, dict)

@@ -203,6 +203,41 @@ class SessionTests(unittest.TestCase):
 
 
 class AcceptanceTraceTests(unittest.TestCase):
+    def test_first_tile_show_restores_synchronously_and_started_is_a_fallback(self):
+        from ddm_plugin_bili_watchlater.tile_presentation import _TileEventFilter
+        from PySide6.QtWidgets import QWidget
+        plugin = plugin_module.BiliWatchLaterPlugin()
+        tile = QWidget()
+        tile.room = {}
+        plugin._sanitize_stale_rooms = Mock()
+        def restore():
+            plugin.playback_session.finished = True
+        plugin.playback_session.restore = Mock(side_effect=restore)
+        watcher = _TileEventFilter(plugin)
+        try:
+            watcher.eventFilter(tile, QEvent(QEvent.Show))
+            plugin._sanitize_stale_rooms.assert_called_once()
+            plugin.playback_session.restore.assert_called_once()
+            watcher.eventFilter(tile, QEvent(QEvent.Show))
+            plugin.playback_session.restore.assert_called_once()
+            plugin.on_event(plugin_module.api.EVENT_STARTED, {})
+            self.assertEqual(plugin.playback_session.restore.call_count, 2)
+        finally:
+            tile.deleteLater()
+            watcher.deleteLater()
+            APP.sendPostedEvents(None, QEvent.DeferredDelete)
+
+    def test_stale_sanitizer_leaves_a_restored_binding_intact(self):
+        plugin = plugin_module.BiliWatchLaterPlugin()
+        tile = Mock(room={'watchlater_bvid': 'BV1xx411c7mD'})
+        tile.findChildren.return_value = []
+        plugin._host_tiles = lambda: [tile]
+        plugin._bindings['BV1xx411c7mD'] = SimpleNamespace(tile=tile)
+        plugin._stop_host_tile = Mock()
+        plugin._sanitize_stale_rooms()
+        plugin._stop_host_tile.assert_not_called()
+        tile.set_room.assert_not_called()
+
     def test_lift_trace_defers_file_io_and_caps_samples_without_identifiers(self):
         from ddm_plugin_bili_watchlater import acceptance_trace as trace
         from PySide6.QtWidgets import QWidget

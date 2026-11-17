@@ -202,6 +202,35 @@ class HostTests(unittest.TestCase):
         self.assertEqual(binding.state, 'paused')
         self.assertTrue(all(call.args == (True,) for call in player.set_paused.call_args_list))
 
+    def test_restore_uses_video_controls_while_http_is_still_pending(self):
+        self.item.duration = 600
+        previous_recording = self.tile._recording_available
+        previous_quality = self.tile.quality
+        previous_label = self.tile.quality_button.text()
+        with patch.object(self.plugin.playback, 'start_resolution'), \
+                patch.object(self.plugin.playback, 'ensure_tick_timer'):
+            self.plugin._start_vod_for_tile(self.tile, self.item,
+                resume=dict(part=0, quality=80, progress=123., paused=True))
+        binding = self.plugin._bindings[self.item.bvid]
+        self.assertEqual(binding.state, 'resolving')
+        progress = self.plugin._bar_progress[id(self.tile)]['widget']
+        subtitle = self.plugin._subtitle_controls[id(self.tile)]['widget']
+        self.assertFalse(progress.isHidden())
+        self.assertFalse(progress.isEnabled())
+        self.assertEqual((progress._duration, progress._position), (600., 123.))
+        self.assertFalse(subtitle.isHidden())
+        self.assertFalse(subtitle.isEnabled())
+        self.assertFalse(self.tile._recording_available)
+        self.assertTrue(self.tile.volume_button.compact_popup)
+        self.assertEqual(self.tile.quality, previous_quality)
+        self.assertEqual(self.tile.quality_button.text(), previous_label)
+        # A narrow host can hide the wrapper while its child stays eligible.
+        self.plugin._bar_progress[id(self.tile)]['visible'] = False
+        self.plugin._release_binding(binding, restart=False)
+        self.assertEqual(self.tile._recording_available, previous_recording)
+        self.assertTrue(progress.isHidden())
+        self.assertTrue(subtitle.isHidden())
+
     def test_avatar_loader_uses_async_cover_lifecycle(self):
         avatars = importlib.import_module('ddm_plugin_bili_watchlater.avatars')
         pixmap = QPixmap(8, 8)

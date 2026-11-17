@@ -67,6 +67,12 @@ class _TileEventFilter(QObject):
         if plugin._shutting_down:
             return False
         kind = event.type()
+        if kind == QEvent.Type.Show and getattr(watched, "room", None) is not None:
+            session = getattr(plugin, 'playback_session', None)
+            if session is not None and not session.finished and not session.attempts:
+                # Controls are attached during construction; Show precedes paint.
+                plugin._sanitize_stale_rooms()
+                session.restore()
         if kind == QEvent.Type.ContextMenu:
             room = getattr(watched, "room", None)
             if isinstance(room, dict) and room.get("watchlater_bvid"):
@@ -470,7 +476,7 @@ class TilePresentation:
         if entry is None:
             return
         binding = self.owner._binding_for_tile(tile)
-        visible = binding is not None and binding.state in ("playing", "paused")
+        visible = binding is not None and binding.state in ("resolving", "playing", "paused")
         try:
             widget = entry["widget"]
             if visible != entry.get("visible"):
@@ -478,7 +484,7 @@ class TilePresentation:
                 widget.setVisible(visible)
                 # 官方通道：显隐翻转后让宿主重算一次底栏宽度预算。
                 entry["ctx"].invalidate_layout()
-            widget.setEnabled(visible and not binding._sub_pending if binding else False)
+            widget.setEnabled(binding.state in ("playing", "paused") and not binding._sub_pending if binding else False)
             widget.set_checked(bool(binding and binding.subtitle_on))
             widget.setToolTip("正在加载字幕…" if binding and binding._sub_pending
                               else "B站字幕：优先中文（点击开关）")
@@ -787,18 +793,20 @@ class TilePresentation:
         compact = fullscreen or pip
         binding = self.owner._binding_for_tile(tile)
         active = binding is not None and binding.state in ("playing", "paused")
+        display = binding is not None and binding.state in ("resolving", "playing", "paused")
         entry = self._bar_progress.get(id(tile))
         if entry is not None:
             # Keep the widget eligible while the host hides only its wrapper
             # for lack of space; widening the tile must restore it naturally.
-            requested = bool(active and not pip)
+            requested = bool(display and not pip)
+            entry["widget"].setEnabled(active)
             if entry["widget"].isHidden() == requested:
                 entry["widget"].setVisible(requested)
                 entry["ctx"].invalidate_layout()
         free = 0
-        if entry is not None and active and not pip:
+        if entry is not None and display and not pip:
             free = self.fit_vod_bottom_bar(tile)
-        bar_visible = bool(entry is not None and active and free > 0)
+        bar_visible = bool(entry is not None and display and free > 0)
         if entry is not None:
             entry["visible"] = bar_visible
         if binding is not None:
@@ -998,7 +1006,7 @@ class TilePresentation:
             return
         self.switch_quality(binding, qn)
 
-    def apply_tile_chrome(self, binding) -> None:
+    def apply_tile_chrome(self, binding, *, pending=False) -> None:
         """v1.0 需求：/4：点播格隐藏录制按钮 + 灌入画质按钮档位。"""
         tile = binding.tile
         if binding.prev_chrome is None:
@@ -1024,6 +1032,8 @@ class TilePresentation:
             binding.prev_chrome["volume_compact"] = bool(
                 getattr(volume, "compact_popup", False))
         self.force_volume_mini(tile)
+        if pending:
+            return  # Keep the live quality settings intact until stream injection.
         set_options = getattr(tile, "set_quality_options", None)
         if callable(set_options):
             options = [

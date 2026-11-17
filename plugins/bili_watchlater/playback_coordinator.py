@@ -225,6 +225,15 @@ class PlaybackCoordinator:
             tile.set_status("正在取流…")
         except Exception:
             pass
+        if resume is not None:
+            # Restore presentation before the first paint, independently of HTTP.
+            self.owner.presentation.apply_tile_chrome(binding, pending=True)
+            self.owner._sync_subtitle_control(tile)
+            entry = self.owner._bar_progress.get(id(tile))
+            if entry is not None:
+                entry['widget'].set_duration(item.duration)
+                entry['widget'].set_position(start)
+            self.owner._sync_tile_widgets(tile)
         if prepared is not None:
             self.start_resolution(binding, start=start, prepared=prepared)
         else:
@@ -648,6 +657,8 @@ class PlaybackCoordinator:
         if entry is not None:
             try:
                 entry["widget"].reset()
+                entry["widget"].set_duration(binding.duration or binding.item.duration)
+                entry["widget"].set_position(start)
             except Exception:
                 pass
         self.owner._ensure_space_shortcut()
@@ -956,7 +967,7 @@ class PlaybackCoordinator:
         if entry is not None:
             try:
                 entry["widget"].set_preview_provider(None)
-                if entry.get("visible"):
+                if entry.get("visible") or not entry["widget"].isHidden():
                     entry["visible"] = False
                     entry["widget"].hide()
                     entry["ctx"].invalidate_layout()
