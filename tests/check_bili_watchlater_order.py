@@ -7,8 +7,8 @@ from check_bili_watchlater_interactions import pages, TileFixture
 from ddm_plugin_bili_watchlater.watch_order import WatchOrder
 from ddm_plugin_bili_watchlater.order_sidebar import OrderSidebar, ORDER_MIME
 from ddm_plugin_bili_watchlater import card_preview, widgets
-from PySide6.QtCore import QEvent, QObject, QPointF, Qt, Signal
-from PySide6.QtGui import QDropEvent, QMouseEvent
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, Qt, Signal
+from PySide6.QtGui import QDrag, QDropEvent, QIcon, QMouseEvent
 from PySide6.QtTest import QTest
 
 
@@ -84,8 +84,8 @@ class OrderTests(unittest.TestCase):
         self.addCleanup(lambda: (panel.close(),panel.deleteLater()))
         panel.refresh()
         panel.set_filter('video2')
-        self.assertTrue(panel.list.item(0).isHidden())
-        self.assertFalse(panel.list.item(2).isHidden())
+        self.assertTrue(panel.list.isRowHidden(0))
+        self.assertFalse(panel.list.isRowHidden(2))
         self.assertEqual(self.keys(),['video0','video1','video2','video3'])
 
     def test_next_video_and_position_use_local_order_not_gallery_filter(self):
@@ -128,11 +128,11 @@ class OrderTests(unittest.TestCase):
             panel.resize(300,650)
             panel.show()
             APP.processEvents()
-            self.assertEqual(panel.list.count(),4)
+            self.assertEqual(panel.list.model().rowCount(),4)
             self.assertFalse(panel.grab().isNull())
-            panel.list.itemClicked.emit(panel.list.item(2))
+            panel.list.clicked.emit(panel.list.model().index(2,0))
             play.assert_not_called()
-            panel.list.itemDoubleClicked.emit(panel.list.item(2))
+            panel.list.doubleClicked.emit(panel.list.model().index(2,0))
             play.assert_called_once_with(self.items[2])
             mime=panel.list.drag_mime(self.items[2])
             self.assertTrue(mime.hasFormat(models.VOD_MIME))
@@ -155,6 +155,122 @@ class OrderTests(unittest.TestCase):
             self.assertEqual(card.title_label.toolTip(),'')
             self.assertTrue(card.remove_button.toolTip())
 
+    def test_model_keeps_identical_rows_and_resets_only_changed_projection(self):
+        from ddm_plugin_bili_watchlater.order_model import OrderModel
+        from PySide6.QtTest import QAbstractItemModelTester
+        model=OrderModel(APP)
+        tester=QAbstractItemModelTester(model,QAbstractItemModelTester.FailureReportingMode.Warning)
+        reset=Mock()
+        model.modelReset.connect(reset)
+        model.replace(self.items)
+        model.replace(list(self.items))
+        reset.assert_called_once()
+        self.assertIs(model.index(0,0).data(Qt.UserRole),self.items[0])
+        for _ in range(10):
+            model.replace(list(reversed(self.items)))
+            model.replace(self.items)
+        self.assertEqual(model.rowCount(model.index(0,0)),0)
+        tester.deleteLater()
+        model.deleteLater()
+
+    def test_drag_hotspot_uses_press_position_and_drag_object_is_retired(self):
+        from ddm_plugin_bili_watchlater import order_sidebar
+        from shiboken6 import isValid
+        page=self.page()
+        panel=OrderSidebar(page,self.order,Mock())
+        self.addCleanup(lambda: (panel.close(),panel.deleteLater()))
+        with patch.object(page,'refresh_from_wall'),patch.object(page.covers,'_pump'):
+            panel.resize(300,650)
+            panel.show()
+            APP.processEvents()
+            view=panel.list
+            index=view.model().index(1,0)
+            grip=QPoint(19,32)
+            QTest.mousePress(view.viewport(),Qt.LeftButton,pos=view.visualRect(index).topLeft()+grip)
+            with patch.object(order_sidebar.motion,'enabled',return_value=False):
+                drag=view.prepare_drag(index)
+                self.assertEqual(drag.hotSpot(),grip)
+                self.assertEqual(drag.pixmap().deviceIndependentSize().toSize(),view.visualRect(index).size())
+            drag.deleteLater()
+            with patch.object(order_sidebar.QDrag,'exec',return_value=Qt.IgnoreAction):
+                view.startDrag(Qt.CopyAction)
+            APP.sendPostedEvents(None,QEvent.DeferredDelete)
+            self.assertFalse(isValid(drag))
+            self.assertFalse(view.findChildren(QDrag))
+
+    def test_drop_refresh_is_deferred_until_native_drag_exec_returns(self):
+        from ddm_plugin_bili_watchlater import order_sidebar
+        page=self.page()
+        panel=OrderSidebar(page,self.order,Mock())
+        self.addCleanup(lambda: (panel.close(),panel.deleteLater()))
+        with patch.object(page,'refresh_from_wall'),patch.object(page.covers,'_pump'):
+            panel.resize(300,650)
+            panel.show()
+            APP.processEvents()
+            view=panel.list
+            view.setCurrentIndex(view.model().index(0,0))
+            changed=list(reversed(self.items))
+            def during_exec(*_):
+                self.assertTrue(view.feedback.dragging)
+                view.replace(changed)
+                self.assertIs(view.model().index(0,0).data(Qt.UserRole),self.items[0])
+                panel.hide()
+                panel.show()
+                return Qt.MoveAction
+            with patch.object(order_sidebar.QDrag,'exec',side_effect=during_exec):
+                view.startDrag(Qt.CopyAction)
+            # showEvent's canonical snapshot wins over an earlier pending refresh.
+            self.assertIsNone(view._pending_items)
+            self.assertFalse(view.feedback.dragging)
+            self.assertIs(view.model().index(0,0).data(Qt.UserRole),self.items[0])
+            self.assertFalse(view.drag_scroll.isActive())
+
+    def test_two_video_drags_then_live_drag_and_switch_back(self):
+        from ddm.widgets import Sidebar
+        from ddm.sidebar_drag import ROOM_MIME, NAV_MIME
+        from PySide6.QtCore import QMimeData
+        from PySide6.QtWidgets import QHBoxLayout, QWidget
+        page=self.page()
+        panel=OrderSidebar(page,self.order,Mock())
+        host=QWidget()
+        host.setGeometry(-10000,-10000,700,760)
+        sidebar=Sidebar([dict(room_id='fixture',uname='Fixture',live=False)],auto_compact=False)
+        QHBoxLayout(host).addWidget(sidebar)
+        sidebar.plugin_pages.add('fixture','order',panel,'观看顺序',QIcon())
+        try:
+            with patch.object(page,'refresh_from_wall'),patch.object(page.covers,'_pump'), \
+                    patch.object(QDrag,'exec',return_value=Qt.IgnoreAction):
+                host.show()
+                APP.processEvents()
+                for _ in range(8):
+                    sidebar.plugin_pages.select(('fixture','order'))
+                    APP.processEvents()
+                    view=panel.list
+                    for row in (0,1):
+                        view.setCurrentIndex(view.model().index(row,0))
+                        view.startDrag(Qt.CopyAction)
+                    sidebar.plugin_pages.select()
+                    live=sidebar.items()[0]
+                    mime=QMimeData()
+                    mime.setData(ROOM_MIME,b'fixture')
+                    mime.setData(NAV_MIME,b'fixture')
+                    sidebar.drag_session.start(live,mime,live.grab(),QPoint(15,20),live.mapToGlobal(QPoint(15,20)))
+                    sidebar.drag_session.cancel()
+                    sidebar.plugin_pages.select(('fixture','order'))
+                    APP.processEvents()
+                    self.assertEqual(view.model().rowCount(),len(self.items))
+                    self.assertFalse(view.feedback.dragging)
+                    APP.sendPostedEvents(None,QEvent.DeferredDelete)
+                    self.assertFalse(view.findChildren(QDrag))
+        finally:
+            sidebar.drag_session.cancel()
+            sidebar.plugin_pages.remove_owner('fixture')
+            panel.close()
+            panel.deleteLater()
+            host.close()
+            host.deleteLater()
+            APP.sendPostedEvents(None,QEvent.DeferredDelete)
+
     def test_real_mouse_single_selects_and_double_click_plays_once(self):
         page=self.page()
         play=Mock()
@@ -165,14 +281,14 @@ class OrderTests(unittest.TestCase):
             panel.show()
             APP.processEvents()
             view=panel.list
-            point=view.visualItemRect(view.item(1)).center()
+            point=view.visualRect(view.model().index(1,0)).center()
             self.assertTrue(view.viewport().hasMouseTracking())
             APP.sendEvent(view.viewport(),QMouseEvent(QEvent.MouseMove,QPointF(point),
                 QPointF(view.viewport().mapToGlobal(point)),Qt.NoButton,Qt.NoButton,Qt.NoModifier))
             self.assertEqual(view.viewport().cursor().shape(),Qt.PointingHandCursor)
             QTest.mouseClick(view.viewport(),Qt.LeftButton,pos=point)
             play.assert_not_called()
-            self.assertEqual(view.currentRow(),1)
+            self.assertEqual(view.currentIndex().row(),1)
             QTest.mouseDClick(view.viewport(),Qt.LeftButton,pos=point)
             QTest.mouseRelease(view.viewport(),Qt.LeftButton,pos=point)
             play.assert_called_once_with(self.items[1])
@@ -189,7 +305,7 @@ class OrderTests(unittest.TestCase):
             APP.processEvents()
             view=panel.list
             state=view.feedback
-            rect=view.visualItemRect(view.item(0))
+            rect=view.visualRect(view.model().index(0,0))
             with patch.object(order_feedback.motion,'enabled',return_value=True):
                 state.hover(0)
                 state.animation.setCurrentTime(60)
@@ -202,7 +318,7 @@ class OrderTests(unittest.TestCase):
             state.set_pressed(1)
             self.assertEqual(state.pressed,1)
             self.assertFalse(view.grab().isNull())
-            self.assertEqual(view.visualItemRect(view.item(0)),rect)
+            self.assertEqual(view.visualRect(view.model().index(0,0)),rect)
             with patch.object(order_feedback.motion,'enabled',return_value=False):
                 state.hover(0)
                 self.assertEqual(state.weights,{0:1.})
@@ -228,11 +344,11 @@ class OrderTests(unittest.TestCase):
                 view.cover_ready('https://fixture.invalid/not-ours.jpg')
                 update.assert_not_called()
                 view.cover_ready(self.items[0].cover_url)
-                update.assert_called_once_with(view.visualItemRect(view.item(0)))
+                update.assert_called_once_with(view.visualRect(view.model().index(0,0)))
                 update.reset_mock()
                 view.cover_ready(self.items[-1].cover_url)
                 update.assert_not_called()
-            y=view.visualItemRect(view.item(0)).bottom()-2
+            y=view.visualRect(view.model().index(0,0)).bottom()-2
             view.set_drop_y(y)
             self.assertFalse(view.grab().isNull())
             panel.hide()
@@ -250,7 +366,7 @@ class OrderTests(unittest.TestCase):
             class Drop:
                 def source(self): return view
                 def mimeData(self): return view.drag_mime(self_item)
-                def position(self): return QPointF(view.visualItemRect(view.item(0)).topLeft())
+                def position(self): return QPointF(view.visualRect(view.model().index(0,0)).topLeft())
                 def setDropAction(self,_): pass
                 accept=Mock()
                 ignore=Mock()

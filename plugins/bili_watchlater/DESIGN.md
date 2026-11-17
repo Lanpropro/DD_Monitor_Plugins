@@ -140,7 +140,7 @@ DPI 通知仅登记一次延迟任务；处理期间和冷却期忽略重入，�
 
 ## 本地观看顺序与侧栏
 
-`WatchOrder` 以 Page 的 canonical 列表对象为数据源，只持有账号内的 BV 排列；Page.items_changed 同步加载/删除/账号清理。`OrderSidebar` 是展示与拖动，使用 QListWidget + delegate 仅绘制可见大卡片，封面/头像复用 Page 的无 Cookie CoverLoader 和同一缓存。Page 暂停封面加载前检查外部可见需求，图库重排请求同时保留侧栏可见图片。组件隐藏停定时器，插件卸载先注销侧栏再关闭 Page。
+`WatchOrder` 以 Page 的 canonical 列表对象为数据源，只持有账号内的 BV 排列；Page.items_changed 同步加载/删除/账号清理。`OrderSidebar` 是展示与拖动，使用 QListView + OrderModel + delegate 仅绘制可见大卡片，封面/头像复用 Page 的无 Cookie CoverLoader 和同一缓存。Page 暂停封面加载前检查外部可见需求，图库重排请求同时保留侧栏可见图片。组件隐藏停定时器，插件卸载先注销侧栏再关闭 Page。
 
 排序 MIME 与既有 VOD_MIME 同时存在：侧栏只接受来自自身的排序，画面墙沿用现有视频协议。自动连播/预取/序号通过 `_ordered_items` 统一读取，队列修改清除旧预取。旧宿主不提供侧栏契约时采用原列表顺序。平台业务不放进本体 sidebar_pages，后者只管理入口、Qt 父对象、当前页及 owner 清理。
 
@@ -157,3 +157,14 @@ DPI 通知仅登记一次延迟任务；处理期间和冷却期忽略重入，�
 `OrderFeedback` 是 OrderList 的 Qt 子对象，每列只有一个 QVariantAnimation，记录少量悬停透明度和按下行；不为每张卡片建控件或定时器。使用宿主 CONTROL_FEEDBACK_MS(160ms)/THEME_WAVE_EASING，快速切换从当前值继续，滚动时即时对齐鼠标状态；键盘/隐藏清理，无系统动画时立即切换。视觉仅为明暗/描边，不改变几何。OrderList 负责拖动插入线和单击选中/双击 chosen 信号，现有VOD MIME及目标格规则不变。
 
 MotionTrace复用于OrderList，拥有独立窗口预算和可见谓词，order timing与Gallery的motion timing分开。真实17:00采集：绘制最高4.5/5.9/4.3ms；visible_urls最高0.8ms，load_covers最高3.6ms；事件循环最大41.5/25.0/70.9ms，用户反馈这次无明显卡顿。未归因或声称修复。首窗142次image_callback，原代码每个回调无条件viewport.update；新实现从视口首项遍历可见项，仅对匹配封面/头像的卡片rect发update，避免无关图片造成整列重绘。需冷/热缓存真实复验才能评价体感提升。
+
+
+### 拖动后切回列表的原生崩溃修复候选
+
+2026-11-17 17:21:40，用户实机进程70080发生0xc0000005；Python现场为OrderSidebar.showEvent→refresh→OrderList.replace第118行QListWidget.clear，原生栈位于shiboken6/QtWidgets。现场定位了旧列表项销毁阶段；不能仅凭该栈断言某个具体PySide内部缺陷已被证实。日志轮转另有WinError32，作为独立记录保留，不将其当成此次访问冲突的根因。
+
+`OrderModel(QAbstractListModel)`持有普通WatchLaterItem引用的显示投影，OrderList使用QListView，不再建立/清空原生QListWidgetItem。相同对象/顺序的展示刷新只发dataChanged，真实列表变化才reset；原选择用BV恢复，筛选在items_replaced后应用。模型以view为Qt父对象，view和model生命周期一致，业务顺序仍唯一归WatchOrder。
+
+Windows拖动exec的嵌套事件循环中，列表刷新只记录最新pending快照；exec返回后统一应用，避免drop回调同步销毁/重置正在拖动的视图状态。每个QDrag在finally调用deleteLater，清定时器/插入线/按下状态；没有长期保留源项包装器。拖动像素使用宿主motion.lifted_drag，并按viewport鼠标按下点减去卡片rect原点设置hotspot，保持DPR和系统动画策略。
+
+专项含QAbstractItemModelTester、身份不变不reset、拖中刷新延后、拖动对象回收和热点；8轮“视频拖2次→关注拖1次→切回”使用真实Qt控件/拖动对象，但跳过Windows OLE exec，仅验证生命周期。首次无交互OLE检查无法由Qt定时取消而中止，未计为通过；最终必须用户按真实手势复验，不用该回归替代实机验收。

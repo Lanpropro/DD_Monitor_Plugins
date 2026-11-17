@@ -26,8 +26,8 @@ class OrderFeedback(QObject):
 
     def update_rows(self, rows):
         for row in rows:
-            if 0 <= row < self.view.count():
-                self.view.viewport().update(self.view.visualItemRect(self.view.item(row)))
+            if 0 <= row < self.view.model().rowCount():
+                self.view.viewport().update(self.view.visualRect(self.view.model().index(row,0)))
 
     def advance(self, progress):
         rows = set(self.weights) | set(self.starts) | {self.hovered}
