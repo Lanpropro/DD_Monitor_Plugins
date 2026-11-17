@@ -23,6 +23,64 @@ class BoundaryTests(unittest.TestCase):
     setUp=controls.PageControlsTests.setUp
     tearDown=controls.PageControlsTests.tearDown
 
+    def test_tile_presentation_state_and_filter_keep_one_owner(self):
+        from ddm_plugin_bili_watchlater import tile_presentation
+        plugin=plugin_module.BiliWatchLaterPlugin()
+        self.assertIs(plugin_module._TileEventFilter,tile_presentation._TileEventFilter)
+        self.assertIs(plugin_module._resolve_tile,tile_presentation._resolve_tile)
+        cells={}
+        plugin._cell_tiles=cells
+        self.assertIs(plugin.presentation._cell_tiles,cells)
+        self.assertIs(plugin._bar_progress,plugin.presentation._bar_progress)
+        self.assertNotIn('_cell_tiles',plugin.__dict__)
+        self.assertNotIn('_quality_connected',plugin.__dict__)
+
+    def test_tile_geometry_sync_coalesces_and_unload_rejects_delayed_work(self):
+        from ddm_plugin_bili_watchlater import tile_presentation
+        plugin=plugin_module.BiliWatchLaterPlugin()
+        tile=object()
+        callbacks=[]
+        with patch.object(tile_presentation.QTimer,'singleShot',side_effect=lambda _,callback:callbacks.append(callback)), \
+                patch.object(plugin.presentation,'sync_tile_widgets') as sync:
+            plugin._queue_tile_sync(tile)
+            plugin._queue_tile_sync(tile)
+            self.assertEqual(len(callbacks),1)
+            self.assertIn(id(tile),plugin.presentation._geometry_pending)
+            callbacks[0]()
+            sync.assert_called_once_with(tile)
+            self.assertEqual(plugin.presentation._geometry_pending,set())
+            plugin._shutting_down=True
+            plugin._queue_tile_sync(tile)
+            self.assertEqual(len(callbacks),1)
+
+    def test_unwatch_tile_disconnects_quality_and_cancels_pending_click(self):
+        from check_bili_watchlater_input import Tile
+        from PySide6.QtCore import QTimer,Signal
+        class QualityTile(Tile):
+            qualityChanged=Signal(object,int)
+        plugin=plugin_module.BiliWatchLaterPlugin()
+        tile=QualityTile()
+        self.addCleanup(tile.deleteLater)
+        timer=QTimer()
+        timer.start(250)
+        plugin._click_timers[id(tile)]=timer
+        plugin._vod_press[id(tile)]=object()
+        quality=Mock()
+        plugin.presentation.on_tile_quality_changed=quality
+        plugin._watch_tile(tile)
+        tile.qualityChanged.emit(tile.room,80)
+        quality.assert_called_once_with(tile,tile.room,80)
+        self.assertIn(id(tile),plugin._watched_tiles)
+        plugin._unwatch_tile(tile)
+        tile.qualityChanged.emit(tile.room,64)
+        self.assertEqual(quality.call_count,1)
+        self.assertFalse(timer.isActive())
+        self.assertNotIn(id(tile),plugin._watched_tiles)
+        self.assertNotIn(id(tile),plugin._click_timers)
+        self.assertNotIn(id(tile),plugin._vod_press)
+        plugin._unwatch_tile(tile)
+        plugin.on_unload()
+
     def test_gallery_renderer_owns_indices_and_page_keeps_qt_widgets_and_timers(self):
         renderer=self.page.renderer
         self.assertIs(renderer.parent(),self.page)

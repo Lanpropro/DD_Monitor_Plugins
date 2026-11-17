@@ -488,7 +488,7 @@ class BottomBarLayoutTests(unittest.TestCase):
     def test_narrow_tile_uses_line_then_restores_full_bar_when_widened(self):
         binding = SimpleNamespace(tile=self.tile, state='playing', line=Mock(), strip=None)
         with patch.object(self.plugin, '_binding_for_tile', return_value=binding), \
-                patch.object(self.plugin, '_sync_position_badge'), \
+                patch.object(self.plugin.presentation, 'sync_position_badge'), \
                 patch.object(self.plugin, '_sync_shortcut_hosts'):
             for width, visible in ((300, False), (1100, True), (300, False), (1100, True)):
                 self.tile.resize(width, 400)
