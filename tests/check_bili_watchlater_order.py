@@ -128,6 +128,7 @@ class OrderTests(unittest.TestCase):
             panel.show()
             APP.processEvents()
             self.assertEqual(panel.list.count(),4)
+            self.assertEqual(panel.list.viewport().cursor().shape(),Qt.PointingHandCursor)
             self.assertFalse(panel.grab().isNull())
             panel.list.itemClicked.emit(panel.list.item(2))
             play.assert_called_once_with(self.items[2])

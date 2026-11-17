@@ -22,9 +22,11 @@ def measure(phase):
 
 
 class MotionTrace(QObject):
-    def __init__(self, page):
-        super().__init__(page)
+    def __init__(self, page, *, areas=None, visible=None, parent=None, prefix='motion timing'):
+        super().__init__(parent or page)
         self.page = page
+        self.visible = visible or (lambda: page._visible)
+        self.prefix = prefix
         self.windows = 0
         self.samples = {}
         self.last = 0
@@ -33,17 +35,19 @@ class MotionTrace(QObject):
         self.timer = QTimer(self)
         self.timer.setInterval(16)
         self.timer.timeout.connect(self.tick)
-        for scroll in (page.list_scroll, page.grid_scroll):
+        for scroll in areas if areas is not None else (page.list_scroll, page.grid_scroll):
             scroll.viewport().installEventFilter(self)
             scroll.verticalScrollBar().valueChanged.connect(lambda _: self.sample('scroll', 0))
 
     def eventFilter(self, watched, event):
+        if event.type() == QEvent.Wheel:
+            self.sample('wheel', 0)
         if event.type() == QEvent.Paint and self.timer.isActive():
             self.samples.setdefault('paint', []).append(0)
         return False
 
     def sample(self, kind, elapsed):
-        if self.windows >= 3 or not self.page._visible:
+        if self.windows >= 3 or not self.visible():
             return
         if not self.timer.isActive():
             self.started = self.last = time.perf_counter()
@@ -61,4 +65,4 @@ class MotionTrace(QObject):
             self.windows += 1
             detail = ' '.join(f'{key}_n={len(values)} {key}_max_ms={max(values):.1f}'
                               for key, values in sorted(self.samples.items()))
-            self.page._log(f'motion timing window={self.windows} loop_gap_max_ms={self.gap:.1f} {detail}')
+            self.page._log(f'{self.prefix} window={self.windows} loop_gap_max_ms={self.gap:.1f} {detail}')

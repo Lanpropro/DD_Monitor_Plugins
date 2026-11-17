@@ -7,6 +7,7 @@ from ddm import theme
 from .models import VOD_MIME, format_duration
 from .card_presentation import avatar_thumbnail
 from .widgets import relative_font
+from .motion_trace import MotionTrace, measure
 
 ORDER_MIME = 'application/x-bili-watchlater-order'
 
@@ -74,6 +75,7 @@ class OrderList(QListWidget):
     def __init__(self, page, parent=None):
         super().__init__(parent)
         self.page = page
+        self.viewport().setCursor(Qt.PointingHandCursor)
         self.setFrameShape(QListWidget.NoFrame)
         self.setStyleSheet('QListWidget { background: transparent; border: 0; }')
         self.setItemDelegate(OrderDelegate(self))
@@ -94,7 +96,10 @@ class OrderList(QListWidget):
         self.drag_scroll.timeout.connect(self.scroll_drag)
         self.drag_y = 0
         page.covers.image_ready.connect(self.cover_ready)
+        self.motion_trace = MotionTrace(page, areas=[self], visible=self.isVisible,
+                                        parent=self, prefix='order timing')
 
+    @measure('replace')
     def replace(self, items):
         selected = self.currentItem().data(Qt.UserRole).bvid if self.currentItem() else None
         value = self.verticalScrollBar().value()
@@ -171,6 +176,7 @@ class OrderList(QListWidget):
         if self.isVisible():
             self.cover_timer.start()
 
+    @measure('load_covers')
     def load_covers(self):
         if not self.isVisible():
             return
@@ -179,6 +185,7 @@ class OrderList(QListWidget):
         for url in self.visible_urls():
             self.page.covers.get(url)
 
+    @measure('visible_urls')
     def visible_urls(self):
         if not self.isVisible():
             return []
@@ -190,14 +197,20 @@ class OrderList(QListWidget):
                 avatars.append(avatar_thumbnail(row.data(Qt.UserRole).owner_face))
         return [url for url in covers+avatars if url]
 
+    @measure('image_callback')
     def cover_ready(self, _url):
         if self.isVisible():
             self.viewport().update()
 
+    @measure('resize_layout')
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.doItemsLayout()
         self.request_covers()
+
+    @measure('list_paint')
+    def paintEvent(self, event):
+        super().paintEvent(event)
 
 
 class OrderSidebar(QWidget):
