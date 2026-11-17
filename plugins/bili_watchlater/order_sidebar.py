@@ -209,7 +209,7 @@ class OrderSidebar(QWidget):
         box.setContentsMargins(0,0,0,0)
         hint = QLabel('拖动排序或拖入格子 · 仅影响本机连播', self)
         hint.setWordWrap(True)
-        hint.setObjectName('NavSub')
+        hint.setObjectName('SectionLabel')
         box.addWidget(hint)
         self.status = QLabel(self)
         self.status.setWordWrap(True)
