@@ -232,7 +232,7 @@ class HostTests(unittest.TestCase):
         self.assertTrue(subtitle.isHidden())
 
     def test_pending_restore_excludes_real_live_composer_and_skips_live_startup(self):
-        live = loader._load_module('bili_live', str(PLUGIN_DIR / 'bili_live/plugin.py'))
+        live = loader._load_module('bili_live', str(ROOT / 'plugins/bili_live/plugin.py'))
         live.on_load(self.plugin.context)
         self.addCleanup(live.on_unload)
         composer = next(entry.control.widget for entry in self.tile._plugin_controls.entries
