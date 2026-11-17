@@ -6,7 +6,9 @@
   "host_capabilities": [
     "tile_controls",
     "credential_snapshots",
-    "workspace_pages"
+    "workspace_pages",
+    "sidebar_pages",
+    "shared_sidebar_drag"
   ],
   "min_app_version": "0.7.3"
 }

@@ -214,6 +214,10 @@ class BiliWatchLaterPlugin(api.Plugin):
             "credentials",
             "request_login",
             "notify",
+            "register_sidebar_page",
+            "unregister_sidebar_page",
+            "start_sidebar_drag",
+            "cancel_sidebar_drag",
         )
         missing = [
             name
@@ -222,14 +226,15 @@ class BiliWatchLaterPlugin(api.Plugin):
         ]
         if missing:
             raise RuntimeError(
-                "bili_watchlater 需要 DD监控室CE 0.7.2 或更新版本；"
+                "bili_watchlater 需要支持侧栏页面和共享拖影的本体开发版"
+                "（晚于已发布的 v0.7.3）；"
                 "当前宿主缺少接口：" + "、".join(missing)
             )
         if not hasattr(api, "EVENT_ACCOUNT_CHANGED") or not hasattr(
             api, "EVENT_CLOSING"
         ):
             raise RuntimeError(
-                "bili_watchlater 需要 DD监控室CE 0.7.2 或更新版本；"
+                "bili_watchlater 需要支持账号和退出事件的本体；"
                 "当前宿主缺少账号或退出事件"
             )
 
