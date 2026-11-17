@@ -1,4 +1,4 @@
-"""Restore browsing by item identity and local offset, never by scroll percentage."""
+"""Remember browsing within this run, by item identity and local offset."""
 from PySide6.QtCore import QObject
 
 
@@ -7,16 +7,17 @@ class BrowseState(QObject):
         super().__init__(page)
         self.page = page
         reader = getattr(page.context, 'setting', None)
-        saved = reader('browse_state', {}) if callable(reader) else {}
-        self.saved = saved if isinstance(saved, dict) else {}
+        legacy = reader('browse_state', {}) if callable(reader) else {}
+        if legacy:
+            setter = getattr(page.context, 'set_setting', None)
+            if callable(setter):
+                setter('browse_state', {})  # Discard positions persisted by older builds.
+        self.saved = {}
         self.pending = None
 
     def clear(self):
         self.saved = {}
         self.pending = None
-        setter = getattr(self.page.context, 'set_setting', None)
-        if callable(setter):
-            setter('browse_state', {})
 
     def capture(self):
         page = self.page
@@ -33,9 +34,6 @@ class BrowseState(QObject):
             value=value, view=page._view_mode, query=page.search.text(),
             filter=page.filter_combo.currentData(), sort=page.sort_combo.currentData(),
             account=str(page._cookies.get('DedeUserID') or ''))
-        setter = getattr(page.context, 'set_setting', None)
-        if callable(setter):
-            setter('browse_state', self.saved)
 
     def prepare(self):
         page = self.page

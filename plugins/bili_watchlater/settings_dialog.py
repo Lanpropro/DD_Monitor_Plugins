@@ -36,7 +36,7 @@ class WatchLaterSettings(InlinePanel):
         self.order_include_finished = self._toggle(values['order_include_finished'], '观看顺序包含已看完视频')
         self._row(appearance, '观看顺序包含已看完视频', '关闭后，播放列表、下一条、自动连播和预加载跳过已看完视频；保留本地排序，重新开启即可显示。', self.order_include_finished)
         self.remember_state = self._toggle(values['remember_state'], '留存状态')
-        self._row(appearance, '留存状态', '再次打开选片页面时，恢复上次的浏览位置、视图、搜索和筛选。', self.remember_state)
+        self._row(appearance, '留存状态', '本次运行中重新打开选片页面时恢复浏览位置、视图、搜索和筛选；退出软件后重置。', self.remember_state)
         self.undo_expand_rows = self._select([(f'{n} 条', n) for n in range(1,11)], values['undo_expand_rows'])
         self._row(appearance, '移除提示展开条数', '展开时同时显示的已移除视频数量；仅窗口高度不足时自动减少，其余条目在提示内滚动查看。', self.undo_expand_rows)
 

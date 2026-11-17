@@ -59,7 +59,7 @@ class PreferenceTests(unittest.TestCase):
         self.assertFalse(dialog.prefetch_next.isEnabled())
         self.assertFalse(dialog.prefetch_next.isChecked())
 
-    def test_close_reopen_and_new_page_restore_deep_anchor_and_offset(self):
+    def test_close_reopen_restores_in_memory_but_new_session_starts_at_top(self):
         values = {}
         page = self.page(values)
         items = [models.WatchLaterItem(aid=i+1, bvid=f'fixture{i}', title=f'视频{i}', view_count=0, danmaku_count=0)
@@ -74,7 +74,8 @@ class PreferenceTests(unittest.TestCase):
             bar = page.list_scroll.verticalScrollBar()
             bar.setValue(bar.value() + 9)
             page.hide()
-            saved = values['browse_state']
+            saved = page.browse_state.saved
+            self.assertNotIn('browse_state', values)
             self.assertEqual(saved['key'], items[65].key)
             self.assertEqual(saved['offset'], 9)
             page.show()
@@ -84,8 +85,19 @@ class PreferenceTests(unittest.TestCase):
         second = self.page(values)
         second._items, second._loaded_once = items, True
         with self.shown(second):
-            self.assertEqual(second._view_mode, 'list')
-            self.assertEqual(second._visible_anchor_key(), saved['key'])
+            self.assertEqual(second._view_mode, 'grid')
+            self.assertEqual(second._active_scroll().verticalScrollBar().value(), 0)
+            self.assertEqual(second.browse_state.saved, {})
+
+    def test_legacy_disk_position_is_discarded_on_new_session(self):
+        values = dict(browse_state=dict(key='old', value=999, view='list', query='old'))
+        page = self.page(values)
+        page.browse_state.prepare()
+        self.assertEqual(page.browse_state.saved, {})
+        self.assertIsNone(page.browse_state.pending)
+        self.assertEqual(page._view_mode, 'grid')
+        self.assertEqual(page.search.text(), '')
+        self.assertEqual(values['browse_state'], {})
 
     def test_retention_off_starts_at_top_and_account_change_clears_saved_state(self):
         values = dict(remember_state=False, browse_state=dict(key='old', value=999, view='list', query='old'))
@@ -98,8 +110,9 @@ class PreferenceTests(unittest.TestCase):
         self.assertEqual(values['browse_state'], {})
 
     def test_saved_filters_from_another_account_are_cleared_before_render(self):
-        values = dict(browse_state=dict(account='old', query='no-match', filter='watched', view='list'))
+        values = {}
         page = self.page(values)
+        page.browse_state.saved = dict(account='old', query='no-match', filter='watched', view='list')
         page._cookies = {'DedeUserID': 'new'}
         page._items = [models.WatchLaterItem(aid=1, bvid='fixture', title='video')]
         page._loaded_once = True
@@ -108,7 +121,8 @@ class PreferenceTests(unittest.TestCase):
         self.assertEqual(page.search.text(), '')
         self.assertEqual(page.filter_combo.currentData(), 'all')
         self.assertEqual(page._render_total, 1)
-        self.assertEqual(values['browse_state'], {})
+        self.assertEqual(page.browse_state.saved, {})
+        self.assertNotIn('browse_state', values)
 
     def test_user_filter_change_discards_pending_scroll_restore(self):
         page = self.page()
