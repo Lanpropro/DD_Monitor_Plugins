@@ -1013,11 +1013,19 @@ class WatchLaterPage(BrowserWindow):
         if self._settings_dialog is not None:
             return
         self._back_to_browser()
+        from .settings_trace import SettingsTrace
+        trace = SettingsTrace(self) if getattr(self, '_settings_trace_count', 0) < 3 else None
+        self._settings_trace_count = getattr(self, '_settings_trace_count', 0) + 1
         dialog = WatchLaterSettings(self.preferences, self)
+        if trace is not None:
+            trace.mark('construct')
         self._settings_dialog = dialog
         dialog.applied.connect(self._apply_preferences)
         dialog.finished.connect(lambda _result: setattr(self, '_settings_dialog', None))
         self._show_inline_panel(dialog, '设置')
+        if trace is not None:
+            trace.mark('attach')
+            trace.watch(dialog)
 
     def _apply_preferences(self, values):
         previous_default = self.preferences['default_view']

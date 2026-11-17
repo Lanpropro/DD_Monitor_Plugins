@@ -207,6 +207,17 @@ class NavigationTests(unittest.TestCase):
                 self.assertLessEqual(panel.width(), 720)
                 self.page._back_to_browser()
 
+    def test_settings_trace_is_bounded_and_contains_only_numeric_timings(self):
+        with self.shown(), patch.object(self.page, '_log') as log:
+            for _ in range(4):
+                self.page._open_settings()
+                APP.processEvents()
+                self.page._back_to_browser()
+            records = [call.args[0] for call in log.call_args_list]
+            self.assertEqual(sum('phase=construct ' in record for record in records), 3)
+            self.assertTrue(all(record.startswith('settings timing phase=') for record in records))
+            self.assertTrue(all('elapsed_ms=' in record and 'stage_ms=' in record for record in records))
+
 
 if __name__ == '__main__':
     unittest.main()
