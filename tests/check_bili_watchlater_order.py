@@ -283,6 +283,104 @@ class OrderTests(unittest.TestCase):
             self.assertFalse(view.feedback.dragging)
             self.assertFalse(view.drag_scroll.isActive())
 
+    def test_shared_drag_displays_visual_before_gap_and_restores_after_callback(self):
+        from ddm_plugin_bili_watchlater import order_sidebar
+        page=self.page()
+        panel=OrderSidebar(page,self.order,Mock())
+        self.addCleanup(lambda: (panel.close(),panel.deleteLater()))
+        with patch.object(page,'refresh_from_wall'),patch.object(page.covers,'_pump'):
+            panel.resize(300,650)
+            panel.show()
+            APP.processEvents()
+            view=panel.list
+            index=view.model().index(0,0)
+            view.setCurrentIndex(index)
+            callbacks=[]
+            def start(source,mime,pixmap,hotspot,global_pos,*,on_finished):
+                self.assertIs(source,view)
+                self.assertIsNone(view.dragged_bvid)
+                self.assertFalse(pixmap.isNull())
+                self.assertIs(mime,view._active_mime)
+                callbacks.append(on_finished)
+                return True
+            page.context.start_sidebar_drag=start
+            with patch.object(order_sidebar.QDrag,'exec',side_effect=AssertionError('Native OLE must not run')):
+                view.startDrag(Qt.CopyAction)
+            self.assertEqual(view.dragged_bvid,self.items[0].bvid)
+            self.assertTrue(view.feedback.dragging)
+            drop=QDropEvent(QPointF(4,4),Qt.MoveAction,view._active_mime,Qt.LeftButton,Qt.NoModifier)
+            self.assertIsNone(drop.source())
+            self.assertTrue(view.owns_drag(drop))
+            foreign_mime=view.drag_mime(self.items[0])
+            foreign=QDropEvent(QPointF(4,4),Qt.MoveAction,foreign_mime,Qt.LeftButton,Qt.NoModifier)
+            self.assertFalse(view.owns_drag(foreign))
+            callbacks[0]()
+            self.assertIsNone(view.dragged_bvid)
+            self.assertIsNone(view._active_drag)
+            self.assertIsNone(view._active_mime)
+            self.assertFalse(view.feedback.dragging)
+
+    def test_busy_shared_drag_does_not_fall_back_to_native(self):
+        from ddm_plugin_bili_watchlater import order_sidebar
+        page=self.page()
+        page.context.start_sidebar_drag=Mock(return_value=False)
+        panel=OrderSidebar(page,self.order,Mock())
+        self.addCleanup(lambda: (panel.close(),panel.deleteLater()))
+        with patch.object(page,'refresh_from_wall'),patch.object(page.covers,'_pump'):
+            panel.resize(300,650)
+            panel.show()
+            APP.processEvents()
+            view=panel.list
+            view.setCurrentIndex(view.model().index(0,0))
+            with patch.object(order_sidebar.QDrag,'exec',side_effect=AssertionError('No concurrent native drag')):
+                view.startDrag(Qt.CopyAction)
+            self.assertFalse(view.feedback.dragging)
+            self.assertIsNone(view._active_drag)
+            self.assertIsNone(view.dragged_bvid)
+
+    def test_real_host_shared_session_reorders_and_restores_without_ole(self):
+        from ddm.widgets import Sidebar
+        from ddm.plugins import PluginContext, PluginManager
+        from PySide6.QtWidgets import QHBoxLayout, QWidget
+        host=QWidget()
+        host.setGeometry(-10000,-10000,700,760)
+        host.sidebar=Sidebar([],auto_compact=False)
+        QHBoxLayout(host).addWidget(host.sidebar)
+        manager=PluginManager(window=host,plugins_dir='unused',enabled=[])
+        context=PluginContext(manager,'fixture')
+        page=self.page()
+        page.context.start_sidebar_drag=context.start_sidebar_drag
+        panel=OrderSidebar(page,self.order,Mock())
+        context.register_sidebar_page('order',panel,title='观看顺序',icon=QIcon())
+        try:
+            with patch.object(page,'refresh_from_wall'),patch.object(page.covers,'_pump'), \
+                    patch.object(QDrag,'exec',side_effect=AssertionError('No OLE')):
+                host.show()
+                host.sidebar.plugin_pages.select(('fixture','order'))
+                APP.processEvents()
+                view=panel.list
+                view.setCurrentIndex(view.model().index(0,0))
+                view.startDrag(Qt.CopyAction)
+                session=host.sidebar.drag_session
+                self.assertTrue(session.active)
+                self.assertTrue(session.ghost.isVisible())
+                self.assertEqual(view.dragged_bvid,self.items[0].bvid)
+                point=view.visualRect(view.model().index(1,0)).bottomLeft()-QPoint(0,2)
+                session.position=view.viewport().mapToGlobal(point)
+                with patch('ddm.sidebar_drag.widget_at',return_value=view.viewport()):
+                    self.assertTrue(session.finish())
+                self.assertEqual(self.keys()[:2],['video1','video0'])
+                self.assertIsNone(view.dragged_bvid)
+                self.assertFalse(view.feedback.dragging)
+                self.assertIsNone(view._active_mime)
+        finally:
+            context.cancel_sidebar_drag()
+            context.unregister_sidebar_page('order')
+            panel.deleteLater()
+            host.close()
+            host.deleteLater()
+            APP.sendPostedEvents(None,QEvent.DeferredDelete)
+
     def test_two_video_drags_then_live_drag_and_switch_back(self):
         from ddm.widgets import Sidebar
         from ddm.sidebar_drag import ROOM_MIME, NAV_MIME

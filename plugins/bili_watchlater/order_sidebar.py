@@ -1,6 +1,6 @@
 """Virtualized large cards: one drag works both inside the queue and on wall tiles."""
 from PySide6.QtCore import QMimeData, QPoint, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QDrag, QLinearGradient, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QCursor, QDrag, QLinearGradient, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (QAbstractItemView, QLabel, QListView,
                               QStyledItemDelegate, QVBoxLayout, QWidget)
 from ddm import motion, theme
@@ -93,6 +93,8 @@ class OrderList(QListView):
         self._pending_items = None
         self._press_pos = None
         self.dragged_bvid = None
+        self._active_drag = None
+        self._active_mime = None
         self.setFrameShape(QListView.NoFrame)
         self.setStyleSheet('QListView { background: transparent; border: 0; }')
         self.setItemDelegate(OrderDelegate(self))
@@ -171,26 +173,52 @@ class OrderList(QListView):
             return
         self.feedback.clear()
         drag = self.prepare_drag(index)
+        self._active_drag, self._active_mime = drag, drag.mimeData()
         self.feedback.dragging = True
-        self.dragged_bvid = index.data(Qt.UserRole).bvid
+        source = index.data(Qt.UserRole).bvid
+        start = getattr(self.page.context, 'start_sidebar_drag', None)
+        if callable(start):
+            try:
+                started = start(self, self._active_mime, drag.pixmap(), drag.hotSpot(), QCursor.pos(),
+                                on_finished=self.finish_drag)
+                if started and self.feedback.dragging:
+                    self.dragged_bvid = source
+                    self.viewport().repaint(self.visualRect(index))
+                elif self.feedback.dragging:
+                    self.finish_drag()
+            except BaseException:
+                self.finish_drag()
+                raise
+            return
+        # Older hosts keep the existing native drag path.
+        self.dragged_bvid = source
         try:
             self.viewport().repaint(self.visualRect(index))
             drag.exec(Qt.CopyAction | Qt.MoveAction, Qt.CopyAction)
         finally:
-            self.drag_scroll.stop()
-            self.set_drop_y(None)
-            self.feedback.dragging = False
-            self.dragged_bvid = None
-            self._press_pos = None
+            self.finish_drag()
+
+    def finish_drag(self):
+        drag, self._active_drag = self._active_drag, None
+        self._active_mime = None
+        self.drag_scroll.stop()
+        self.set_drop_y(None)
+        self.feedback.dragging = False
+        self.dragged_bvid = None
+        self._press_pos = None
+        if drag is not None:
             drag.deleteLater()
-            if self._pending_items is not None:
-                items, self._pending_items = self._pending_items, None
-                self.replace(items)
-            self.feedback.sync_pointer()
-            self.viewport().update()
+        if self._pending_items is not None:
+            items, self._pending_items = self._pending_items, None
+            self.replace(items)
+        self.feedback.sync_pointer()
+        self.viewport().repaint()
+
+    def owns_drag(self, event):
+        return (self.feedback.dragging and event.mimeData() is self._active_mime) or event.source() is self
 
     def dragEnterEvent(self, event):
-        if event.source() is self and event.mimeData().hasFormat(ORDER_MIME):
+        if self.owns_drag(event) and event.mimeData().hasFormat(ORDER_MIME):
             event.setDropAction(Qt.MoveAction)
             event.accept()
         else:
@@ -220,7 +248,7 @@ class OrderList(QListView):
     def dropEvent(self, event):
         self.drag_scroll.stop()
         self.set_drop_y(None)
-        if event.source() is not self or not event.mimeData().hasFormat(ORDER_MIME):
+        if not self.owns_drag(event) or not event.mimeData().hasFormat(ORDER_MIME):
             event.ignore()
             return
         index, _y = self.insertion_at(event.position().toPoint())

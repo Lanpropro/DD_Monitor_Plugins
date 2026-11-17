@@ -173,3 +173,10 @@ Windows拖动exec的嵌套事件循环中，列表刷新只记录最新pending�
 ### 拖动原位占位（后续候选）
 
 参考Sidebar/RoomListBox拖动时隐藏源卡片、保留占位的实现。OrderList在prepare_drag已捕获原图之后登记dragged_bvid，delegate只跳过该BV的绘制；模型/行几何/滚动不变，不调用setRowHidden或reset。exec前同步重绘源区域，finally无条件清源ID并恢复视图，再沿用pending刷新和QDrag回收路径。这样拖影完整，原位留空，同时保留已针对clear访问冲突做的生命周期修复。图像回归验证拖影仍为原图、原位图像消失、取消恢复、模型不reset及异常退出清理。
+
+
+### 抓起闪烁的共享拖影候选
+
+真实录像2026-11-17 17-56-51.mp4为4.7s/60fps。约1.33–1.40s可见源位置已空而浮动图像未出现，对应旧代码先repaint空位再调用QDrag.exec的交接顺序。新宿主公开start_sidebar_drag复用关注卡片的应用内会话，先创建/显示/绘制浮动图像再返回；插件随后留空原位，不再进入Windows OLE。on_finished统一恢复源图、pending投影和QDrag/MIME所有权，源MIME强引用保留到结束。同列落点以当前活动MIME身份确认，可接受宿主合成的无source事件，不接收其他来源的排序。
+
+旧宿主缺少公开方法时保留原生回退；忙碌或失败不另起原生拖动。宿主接口实现及根run.cmd同步补丁必须与此候选一起验收。新共享路线仍需用户录像/手势复验，静态Qt回归不当作消除闪烁的实测证据。
