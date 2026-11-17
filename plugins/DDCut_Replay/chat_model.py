@@ -5,6 +5,7 @@ from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt
 from PySide6.QtGui import QPixmap
 
 from ddm.danmaku_content import content_runs
+from ddm.search import matches_query
 from .timeline import timecode
 from .chat_scene import display_text
 
@@ -26,9 +27,8 @@ class ChatModel(QAbstractListModel):
     def filter(self, query='', kind='all', offset=0):
         self.beginResetModel()
         self.offset = offset
-        query = query.casefold().strip()
         self.rows = [row for row in self.events if (kind == 'all' or row['kind'] == kind)
-                     and query in (str(row.get('uname') or '') + ' ' + str(row.get('text') or '')).casefold()]
+                     and matches_query(str(row.get('uname') or '') + ' ' + str(row.get('text') or ''), query)]
         self.times = [row['time'] + offset for row in self.rows]
         self.endResetModel()
 

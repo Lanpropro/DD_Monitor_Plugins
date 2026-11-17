@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFrame, 
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, QMessageBox)
 
 from ddm import theme
+from ddm.search import matches_query
 
 from .media import ACTIVE, probe, scan_directory, prepare_snapshot, export_clip, export_ranges, thumbnail
 from .hls import preview_options
@@ -744,10 +745,10 @@ class Workspace(QWidget):
         self.filter_projects()
 
     def filter_projects(self, *_):
-        query = self.project_search.text().casefold()
+        query = self.project_search.text()
         for index in range(self.project_list.topLevelItemCount()):
             item = self.project_list.topLevelItem(index)
-            item.setHidden(query not in (item.text(0)+' '+item.text(4)).casefold())
+            item.setHidden(not matches_query(item.text(0) + ' ' + item.text(4), query))
 
     def new_project(self, *_):
         from .project import new_project, ProjectDocument
@@ -1006,14 +1007,14 @@ class Workspace(QWidget):
         self.scan()
 
     def filter_library(self, *_):
-        query = self.search.text().strip().casefold()
+        query = self.search.text().strip()
         tree = self.sources if self.category.currentData() == 'live' else self.library
         visible = 0
         entries = {entry['path']: entry for entry in self.hub.entries}
         for index in range(tree.count()):
             item = tree.item(index)
             content = str(item.data(Qt.UserRole + 1) or '')
-            match = query in content.casefold()
+            match = matches_query(content, query)
             if self.category.currentData() != 'live':
                 match = match and self.library_tools.matches(entries.get(item.data(Qt.UserRole), {}))
             item.setHidden(not match)

@@ -13,7 +13,7 @@ from check_ddcut_ranges_chat import app, args, remainder, media, module, ui, unt
 from PySide6.QtCore import QCoreApplication, QDate, QEvent, QPoint, QPointF, Qt, QTimer
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QMainWindow, QMessageBox
+from PySide6.QtWidgets import QMainWindow, QMessageBox, QTreeWidgetItem
 
 data = importlib.import_module('ddcut_ranges_test.library_data')
 tools_module = importlib.import_module('ddcut_ranges_test.library_tools')
@@ -44,6 +44,64 @@ class LibraryTests(unittest.TestCase):
                      created_at=datetime(2026, 11, 9, 0, 10).timestamp(), duration=30)
         (folder / 'recording.json').write_text(json.dumps(entry), encoding='utf-8')
         return entry
+
+    def test_library_projects_and_chat_search_share_host_pinyin_matching(self):
+        hub = media.TaskHub(self.root / 'pinyin')
+        for entry in [self.entry('中文录播', room={'uname': '小明', 'room_id': '123'}),
+                      self.entry('English Archive')]:
+            hub.add_entry(entry)
+        host = QMainWindow()
+        owner = SimpleNamespace(context=SimpleNamespace(window=host, notify=lambda *a, **k: None), hub=hub,
+            service=SimpleNamespace(sources=lambda: [], options=lambda: {'directory': str(self.root)}),
+            preview_server=SimpleNamespace(source_url=lambda path: path), _ticks=0, inputs=None, links=None)
+        view = ui.Workspace(owner)
+        owner.workspace = view
+        host.setCentralWidget(view)
+        try:
+            view.category.setCurrentIndex(1)
+            for query, expected in [('中文', 1), ('zhongwen', 1), ('zwlb', 1), ('XM 123', 1),
+                                    ('english ARCHIVE', 1), ('', 2), ('没有匹配', 0)]:
+                view.search.setText(query)
+                self.assertEqual(sum(not view.library.item(n).isHidden() for n in range(view.library.count())),
+                                 expected, query)
+            view.search.setText('xm 123')
+            view.library_tools.date_filter.setChecked(True)
+            view.library_tools.date.setDate(QDate(2026, 11, 10))
+            self.assertTrue(all(view.library.item(n).isHidden() for n in range(view.library.count())))
+            view.library_tools.date_filter.setChecked(False)
+            self.assertEqual(sum(not view.library.item(n).isHidden() for n in range(view.library.count())), 1)
+            view.category.setCurrentIndex(2)
+            self.assertEqual(view.library.count(), 0, 'Search must not pull recordings into the clip category')
+            view.category.setCurrentIndex(1)
+            self.assertEqual(sum(not view.library.item(n).isHidden() for n in range(view.library.count())), 1)
+
+            for columns in [('中文工程', '', '', '', '比赛备注 123'), ('Demo', '', '', '', 'English note')]:
+                QTreeWidgetItem(view.project_list, list(columns))
+            for query, expected in [('中文', 1), ('zhongwen', 1), ('zwgc', 1), ('BS 123', 1),
+                                    ('ENGLISH demo', 1), ('', 2), ('没有匹配', 0)]:
+                view.project_search.setText(query)
+                self.assertEqual(sum(not view.project_list.topLevelItem(n).isHidden()
+                                     for n in range(view.project_list.topLevelItemCount())), expected, query)
+
+            view.chat_model.events = [dict(kind='danmaku', time=1, uname='小明', text='测试弹幕 123'),
+                                      dict(kind='super_chat', time=2, uname='Another', text='醒目留言'),
+                                      dict(kind='danmaku', time=3, uname='English', text='HELLO')]
+            for query, expected in [('弹幕', 1), ('ceshi', 1), ('csdm', 1), ('xm 123', 1),
+                                    ('english hello', 1), ('', 3), ('没有匹配', 0)]:
+                view.chat_search.setText(query)
+                self.assertEqual(view.chat_model.rowCount(), expected, query)
+            view.chat_search.setText('xingmu')
+            view.chat_kind.setCurrentIndex(view.chat_kind.findData('super_chat'))
+            self.assertEqual(view.chat_model.rowCount(), 1)
+            view.chat_kind.setCurrentIndex(view.chat_kind.findData('danmaku'))
+            self.assertEqual(view.chat_model.rowCount(), 0)
+        finally:
+            view.close()
+            hub.close()
+            host.close()
+            host.deleteLater()
+            QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+            app.processEvents()
 
     def test_physical_accounting_unique_files_unknown_missing_and_calendar_midnight(self):
         entry, archive = self.entry(), self.archive()
