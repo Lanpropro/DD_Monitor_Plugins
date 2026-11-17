@@ -1,11 +1,25 @@
 """Account-scoped VOD recovery; host layout and live rooms remain host-owned."""
+import hashlib
 import math
 import re
 from PySide6.QtCore import QTimer
 from .models import WatchLaterItem
 from .preferences import read_preferences
+from .acceptance_trace import record as trace_event
 
 KEY = 'playback_session'
+
+
+def account_key(cookies):
+    uid=str(cookies.get('DedeUserID') or '')
+    if uid:
+        return uid  # Preserve snapshots from hosts that provide a public UID.
+    session=str(cookies.get('SESSDATA') or '')
+    if not session:
+        return ''
+    # The host's credential contract does not include DedeUserID. An opaque
+    # login fingerprint scopes recovery without persisting the login secret.
+    return 'session:'+hashlib.sha256(('bili_watchlater:'+session).encode()).hexdigest()
 
 
 def seconds(value):
@@ -36,12 +50,14 @@ class PlaybackSession:
     def capture(self):
         plugin = self.plugin
         if not read_preferences(plugin.context)['resume_session']:
+            trace_event('session_capture',reason='disabled',count=0)
             self.clear()
             return
         wall = getattr(plugin._host_window(), 'wall', None)
         panes = getattr(wall, 'pane_danmaku', None)
-        account = str(plugin._cookie_snapshot().get('DedeUserID') or '')
+        account = account_key(plugin._cookie_snapshot())
         if panes is None or not account:
+            trace_event('session_capture',reason='no_layout' if panes is None else 'no_login',count=0)
             self.clear()
             return
         videos = []
@@ -68,6 +84,7 @@ class PlaybackSession:
                 paused=bool(getattr(tile, 'paused', binding.state == 'paused')),
                 expected_room=str((binding.prev_room or {}).get('room_id') or '')))
         self._write(dict(account=account, layout=wall.layout_id, videos=videos) if videos else {})
+        trace_event('session_capture',reason='saved' if videos else 'no_active_video',count=len(videos))
 
     def restore(self):
         plugin = self.plugin
@@ -78,15 +95,17 @@ class PlaybackSession:
             return
         saved = self._read()
         if not isinstance(saved, dict) or not saved.get('videos'):
+            trace_event('session_restore',reason='no_snapshot',count=0)
             self.finished = True
             return
-        account = str(plugin._cookie_snapshot().get('DedeUserID') or '')
+        account = account_key(plugin._cookie_snapshot())
         wall = getattr(plugin._host_window(), 'wall', None)
         panes = getattr(wall, 'pane_danmaku', None)
         if not account or panes is None or not plugin._host_tiles():
             self._retry()
             return
         if account != saved.get('account') or wall.layout_id != saved.get('layout'):
+            trace_event('session_restore',reason='login_changed' if account != saved.get('account') else 'layout_changed',count=0)
             self.clear()
             plugin._notify_warning('账号或布局已变化，未自动恢复上次视频。')
             return
@@ -129,10 +148,12 @@ class PlaybackSession:
         for tile, item, resume in pending:
             plugin._start_vod_for_tile(tile, item, resume=resume)
         plugin._log(f'playback session restored count={len(pending)} skipped={len(records)-len(pending)}')
+        trace_event('session_restore',reason='started',count=len(pending),skipped=len(records)-len(pending))
 
     def _retry(self):
         self.attempts += 1
         if self.attempts <= 10:
+            trace_event('session_retry',attempt=self.attempts)
             QTimer.singleShot(400, self.restore)
         else:
             self.finished = True

@@ -51,6 +51,43 @@ class SessionTests(unittest.TestCase):
         self.tile.room = dict(self.binding.prev_room)
         return deepcopy(self.values[KEY])
 
+    def test_real_host_cookie_contract_without_dedeuserid_can_save_and_restore(self):
+        from ddm import bili,plugins as api
+        manager=api.PluginManager(plugins_dir='unused',enabled=[])
+        with patch.object(bili,'SESSION_DATA','fixture-host-session'), \
+                patch.object(bili,'BILI_JCT','fixture-host-csrf'), \
+                patch.object(bili,'BUVID3','fixture-host-device'):
+            manager.register_credentials('bilibili',bili._cookies,identity_keys=('SESSDATA','bili_jct'))
+            self.plugin.context.credentials=manager.credentials
+            del self.plugin.playback.cookie_snapshot
+            self.assertNotIn('DedeUserID',self.plugin._cookie_snapshot())
+            self.plugin.playback_session.capture()
+            saved=deepcopy(self.values[KEY])
+            self.assertEqual(saved['videos'][0]['progress'],50.)
+            serialized=json.dumps(saved)
+            for value in ('fixture-host-session','fixture-host-csrf','fixture-host-device'):
+                self.assertNotIn(value,serialized)
+            self.tile.room=dict(self.binding.prev_room)
+            second=self.make_plugin()
+            second.context.credentials=manager.credentials
+            del second.playback.cookie_snapshot
+            with patch.object(second,'_start_vod_for_tile') as start:
+                second.playback_session.restore()
+                self.assertEqual(start.call_args.kwargs['resume']['progress'],50.)
+                self.assertIs(start.call_args.args[0],self.tile)
+
+    def test_changed_host_login_session_never_restores_another_login(self):
+        self.plugin.playback.cookie_snapshot=lambda:{'SESSDATA':'fixture-old-login'}
+        self.plugin.playback_session.capture()
+        self.assertTrue(self.values[KEY])
+        self.tile.room=dict(self.binding.prev_room)
+        second=self.make_plugin()
+        second.playback.cookie_snapshot=lambda:{'SESSDATA':'fixture-other-login'}
+        with patch.object(second,'_start_vod_for_tile') as start:
+            second.playback_session.restore()
+        start.assert_not_called()
+        self.assertEqual(self.values[KEY],{})
+
     def test_shutdown_snapshot_and_new_instance_restore_exact_cell_part_and_progress(self):
         self.plugin.host.player = lambda _: SimpleNamespace(_prop=lambda key, default: 123.5 if key == 'time-pos' else default)
         saved = self.saved()
@@ -163,6 +200,31 @@ class SessionTests(unittest.TestCase):
             second._shutting_down = True
             second.playback_session.restore()
             self.assertEqual(timer.call_count, 1)
+
+
+class AcceptanceTraceTests(unittest.TestCase):
+    def test_lift_trace_defers_file_io_and_caps_samples_without_identifiers(self):
+        from ddm_plugin_bili_watchlater import acceptance_trace as trace
+        from PySide6.QtWidgets import QWidget
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'trace.jsonl'
+            view=QWidget()
+            probe=trace.LiftTrace(view)
+            with patch.object(trace,'trace_path',return_value=path),patch.object(trace,'_remaining',80):
+                for _ in range(10):
+                    probe.press()
+                    probe.begin()
+                    probe.mark('snapshot_ms')
+                    probe.mark('host_start_ms')
+                    probe.end()
+                self.assertFalse(path.exists())
+                APP.processEvents()
+                rows=[json.loads(line) for line in path.read_text(encoding='utf-8').splitlines()]
+                self.assertEqual(len(rows),8)
+                self.assertTrue(all(row['phase']=='drag_lift' for row in rows))
+                self.assertTrue(all(set(row)=={'phase','time','attempt','press_to_drag_ms','snapshot_ms','host_start_ms','total_ms','loop_return_ms'} for row in rows))
+            view.deleteLater()
+            APP.sendPostedEvents(None,QEvent.DeferredDelete)
 
 
 class ButtonTests(unittest.TestCase):

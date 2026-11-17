@@ -11,6 +11,7 @@ from .motion_trace import MotionTrace, measure
 from .order_feedback import OrderFeedback
 from .order_model import OrderModel
 from .order_avoidance import OrderAvoidance
+from .acceptance_trace import LiftTrace
 
 ORDER_MIME = 'application/x-bili-watchlater-order'
 
@@ -124,6 +125,7 @@ class OrderList(QListView):
         self.motion_trace = MotionTrace(page, areas=[self], visible=self.isVisible,
                                         parent=self, prefix='order timing')
         self.feedback = OrderFeedback(self)
+        self.lift_trace = LiftTrace(self)
         self.avoidance = OrderAvoidance(self)
         self.drop_y = None
 
@@ -146,6 +148,8 @@ class OrderList(QListView):
         self.request_covers()
 
     def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.lift_trace.press()
         self._press_pos = event.position().toPoint() if event.button() == Qt.LeftButton else None
         super().mousePressEvent(event)
 
@@ -167,18 +171,25 @@ class OrderList(QListView):
         hotspot = position - rect.topLeft()
         hotspot = QPoint(max(0,min(hotspot.x(),rect.width()-1)),
                          max(0,min(hotspot.y(),rect.height()-1)))
-        pixmap, hotspot = motion.lifted_drag(self.viewport().grab(rect),hotspot)
+        self.lift_trace.mark('geometry_ms')
+        snapshot=self.viewport().grab(rect)
+        self.lift_trace.mark('snapshot_ms')
+        pixmap, hotspot = motion.lifted_drag(snapshot,hotspot)
+        self.lift_trace.mark('lift_effect_ms')
         drag = QDrag(self)
         drag.setMimeData(self.drag_mime(item))
         drag.setPixmap(pixmap)
         drag.setHotSpot(hotspot)
+        self.lift_trace.mark('mime_ms')
         return drag
 
     def startDrag(self, actions):
         index = self.currentIndex()
         if not index.isValid() or self.feedback.dragging:
             return
+        self.lift_trace.begin()
         self.feedback.clear()
+        self.lift_trace.mark('feedback_ms')
         drag = self.prepare_drag(index)
         self._active_drag, self._active_mime = drag, drag.mimeData()
         self.feedback.dragging = True
@@ -188,21 +199,28 @@ class OrderList(QListView):
             try:
                 started = start(self, self._active_mime, drag.pixmap(), drag.hotSpot(), QCursor.pos(),
                                 on_finished=self.finish_drag)
+                self.lift_trace.mark('host_start_ms')
                 if started and self.feedback.dragging:
                     self.dragged_bvid = source
                     self.avoidance.begin(index.row())
+                    self.lift_trace.mark('avoidance_ms')
                     self.viewport().repaint()
+                    self.lift_trace.mark('gap_repaint_ms')
                 elif self.feedback.dragging:
                     self.finish_drag()
             except BaseException:
                 self.finish_drag()
                 raise
+            finally:
+                self.lift_trace.end()
             return
         # Older hosts keep the existing native drag path.
         self.dragged_bvid = source
         self.avoidance.begin(index.row())
         try:
             self.viewport().repaint(self.visualRect(index))
+            self.lift_trace.mark('gap_repaint_ms')
+            self.lift_trace.end()
             drag.exec(Qt.CopyAction | Qt.MoveAction, Qt.CopyAction)
         finally:
             self.finish_drag()
