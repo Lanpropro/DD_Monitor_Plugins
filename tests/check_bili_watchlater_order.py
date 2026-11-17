@@ -53,6 +53,40 @@ class OrderTests(unittest.TestCase):
         self.assertFalse(self.order.move('unknown','video0'))
         self.assertFalse(self.saved)
 
+    def test_wheel_distance_matches_host_follow_scroll_after_layout_and_resize(self):
+        from PySide6.QtGui import QWheelEvent
+        from PySide6.QtWidgets import QWidget
+        from ddm.sidebar_list import CarouselScroll
+        page = self.page()
+        panel = OrderSidebar(page,self.order,Mock())
+        reference = CarouselScroll()
+        content = QWidget()
+        content.setFixedSize(250,8000)
+        reference.setWidget(content)
+        self.addCleanup(lambda:(panel.close(),panel.deleteLater(),reference.close(),reference.deleteLater()))
+        with patch.object(page,'refresh_from_wall'),patch.object(page.covers,'_pump'):
+            self.order.update([models.WatchLaterItem(aid=i+1,bvid=f'wheel{i}',title=str(i)) for i in range(60)],'account-A')
+            panel.show()
+            reference.show()
+            for width in (280,360):
+                panel.resize(width,650)
+                reference.resize(width,650)
+                APP.processEvents()
+                view = panel.list
+                self.assertEqual(view.verticalScrollBar().singleStep(), reference.verticalScrollBar().singleStep())
+                for pixels,angle in ((QPoint(),QPoint(0,-120)),(QPoint(0,-17),QPoint())):
+                    distances=[]
+                    for scroll in (reference,view):
+                        scroll.verticalScrollBar().setValue(1000)
+                        event=QWheelEvent(QPointF(80,80),QPointF(scroll.mapToGlobal(QPoint(80,80))),
+                            pixels,angle,Qt.NoButton,Qt.NoModifier,Qt.NoScrollPhase,False)
+                        APP.sendEvent(scroll.viewport(),event)
+                        distances.append(scroll.verticalScrollBar().value()-1000)
+                    self.assertEqual(distances[0],distances[1])
+                    if not angle.isNull():
+                        self.assertGreater(distances[1],0)
+                        self.assertLess(distances[1],view.visualRect(view.model().index(0,0)).height())
+
     def test_sidebar_visibility_setting_registers_and_removes_without_loading_gallery(self):
         plugin=plugin_module.BiliWatchLaterPlugin()
         plugin.context=SimpleNamespace(register_sidebar_page=Mock(return_value=True),unregister_sidebar_page=Mock())
@@ -68,6 +102,9 @@ class OrderTests(unittest.TestCase):
             plugin._sync_order_sidebar(False)
             plugin.context.unregister_sidebar_page.assert_called_once_with('watch_order')
             self.assertIsNone(plugin._order_container)
+            # Release captured Qt icons/widgets while QApplication is still alive.
+            plugin.context.register_sidebar_page.reset_mock()
+            container.factory = None
             APP.sendPostedEvents(None,QEvent.DeferredDelete)
 
     def test_sidebar_visibility_switch_uses_existing_autosave_and_filter_keeps_order(self):

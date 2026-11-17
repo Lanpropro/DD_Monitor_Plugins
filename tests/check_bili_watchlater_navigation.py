@@ -4,7 +4,8 @@ import unittest
 from unittest.mock import patch
 import check_bili_watchlater_page_controls as controls
 from check_bili_watchlater import APP, models
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QWindow
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QFrame, QPushButton
 from ddm import theme
@@ -160,6 +161,54 @@ class NavigationTests(unittest.TestCase):
             QTest.mouseClick(header.close_button, Qt.LeftButton)
             self.assertFalse(self.page.isVisible())
             self.assertIsNone(self.page._settings_dialog)
+
+    def test_edges_and_corners_intercept_child_pages_and_dispatch_native_resize(self):
+        with self.shown():
+            page = self.page
+            for open_panel in (lambda: None, page._open_settings, lambda: page._select_item(self.item)):
+                open_panel()
+                APP.processEvents()
+                for handle in page._resize_handles:
+                    point = handle.mapTo(page, handle.rect().center())
+                    self.assertIs(page.childAt(point), handle)
+                    self.assertTrue(handle.isVisible())
+                    with patch.object(QWindow, 'startSystemResize', return_value=True) as resize:
+                        QTest.mouseClick(handle, Qt.LeftButton)
+                        resize.assert_called_once_with(handle.edges)
+                page._back_to_browser()
+            self.assertEqual(page._resize_handles[0].cursor().shape(), Qt.SizeHorCursor)
+            self.assertEqual(page._resize_handles[2].cursor().shape(), Qt.SizeVerCursor)
+            self.assertEqual(page._resize_handles[-1].cursor().shape(), Qt.SizeFDiagCursor)
+
+    def test_resize_handles_follow_geometry_and_hide_when_maximized_or_embedded(self):
+        with self.shown():
+            page = self.page
+            page.resize(860, 620)
+            APP.processEvents()
+            corner = page._resize_handles[-1]
+            self.assertEqual(corner.geometry().bottomRight(), QPoint(859, 619))
+            with patch.object(page, 'isMaximized', return_value=True):
+                page._sync_resize_handles()
+                self.assertTrue(all(handle.isHidden() for handle in page._resize_handles))
+            with patch.object(page, 'isWindow', return_value=False):
+                page._sync_resize_handles()
+                self.assertTrue(all(handle.isHidden() for handle in page._resize_handles))
+            page._sync_resize_handles()
+            self.assertTrue(all(handle.isVisible() for handle in page._resize_handles))
+
+    def test_resized_dimensions_restore_using_existing_geometry_store(self):
+        store = {}
+        from types import SimpleNamespace
+        self.page._geometry_settings = SimpleNamespace(value=lambda key:store.get(key),
+            setValue=lambda key,value:store.__setitem__(key,value))
+        with self.shown():
+            self.page.resize(850, 610)
+            APP.processEvents()
+            self.page._save_geometry_now()
+            self.page.resize(980, 700)
+            from ddm_plugin_bili_watchlater.page import WatchLaterPage
+            self.assertTrue(WatchLaterPage._apply_saved_geometry(self.page))
+            self.assertEqual((self.page.width(), self.page.height()), (850, 610))
 
     def test_inline_delete_confirmation_requires_explicit_accept_and_rejects_old_account(self):
         self.page._has_session = self.page._has_csrf = True

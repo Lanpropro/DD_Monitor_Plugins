@@ -103,6 +103,8 @@ class OrderList(QListView):
         self.setStyleSheet('QListView { background: transparent; border: 0; }')
         self.setItemDelegate(OrderDelegate(self))
         self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        # Match the host follow list's QScrollArea wheel step instead of item height.
+        self.verticalScrollBar().setSingleStep(20)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setDragEnabled(True)
         self.setAcceptDrops(True)

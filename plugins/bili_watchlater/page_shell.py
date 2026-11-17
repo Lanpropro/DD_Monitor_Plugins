@@ -1,5 +1,5 @@
 """One frameless browser window with embedded, disposable detail pages."""
-from PySide6.QtCore import QRectF, Qt, Signal
+from PySide6.QtCore import QEvent, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QIcon, QPainter, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from ddm import theme
@@ -127,6 +127,25 @@ class BrowserTitleBar(QWidget):
         super().mouseDoubleClickEvent(event)
 
 
+class ResizeHandle(QWidget):
+    def __init__(self, window, edges, cursor):
+        super().__init__(window)
+        self.edges = edges
+        self.setCursor(cursor)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setAccessibleName('调整稍后再看窗口大小')
+        self.setProperty('customControlSurface', True)
+
+    def mousePressEvent(self, event):
+        window = self.window()
+        if (event.button() == Qt.LeftButton and not window.isMaximized()
+                and window.windowHandle() is not None
+                and window.windowHandle().startSystemResize(self.edges)):
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
 class BrowserWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -137,6 +156,39 @@ class BrowserWindow(QWidget):
         self.setProperty('settingsGlassContent', True)
         self.setProperty('appearanceLight', theme.is_light())
         self.setProperty('customControlSurface', True)
+        self._resize_handles = [ResizeHandle(self, edges, cursor) for edges, cursor in (
+            (Qt.LeftEdge, Qt.SizeHorCursor), (Qt.RightEdge, Qt.SizeHorCursor),
+            (Qt.TopEdge, Qt.SizeVerCursor), (Qt.BottomEdge, Qt.SizeVerCursor),
+            (Qt.TopEdge | Qt.LeftEdge, Qt.SizeFDiagCursor),
+            (Qt.TopEdge | Qt.RightEdge, Qt.SizeBDiagCursor),
+            (Qt.BottomEdge | Qt.LeftEdge, Qt.SizeBDiagCursor),
+            (Qt.BottomEdge | Qt.RightEdge, Qt.SizeFDiagCursor))]
+
+    def _sync_resize_handles(self):
+        # Overlay the perimeter so child pages and the draggable header cannot eat presses.
+        width, height, edge, corner = self.width(), self.height(), 8, 16
+        rects = ((0,corner,edge,height-2*corner), (width-edge,corner,edge,height-2*corner),
+                 (corner,0,width-2*corner,edge), (corner,height-edge,width-2*corner,edge),
+                 (0,0,corner,corner), (width-corner,0,corner,corner),
+                 (0,height-corner,corner,corner), (width-corner,height-corner,corner,corner))
+        enabled = self.isWindow() and not (self.isMaximized() or self.isFullScreen())
+        for handle, rect in zip(self._resize_handles, rects):
+            handle.setGeometry(QRect(*rect))
+            handle.setVisible(enabled)
+            handle.raise_()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._sync_resize_handles()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._sync_resize_handles()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.WindowStateChange:
+            self._sync_resize_handles()
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -145,20 +197,3 @@ class BrowserWindow(QWidget):
         painter.setBrush(theme.qcolor(background_color()))
         painter.setPen(QPen(theme.qcolor(theme.BORDER), 1))
         painter.drawPath(continuous_path(rect, 0 if self.isMaximized() else 18))
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton and self.isWindow() and self.windowHandle() is not None and not self.isMaximized():
-            point = event.position()
-            edges = Qt.Edges()
-            if point.x() < 8:
-                edges |= Qt.LeftEdge
-            if point.x() >= self.width() - 8:
-                edges |= Qt.RightEdge
-            if point.y() < 8:
-                edges |= Qt.TopEdge
-            if point.y() >= self.height() - 8:
-                edges |= Qt.BottomEdge
-            if edges and self.windowHandle().startSystemResize(edges):
-                event.accept()
-                return
-        super().mousePressEvent(event)

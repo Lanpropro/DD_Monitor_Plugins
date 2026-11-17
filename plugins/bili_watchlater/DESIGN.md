@@ -186,3 +186,9 @@ Windows拖动exec的嵌套事件循环中，列表刷新只记录最新pending�
 `OrderAvoidance` 是 OrderList 子对象，单个 QVariantAnimation 持有可见模型行的临时槽位，不改变模型或条目所有权。抓起后以空槽标记源位置，鼠标跨越卡片半区时移动空槽，其余卡片按宿主160ms/easing过渡；中途反向从当前位置继续。绘制、可见图片需求和落点计算读取临时位置，滚动使用同一偏移。取消/离开恢复，放下后才由WatchOrder保存真实顺序；回原位以源行作锚点，避免改变搜索隐藏项的顺序。
 
 `order_include_finished` 默认True，沿用即时保存。WatchOrder保留完整排列，snapshot过滤展示；move显式使用完整排列，next_after在完整排列中定位当前项，再跳过完成项，防止当前项已被过滤时丢失下一项。设置变化刷新侧栏、下一项/序号并清除旧预取，不中断当前绑定。完成图标复用card_presentation的圆环勾，delegate为标题预留空间，模型无障碍文本保留状态说明。
+
+### 窗口缩放与滚轮幅度
+
+BrowserWindow在边缘持有八个无焦点ResizeHandle子控件，覆盖外侧8像素及16像素角落，不参与布局；显示、尺寸和窗口状态变化时更新几何及层级。原有父窗口mousePressEvent会被标题栏或子页面吃掉，独立边缘命中区域改由QWindow.startSystemResize处理，不实现另一套手动窗口几何逻辑。最大化/全屏/嵌入时隐藏，尺寸继续由Page原有400ms去抖及关闭保存路径持久化。
+
+OrderList保留ScrollPerPixel，但显式设定singleStep=20，与本体关注栏CarouselScroll(QScrollArea)默认值一致，避免QListView根据卡片高度自动计算步长。沿用Qt的系统滚轮行数和触控板像素输入，无新滚轮事件接管；拖动中的边缘滚动定时器不变。
