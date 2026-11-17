@@ -79,7 +79,7 @@ class PlaybackMergeTests(unittest.TestCase):
         self.plugin._bindings['fixture'] = SimpleNamespace(tile=tile)
         try:
             with patch.object(self.plugin.host, 'tiles', return_value=[tile]), \
-                    patch.object(self.plugin, '_cover_pip_dpi') as cover, \
+                    patch.object(self.plugin.pip_dpi, 'cover_pip_dpi') as cover, \
                     patch.object(self.plugin, '_queue_tile_sync') as sync:
                 for _ in range(100):
                     self.plugin._on_dpi_event(tile)
@@ -103,7 +103,7 @@ class PlaybackMergeTests(unittest.TestCase):
         self.plugin._dpi_covers[id(tile)] = cover
         cover.show()
         self.plugin._on_dpi_event(tile)
-        with patch.object(self.plugin, '_pip_drag_active', return_value=True):
+        with patch.object(self.plugin.pip_dpi, 'pip_drag_active', return_value=True):
             self.plugin._on_dpi_event(tile)
         self.assertTrue(cover.isHidden())
         self.assertFalse(self.plugin._dpi_pending)

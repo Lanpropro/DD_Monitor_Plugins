@@ -107,5 +107,68 @@ class BoundaryTests(unittest.TestCase):
         plugin.playback.stop_tick_timer()
         self.assertIsNone(plugin._tick_timer)
 
+    def test_dpi_state_is_single_owned_and_flush_retains_timer_contract(self):
+        plugin=plugin_module.BiliWatchLaterPlugin()
+        dpi=plugin.pip_dpi
+        self.addCleanup(dpi.stop_flush)
+        covers={}
+        plugin._dpi_covers=covers
+        self.assertIs(dpi.covers,covers)
+        dpi.ignore_until=0
+        self.assertNotIn('_dpi_covers',plugin.__dict__)
+        self.assertNotIn('_dpi_pending',plugin.__dict__)
+        plugin._bindings['fixture']=SimpleNamespace(tile=None)
+        with patch.object(dpi,'pip_drag_active',return_value=False):
+            plugin._on_dpi_event(None)
+        timer=plugin._dpi_flush_timer
+        self.assertIsNone(timer.parent())
+        self.assertEqual(timer.interval(),120)
+        self.assertTrue(timer.isSingleShot())
+        self.assertTrue(dpi.pending)
+        dpi.stop_flush()
+        self.assertFalse(dpi.pending)
+        self.assertIsNone(plugin._dpi_flush_timer)
+
+    def test_dpi_cover_retains_tile_parent_delays_and_two_stage_cleanup(self):
+        from PySide6.QtWidgets import QWidget
+        from ddm_plugin_bili_watchlater import pip_dpi
+        plugin=plugin_module.BiliWatchLaterPlugin()
+        dpi=plugin.pip_dpi
+        tile=QWidget()
+        tile.resize(320,180)
+        tile.video=QWidget(tile)
+        tile.video.setGeometry(5,6,300,160)
+        self.addCleanup(tile.deleteLater)
+        self.addCleanup(dpi.dispose_covers)
+        with patch.object(dpi,'pip_drag_active',return_value=False), \
+                patch.object(plugin,'_tile_in_pip_window',return_value=True), \
+                patch.object(pip_dpi.QTimer,'singleShot') as later:
+            plugin._cover_pip_dpi(tile)
+            cover=plugin._dpi_covers[id(tile)]
+            timer=plugin._dpi_cover_timers[id(tile)]
+            self.assertIs(cover.parentWidget(),tile)
+            self.assertEqual(cover.geometry(),tile.video.geometry())
+            self.assertEqual([call.args[0] for call in later.call_args_list],[60,180,360,600])
+            self.assertEqual(timer.interval(),900)
+            self.assertIsNone(timer.parent())
+            self.assertTrue(timer.isSingleShot())
+            self.assertTrue(timer.isActive())
+            # Repeated notification renews hide, without scheduling another raise series.
+            plugin._cover_pip_dpi(tile)
+            self.assertEqual(later.call_count,4)
+        dpi.stop_flush()
+        self.assertIs(plugin._dpi_covers[id(tile)],cover)
+        dpi.hide_all_dpi_covers()
+        self.assertTrue(cover.isHidden())
+        self.assertFalse(timer.isActive())
+        self.assertEqual(dpi.cover_deadline,{})
+        dpi.dispose_covers()
+        self.assertEqual(plugin._dpi_covers,{})
+        self.assertEqual(plugin._dpi_cover_timers,{})
+        # Delayed raise must ignore a cover removed during shutdown.
+        with patch.object(cover,'raise_') as raise_cover:
+            dpi.raise_dpi_cover(tile,cover)
+        raise_cover.assert_not_called()
+
 
 if __name__=='__main__': unittest.main()

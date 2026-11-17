@@ -256,7 +256,7 @@ class OrderTests(unittest.TestCase):
         plugin = plugin_module.BiliWatchLaterPlugin()
         occupied, empty = TileFixture({'room_id':'live'}), TileFixture({})
         plugin.host.playback_tiles = lambda: [occupied,empty]
-        plugin.playback.start_vod_for_tile = Mock()
+        plugin._start_vod_for_tile = Mock()
         plugin._play_from_order(self.items[0])
         plugin._start_vod_for_tile.assert_called_with(empty,self.items[0])
         plugin._bindings={'a':SimpleNamespace(tile=occupied)}
