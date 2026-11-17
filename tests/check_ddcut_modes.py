@@ -135,6 +135,92 @@ with tempfile.TemporaryDirectory(prefix='ddcut-modes-') as directory:
                 view.review({**entries[0], **media.probe(media.Job('probe', 'test'), ffmpeg, entries[0]['path'], data / 'work')})
                 assert view.tabs.count() == 1 and not view.review_panel.isHidden()
                 assert view.review_page is view.library_page
+            # Both outputs share one FFmpeg input; native encoding stays independent.
+            clip_folder = data / 'independent-clips'
+            plugin.set_clip_options(dict(directory=str(clip_folder), segment_seconds=1, danmaku=True))
+            plugin.set_capture_mode('both')
+            host.settings.update(recording_codec='h264', recording_encoder='cpu', recording_fps=12)
+            before_originals = set((data / 'recordings').glob('*.mp4'))
+            before_replays = set((data / 'recordings/replays').glob('*.mp4'))
+            assert host.recorder.start(tile, recording=False)
+            dual = host.recorder.sessions[tile]
+            until(lambda: dual.process is not None)
+            assert dual.review_info() is None  # Pure native cache does not write a clip archive.
+            assert host.recorder.start(tile, recording=True)
+            until(lambda: dual.review_info() is not None)
+            assert dual.clip.process is dual.process
+            assert dual.settings['recording_codec'] == 'h264'
+            assert dual.clip.settings['recording_codec'] == 'copy'
+            assert dual.clip.segment_seconds == 1
+            plugin.on_event(plugin_module.api.EVENT_DANMAKU, {'room_id': '123456', 'message': {'text': 'dual chat'}})
+            dual.update_review()
+            dual_info = dual.review_info()
+            assert Path(dual_info['path']).is_relative_to(clip_folder)
+            snapshot = plugin.service.snapshot(str(id(tile)), dual.session_id)
+            assert snapshot['index_format'] == 'hls'
+            assert all(Path(path).is_relative_to(clip_folder) for path in snapshot['parts'])
+            plugin.service.release(snapshot['lease'])
+            # A source refresh keeps both output families and chat/archive metadata.
+            refreshed = data / 'refreshed.mp4'
+            shutil.copy2(source, refreshed)
+            chunk = dual.chunk
+            tile.stream_url = str(refreshed)
+            host.recorder.on_resolved(tile)
+            until(lambda: dual.chunk > chunk and dual.review_info() and len(dual.clip._lists) > 1)
+            # Native auto-rotation also closes the companion archive and starts another.
+            dual.output_started_at = time.monotonic() - 3700
+            chunk = dual.chunk
+            until(lambda: dual.chunk > chunk and dual.review_info() and dual.clip._saved is False)
+            host.recorder.stop(tile)
+            until(lambda: tile not in host.recorder.sessions and not host.recorder.exports)
+            native_files = set((data / 'recordings').glob('*.mp4')) - before_originals
+            replay_files = set((data / 'recordings/replays').glob('*.mp4')) - before_replays
+            assert len(native_files) >= 2 and replay_files
+            archives = list(clip_folder.rglob('recording.json'))
+            assert len(archives) >= 2
+            for path in archives:
+                item = json.loads(path.read_text(encoding='utf-8'))
+                assert item['complete'] and '#EXT-X-ENDLIST' in Path(item['path']).read_text(encoding='utf-8')
+                assert media.probe(media.Job('probe', 'dual'), ffmpeg, item['path'], data/'work')['duration'] > 0
+            assert 'dual chat' in Path(dual_info['danmaku_path']).read_text(encoding='utf-8')
+            ffprobe = shutil.which('ffprobe')
+            def fps(path):
+                result = json.loads(subprocess.check_output([ffprobe, '-v', 'error', '-select_streams', 'v:0',
+                    '-show_entries', 'stream=avg_frame_rate', '-of', 'json', str(path)]))
+                numerator, denominator = map(int, result['streams'][0]['avg_frame_rate'].split('/'))
+                return numerator/denominator
+            assert abs(fps(next(iter(native_files))) - 12) < .1
+            assert abs(fps(dual_info['path']) - 30) < .1
+            # A companion-index failure must not prevent a native file from being saved.
+            before_originals = set((data/'recordings').glob('*.mp4'))
+            assert host.recorder.start(tile, recording=True)
+            failed = host.recorder.sessions[tile]
+            until(lambda: failed.review_info() is not None)
+            with patch.object(failed.clip, 'save_recording', side_effect=OSError('fixture index failure')):
+                host.recorder.stop(tile)
+                until(lambda: tile not in host.recorder.sessions and not host.recorder.exports)
+            assert set((data/'recordings').glob('*.mp4')) - before_originals
+            assert any('切片素材保存失败' in text for text in notices)
+            assert failed.clip.finished_parts()
+            # HLS can finish even when there are no usable native parts to merge.
+            assert host.recorder.start(tile, recording=True)
+            missing_primary = host.recorder.sessions[tile]
+            until(lambda: missing_primary.review_info() is not None)
+            orphan_info = missing_primary.review_info()
+            with patch.object(missing_primary, 'finished_parts', return_value=[]):
+                host.recorder.stop(tile)
+                until(lambda: tile not in host.recorder.sessions and not host.recorder.exports)
+            assert json.loads(Path(orphan_info['path']).with_name('recording.json').read_text(encoding='utf-8'))['complete']
+            # On exit both native and HLS outputs are finalized; automatic replay is not saved.
+            assert host.recorder.start(tile, recording=True)
+            exiting = host.recorder.sessions[tile]
+            until(lambda: exiting.review_info() is not None)
+            final_info = exiting.review_info()
+            host.recorder.shutdown()
+            assert json.loads(Path(final_info['path']).with_name('recording.json').read_text(encoding='utf-8'))['complete']
+            assert not host.recorder.sessions
+            host.recorder.timer.start()
+            plugin.set_capture_mode('original')
             plugin.on_unload()
             plugin = plugin_module.DDCutReplay()
             plugin.on_load(PluginContext(manager, 'ddcut_replay'))
@@ -143,4 +229,4 @@ with tempfile.TemporaryDirectory(prefix='ddcut-modes-') as directory:
             plugin.on_unload()
             host.recorder.shutdown()
             host.close()
-print('PASS: exclusive recording modes, original video + replay, clip-only archive, readable names/notifications, metadata/artwork, inline review and mode persistence')
+print('PASS: three recording modes, dual native encode + HLS copy, chat, refresh, rotation, buffer promotion, partial failure, shutdown, original video + replay, clip-only archive, readable names/notifications, metadata/artwork, inline review and mode persistence')

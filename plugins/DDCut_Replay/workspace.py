@@ -158,10 +158,11 @@ class Workspace(QWidget):
         button('封面制作', self.open_cover, header)
         button('外部输入', self.show_inputs, header)
         self.task_button.setCheckable(True)
-        self.capture_switch = QCheckBox('仅录制切片素材')
-        self.capture_switch.setChecked(getattr(owner, 'capture_mode', 'clip') == 'clip')
-        self.capture_switch.setToolTip('开启：只保存可边录边看的切片素材；关闭：使用本体完整录像与即时重放。停止当前录制和缓存后可切换。')
-        self.capture_switch.toggled.connect(self.change_capture_mode)
+        from .recording_settings import mode_combo
+        self.capture_switch = mode_combo(compact=True)
+        self.capture_switch.setCurrentIndex(self.capture_switch.findData(getattr(owner, 'capture_mode', 'clip')))
+        self.capture_switch.setToolTip('格子录制按钮的行为。停止当前录制和缓存后可切换；本体参数在上，切片参数在下。')
+        self.capture_switch.currentIndexChanged.connect(self.change_capture_mode)
         header.insertWidget(1, self.capture_switch)
         root.addLayout(header)
         self.content = QSplitter(Qt.Horizontal)
@@ -875,16 +876,16 @@ class Workspace(QWidget):
         if hasattr(self, 'task_panel'):
             self.update_media_layout()
 
-    def change_capture_mode(self, checked):
+    def change_capture_mode(self, _index):
         try:
-            self.owner.set_capture_mode('clip' if checked else 'original')
+            self.owner.set_capture_mode(self.capture_switch.currentData())
         except Exception as error:
             self.capture_switch.blockSignals(True)
-            self.capture_switch.setChecked(getattr(self.owner, 'capture_mode', 'clip') == 'clip')
+            self.capture_switch.setCurrentIndex(self.capture_switch.findData(getattr(self.owner, 'capture_mode', 'clip')))
             self.capture_switch.blockSignals(False)
             self.report(error)
         else:
-            self.report('录制方式：仅切片素材' if checked else '录制方式：原版完整录像与即时重放')
+            self.report('格子录制按钮：' + self.capture_switch.currentText())
 
     def show_library(self):
         self.cover_editor.shutdown()
@@ -1296,10 +1297,12 @@ class Workspace(QWidget):
     def scan(self):
         def submit():
             options = self.service.options()
-            if not options['directory']:
+            if not options.get('directory') and not self.owner.hub.preferences.get('clip_recording', {}).get('directory'):
                 self.report('尚未选择录制目录，请打开录制设置。')
                 return
-            self.hub.submit('扫描录制目录', 'scan', scan_directory, options['directory'])
+            directories = list(dict.fromkeys(filter(None, [options.get('directory'), self.owner.hub.preferences.get('clip_recording', {}).get('directory')])))
+            from .recording_settings import scan_recording_directories
+            self.hub.submit('扫描录制目录', 'scan', scan_recording_directories, directories)
         self.guard(submit)
 
     def refresh_library(self, *_):

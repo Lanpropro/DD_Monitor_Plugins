@@ -20,7 +20,7 @@ os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 os.environ['DDM_NO_SAVE'] = '1'
 from PySide6.QtCore import QCoreApplication, QEvent, Qt
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication, QMainWindow, QWidget
+from PySide6.QtWidgets import QApplication, QDialog, QMainWindow, QWidget
 from ddm import theme
 from ddm.config import DEFAULT_SETTINGS
 from ddm.dialogs import SettingsDialog
@@ -48,7 +48,7 @@ class SettingsTests(unittest.TestCase):
                 raise RuntimeError('请先停止当前录制和缓存，再切换录制方式')
             self.backend = value
         self.owner.service = SimpleNamespace(set_backend_enabled=set_backend,
-            sources=lambda: [], options=lambda: {})
+            sources=lambda: [], options=lambda: {}, select_backend=lambda factory=None: set_backend(factory is not None))
         self.owner.preview_server = SimpleNamespace(source_url=lambda path: path)
 
     def tearDown(self):
@@ -57,6 +57,18 @@ class SettingsTests(unittest.TestCase):
         self.host.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         self.temp.cleanup()
+
+    def test_first_choice_can_be_deferred_and_persisted(self):
+        from ddcut_settings_check.recording_settings import CaptureModePrompt
+        prompt = CaptureModePrompt(self.owner, self.host)
+        prompt.reject()
+        self.assertNotIn('capture_mode', self.owner.hub.preferences)
+        prompt = CaptureModePrompt(self.owner, self.host)
+        prompt.mode.setCurrentIndex(prompt.mode.findData('both'))
+        prompt.apply()
+        self.assertEqual(self.owner.hub.preferences['capture_mode'], 'both')
+        self.assertEqual(prompt.result(), QDialog.DialogCode.Accepted)
+        prompt.deleteLater()
 
     def test_workspace_covers_wallpaper_in_both_themes_and_restores(self):
         container = QWidget()
@@ -92,18 +104,30 @@ class SettingsTests(unittest.TestCase):
             page = dialog.recording_page
             panel, = tuple(self.owner.settings_panels)
             self.assertIs(panel.parentWidget().parentWidget(), page.sections)
+            self.assertEqual(page.sections.entries[-1][0], 'plugin_ddcut_replay')
+            self.assertEqual(page.recording_mode_layout.indexOf(panel.mode_row), 0)
             panel.mode.setCurrentIndex(panel.mode.findData('clip'))
             self.assertTrue(self.backend)
             self.assertEqual(self.owner.hub.preferences['capture_mode'], 'clip')
-            self.assertTrue(view.capture_switch.isChecked())
-            view.capture_switch.setChecked(False)
+            self.assertEqual(view.capture_switch.currentData(), 'clip')
+            view.capture_switch.setCurrentIndex(view.capture_switch.findData('original'))
             self.assertFalse(self.backend)
             self.assertEqual(panel.mode.currentData(), 'original')
+            panel.mode.setCurrentIndex(panel.mode.findData('both'))
+            self.assertEqual(view.capture_switch.currentData(), 'both')
+            self.assertEqual(self.owner.hub.preferences['capture_mode'], 'both')
+            panel.segment.setValue(3)
+            panel.danmaku.setChecked(False)
+            self.assertEqual(self.owner.clip_options()['segment_seconds'], 3)
+            self.assertFalse(self.owner.clip_options()['danmaku'])
+            view.capture_switch.setCurrentIndex(view.capture_switch.findData('original'))
             self.busy = True
             panel.mode.setCurrentIndex(panel.mode.findData('clip'))
             self.assertEqual(panel.mode.currentData(), 'original')
             self.assertIn('停止当前录制', panel.status.text())
-            self.assertFalse(view.capture_switch.isChecked())
+            panel.mode.setCurrentIndex(panel.mode.findData('both'))
+            self.assertEqual(panel.mode.currentData(), 'original')
+            self.assertEqual(view.capture_switch.currentData(), 'original')
             page.reset()
             self.assertEqual(len(self.owner.settings_panels), 1)
             self.assertEqual(panel.mode.currentData(), 'original')

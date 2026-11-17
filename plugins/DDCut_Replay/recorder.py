@@ -21,11 +21,12 @@ from ddm.danmaku_content import content_runs
 
 class ReplayRecordingSession(RecordingSession):
     supports_replay = False
+    clip_options = {}
     def __init__(self, tile, settings, recording, folder, video_codec=''):
         # HLS storage follows the source codec. AVC/HEVC use TS; the host's
         # existing AV1 compatibility rule selects MP4, emitted here as fMP4.
-        super().__init__(tile, {**settings, 'recording_format': 'ts'}, recording, folder, video_codec)
-        self.segment_seconds = 2
+        super().__init__(tile, {**settings, 'recording_format': 'ts', 'recording_codec': 'copy'}, recording, folder, video_codec)
+        self.segment_seconds = int(self.clip_options.get('segment_seconds', 2))
         self._archive = None
         self._lists = []
         self._stamp = None
@@ -39,6 +40,8 @@ class ReplayRecordingSession(RecordingSession):
         self._emoticon_loaders = {}
 
     def record_danmaku(self, message):
+        if not self.clip_options.get('danmaku', True):
+            return
         kind = message.get('kind') or 'danmaku'
         if (not self._archive or self._saved or self.stopping or not self.process
                 or self.process.poll() is not None or kind not in ('danmaku', 'super_chat', 'super_chat_delete')):

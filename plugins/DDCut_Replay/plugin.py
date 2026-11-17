@@ -23,6 +23,7 @@ from .workspace import Workspace
 class DDCutReplay(api.Plugin):
     name = '录制与切片'
     version = '0.1.3'
+    recording_settings_title = '切片录制'
 
     def __init__(self):
         super().__init__()
@@ -34,6 +35,9 @@ class DDCutReplay(api.Plugin):
         self.inputs = None
         self.links = None
         self.settings_panels = WeakSet()
+        self.backends = None
+        self.mode_prompt = None
+        self.mode_prompt_timer = None
 
     def on_load(self, context):
         self.context = context
@@ -84,33 +88,72 @@ class DDCutReplay(api.Plugin):
             from .deep_links import DeepLinks
             self.links = DeepLinks(self)
             self.capture_mode = self.hub.preferences.get('capture_mode', 'original')
+            from .dual_recorder import configured_backends
+            self.backends = configured_backends(self.clip_options())
             if hasattr(self.service, 'register_backend'):
-                if self.capture_mode == 'original':
-                    self.service.register_backend(ReplayRecordingSession, enabled=False)
-                else:
-                    self.service.register_backend(ReplayRecordingSession)
+                selected = self.backends[1] if self.capture_mode == 'both' else self.backends[0]
+                self.service.register_backend(selected, enabled=self.capture_mode != 'original')
+            if 'capture_mode' not in self.hub.preferences and not os.environ.get('DDM_NO_SAVE'):
+                self.mode_prompt_timer = QTimer(action)
+                self.mode_prompt_timer.setSingleShot(True)
+                self.mode_prompt_timer.timeout.connect(self.choose_capture_mode)
+                self.mode_prompt_timer.start(500)
             self.timer = QTimer(action)
             self.timer.setInterval(250)
             self.timer.timeout.connect(self.poll)
             self.timer.start()
 
     def set_capture_mode(self, mode):
-        if mode not in ('clip', 'original'):
+        if mode not in ('clip', 'original', 'both'):
             raise ValueError('未知录制方式')
-        setter = getattr(self.service, 'set_backend_enabled', None)
-        if setter is None:
-            raise RuntimeError('请更新配套本体，以支持互斥录制方式')
-        setter(mode == 'clip')
+        selector = getattr(self.service, 'select_backend', None)
+        if selector is not None:
+            if self.backends is None:
+                from .dual_recorder import configured_backends
+                self.backends = configured_backends(self.clip_options())
+            selector(None if mode == 'original' else self.backends[mode == 'both'])
+        elif mode == 'both':
+            raise RuntimeError('请更新配套本体，以支持同时录制')
+        else:
+            self.service.set_backend_enabled(mode == 'clip')
         self.capture_mode = mode
         self.hub.preferences['capture_mode'] = mode
         self.hub.save()
         if self.workspace is not None:
             switch = self.workspace.capture_switch
             previous = switch.blockSignals(True)
-            switch.setChecked(mode == 'clip')
+            switch.setCurrentIndex(switch.findData(mode))
             switch.blockSignals(previous)
         for panel in self.settings_panels:
             panel.sync()
+
+    def clip_options(self):
+        return dict(self.hub.preferences.get('clip_recording', {}))
+
+    def set_clip_options(self, options):
+        seconds = int(options.get('segment_seconds', 2))
+        if not 1 <= seconds <= 10:
+            raise ValueError('HLS目标分段时长必须为1到10秒')
+        options = dict(directory=str(options.get('directory') or ''),
+                       segment_seconds=seconds, danmaku=bool(options.get('danmaku', True)))
+        from .dual_recorder import configured_backends
+        backends = configured_backends(options)
+        selector = getattr(self.service, 'select_backend', None)
+        if selector is None:
+            raise RuntimeError('请更新配套本体，以支持独立切片录制设置')
+        selector(None if self.capture_mode == 'original' else backends[self.capture_mode == 'both'])
+        self.backends = backends
+        self.hub.preferences['clip_recording'] = dict(options)
+        self.hub.save()
+        for panel in self.settings_panels:
+            panel.sync()
+
+    def choose_capture_mode(self):
+        from .recording_settings import CaptureModePrompt
+        if self.mode_prompt is None:
+            self.mode_prompt = CaptureModePrompt(self, self.context.window)
+            self.mode_prompt.finished.connect(lambda: setattr(self, 'mode_prompt', None))
+        self.mode_prompt.open()
 
     def recording_settings(self, parent):
         if self.service is None:
@@ -123,12 +166,14 @@ class DDCutReplay(api.Plugin):
     def on_event(self, event, payload):
         if event != api.EVENT_DANMAKU or self.hub is None or self.hub.closed:
             return
-        recorder = getattr(self.context.window, 'recorder', None)
-        if recorder is None:
-            return
-        for session in tuple(recorder.sessions.values()):
-            if isinstance(session, ReplayRecordingSession) and session.room_id == str(payload.get('room_id') or ''):
-                session.record_danmaku(payload.get('message') or {})
+        deliver = getattr(self.service, 'record_danmaku', None)
+        if deliver is not None:
+            deliver(payload.get('room_id') or '', payload.get('message') or {})
+        else:
+            recorder = getattr(self.context.window, 'recorder', None)
+            for session in tuple(getattr(recorder, 'sessions', {}).values()):
+                if isinstance(session, ReplayRecordingSession) and session.room_id == str(payload.get('room_id') or ''):
+                    session.record_danmaku(payload.get('message') or {})
 
     def open(self, *_):
         if self.service is None:
@@ -234,6 +279,10 @@ class DDCutReplay(api.Plugin):
                 self.workspace.refresh_live()
 
     def on_unload(self):
+        if self.mode_prompt_timer:
+            self.mode_prompt_timer.stop()
+        if self.mode_prompt is not None:
+            self.mode_prompt.close()
         for panel in tuple(self.settings_panels):
             panel.detach()
         self.settings_panels.clear()
