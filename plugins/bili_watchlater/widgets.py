@@ -65,6 +65,8 @@ from .models import (
 from .entry_icon import BrowserIcon
 from .page_panels import GalleryToolButton, PlacementButton, ThumbnailSurface, two_line_title
 from .button_feedback import StableActionButton as ActionButton
+from .card_presentation import (UploaderAvatar, avatar_thumbnail, cover_description, draw_cover_footer,
+                                draw_finished_icon, finished_icon_rect, publication_text)
 
 
 def browser_button(parent):
@@ -117,6 +119,8 @@ def item_tooltip(item: WatchLaterItem, hint: str = "") -> str:
     发生在这一个地方，避免在已有 tooltip 上再覆盖一层重复内容。
     """
     lines = [str(item.title or "").strip(), str(item.owner_name or "").strip()]
+    if item.is_finished:
+        lines.append('已看完')
     if hint:
         lines.append(str(hint).strip())
     return "\n".join(line for line in lines if line)
@@ -338,10 +342,8 @@ class HoverTitleTip(QObject):
         return False
 
 
-# v1.0：封面徽章固定四个角位——分P 左上、已看完 右上、时长 右下，
-# 三者互不重叠（旧版已看完在左上，分P 会被挤到右上）。
+# 分 P 左上、完成图标右上、时长右下。
 BADGE_ALIGN_PARTS = Qt.AlignLeft | Qt.AlignTop
-BADGE_ALIGN_FINISHED = Qt.AlignRight | Qt.AlignTop
 BADGE_ALIGN_DURATION = Qt.AlignRight | Qt.AlignBottom
 
 
@@ -350,8 +352,6 @@ def cover_badges(item: WatchLaterItem) -> list[tuple[str, int]]:
     badges: list[tuple[str, int]] = []
     if item.parts > 1:
         badges.append((f"共 {item.parts} P", BADGE_ALIGN_PARTS))
-    if item.is_finished:
-        badges.append(("已看完", BADGE_ALIGN_FINISHED))
     if item.duration > 0:
         badges.append((format_duration(item.duration), BADGE_ALIGN_DURATION))
     return badges
@@ -669,6 +669,7 @@ class CoverWidget(QWidget):
         self.set_pixmap(pixmap)
         # v1.0：封面也可能把标题藏在省略号后面，悬停给出完整标题 + UP 主。
         self.setToolTip(item_tooltip(item, self._hint))
+        self.setAccessibleDescription(cover_description(item))
         if changed:
             self.setAccessibleName(item.title)
             self.update()
@@ -790,7 +791,8 @@ class CoverWidget(QWidget):
 
     def _composited_cover(self) -> QPixmap:
         item = self._item
-        data = (tuple(cover_badges(item)), item.duration, item.progress, item.is_finished) if item else None
+        data = (tuple(cover_badges(item)), item.duration, item.progress, item.is_finished,
+                item.view_count, item.danmaku_count) if item else None
         palette = self.palette()
         pixmap = self._preview_frame if self._preview_frame is not None else self._pixmap
         key = (pixmap.cacheKey() if pixmap is not None else None,
@@ -824,7 +826,8 @@ class CoverWidget(QWidget):
         )
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         path = QPainterPath()
-        path.addRoundedRect(rect, 8, 8)
+        radius = 12 if self._flexible else 8
+        path.addRoundedRect(rect, radius, radius)
         painter.setClipPath(path)
 
         pixmap = self._preview_frame if self._preview_frame is not None else self._pixmap
@@ -861,9 +864,12 @@ class CoverWidget(QWidget):
 
         item = self._item
         if item is not None:
-            # v1.0：分P 左上 / 已看完 右上 / 时长 右下，三处角位互不重叠。
+            if self._flexible:
+                draw_cover_footer(painter, rect, item, relative_font(self.font(), .82))
             for text, alignment in cover_badges(item):
                 bottom = bool(alignment & Qt.AlignBottom)
+                if bottom and self._flexible:
+                    continue
                 self._draw_badge(
                     painter,
                     text,
@@ -871,6 +877,8 @@ class CoverWidget(QWidget):
                     6,
                     8 if bottom else 6,
                 )
+            if item.is_finished:
+                draw_finished_icon(painter, rect)
             # v1.0 需求：：封面底边常驻小蓝线显示历史播放进度（B 站客户端同款）。
             if item.duration > 0:
                 ratio = (1.0 if item.is_finished else
@@ -895,6 +903,12 @@ class CoverWidget(QWidget):
         painter.setFont(font)
         metrics = QFontMetrics(font)
         width = metrics.horizontalAdvance(text) + 10
+        if self._item is not None and self._item.is_finished and alignment == BADGE_ALIGN_PARTS:
+            available = int(finished_icon_rect(QRectF(self.rect())).left()) - margin_x - 4
+            if available < 16:
+                return
+            width = min(width, available)
+            text = metrics.elidedText(text, Qt.ElideRight, max(1, width - 10))
         height = metrics.height() + 2
         if alignment & Qt.AlignRight:
             x = self.width() - width - margin_x
@@ -1361,27 +1375,41 @@ class GridCard(ThumbnailSurface):
         layout.addWidget(self.cover, 0)
 
         self.title_label = ClickableLabel(self, lines=2)
+        self.title_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.title_label.set_full_text(item.title)
         self.title_label.setFont(relative_font(self.font(), 1.0, bold=True))
         self.title_label.clicked.connect(self._select)
         self.title_label.double_clicked.connect(self._double_close)
         layout.addWidget(self.title_label)
+        self.uploader_row = QWidget(self)
+        uploader = QHBoxLayout(self.uploader_row)
+        uploader.setContentsMargins(0, 0, 0, 0)
+        uploader.setSpacing(9)
+        self.avatar = UploaderAvatar(self.uploader_row)
+        uploader.addWidget(self.avatar)
+        details = QVBoxLayout()
+        details.setContentsMargins(0, 0, 0, 0)
+        details.setSpacing(2)
         self.owner_label = ElidedLabel(self)
         self.owner_label.setForegroundRole(QPalette.PlaceholderText)
         self.owner_label.setFont(relative_font(self.font(), .9))
         self.owner_label.set_full_text(item.owner_name)
         self.owner_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        layout.addWidget(self.owner_label)
+        details.addWidget(self.owner_label)
+        self.date_label = ElidedLabel(self)
+        self.date_label.setForegroundRole(QPalette.PlaceholderText)
+        self.date_label.setFont(relative_font(self.font(), .78))
+        self.date_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        details.addWidget(self.date_label)
+        uploader.addLayout(details, 1)
+        layout.addWidget(self.uploader_row)
+        self._sync_uploader()
 
         actions = QHBoxLayout()
         actions.setContentsMargins(0, 0, 0, 0)
         actions.setSpacing(4)
-        self.meta_label = ElidedLabel(self)
-        self.meta_label.setForegroundRole(QPalette.PlaceholderText)
-        self.meta_label.setFont(relative_font(self.font(), 0.9))
-        self.meta_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        self.meta_label.set_full_text(self._meta_text(item))
-        actions.addWidget(self.meta_label, 1)
+        actions.addStretch()
+        self.actions_layout = actions
         self.play_button = PlacementButton("置入视频", self)
         self.play_button.setAccessibleName("置入或替换视频")
         self.play_button.setAutoDefault(False)
@@ -1396,7 +1424,7 @@ class GridCard(ThumbnailSurface):
         self.remove_button.setAccessibleName('从稍后再看移除')
         self.remove_button.clicked.connect(self._remove)
         actions.addWidget(self.remove_button)
-        layout.addLayout(actions)
+        uploader.addLayout(actions)
         layout.addStretch(1)
 
         self._destructive_ready = False
@@ -1405,31 +1433,29 @@ class GridCard(ThumbnailSurface):
         # v1.0 需求 8：卡片任意位置悬停都主动弹出完整标题 + UP 主。
         self._title_tip = HoverTitleTip(self, lambda: item_tooltip(self.item))
         self._title_tip.watch(
-            self, self.cover, self.title_label, self.owner_label, self.meta_label
+            self, self.cover, self.title_label, self.owner_label, self.date_label
         )
 
     def fit_cell(self, width: int, height: int) -> None:
-        """按列宽保留自然封面和文字高度，与下方文字同宽。
-
-        v1.0 需求 7：旧实现按高度反算宽度，高度受限时封面比标题/UP 主窄一
-        截，左边缘对不齐。改为优先用满可用宽度（16:9 由宽度推高度），只有
-        整格高度真的放不下时才退回按高度反算。
-        """
-        side = 24 if width < 125 else 30
-        self.play_button.set_compact(width < 270, side)
+        """Keep a natural 16:9 cover and one shared uploader/action row."""
+        side = 20 if width < 160 else 30
+        self.play_button.set_compact(width < 360, side)
         self.open_button.setFixedSize(side, side)
         self.remove_button.setFixedSize(side, side)
+        self.uploader_row.layout().setSpacing(4 if width < 270 else 9)
+        self.actions_layout.setSpacing(2 if width < 160 else 4)
         layout = self.layout()
         margins = layout.contentsMargins()
         title_h = self.title_label.fontMetrics().lineSpacing() * 2 + 4
-        meta_h = self.owner_label.sizeHint().height()
+        self.avatar.setVisible(width >= 210)
+        meta_h = max(34, self.owner_label.sizeHint().height() + self.date_label.sizeHint().height() + 2)
         # cover/title/meta/stretch 共 count() 项 → count()-1 个 spacing 间隙；
         # 旧写法只算 2 个间隙，固定高比布局最小高少约 2px，meta 行底部被裁。
         gaps = max(0, layout.count() - 1) * layout.spacing()
-        overhead = margins.top() + margins.bottom() + title_h + meta_h + self.play_button.sizeHint().height() + gaps
+        overhead = margins.top() + margins.bottom() + title_h + meta_h + gaps
         cover_w, cover_h = fit_grid_cover(
             width,
-            height,
+            max(height, (width - margins.left() - margins.right()) * 9 // 16 + overhead),
             margin_x=margins.left() + margins.right(),
             overhead=overhead,
         )
@@ -1440,19 +1466,19 @@ class GridCard(ThumbnailSurface):
         self.cover.setFixedHeight(cover_h)
         self.cover.resize(cover_w, cover_h)
         self.title_label.setFixedHeight(title_h)
-        self.owner_label.setFixedHeight(meta_h)
+        self.uploader_row.setFixedHeight(meta_h)
         self.setFixedHeight(cover_h + overhead)
 
-    @staticmethod
-    def _meta_text(item: WatchLaterItem) -> str:
-        parts = []
-        # v1.0 需求：：播放量未知时不显示。
-        views = format_views(item.view_count)
-        if views:
-            parts.append(views)
-        if item.danmaku_count is not None:
-            parts.append(format_count(item.danmaku_count) + "弹幕")
-        return " · ".join(parts)
+    def _sync_uploader(self):
+        self.avatar_url = avatar_thumbnail(self.item.owner_face)
+        self.avatar.set_author(self.item.owner_name, self.avatar_url)
+        date, hint = publication_text(self.item)
+        self.date_label.set_full_text(date)
+        self.date_label.setToolTip(hint)
+
+    def refresh_avatar(self, provider):
+        if self.avatar_url:
+            self.avatar.set_pixmap(provider(self.avatar_url))
 
     def _sync_tooltips(self) -> None:
         """v1.0 需求：：悬停显示完整标题 + UP 主。"""
@@ -1465,20 +1491,18 @@ class GridCard(ThumbnailSurface):
         except (TypeError, ValueError):
             return
         self.item.danmaku_count = value
-        text = self._meta_text(self.item)
-        if self.meta_label.full_text() != text:
-            self.meta_label.set_full_text(text)
+        self.cover.setAccessibleDescription(cover_description(self.item))
+        self.cover.update()
 
     def set_view_count(self, count: int | None) -> None:
-        """v1.0 需求：：播放量到位后只刷新 meta 行。"""
+        """Refresh the count overlay when its asynchronous value arrives."""
         try:
             value = None if count is None else max(0, int(count))
         except (TypeError, ValueError):
             return
         self.item.view_count = value
-        text = self._meta_text(self.item)
-        if self.meta_label.full_text() != text:
-            self.meta_label.set_full_text(text)
+        self.cover.setAccessibleDescription(cover_description(self.item))
+        self.cover.update()
 
     def update_item(self, item: WatchLaterItem) -> None:
         if item is self.item:
@@ -1486,8 +1510,8 @@ class GridCard(ThumbnailSurface):
         self.item = item
         self.setAccessibleName(item.title)
         self.title_label.set_full_text(item.title)
-        self.meta_label.set_full_text(self._meta_text(item))
         self.owner_label.set_full_text(item.owner_name)
+        self._sync_uploader()
         self._sync_tooltips()
         self._sync_cover_item()
 

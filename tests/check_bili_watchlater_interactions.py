@@ -198,8 +198,8 @@ class CardPlaybackTests(unittest.TestCase):
             card.fit_cell(width, round(width * 9 / 16) + 140)
             card.layout().activate()
             self.assertAlmostEqual(card.cover.width() / card.cover.height(), 16 / 9, delta=.03)
-            self.assertGreater(card.play_button.y(), card.owner_label.geometry().bottom())
-            self.assertTrue(card.rect().contains(card.play_button.geometry()))
+            self.assertIs(card.play_button.parentWidget(), card.uploader_row)
+            self.assertTrue(card.uploader_row.rect().contains(card.play_button.geometry()))
 
     def test_filter_segments_use_existing_filter_state_in_both_directions(self):
         self.page.filter_tabs.setValue('unfinished')
@@ -257,9 +257,9 @@ class CardPlaybackTests(unittest.TestCase):
         card.update_item(replacement)
         self.assertEqual(card.owner_label.full_text(), '新的 UP 主')
         self.assertEqual(card.title_label.full_text(), replacement.title)
-        self.assertIn('播放', card.meta_label.full_text())
+        self.assertEqual(card.cover._item.view_count, 12345)
         card.set_danmaku_count(789)
-        self.assertIn('789弹幕', card.meta_label.full_text())
+        self.assertEqual(card.cover._item.danmaku_count, 789)
 
     def test_visible_controls_fit_normal_and_multiselect_at_minimum_width(self):
         self.item.view_count = self.item.danmaku_count = 0

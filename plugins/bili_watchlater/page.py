@@ -519,6 +519,7 @@ class WatchLaterPage(BrowserWindow):
         self._minimize_guard = False
 
         self.covers = CoverLoader(self)
+        self._avatars_by_url = {}
         self.covers.image_ready.connect(self._cover_ready)
         self.covers.diagnostic.connect(self._log)
 
@@ -1587,7 +1588,10 @@ class WatchLaterPage(BrowserWindow):
         self.card_preview.stop()
         for view in self._cover_views:
             view.cover.set_pixmap(None)
+            if isinstance(view, GridCard):
+                view.avatar.set_pixmap(None)
         self._cover_views.clear()
+        self._avatars_by_url.clear()
 
     def _drop_view(self, view, layout) -> None:
         if self.card_preview.target is view.cover:
@@ -1596,6 +1600,8 @@ class WatchLaterPage(BrowserWindow):
         layout.removeWidget(view)
         view.hide()
         view.cover.set_pixmap(None)
+        if isinstance(view, GridCard):
+            view.avatar.set_pixmap(None)
         view.deleteLater()
 
     def _prune_inactive_view(self, items: list[WatchLaterItem]) -> None:
@@ -1613,6 +1619,8 @@ class WatchLaterPage(BrowserWindow):
             else:
                 view.update_item(wanted[key])
                 view.cover.set_pixmap(None)
+                if isinstance(view, GridCard):
+                    view.avatar.set_pixmap(None)
                 self._cover_views.discard(view)
         views[:] = [view for view in views if view.item.key in index]
         covers = self._cards_by_cover if grid else self._rows_by_cover
@@ -1858,6 +1866,9 @@ class WatchLaterPage(BrowserWindow):
         for row in index.get(url, ()):
             if row in self._cover_views and self._visible:
                 row.refresh_cover()
+        for row in self._avatars_by_url.get(url, ()):
+            if row in self._cover_views and self._visible:
+                row.refresh_avatar(self.covers.cached)
         # A delivery drains the pending queue by one.  Re-arm the debounced
         # visible-row check so rows that were dropped while the queue was full
         # get their get() retried once slots free up (no extra scroll needed).
@@ -2084,13 +2095,22 @@ class WatchLaterPage(BrowserWindow):
             walk += 1
         for row in self._cover_views - retain:
             row.cover.set_pixmap(None)
+            if isinstance(row, GridCard):
+                row.avatar.set_pixmap(None)
         self._cover_views = retain
+        self._avatars_by_url = {}
+        for row in retain:
+            if isinstance(row, GridCard) and row.avatar_url:
+                self._avatars_by_url.setdefault(row.avatar_url, []).append(row)
         visible.sort(key=lambda row: not (row.geometry().bottom() >= offset
             and row.geometry().top() <= offset + viewport_rect.height()))
-        self.covers.prioritize([row.item.cover_url for row in visible])
+        self.covers.prioritize([row.item.cover_url for row in visible] +
+                               [row.avatar_url for row in visible if isinstance(row, GridCard) and row.avatar_url])
         provider = self._danmaku_provider()
         for row in visible:
             row.refresh_cover(self.covers.get)
+            if isinstance(row, GridCard):
+                row.refresh_avatar(self.covers.get)
             if provider is not None and row.item.bvid:
                 count = provider.get(row.item.bvid)
                 if count is not None:
