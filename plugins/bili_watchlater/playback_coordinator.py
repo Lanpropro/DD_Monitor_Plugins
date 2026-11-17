@@ -583,6 +583,8 @@ class PlaybackCoordinator:
             if isinstance(audio_url, str) and audio_url.strip():
                 binding.pending_audio = audio_url.strip()
         binding.stream = stream
+        binding._trace_tick = binding._trace_count = 0
+        binding._trace_paused = None
         binding.cid = _as_int(getattr(stream, "cid", 0)) or binding.cid
         if binding.danmaku is None and not binding.dm_pending:
             self.start_danmaku_fetch(binding, self.cookie_snapshot())
@@ -1267,6 +1269,17 @@ class PlaybackCoordinator:
             binding.state = "paused"
         elif binding.state == "paused" and not paused:
             binding.state = "playing"
+        # The host watchdog returns early while paused, so it cannot acknowledge
+        # a frame loaded in that state. Clear startup feedback only for a real
+        # configured video frame; metadata alone does not prove readiness.
+        if (paused and position is not None and prop("vo-configured", False)
+                and not getattr(tile, "_player_active", False)):
+            tile.set_video_active(True)
+            tile.set_buffering(False)
+            tile.set_status("")
+            tile.set_paused(True)
+        from .acceptance_trace import playback_sample
+        playback_sample(binding, player)
         if position is not None:
             binding.progress = position
         if duration > 0:

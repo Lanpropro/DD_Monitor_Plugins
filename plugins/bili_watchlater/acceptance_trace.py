@@ -61,3 +61,35 @@ class LiftTrace(QObject):
         # Keep diagnostic file I/O outside drag image creation and repaint.
         QTimer.singleShot(0,lambda:record('drag_lift',**values,
             loop_return_ms=round((time.perf_counter()-finished)*1000,3)))
+
+
+def playback_sample(binding, player):
+    """Sample a few startup/pause transitions; never serialize track URLs or IDs."""
+    tick = getattr(binding, '_trace_tick', 0) + 1
+    binding._trace_tick = tick
+    paused = bool(getattr(binding.tile, 'paused', False))
+    changed = paused != getattr(binding, '_trace_paused', None)
+    binding._trace_paused = paused
+    count = getattr(binding, '_trace_count', 0)
+    if count >= 8 or not (tick in (1, 4, 12, 40) or changed):
+        return
+    binding._trace_count = count + 1
+    prop = player._prop
+    tracks = prop('track-list', []) or []
+    audio = [track for track in tracks if isinstance(track, dict) and track.get('type') == 'audio']
+    def number(name):
+        value = prop(name, None)
+        return round(float(value), 3) if isinstance(value, (int, float)) else None
+    record('playback_sample', tick=tick, paused=paused,
+           dash=bool(getattr(binding.stream, 'is_dash', False)),
+           audio_url=bool(getattr(binding.stream, 'audio_url', '')),
+           pending_audio=bool(binding.pending_audio), attempts=binding.audio_attempts,
+           audio_tracks=len(audio), selected_audio=sum(bool(t.get('selected')) for t in audio),
+           audio_params=bool(prop('audio-params', None)),
+           audio_output=bool(prop('audio-out-params', None)),
+           audio_pts=number('audio-pts'), position=number('time-pos'),
+           mute=bool(prop('mute', False)), volume=number('volume'),
+           core_paused=bool(prop('pause', False)),
+           video_ready=bool(prop('vo-configured', False)),
+           idle=bool(prop('idle-active', False)),
+           cache_paused=bool(prop('paused-for-cache', False)))

@@ -181,6 +181,27 @@ class HostTests(unittest.TestCase):
         self.assertNotIn(self.tile, self.window.players)
         self.assertEqual(self.plugin._bindings, {})
 
+    def test_paused_startup_acknowledges_real_tile_frame_without_resuming(self):
+        binding = self.binding()
+        binding.resume_paused = True
+        stream = streams.VodStream(url='https://a.bilivideo.com/v.mp4', cid=101)
+        workers = importlib.import_module('ddm_plugin_bili_watchlater.workers')
+        player = Mock()
+        values = {'duration': 60., 'time-pos': 30., 'vo-configured': True}
+        player._prop.side_effect = lambda key, default=None: values.get(key, default)
+        with patch('ddm.app.TilePlayer', return_value=player), \
+                patch.object(workers.DanmakuRequest, 'start'):
+            self.plugin._inject_playback(binding, stream, 30.)
+        self.tile.set_status('连接中…')
+        self.plugin.playback.tick_binding(binding, [self.tile])
+        self.assertTrue(self.tile.paused)
+        self.assertTrue(self.tile._player_active)
+        self.assertFalse(self.tile._connecting)
+        self.assertFalse(self.tile._buffering)
+        self.assertEqual(self.tile._status_text, '')
+        self.assertEqual(binding.state, 'paused')
+        self.assertTrue(all(call.args == (True,) for call in player.set_paused.call_args_list))
+
     def test_avatar_loader_uses_async_cover_lifecycle(self):
         avatars = importlib.import_module('ddm_plugin_bili_watchlater.avatars')
         pixmap = QPixmap(8, 8)
