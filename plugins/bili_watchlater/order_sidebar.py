@@ -1,5 +1,5 @@
 """Virtualized large cards: one drag works both inside the queue and on wall tiles."""
-from PySide6.QtCore import QMimeData, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QMimeData, QPoint, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QDrag, QLinearGradient, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (QAbstractItemView, QLabel, QListWidget, QListWidgetItem,
                               QStyledItemDelegate, QVBoxLayout, QWidget)
@@ -8,6 +8,7 @@ from .models import VOD_MIME, format_duration
 from .card_presentation import avatar_thumbnail
 from .widgets import relative_font
 from .motion_trace import MotionTrace, measure
+from .order_feedback import OrderFeedback
 
 ORDER_MIME = 'application/x-bili-watchlater-order'
 
@@ -41,6 +42,11 @@ class OrderDelegate(QStyledItemDelegate):
         gradient.setColorAt(.6, QColor(0,0,0,25))
         gradient.setColorAt(1, QColor(0,0,0,180))
         painter.fillRect(rect, gradient)
+        opacity = view.feedback.weights.get(index.row(), 0.)
+        if opacity:
+            painter.fillRect(rect, QColor(255,255,255,round(14*opacity)))
+        if view.feedback.pressed == index.row():
+            painter.fillRect(rect, QColor(0,0,0,32))
         avatar_rect = QRectF(rect.left()+10,rect.top()+10,30,30)
         painter.save()
         avatar_path = QPainterPath()
@@ -65,6 +71,10 @@ class OrderDelegate(QStyledItemDelegate):
             painter.setPen(QPen(theme.qcolor(theme.ACCENT), 2))
             painter.setBrush(Qt.NoBrush)
             painter.drawRoundedRect(rect,8,8)
+        elif opacity:
+            painter.setPen(QPen(QColor(255,255,255,round(115*opacity)),1.5))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(rect,8,8)
         painter.restore()
 
 
@@ -75,7 +85,6 @@ class OrderList(QListWidget):
     def __init__(self, page, parent=None):
         super().__init__(parent)
         self.page = page
-        self.viewport().setCursor(Qt.PointingHandCursor)
         self.setFrameShape(QListWidget.NoFrame)
         self.setStyleSheet('QListWidget { background: transparent; border: 0; }')
         self.setItemDelegate(OrderDelegate(self))
@@ -85,7 +94,7 @@ class OrderList(QListWidget):
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
         self.setDragDropMode(QAbstractItemView.DragDrop)
-        self.itemClicked.connect(lambda row: self.chosen.emit(row.data(Qt.UserRole)))
+        self.itemDoubleClicked.connect(lambda row: self.chosen.emit(row.data(Qt.UserRole)))
         self.verticalScrollBar().valueChanged.connect(self.request_covers)
         self.cover_timer = QTimer(self)
         self.cover_timer.setSingleShot(True)
@@ -98,9 +107,12 @@ class OrderList(QListWidget):
         page.covers.image_ready.connect(self.cover_ready)
         self.motion_trace = MotionTrace(page, areas=[self], visible=self.isVisible,
                                         parent=self, prefix='order timing')
+        self.feedback = OrderFeedback(self)
+        self.drop_y = None
 
     @measure('replace')
     def replace(self, items):
+        self.feedback.clear()
         selected = self.currentItem().data(Qt.UserRole).bvid if self.currentItem() else None
         value = self.verticalScrollBar().value()
         self.clear()
@@ -126,6 +138,8 @@ class OrderList(QListWidget):
         if row is None:
             return
         item = row.data(Qt.UserRole)
+        self.feedback.clear()
+        self.feedback.dragging = True
         drag = QDrag(self)
         drag.setMimeData(self.drag_mime(item))
         drag.setPixmap(self.viewport().grab(self.visualItemRect(row)))
@@ -133,6 +147,9 @@ class OrderList(QListWidget):
             drag.exec(Qt.CopyAction | Qt.MoveAction, Qt.CopyAction)
         finally:
             self.drag_scroll.stop()
+            self.set_drop_y(None)
+            self.feedback.dragging = False
+            self.feedback.sync_pointer()
 
     def dragEnterEvent(self, event):
         if event.source() is self and event.mimeData().hasFormat(ORDER_MIME):
@@ -145,6 +162,8 @@ class OrderList(QListWidget):
         self.dragEnterEvent(event)
         if event.isAccepted():
             self.drag_y = event.position().y()
+            _index, y = self.insertion_at(event.position().toPoint())
+            self.set_drop_y(y)
             self.drag_scroll.start()
 
     def scroll_drag(self):
@@ -152,25 +171,40 @@ class OrderList(QListWidget):
         step = -12 if self.drag_y < edge else 12 if self.drag_y > height-edge else 0
         bar = self.verticalScrollBar()
         bar.setValue(bar.value()+step)
+        _index, y = self.insertion_at(QPoint(2,round(self.drag_y)))
+        self.set_drop_y(y)
 
     def dragLeaveEvent(self, event):
         self.drag_scroll.stop()
+        self.set_drop_y(None)
         super().dragLeaveEvent(event)
 
     def dropEvent(self, event):
         self.drag_scroll.stop()
+        self.set_drop_y(None)
         if event.source() is not self or not event.mimeData().hasFormat(ORDER_MIME):
             event.ignore()
             return
-        row = self.itemAt(event.position().toPoint())
-        index = self.row(row) if row is not None else self.count()
-        if row is not None and event.position().y() > self.visualItemRect(row).center().y():
-            index += 1
+        index, _y = self.insertion_at(event.position().toPoint())
         before = self.item(index).data(Qt.UserRole).bvid if index < self.count() else None
         key = bytes(event.mimeData().data(ORDER_MIME)).decode('utf-8')
         self.reordered.emit(key, before)
         event.setDropAction(Qt.MoveAction)
         event.accept()
+
+    def insertion_at(self, point):
+        row = self.itemAt(point)
+        if row is None:
+            return self.count(), min(self.viewport().height()-2,point.y())
+        rect = self.visualItemRect(row)
+        after = point.y() > rect.center().y()
+        return self.row(row) + int(after), rect.bottom()-2 if after else rect.top()+2
+
+    def set_drop_y(self, y):
+        for value in (self.drop_y,y):
+            if value is not None:
+                self.viewport().update(0,round(value)-5,self.viewport().width(),11)
+        self.drop_y = y
 
     def request_covers(self, *_):
         if self.isVisible():
@@ -190,17 +224,30 @@ class OrderList(QListWidget):
         if not self.isVisible():
             return []
         covers, avatars = [], []
-        for index in range(self.count()):
-            row = self.item(index)
-            if self.visualItemRect(row).intersects(self.viewport().rect()):
-                covers.append(row.data(Qt.UserRole).cover_url)
-                avatars.append(avatar_thumbnail(row.data(Qt.UserRole).owner_face))
+        for row in self.visible_items():
+            covers.append(row.data(Qt.UserRole).cover_url)
+            avatars.append(avatar_thumbnail(row.data(Qt.UserRole).owner_face))
         return [url for url in covers+avatars if url]
 
+    def visible_items(self):
+        start = max(0,self.indexAt(QPoint(1,0)).row())
+        for index in range(start,self.count()):
+            row = self.item(index)
+            if row.isHidden():
+                continue
+            rect = self.visualItemRect(row)
+            if rect.top() >= self.viewport().height():
+                break
+            if rect.bottom() >= 0:
+                yield row
+
     @measure('image_callback')
-    def cover_ready(self, _url):
+    def cover_ready(self, url):
         if self.isVisible():
-            self.viewport().update()
+            for row in self.visible_items():
+                item = row.data(Qt.UserRole)
+                if url in (item.cover_url, avatar_thumbnail(item.owner_face)):
+                    self.viewport().update(self.visualItemRect(row))
 
     @measure('resize_layout')
     def resizeEvent(self, event):
@@ -211,6 +258,21 @@ class OrderList(QListWidget):
     @measure('list_paint')
     def paintEvent(self, event):
         super().paintEvent(event)
+        if self.drop_y is not None:
+            painter = QPainter(self.viewport())
+            painter.setPen(QPen(theme.qcolor(theme.ACCENT),2))
+            painter.drawLine(6,round(self.drop_y),self.viewport().width()-6,round(self.drop_y))
+            painter.end()
+
+    def keyPressEvent(self, event):
+        self.feedback.clear()
+        super().keyPressEvent(event)
+
+    def hideEvent(self, event):
+        self.feedback.clear()
+        self.motion_trace.timer.stop()
+        self.set_drop_y(None)
+        super().hideEvent(event)
 
 
 class OrderSidebar(QWidget):
@@ -220,7 +282,7 @@ class OrderSidebar(QWidget):
         self.page, self.order = page, order
         box = QVBoxLayout(self)
         box.setContentsMargins(0,0,0,0)
-        hint = QLabel('拖动排序或拖入格子 · 仅影响本机连播', self)
+        hint = QLabel('双击播放 · 拖动排序或拖入格子', self)
         hint.setWordWrap(True)
         hint.setObjectName('SectionLabel')
         box.addWidget(hint)

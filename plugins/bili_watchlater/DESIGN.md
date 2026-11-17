@@ -150,3 +150,10 @@ DPI 通知仅登记一次延迟任务；处理期间和冷却期忽略重入，�
 侧栏只替换下方内容，上方关注标题、工具和共享搜索结构保留；搜索由注册时的 on_filter 回调转发，关闭/收起/注销恢复关注查询。`show_watch_order` 默认开启，通过既有即时保存设置控制入口注册；控件及 Gallery 均懒创建，隐藏入口不删除本地排列。
 
 首轮真实采集（2026-11-17 16:32）：三段事件循环最大间隔118.8/89.3/62.9 ms；预览裁帧最高0.2 ms、封面绘制最高1.4 ms，尚不能将卡顿归因于裁帧或绘制。第二轮增加 grid_layout/grow/render/grid_build/list_build/visible_covers/cover_ready/playback_tick 阶段，等待实际采集后再优化，阶段耗时包含内部让出事件循环的时间，不能直接视为连续阻塞。
+
+
+### 观看顺序栏反馈与真实滚动采集
+
+`OrderFeedback` 是 OrderList 的 Qt 子对象，每列只有一个 QVariantAnimation，记录少量悬停透明度和按下行；不为每张卡片建控件或定时器。使用宿主 CONTROL_FEEDBACK_MS(160ms)/THEME_WAVE_EASING，快速切换从当前值继续，滚动时即时对齐鼠标状态；键盘/隐藏清理，无系统动画时立即切换。视觉仅为明暗/描边，不改变几何。OrderList 负责拖动插入线和单击选中/双击 chosen 信号，现有VOD MIME及目标格规则不变。
+
+MotionTrace复用于OrderList，拥有独立窗口预算和可见谓词，order timing与Gallery的motion timing分开。真实17:00采集：绘制最高4.5/5.9/4.3ms；visible_urls最高0.8ms，load_covers最高3.6ms；事件循环最大41.5/25.0/70.9ms，用户反馈这次无明显卡顿。未归因或声称修复。首窗142次image_callback，原代码每个回调无条件viewport.update；新实现从视口首项遍历可见项，仅对匹配封面/头像的卡片rect发update，避免无关图片造成整列重绘。需冷/热缓存真实复验才能评价体感提升。
