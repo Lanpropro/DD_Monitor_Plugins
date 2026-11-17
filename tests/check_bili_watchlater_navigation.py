@@ -34,12 +34,15 @@ class NavigationTests(unittest.TestCase):
             self.assertTrue(page.windowFlags() & Qt.FramelessWindowHint)
             self.assertFalse(page.windowFlags() & Qt.WindowMinimizeButtonHint)
             self.assertTrue(page.testAttribute(Qt.WA_TranslucentBackground))
+            self.assertTrue(page.window_header.breadcrumb.isHidden())
             handle = page.winId()
             for open_panel, field in ((page._open_settings, '_settings_dialog'),
                                       (lambda: page._select_item(self.item), '_placement_picker')):
                 open_panel()
                 panel = getattr(page, field)
                 self.assertFalse(panel.isWindow())
+                self.assertTrue(page.window_header.breadcrumb.isVisible())
+                self.assertIn('稍后再看  ›  ', page.window_header.breadcrumb.text())
                 self.assertIs(panel.window(), page)
                 self.assertEqual(page.winId(), handle)
                 self.assertIs(page.navigation.currentWidget(), panel)
@@ -49,6 +52,7 @@ class NavigationTests(unittest.TestCase):
                 self.assertFalse(page._cover_scroll_timer.isActive())
                 panel.reject()
                 self.assertIs(page.navigation.currentWidget(), page.browser_view)
+                self.assertTrue(page.window_header.breadcrumb.isHidden())
                 self.assertEqual(page.winId(), handle)
                 self.assertTrue(page._refresh_shortcut.isEnabled())
 

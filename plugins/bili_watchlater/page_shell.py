@@ -83,10 +83,11 @@ class BrowserTitleBar(QWidget):
         self.back.clicked.connect(self.back_requested)
         row.addWidget(self.back)
         self.back.hide()
-        self.breadcrumb = QLabel('稍后再看', self)
+        self.breadcrumb = QLabel('', self)
         self.breadcrumb.setObjectName('SettingsBreadcrumb')
         self.breadcrumb.setAttribute(Qt.WA_TransparentForMouseEvents)
         row.addWidget(self.breadcrumb)
+        self.breadcrumb.hide()
         row.addStretch()
         self.maximize = GalleryToolButton(self)
         self.maximize.setIcon(QIcon(GalleryIcon('maximize')))
@@ -103,7 +104,8 @@ class BrowserTitleBar(QWidget):
 
     def set_page(self, title=''):
         self.back.setVisible(bool(title))
-        self.breadcrumb.setText('稍后再看' + ('  ›  ' + title if title else ''))
+        self.breadcrumb.setText('稍后再看  ›  ' + title if title else '')
+        self.breadcrumb.setVisible(bool(title))
 
     def toggle_maximize(self):
         window = self.window()
