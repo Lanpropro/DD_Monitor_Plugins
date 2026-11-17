@@ -77,5 +77,35 @@ class BoundaryTests(unittest.TestCase):
         self.assertIs(widgets.ElidedLabel,gallery_controls.ElidedLabel)
         self.assertIs(controls.pages.GridCard,media_cards.GridCard)
 
+    def test_playback_binding_and_generation_have_one_owner_with_legacy_access(self):
+        from ddm_plugin_bili_watchlater.playback_binding import VodBinding
+        plugin=plugin_module.BiliWatchLaterPlugin()
+        bindings={}
+        plugin._bindings=bindings
+        self.assertIs(plugin.playback.bindings,bindings)
+        self.assertIs(plugin_module._VodBinding,VodBinding)
+        plugin.playback.account_generation=7
+        self.assertEqual(plugin._account_generation,7)
+        self.assertNotIn('_bindings',plugin.__dict__)
+        self.assertNotIn('_account_generation',plugin.__dict__)
+
+    def test_playback_tick_keeps_timer_interval_and_measurement_page(self):
+        plugin=plugin_module.BiliWatchLaterPlugin()
+        self.addCleanup(plugin.playback.stop_tick_timer)
+        sample=Mock()
+        plugin.page=SimpleNamespace(motion_trace=SimpleNamespace(timer=SimpleNamespace(isActive=lambda:True),sample=sample))
+        plugin._ensure_tick_timer()
+        timer=plugin._tick_timer
+        self.assertIsNone(timer.parent())
+        self.assertEqual(timer.interval(),300)
+        self.assertTrue(timer.isActive())
+        plugin._tick()
+        self.assertFalse(timer.isActive())
+        sample.assert_called_once()
+        self.assertEqual(sample.call_args.args[0],'playback_tick')
+        self.assertIs(plugin.playback.page,plugin.page)
+        plugin.playback.stop_tick_timer()
+        self.assertIsNone(plugin._tick_timer)
+
 
 if __name__=='__main__': unittest.main()

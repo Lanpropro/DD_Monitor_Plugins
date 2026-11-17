@@ -39,7 +39,7 @@ class SessionTests(unittest.TestCase):
         plugin = plugin_module.BiliWatchLaterPlugin()
         plugin.context = context(self.values)
         plugin.host.window = lambda: self.window
-        plugin._cookie_snapshot = lambda: {'DedeUserID': 'fixture-account', 'SESSDATA': 'fixture-secret'}
+        plugin.playback.cookie_snapshot = lambda: {'DedeUserID': 'fixture-account', 'SESSDATA': 'fixture-secret'}
         plugin._resolve_cell_from_tile = lambda tile: tile
         plugin.host.player = lambda tile: None
         plugin._notify_warning = Mock()
@@ -77,7 +77,7 @@ class SessionTests(unittest.TestCase):
         self.values['auto_play'] = False
         self.tile.room = {}
         resume = dict(part=2, progress=321.25, quality=64, paused=False)
-        with patch.object(second, '_start_resolution') as resolve, patch.object(second, '_ensure_tick_timer'):
+        with patch.object(second.playback, 'start_resolution') as resolve, patch.object(second.playback, 'ensure_tick_timer'):
             second._start_vod_for_tile(self.tile, self.item, resume=resume)
             binding = second._bindings[self.item.bvid]
             self.assertEqual((binding.part, binding.quality, binding.progress), (2, 64, 321.25))

@@ -45,7 +45,7 @@ class PlaybackMergeTests(unittest.TestCase):
         binding, tile = SimpleNamespace(progress=10), object()
         with patch.object(self.plugin, '_vod_key_action', return_value=('right', tile, binding)), \
                 patch.object(self.plugin, '_claim_key', return_value=True), \
-                patch.object(self.plugin, '_seek_binding_relative') as relative:
+                patch.object(self.plugin.playback, 'seek_binding_relative') as relative:
             self.assertTrue(self.plugin._handle_vod_key(event))
         relative.assert_called_once_with(binding, 5)
 

@@ -254,7 +254,7 @@ class HostTests(unittest.TestCase):
             subtitle.write_text('P1', encoding='utf-8')
             binding.subtitles = [('中文', str(subtitle))]
             binding.subtitle_on = binding.subtitle_loaded = True
-            with patch.object(self.plugin, '_start_resolution'):
+            with patch.object(self.plugin.playback, 'start_resolution'):
                 self.plugin._next_binding(binding)
             self.assertFalse(subtitle.exists())
         self.assertEqual(binding.part, 1)

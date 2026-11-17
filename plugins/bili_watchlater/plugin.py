@@ -20,7 +20,6 @@ v1.0 架构（用户实测 11 条返工 +「直接用本体播放器」）：解
 """
 from __future__ import annotations
 
-import bisect
 import os
 import re
 import threading
@@ -96,21 +95,12 @@ if __spec__ is not None:
     __spec__.submodule_search_locations = __path__
 
 
-from .motion_trace import measure
 from .host_playback import HostPlaybackAdapter
-
-def _as_int(value) -> int:
-    from .models import safe_int
-
-    return safe_int(value)
+from .playback_coordinator import PlaybackCoordinator
+from .playback_binding import VodBinding as _VodBinding  # Legacy binding import.
 
 
-def _video_page_url(item) -> str:
-    # Public https webpage URL, used ONLY for the explicit browser fallback.
-    # It is never handed to the player (host EMBEDDED_OPTIONS has ytdl=False).
-    from .models import video_url
 
-    return video_url(item)
 
 
 def _resolve_tile(tile_context, window=None):
@@ -453,66 +443,35 @@ class _VodKeyFilter(QObject):
         return False
 
 
-class _VodBinding:
-    """One VOD playback bound to a synthetic room (keyed by bvid)."""
 
-    def __init__(self, item, cell, tile) -> None:
-        self.item = item
-        self.bvid = str(getattr(item, "bvid", "") or "")
-        self.cell = cell
-        self.tile = tile
-        self.prev_room = None
-        self.prev_chrome = {
-            name: getattr(tile, name) for name in (
-                "_recording_available", "quality_options", "quality",
-                "actual_quality", "quality_locked"
-            ) if hasattr(tile, name)
-        }
-        self.resume_paused = False
-        self.cid = _as_int(getattr(item, "cid", 0))
-        self.state = "resolving"  # resolving/playing/paused/error/ended
-        self.stream = None
-        self.warm_lease = None
-        self.pending_warm_lease = None
-        self.progress = 0.0
-        self.duration = 0.0
-        self.pending_seek = 0.0
-        self.pending_audio = ""
-        self.audio_attempts = 0
-        self.strip = None
-        self.card = None
-        self.danmaku = None       # [(time, mode, color, text)] sorted
-        self.dm_cursor = 0
-        self.dm_last_pos = 0.0
-        self.dm_pending = False
-        self.request_id = 0
-        # --- v1.0：清晰度 / 全屏进度 / 预览 / 状态槽 ---
-        self.quality = 0          # 当前档位 qn（0=接口默认最高）
-        self.qualities = []       # [(qn, label)] 来自 accept_quality/description
-        self.line = None          # 全屏视频底边 3px 蓝色进度线
-        self.preview = None       # VodPreviewProvider（雪碧图预览）
-        # --- v1.0 需求：：B 站字幕（SRT 临时文件）与开关 ---
-        self.subtitles: list = []   # [(label, srt_path)]
-        self.subtitle_on = False
-        self.subtitle_loaded = False
-        self._sub_pending = False
-        #: v1.0b：复用宿主药丸时的状态（原文案/绘制钩子的存档）。
-        self.order_pill = None
-        #: v1.0 需求：：多 P 视频当前播放的分 P（0 基）。
-        self.part = 0
-        # --- v1.0 任务 3/8：左上角「N/总数」位置徽章 ---
-        self.badge = None
-        #: v1.0 任务 6：EOF 死锁存（一旦 ended 就不再接受续播/重连路径）。
-        self.ended = False
-        self._state_slot = None   # stateChanged 连接句柄（重注入先断旧连接）
-        self._state_player = None  # 连接时的播放器实例（重建后不对旧对象断连）
+
+def _playback_field(name):
+    """Legacy plugin state forwards to the single playback coordinator."""
+    return property(lambda plugin:getattr(plugin.playback,name),
+                    lambda plugin,value:setattr(plugin.playback,name,value))
 
 
 class BiliWatchLaterPlugin(api.Plugin):
+    _bindings = _playback_field('bindings')
+    _vod_requests = _playback_field('vod_requests')
+    _vod_context = _playback_field('vod_context')
+    _cell_vod = _playback_field('cell_vod')
+    _vod_seq = _playback_field('vod_seq')
+    _next_prefetch = _playback_field('next_prefetch')
+    _account_generation = _playback_field('account_generation')
+    _dm_requests = _playback_field('dm_requests')
+    _dm_context = _playback_field('dm_context')
+    _dm_seq = _playback_field('dm_seq')
+    _sub_requests = _playback_field('sub_requests')
+    _sub_context = _playback_field('sub_context')
+    _sub_seq = _playback_field('sub_seq')
+    _tick_timer = _playback_field('tick_timer')
+
     def __init__(self) -> None:
         super().__init__()
         self.context = None
         self.host = HostPlaybackAdapter(lambda:self.context,self._log)
+        self.playback = PlaybackCoordinator(self)
         self.page = None
         self.action: QAction | None = None
         self.button: QToolButton | None = None
@@ -522,23 +481,9 @@ class BiliWatchLaterPlugin(api.Plugin):
         self._shutting_down = False
         # --- v1.0 点播绑定：bvid -> _VodBinding（合成房间随格子拖拽移动，
         # 节拍器按房间标记扫描当前所在格子，绝不按房间号字符串反查绑定）。
-        self._bindings: dict[str, _VodBinding] = {}
         self._cell_tiles: dict[int, object] = {}
-        self._vod_requests: set = set()
-        self._vod_context: dict[int, dict] = {}
-        self._cell_vod: dict[int, int] = {}
-        self._vod_seq = 0
-        self._next_prefetch = None
         from .playback_session import PlaybackSession
         self.playback_session = PlaybackSession(self)
-        self._account_generation = 0
-        self._dm_requests: set = set()
-        self._dm_context: dict[int, tuple] = {}
-        self._dm_seq = 0
-        self._sub_requests: set = set()
-        self._sub_context: dict[int, tuple] = {}
-        self._sub_seq = 0
-        self._tick_timer: QTimer | None = None
         # --- 格子事件过滤器（右键/拖放/几何），同一格子只装一次 ---
         self._tile_filter: _TileEventFilter | None = None
         self._watched_tiles: set[int] = set()
@@ -989,7 +934,7 @@ class BiliWatchLaterPlugin(api.Plugin):
         if tile is None:
             return None
         binding = next(
-            (b for b in self._bindings.values() if b.tile is tile), None
+            (b for b in self.playback.bindings.values() if b.tile is tile), None
         )
         if binding is not None:
             return binding
@@ -997,7 +942,7 @@ class BiliWatchLaterPlugin(api.Plugin):
         try:
             room = getattr(tile, "room", None)
             if isinstance(room, dict):
-                return self._bindings.get(str(room.get("watchlater_bvid") or ""))
+                return self.playback.bindings.get(str(room.get("watchlater_bvid") or ""))
         except Exception:
             pass
         return None
@@ -1143,68 +1088,20 @@ class BiliWatchLaterPlugin(api.Plugin):
         return SubtitleControl()
 
     def _start_subtitle_fetch(self, binding, cookies: dict) -> None:
-        if binding.subtitles or binding._sub_pending or self._shutting_down:
-            return
-        from .workers import SubtitleRequest
-
-        self._sub_seq += 1
-        request_id = self._sub_seq
-        binding._sub_pending = True
-        self._sub_context[request_id] = (binding, self._account_generation)
-        worker = SubtitleRequest(cookies, request_id, binding.bvid, binding.cid)
-        self._sub_requests.add(worker)
-        worker.completed.connect(self._on_subtitle_completed)
-        worker.failed.connect(self._on_subtitle_failed)
-        worker.finished.connect(
-            lambda rid=request_id: self._retire_subtitle(rid), Qt.QueuedConnection
-        )
-        worker.finished.connect(worker.deleteLater)
-        self._sync_subtitle_control(binding.tile)
-        try:
-            worker.start()
-        except Exception as error:
-            self._sub_requests.discard(worker)
-            self._on_subtitle_failed(request_id, error)
-            worker.deleteLater()
+        return self.playback.start_subtitle_fetch(binding, cookies)
 
     def _retire_subtitle(self, request_id: int) -> None:
-        self._sub_context.pop(request_id, None)
-        for worker in tuple(self._sub_requests):
-            if getattr(worker, "request_id", None) == request_id:
-                self._sub_requests.discard(worker)
-                break
+        return self.playback.retire_subtitle(request_id)
 
     def _current_subtitle_binding(self, request_id):
-        ctx = self._sub_context.pop(request_id, None)
-        if ctx is None:
-            return None
-        binding, generation = ctx
-        if (self._shutting_down or generation != self._account_generation
-                or self._bindings.get(binding.bvid) is not binding):
-            return None
-        binding._sub_pending = False
-        return binding
+        return self.playback.current_subtitle_binding(request_id)
 
     def _on_subtitle_completed(self, request_id, results) -> None:
-        binding = self._current_subtitle_binding(request_id)
-        if binding is None:
-            self._unlink_paths([path for _label, path in (results or [])])
-            return
-        binding.subtitles = list(results or [])
-        if not binding.subtitles:
-            binding.subtitle_on = False
-            self._notify_warning("该视频没有可用字幕，或当前账号暂不能获取字幕。")
-        self._sync_subtitle_control(binding.tile)
+        return self.playback.on_subtitle_completed(request_id, results)
         # 文件加载后由 ticker 挂到对应播放器；多路返回不会串到其它绑定。
 
     def _on_subtitle_failed(self, request_id, error) -> None:
-        binding = self._current_subtitle_binding(request_id)
-        if binding is None:
-            return
-        binding.subtitle_on = False
-        self._sync_subtitle_control(binding.tile)
-        self._notify_warning("字幕加载失败，播放不受影响。")
-        self._log("subtitle fetch failed type=" + type(error).__name__)
+        return self.playback.on_subtitle_failed(request_id, error)
 
     def _sync_subtitle_control(self, tile) -> None:
         entry = self._subtitle_controls.get(id(tile))
@@ -1227,45 +1124,14 @@ class BiliWatchLaterPlugin(api.Plugin):
             pass
 
     def _apply_subtitle(self, binding, player) -> None:
-        if not binding.subtitle_on or not binding.subtitles or binding.subtitle_loaded:
-            return
-        label, path = binding.subtitles[0]
-        if self._mpv_command(player, "sub-add", path, "select", str(label)):
-            binding.subtitle_loaded = True
-            try:
-                player._set("sub-visibility", True)
-            except Exception:
-                pass
-        else:
-            binding.subtitle_on = False
-            self._sync_subtitle_control(binding.tile)
-            self._notify_warning("当前播放器无法加载字幕。")
+        return self.playback.apply_subtitle(binding, player)
 
     @staticmethod
     def _unlink_paths(paths) -> None:
-        import os
-
-        for path in paths:
-            try:
-                os.unlink(path)
-            except Exception:
-                pass
+        return PlaybackCoordinator.unlink_paths(paths)
 
     def _toggle_subtitle(self, tile) -> None:
-        binding = self._binding_for_tile(tile)
-        if (binding is None or binding.state not in ("playing", "paused")
-                or binding._sub_pending):
-            return
-        binding.subtitle_on = not binding.subtitle_on
-        if binding.subtitle_on and not binding.subtitles:
-            self._start_subtitle_fetch(binding, self._cookie_snapshot())
-        player = self._host_player(tile)
-        if player is not None and binding.subtitle_loaded:
-            try:
-                player._set("sub-visibility", binding.subtitle_on)
-            except Exception:
-                pass
-        self._sync_subtitle_control(tile)
+        return self.playback.toggle_subtitle(tile)
 
     def _build_empty_tile_menu(self, tile):
         """空格子右键菜单（需求 8：只留选片 + 宿主原有的切换为弹幕）。"""
@@ -1422,7 +1288,7 @@ class BiliWatchLaterPlugin(api.Plugin):
         """格子 Resize/Move/Show/WinIdChange 后同步几何与全屏态（排队调用）。"""
         if self._shutting_down:
             return
-        for binding in self._bindings.values():
+        for binding in self.playback.bindings.values():
             if binding.tile is not tile:
                 continue
             try:
@@ -1438,7 +1304,7 @@ class BiliWatchLaterPlugin(api.Plugin):
                 pass  # widget already deleted by Qt
         self._sync_fullscreen_state(tile)
         # v1.0 需求：：宿主刚按宽度重算过 compact_popup，这里再钉回 mini。
-        for binding in self._bindings.values():
+        for binding in self.playback.bindings.values():
             if binding.tile is tile:
                 self._force_volume_mini(tile)
                 break
@@ -1523,7 +1389,7 @@ class BiliWatchLaterPlugin(api.Plugin):
                 active = bool(active_fn())
             except Exception:
                 active = False
-        active = active and bool(self._bindings) and not self._shutting_down
+        active = active and bool(self.playback.bindings) and not self._shutting_down
         floating = getattr(pip, "floating", None) if active else None
         identity = id(floating) if floating is not None else active
         if active == self._pip_active and identity == getattr(self, "_pip_identity", None):
@@ -1718,7 +1584,7 @@ class BiliWatchLaterPlugin(api.Plugin):
     def _single_vod_click(self, tile, binding) -> None:
         self._click_timers.pop(id(tile), None)
         if (self._shutting_down or binding.tile is not tile
-                or self._bindings.get(binding.bvid) is not binding):
+                or self.playback.bindings.get(binding.bvid) is not binding):
             return
         if binding.state not in ("playing", "paused"):
             return
@@ -2168,7 +2034,7 @@ class BiliWatchLaterPlugin(api.Plugin):
         的重入/冷却事件一律忽略，从根上掐断自激循环。
         """
         if (self._shutting_down or self._dpi_handling
-                or not self._bindings):
+                or not self.playback.bindings):
             return
         if self._pip_drag_active():
             # 拖动浮窗时 Move/DPR 事件风暴会让 900ms 遮罩反复续期 → 黑屏。
@@ -2209,7 +2075,7 @@ class BiliWatchLaterPlugin(api.Plugin):
     def _flush_dpi_event(self) -> None:
         """合并后的跨屏处理：盖遮罩 + 对真实点播格排队一次几何同步。"""
         self._dpi_pending = False
-        if self._shutting_down or not self._bindings:
+        if self._shutting_down or not self.playback.bindings:
             return
         if self._pip_drag_active():
             self._hide_all_dpi_covers()
@@ -2219,7 +2085,7 @@ class BiliWatchLaterPlugin(api.Plugin):
             # 绑定表就是插件自己的「点播格清单」：主墙 / 全屏 / 画中画的
             # tile 都在里面，不需要（也不允许）遍历整个宿主控件树。
             vod_tiles = []
-            for binding in list(self._bindings.values()):
+            for binding in list(self.playback.bindings.values()):
                 tile = binding.tile
                 if tile is None:
                     continue
@@ -2400,7 +2266,7 @@ class BiliWatchLaterPlugin(api.Plugin):
                 except Exception:
                     pass
                 continue
-            binding = self._bindings.get(bvid)
+            binding = self.playback.bindings.get(bvid)
             url = str(getattr(getattr(binding, "item", None), "owner_face", "") or "")
             if self._face_loader is None:
                 from .avatars import AvatarLoader
@@ -2719,7 +2585,7 @@ class BiliWatchLaterPlugin(api.Plugin):
         if tile is not None and tile not in candidates:
             tile = None
         if tile is None:
-            existing = self._bindings.get(str(getattr(item, "bvid", "") or ""))
+            existing = self.playback.bindings.get(str(getattr(item, "bvid", "") or ""))
             if existing is not None and existing.tile in candidates:
                 tile = existing.tile
         if tile is None:
@@ -2746,499 +2612,61 @@ class BiliWatchLaterPlugin(api.Plugin):
                 pass
 
     def _start_vod_for_tile(self, tile, item, *, prepared=None, resume=None) -> None:
-        if self._shutting_down or tile is None or item is None:
-            return
-        bvid = str(getattr(item, "bvid", "") or "")
-        if not bvid:
-            return
-        if not self.host.supports_playback():
-            self._notify_warning(
-                "当前宿主版本不支持内嵌播放，请用浏览器打开。"
-            )
-            return
-        cell = self._resolve_cell_from_tile(tile)
-        if cell is None:
-            self._notify_warning("这个格子没有注册稍后再看控件，无法内嵌播放。")
-            return
-        # 同一视频只在一个格子播：换格起播 = 把旧格子还原。
-        old = self._bindings.get(bvid)
-        if old is not None:
-            if old.tile is tile:
-                # 同格重复拖入同一视频 = 重播：直接重新取流，不先把
-                # 旧直播起起来再停（避免无谓的直播取流与画面闪烁）。
-                old.item = item
-                self._replay_binding(old)
-                return
-            # 同一个正在播放的视频再次拖到另一个格子 = 移动画面，保留解码器。
-            if old.state in ("playing", "paused"):
-                from .tile_swap import swap_tiles_preserving_players
-                if swap_tiles_preserving_players(window, old.tile, tile):
-                    self._sync_tile_widgets(old.tile)
-                    self._sync_tile_widgets(tile)
-                    return
-                self._notify_warning("当前布局暂不能无中断换格，视频保持原位。")
-                return
-            self._release_binding(old, restart=True)
-        # 目标格上已有的别的点播：先静默替换（不中间起直播）。
-        for existing in list(self._bindings.values()):
-            if existing.tile is tile:
-                self._release_binding(existing, restart=False)
-        room = getattr(tile, "room", None) or {}
-        prev_room = None
-        if str(room.get("room_id") or "") and not room.get("watchlater_bvid"):
-            prev_room = dict(room)
-        binding = _VodBinding(item, cell, tile)
-        from .preferences import read_preferences
-        binding.resume_paused = not read_preferences(self.context)['auto_play']
-        binding.part = 0          # v1.0 需求：：新片从第一 P 开始
-        start = self._resume_seconds(item)
-        if resume is not None:
-            binding.part = resume['part']
-            binding.quality = resume['quality']
-            binding.resume_paused = binding.resume_paused or resume['paused']
-            start = resume['progress']
-            binding.progress = start
-        binding.prev_room = prev_room
-        self._bindings[bvid] = binding
-        if self.wall is not None:
-            try:
-                self.wall.bind(cell, item)
-            except Exception:
-                pass
-        try:
-            tile.set_status("正在取流…")
-        except Exception:
-            pass
-        if prepared is not None:
-            self._start_resolution(binding, start=start, prepared=prepared)
-        else:
-            self._start_resolution(binding, start=start)
-        self._ensure_tick_timer()
+        return self.playback.start_vod_for_tile(tile, item, prepared=prepared, resume=resume)
 
     @staticmethod
     def _room_title(binding) -> str:
-        """合成房间标题；多 P 时追加「P{n}」，画中画/标题浮标才分得清第几 P。"""
-        title = str(getattr(binding.item, "title", "") or "")
-        parts = int(getattr(binding.item, "parts", 1) or 1)
-        if parts > 1:
-            return "%s  P%d" % (title, int(binding.part) + 1)
-        return title
+        return PlaybackCoordinator.room_title(binding)
 
     @staticmethod
     def _resume_seconds(item) -> float:
-        # 单 P 才续播；多 P 不猜分P（与 v1.0 同一规则）。
-        if bool(getattr(item, "is_multi_part", False)):
-            return 0.0
-        try:
-            return max(0.0, float(getattr(item, "progress", 0) or 0))
-        except (TypeError, ValueError):
-            return 0.0
+        return PlaybackCoordinator.resume_seconds(item)
 
     def _cookie_snapshot(self) -> dict[str, str]:
-        snapshot = None
-        try:
-            snapshot = self.context.credentials("bilibili")
-        except Exception:
-            snapshot = None
-        values = getattr(snapshot, "values", None)
-        if values is None and isinstance(snapshot, dict):
-            values = snapshot
-        cookies: dict[str, str] = {}
-        try:
-            if values is not None:
-                cookies = {
-                    str(key): str(value)
-                    for key, value in dict(values).items()
-                    if value is not None
-                }
-        except (TypeError, ValueError):
-            cookies = {}
-        if self._account_generation <= 0:
-            cred_generation = _as_int(getattr(snapshot, "generation", 0))
-            self._account_generation = cred_generation if cred_generation > 0 else 1
-        return cookies
+        return self.playback.cookie_snapshot()
 
     # ------------------------------------------------------------ VOD workers
-    def _start_resolution(self, binding, *, start: float,
-                          qn: int | None = None, prepared=None) -> None:
-        """起一次取流（首播/重试/重播/秒切回退续播/清晰度切换共用）。"""
-        cookies = self._cookie_snapshot()
-        generation = self._account_generation
-        cell = binding.cell
-        self._cancel_cell_requests(cell)
-        from .workers import VodResolveRequest
-
-        if qn is None:
-            qn = int(binding.quality or 0)
-        self._vod_seq += 1
-        request_id = self._vod_seq
-        binding.request_id = request_id
-        previous_state = binding.state
-        binding.resume_paused = binding.resume_paused or previous_state == "paused"
-        # v1.0 任务 6：重播/重试/换片都是显式重启，解除 ended 锁存。
-        binding.ended = False
-        binding.state = "resolving"
-        room = getattr(binding.tile, "room", None) or {}
-        self._vod_context[request_id] = {
-            "cell": cell,
-            "tile": binding.tile,
-            "item": binding.item,
-            "bvid": binding.bvid,
-            "generation": generation,
-            "start": float(start),
-            "qn": int(qn),
-            "previous_state": previous_state,
-            "expected_room": str(room.get("room_id") or ""),
-        }
-        self._cell_vod[id(cell)] = request_id
-        if prepared is not None:
-            try:
-                stream, lease = prepared.activate()
-                binding.pending_warm_lease = lease
-                self._on_vod_completed(request_id, generation, stream)
-                self._retire_vod(request_id)
-                return
-            except Exception as error:
-                lease = getattr(binding, 'pending_warm_lease', None)
-                if lease is not None:
-                    lease.close()
-                    binding.pending_warm_lease = None
-                self._log('prefetch handoff fallback type=' + type(error).__name__)
-        worker = VodResolveRequest(
-            cookies, generation, request_id, binding.bvid,
-            # 多 P：第 2 页起不再用列表里的 cid，交给 resolve 按 page 取。
-            _as_int(getattr(binding.item, "cid", 0)) if binding.part <= 0 else 0,
-            int(qn), hq=True, page=binding.part,
-        )
-        self._vod_requests.add(worker)
-        worker.completed.connect(self._on_vod_completed)
-        worker.failed.connect(self._on_vod_failed)
-        try:
-            worker.finished.connect(worker.deleteLater)
-        except Exception:
-            pass
-        worker.finished.connect(
-            lambda rid=request_id: self._retire_vod(rid), Qt.QueuedConnection
-        )
-        try:
-            worker.start()
-        except Exception as error:
-            self._vod_requests.discard(worker)
-            self._vod_context.pop(request_id, None)
-            self._cell_vod.pop(id(cell), None)
-            self._log("vod worker start failed type=" + type(error).__name__)
-            self._show_card_error(binding, "无法启动取流，请用浏览器打开")
+    def _start_resolution(self, binding, *, start: float, qn: int | None=None, prepared=None) -> None:
+        return self.playback.start_resolution(binding, start=start, qn=qn, prepared=prepared)
         # Danmaku starts after resolution supplies the actual part's cid.
         # Subtitles remain lazy and require an explicit click.
 
     def _start_danmaku_fetch(self, binding, cookies: dict) -> None:
-        from .workers import DanmakuRequest
-
-        self._dm_seq += 1
-        request_id = self._dm_seq
-        binding.dm_pending = True
-        self._dm_context[request_id] = (binding, self._account_generation, binding.part)
-        worker = DanmakuRequest(
-            cookies, request_id, binding.bvid,
-            binding.cid,
-        )
-        self._dm_requests.add(worker)
-        worker.completed.connect(self._on_danmaku_completed)
-        worker.failed.connect(self._on_danmaku_failed)
-        try:
-            worker.finished.connect(worker.deleteLater)
-        except Exception:
-            pass
-        worker.finished.connect(
-            lambda rid=request_id: self._retire_danmaku(rid), Qt.QueuedConnection
-        )
-        try:
-            worker.start()
-        except Exception:
-            self._dm_requests.discard(worker)
-            self._dm_context.pop(request_id, None)
-            binding.dm_pending = False
+        return self.playback.start_danmaku_fetch(binding, cookies)
 
     def _on_danmaku_completed(self, request_id, comments) -> None:
-        ctx = self._dm_context.get(request_id)
-        if ctx is None or self._shutting_down:
-            return
-        binding, generation, part = ctx
-        if (self._bindings.get(binding.bvid) is not binding
-                or generation != self._account_generation or part != binding.part):
-            return
-        binding.danmaku = list(comments or [])
-        binding.dm_cursor = bisect.bisect_left(
-            [entry[0] for entry in binding.danmaku], binding.progress
-        )
-        binding.dm_last_pos = binding.progress
-        binding.dm_pending = False
+        return self.playback.on_danmaku_completed(request_id, comments)
 
     def _on_danmaku_failed(self, request_id, error) -> None:
-        ctx = self._dm_context.get(request_id)
-        if ctx is None or self._shutting_down:
-            return
-        binding, generation, part = ctx
-        if (self._bindings.get(binding.bvid) is not binding
-                or generation != self._account_generation or part != binding.part):
-            return
-        binding.dm_pending = False
-        message = getattr(error, "message", None)
-        self._log("danmaku fetch failed: " + str(message or type(error).__name__)[:160])
+        return self.playback.on_danmaku_failed(request_id, error)
 
     def _retire_danmaku(self, request_id) -> None:
-        self._dm_context.pop(request_id, None)
-        for worker in tuple(self._dm_requests):
-            if getattr(worker, "request_id", None) == request_id:
-                self._dm_requests.discard(worker)
-                break
+        return self.playback.retire_danmaku(request_id)
 
     def _is_current_vod(self, request_id, generation, ctx) -> bool:
-        if generation != self._account_generation:
-            return False
-        if ctx.get("generation") != generation:
-            return False
-        return self._cell_vod.get(id(ctx["cell"])) == request_id
+        return self.playback.is_current_vod(request_id, generation, ctx)
 
     def _on_vod_completed(self, request_id, generation, stream) -> None:
-        if self._shutting_down:
-            return
-        ctx = self._vod_context.get(request_id)
-        if ctx is None or not self._is_current_vod(request_id, generation, ctx):
-            return
-        tile = ctx["tile"]
-        if tile not in self._host_tiles():
-            return  # 格子已被布局拆掉
-        room = getattr(tile, "room", None) or {}
-        if str(room.get("room_id") or "") != ctx.get("expected_room", ""):
-            return  # 取流期间用户换了台/拖了直播进来：结果作废
-        binding = self._bindings.get(ctx["bvid"])
-        if binding is None or binding.request_id != request_id:
-            return
-        self._inject_playback(binding, stream, float(ctx.get("start", 0.0)))
+        return self.playback.on_vod_completed(request_id, generation, stream)
 
     def _on_vod_failed(self, request_id, generation, error) -> None:
-        if self._shutting_down:
-            return
-        ctx = self._vod_context.get(request_id)
-        if ctx is None or not self._is_current_vod(request_id, generation, ctx):
-            return
-        binding = self._bindings.get(ctx["bvid"])
-        if binding is None or binding.request_id != request_id:
-            return
-        message = getattr(error, "message", None)
-        if not isinstance(message, str) or not message.strip():
-            message = "取流失败，请用浏览器打开该视频"
-        if ctx.get("previous_state") in ("playing", "paused") and self._host_player(binding.tile):
-            binding.state = ctx["previous_state"]
-            self._apply_tile_chrome(binding)
-            self._sync_fullscreen_state(binding.tile)
-            self._notify_warning("画质切换失败，保留原画质继续播放。")
-        else:
-            self._show_card_error(binding, message)
+        return self.playback.on_vod_failed(request_id, generation, error)
 
     def _retire_vod(self, request_id) -> None:
-        self._vod_context.pop(request_id, None)
-        for worker in tuple(self._vod_requests):
-            if getattr(worker, "request_id", None) == request_id:
-                self._vod_requests.discard(worker)
-                break
+        return self.playback.retire_vod(request_id)
 
     def _cancel_cell_requests(self, cell) -> None:
-        request_id = self._cell_vod.pop(id(cell), None)
-        if request_id is None or request_id not in self._vod_context:
-            return
-        for worker in tuple(self._vod_requests):
-            if getattr(worker, "request_id", None) == request_id:
-                try:
-                    worker.cancel()
-                except Exception:
-                    pass
+        return self.playback.cancel_cell_requests(cell)
 
     def _cancel_all_requests(self) -> None:
-        for worker in tuple(self._vod_requests) + tuple(self._dm_requests) \
-                + tuple(self._sub_requests):
-            try:
-                worker.cancel()
-            except Exception:
-                pass
+        return self.playback.cancel_all_requests()
 
     def _drain_requests(self) -> None:
-        self._cancel_all_requests()
-        for worker in tuple(self._vod_requests) + tuple(self._dm_requests) \
-                + tuple(self._sub_requests):
-            try:
-                if worker.isRunning():
-                    worker.wait()
-            except Exception:
-                pass
-            try:
-                worker.deleteLater()
-            except Exception:
-                pass
-        # 字幕 worker 交接后的临时文件：completed 信号可能在宿主退出前未被
-        # 处理（_sub_context 已清），这里按 worker 记录的 srt_path 兜底删除。
-        # 与 binding 释放时的清理幂等（重复 unlink 异常被吞）。
-        sub_paths = [getattr(w, "srt_path", None) for w in tuple(self._sub_requests)]
-        self._unlink_paths([p for p in sub_paths if p])
-        self._vod_requests.clear()
-        self._vod_context.clear()
-        self._cell_vod.clear()
-        self._dm_requests.clear()
-        self._dm_context.clear()
-        self._sub_requests.clear()
-        self._sub_context.clear()
+        return self.playback.drain_requests()
 
     # ----------------------------------------------------- playback injection
     def _inject_playback(self, binding, stream, start: float) -> None:
-        from .tile_vod import is_direct_url, merge_headers
-
-        tile = binding.tile
-        url = getattr(stream, "url", "")
-        if not is_direct_url(url):
-            # 红线：网页 URL 绝不喂宿主播放器（ytdl=False 必错）。
-            self._show_card_error(binding, "取流结果异常，请用浏览器打开")
-            return
-        old_lease = getattr(binding, 'warm_lease', None)
-        if old_lease is not None:
-            old_lease.close()
-        binding.warm_lease = getattr(binding, 'pending_warm_lease', None)
-        binding.pending_warm_lease = None
-        self._stop_host_tile(tile)
-        current = getattr(tile, "room", None) or {}
-        danmaku_enabled = bool(current.get("video_danmaku_enabled", True)) \
-            if current.get("watchlater_bvid") == binding.bvid else True
-        synthetic = {
-            "room_id": binding.bvid,      # 无冒号：start_tile 不会当平台房
-            "live": False,                # 离线分支：宿主绝不联网取直播
-            "live_known": True,
-            "platform": "bilibili",
-            "uname": str(getattr(binding.item, "owner_name", "") or ""),
-            # v1.0 需求：/17：画中画/头像位读 room["face"]，缺了就只剩空白。
-            "face": str(getattr(binding.item, "owner_face", "") or ""),
-            "title": self._room_title(binding),
-            "video_danmaku_enabled": danmaku_enabled,
-            "watchlater_bvid": binding.bvid,  # 扫描标记（dict 拷贝会保留）
-            "watchlater_part": int(binding.part),  # 多 P：当前第几 P（0 基）
-        }
-        try:
-            tile.set_room(synthetic)
-        except Exception as error:
-            self._log("synthetic room failed type=" + type(error).__name__)
-            self._release_binding(binding, restart=True)
-            return
-        # 需求：：左上角「未开播」药丸由 room["live"] 驱动（playback_badges
-        # .py:81-84），点播期间先藏一次；悬停再想显示时由格子过滤器拦
-        # Show 事件（实例级，不 patch 宿主类）。
-        badge = getattr(tile, "stream_badge", None)
-        if badge is not None:
-            try:
-                badge.hide()
-            except RuntimeError:
-                pass
-        if not self._play_on_host(tile, url.strip(), merge_headers(
-                getattr(stream, "headers", None)), start_paused=binding.resume_paused):
-            self._release_binding(binding, restart=True)
-            self._notify_warning("播放器启动失败，请用浏览器打开该视频。")
-            return
-        player = self._host_player(tile)
-        if player is None:
-            self._release_binding(binding, restart=True)
-            return
-        # VOD：EOF 不是冻屏（宿主 _check 会把 eof 当 stall 计分）。
-        try:
-            player.freeze_watch = False
-        except Exception:
-            pass
-        try:
-            player._set("keep-open", "always")  # 结束停在最后一帧
-        except Exception:
-            pass
-        binding.pending_seek = 0.0
-        if start > 0:
-            text = ("%d" % int(start)) if start == int(start) else ("%g" % start)
-            try:
-                player._set("start", text)  # 复播时内核已建，选项生效
-            except Exception:
-                pass
-            # 首播时宿主内核在 _play_on 内部才 bind，上面的写入是空操作；
-            # 节拍器在文件加载后校验位置，丢了才补 seek（v1.0 实际运行环境证据）。
-            binding.pending_seek = start
-        binding.pending_audio = ""
-        binding.audio_attempts = 0
-        if getattr(stream, "is_dash", False):
-            audio_url = getattr(stream, "audio_url", "") or ""
-            if isinstance(audio_url, str) and audio_url.strip():
-                binding.pending_audio = audio_url.strip()
-        binding.stream = stream
-        binding.cid = _as_int(getattr(stream, "cid", 0)) or binding.cid
-        if binding.danmaku is None and not binding.dm_pending:
-            self._start_danmaku_fetch(binding, self._cookie_snapshot())
-        binding.subtitle_loaded = False
-        # 需求：：接口给的可选档位进绑定，右键「画质」菜单用。
-        try:
-            from .vod_stream import qualities_from_stream
-
-            binding.qualities = qualities_from_stream(stream)
-            actual = _as_int(getattr(stream, "qn", 0))
-            if actual > 0:
-                binding.quality = actual
-        except Exception:
-            binding.qualities = []
-        self._apply_tile_chrome(binding)
-        binding.state = "paused" if binding.resume_paused else "playing"
-        binding.progress = start
-        # v1.0 任务 3：左上角立刻换成「N/总数」，不留一个空洞。
-        self._sync_position_badge(binding)
-        self._sync_subtitle_control(tile)
-        # stateChanged 连接卫生：同一播放器重注入（清晰度切换/续播）先断
-        # 旧 lambda，避免重复回调累积。播放器实例被重建（拖格回退 release
-        # 后新建）时不对旧对象断连——libpyside 会刷 Failed to disconnect
-        # 警告；旧实例销毁时连接自然消失。
-        slot = lambda state, b=binding: self._on_host_player_state(b, state)
-        try:
-            if (binding._state_slot is not None
-                    and binding._state_player is player):
-                try:
-                    player.stateChanged.disconnect(binding._state_slot)
-                except Exception:
-                    pass
-            player.stateChanged.connect(slot)
-            binding._state_slot = slot
-            binding._state_player = player
-        except Exception:
-            pass
-        # 需求：：预览雪碧图 provider（懒加载，首次悬停才抓取）。
-        from .preferences import read_preferences
-        if binding.preview is None and read_preferences(self.context)['video_preview']:
-            try:
-                from .vod_preview import VodPreviewProvider
-
-                binding.preview = VodPreviewProvider(
-                    binding.bvid, binding.cid,
-                )
-            except Exception as error:
-                binding.preview = None
-                self._log("preview create failed type=" + type(error).__name__)
-        self._ensure_tile_widgets(binding)
-        if binding.card is not None:
-            binding.card.hide()
-        if binding.strip is not None:
-            binding.strip.reset()
-        entry = self._bar_progress.get(id(tile))
-        if entry is not None and binding.preview is not None:
-            try:
-                entry["widget"].set_preview_provider(binding.preview)
-            except Exception:
-                pass
-        if entry is not None:
-            try:
-                entry["widget"].reset()
-            except Exception:
-                pass
-        self._ensure_space_shortcut()
-        self._sync_fullscreen_state(tile)
-        self._ensure_tick_timer()
+        return self.playback.inject_playback(binding, stream, start)
 
     def _ensure_tile_widgets(self, binding) -> None:
         from .tile_vod import VodStatusCard
@@ -3418,136 +2846,30 @@ class BiliWatchLaterPlugin(api.Plugin):
                 pass
 
     def _on_host_player_state(self, binding, state: str) -> None:
-        """只观察宿主播放器状态，绝不回写宿主（宿主自己的槽已接好）。"""
-        if self._shutting_down or binding.state not in ("playing", "paused"):
-            return
-        if state != "error":
-            return
-        player = self._host_player(binding.tile)
-        try:
-            if player is not None and player._prop("eof-reached", False):
-                return  # EOF 由节拍器走 ended，不算错误
-        except Exception:
-            pass
-        binding.state = "error"
-        self._show_card_error(binding, "播放中断或失败，可重试")
+        return self.playback.on_host_player_state(binding, state)
 
     def _show_card_error(self, binding, message: str) -> None:
-        binding.state = "error"
-        self._ensure_tile_widgets(binding)
-        if binding.card is not None:
-            try:
-                binding.card.show_error(message)
-            except RuntimeError:
-                pass
-        if binding.strip is not None:
-            try:
-                binding.strip.hide()
-            except RuntimeError:
-                pass
+        return self.playback.show_card_error(binding, message)
 
     @staticmethod
     def _mpv_command(player, *args) -> bool:
-        """v1.0 头号修复：宿主 TilePlayer **没有 command()**（player.py 只有
-        _prop/_set/play/stop/release/set_paused），裸 mpv 在 ``player.player``。
-
-        v1.0 直接 ``player.command(...)`` 抛 AttributeError 被 except 吞掉，
-        导致进度条拖不动（需求：）、拖格续播定位丢失（需求：）、DASH 挂
-        音轨静默失败。顺序：真宿主裸 mpv → 测试替身的 command → seek 的
-        属性写兜底（time-pos）。
-        """
-        raw = getattr(player, "player", None)
-        command = getattr(raw, "command", None)
-        if callable(command):
-            try:
-                command(*args)
-                return True
-            except Exception:
-                return False
-        command = getattr(player, "command", None)
-        if callable(command):
-            try:
-                command(*args)
-                return True
-            except Exception:
-                return False
-        if args and args[0] == "seek" and len(args) >= 2:
-            try:
-                player._set("time-pos", float(args[1]))
-                return True
-            except Exception:
-                return False
-        return False
+        return PlaybackCoordinator.mpv_command(player, *args)
 
     def _seek_binding_relative(self, binding, delta: float) -> None:
-        """需求 2：B 站原版左右键 —— 以播放器真实 time-pos 为基准 ±5 秒。
-
-        旧实现算 ``binding.progress + 5`` 再发绝对 seek：全屏重排会释放/重建
-        播放器，节拍器也可能滞后，``progress`` 停在旧值时连按几次都跳到同一
-        个位置，肉眼就是「全屏下左右键没反应」。mpv 的相对 seek 以真实播放
-        位置为准，按住连发每次都实打实走 5 秒；节拍器下一拍会从 time-pos
-        把 ``binding.progress`` 修正回真实值。
-        """
-        if binding is None or self._shutting_down:
-            return
-        delta = float(delta)
-        if not delta:
-            return
-        player = self._player_for_binding(binding)
-        if player is None:
-            return
-        current = float(getattr(binding, "progress", 0.0) or 0.0)
-        duration = float(getattr(binding, "duration", 0.0) or 0.0)
-        local_target = max(0.0, current + delta)
-        if duration > 0:
-            local_target = min(local_target, duration)
-        raw = getattr(player, "player", None)
-        command = getattr(raw, "command", None)
-        if not callable(command):
-            command = getattr(player, "command", None)
-        if callable(command):
-            # relative+exact = 精确 ±5 秒（不吸附关键帧），与 B 站网页一致；
-            # 少数 mpv 构建不认组合 flag 时退回普通 relative。
-            if (self._mpv_command(player, "seek", delta, "relative+exact")
-                    or self._mpv_command(player, "seek", delta, "relative")):
-                binding.progress = local_target
-                return
-        # 没有裸 mpv command 的替身播放器：_mpv_command 的 _set 兜底只认
-        # 绝对秒数，所以按本地进度做一次绝对跳。
-        self._seek_binding(binding, local_target)
+        return self.playback.seek_binding_relative(binding, delta)
 
 
     def _seek_binding(self, binding, seconds: float) -> None:
-        player = self._player_for_binding(binding)
-        if player is None:
-            return
-        target = max(0.0, float(seconds))
-        if self._mpv_command(player, "seek", target, "absolute"):
-            # 立即回写进度：节拍器下一拍前滑杆/时间显示不闪回。
-            binding.progress = target
+        return self.playback.seek_binding(binding, seconds)
 
     def _retry_binding(self, binding) -> None:
-        if self._shutting_down or binding.state == "resolving":
-            return
-        if binding.card is not None:
-            binding.card.hide()
-        try:
-            binding.tile.set_status("正在取流…")
-        except Exception:
-            pass
-        self._start_resolution(binding, start=binding.progress)
+        return self.playback.retry_binding(binding)
 
     def _replay_binding(self, binding) -> None:
-        if self._shutting_down or binding.state == "resolving":
-            return
-        if binding.card is not None:
-            binding.card.hide()
-        binding.dm_cursor = 0
-        binding.dm_last_pos = 0.0
-        self._start_resolution(binding, start=0.0)
+        return self.playback.replay_binding(binding)
 
     def _open_binding_browser(self, binding) -> None:
-        self._open_url(_video_page_url(binding.item))
+        return self.playback.open_binding_browser(binding)
 
     # ------------------------------------------------- v1.0 任务 7：下一个视频
     def _ordered_items(self):
@@ -3563,9 +2885,8 @@ class BiliWatchLaterPlugin(api.Plugin):
         self._watch_order_changed()
 
     def _watch_order_changed(self):
-        if self._next_prefetch is not None:
-            self._next_prefetch.clear()
-        for binding in self._bindings.values():
+        self.playback.clear_prefetch()
+        for binding in self.playback.bindings.values():
             self._sync_next_button(binding)
             self._sync_position_badge(binding)
 
@@ -3606,7 +2927,7 @@ class BiliWatchLaterPlugin(api.Plugin):
 
     def _play_from_order(self, item):
         tiles = self._playback_tiles()
-        bound = [binding.tile for binding in self._bindings.values() if binding.tile in tiles]
+        bound = [binding.tile for binding in self.playback.bindings.values() if binding.tile in tiles]
         target = bound[0] if len(bound) == 1 else None
         if not bound:
             target = next((tile for tile in tiles if not (getattr(tile, 'room', None) or {}).get('room_id')), None)
@@ -3638,64 +2959,13 @@ class BiliWatchLaterPlugin(api.Plugin):
             return None
 
     def _has_next(self, binding) -> bool:
-        parts = int(getattr(binding.item, "parts", 1) or 1)
-        return binding.part + 1 < parts or self._next_item_for(binding.bvid) is not None
+        return self.playback.has_next(binding)
 
     def _sync_next_button(self, binding) -> None:
-        """结束卡上的「下一个视频」可用性跟随列表变化（删除/刷新后仍准）。"""
-        card = binding.card
-        if card is None:
-            return
-        try:
-            card.set_next_available(self._has_next(binding))
-        except (AttributeError, RuntimeError):
-            pass
+        return self.playback.sync_next_button(binding)
 
     def _next_binding(self, binding) -> None:
-        """播放列表里的下一条；到末尾就明确提示，绝不悄悄重播当前这条。
-
-        复用 :meth:`_start_vod_for_tile` 的既有换片路径（同格不同 bvid 会
-        先 ``_release_binding(restart=False)`` 静默替换），不新建播放器路径。
-        """
-        if self._shutting_down or binding is None:
-            return
-        parts = int(getattr(binding.item, "parts", 1) or 1)
-        if binding.part + 1 < parts:
-            # v1.0 需求：：同一个多 P 视频先播下一 P，播完所有 P 再进下一条。
-            prepared = self._take_prefetched(binding, binding.item, binding.part + 1, int(binding.quality or 0))
-            self._cancel_binding_media(binding)
-            if binding.preview is not None:
-                binding.preview.release()
-                binding.preview = None
-            self._unlink_paths([path for _label, path in binding.subtitles])
-            binding.subtitles = []
-            binding.subtitle_loaded = binding.subtitle_on = False
-            binding.danmaku = None
-            binding.cid = 0
-            binding.part += 1
-            from .preferences import read_preferences
-            binding.resume_paused = not read_preferences(self.context)['auto_play']
-            binding.dm_cursor = 0
-            binding.dm_last_pos = 0.0
-            if prepared is not None:
-                self._start_resolution(binding, start=0.0, prepared=prepared)
-            else:
-                self._start_resolution(binding, start=0.0)
-            return
-        item = self._next_item_for(binding.bvid)
-        if item is None:
-            self._notify_warning("已经是稍后再看列表里的最后一个视频了。")
-            self._sync_next_button(binding)
-            return
-        tile = binding.tile
-        if tile is None or tile not in self._host_tiles():
-            self._notify_warning("这个格子已经不在了，无法播放下一个视频。")
-            return
-        prepared = self._take_prefetched(binding, item, 0, 0)
-        if prepared is not None:
-            self._start_vod_for_tile(tile, item, prepared=prepared)
-        else:
-            self._start_vod_for_tile(tile, item)
+        return self.playback.next_binding(binding)
 
     def _open_url(self, url: str) -> None:
         if isinstance(url, str) and url.startswith("https://"):
@@ -3711,283 +2981,43 @@ class BiliWatchLaterPlugin(api.Plugin):
             except Exception:
                 pass
         tile = self._cell_tiles.get(id(cell))
-        for binding in list(self._bindings.values()):
+        for binding in list(self.playback.bindings.values()):
             if binding.tile is tile or binding.cell is cell:
                 self._release_binding(binding, restart=True)
 
     def _release_binding(self, binding, *, restart: bool) -> None:
-        """结束一个点播绑定：停播放器、还原房间、清理控件。
-
-        只用于合成房间**还在格子上**的路径（还原按钮/账号切换/卸载/
-        起播替换）。格子已被宿主换房的清理走 :meth:`_detach_binding`。
-        """
-        tile = binding.tile
-        alive = tile in self._host_tiles()
-        if alive:
-            room = getattr(tile, "room", None) or {}
-            owns_room = room.get("watchlater_bvid") == binding.bvid
-            if not owns_room:
-                self._detach_binding(binding)
-                return
-            self._stop_host_tile(tile)
-            self._restore_tile_chrome(binding, quality=True)
-            prev = binding.prev_room
-            try:
-                tile.set_room(prev if prev and prev.get("room_id") else None)
-            except Exception:
-                pass
-            if (restart and not self._shutting_down and prev
-                    and prev.get("room_id") and prev.get("live")):
-                self._start_host_tile(tile)
-        self._detach_binding(binding)
+        return self.playback.release_binding(binding, restart=restart)
 
     def _cancel_binding_media(self, binding) -> None:
-        """Invalidate a binding's subtitle/danmaku deliveries before replacing it."""
-        if self._next_prefetch is not None:
-            self._next_prefetch.drop(id(binding))
-        for name in ('warm_lease', 'pending_warm_lease'):
-            lease = getattr(binding, name, None)
-            if lease is not None:
-                lease.close()
-                setattr(binding, name, None)
-        for contexts, workers in ((self._dm_context, self._dm_requests),
-                                  (self._sub_context, self._sub_requests)):
-            for request_id, ctx in tuple(contexts.items()):
-                if ctx[0] is binding:
-                    contexts.pop(request_id, None)
-                    for worker in tuple(workers):
-                        if worker.request_id == request_id:
-                            worker.cancel()
-        binding.dm_pending = binding._sub_pending = False
+        return self.playback.cancel_binding_media(binding)
 
     def _detach_binding(self, binding) -> None:
-        """只收走插件自己的控件与状态，绝不碰格子当前的房间/播放器。
-
-        合成房间从格子上消失（用户关闭这一路、或把别的直播拖进来替换）
-        时，格子现在归宿主：停掉新播放器或把旧房间 set_room 回去，都会
-        吃掉用户刚拖入的直播。这里只做插件侧清理。
-        """
-        if self._bindings.get(binding.bvid) is binding:
-            self._bindings.pop(binding.bvid, None)
-        self._restore_tile_chrome(binding, quality=False)
-        self._vod_press.pop(id(binding.tile), None)
-        self._cancel_binding_media(binding)
-        if binding.request_id:
-            self._vod_context.pop(binding.request_id, None)
-        if binding.strip is not None and binding.preview is not None:
-            try:
-                binding.strip.set_preview_provider(None)
-            except Exception:
-                pass
-        preview = binding.preview
-        binding.preview = None
-        if preview is not None:
-            try:
-                preview.release()
-            except RuntimeError:
-                pass
-            except Exception as error:
-                self._log("preview release failed type=" + type(error).__name__)
-        if binding._state_slot is not None:
-            player = self._host_player(binding.tile)
-            if player is not None and player is binding._state_player:
-                try:
-                    player.stateChanged.disconnect(binding._state_slot)
-                except Exception:
-                    pass
-            binding._state_slot = None
-            binding._state_player = None
-        for widget in (binding.strip, binding.card, binding.line, binding.badge):
-            if widget is not None:
-                try:
-                    widget.hide()
-                    widget.deleteLater()
-                except RuntimeError:
-                    pass
-        self._restore_order_pill(binding, getattr(binding.tile, "stream_badge", None))
-        binding.strip = None
-        binding.card = None
-        binding.line = None
-        binding.badge = None
-        # v1.0 需求：：清理字幕临时文件 + 藏字幕按钮。
-        self._unlink_paths([path for _label, path in binding.subtitles])
-        binding.subtitles = []
-        binding.subtitle_loaded = False
-        binding.subtitle_on = False
-        self._sync_subtitle_control(binding.tile)
-        timer = self._click_timers.pop(id(binding.tile), None)
-        if timer is not None:
-            try:
-                timer.stop()
-                timer.deleteLater()
-            except RuntimeError:
-                pass
-        entry = self._bar_progress.get(id(binding.tile))
-        if entry is not None:
-            try:
-                entry["widget"].set_preview_provider(None)
-                if entry.get("visible"):
-                    entry["visible"] = False
-                    entry["widget"].hide()
-                    entry["ctx"].invalidate_layout()
-            except Exception:
-                pass
-        if self.wall is not None and binding.cell is not None:
-            try:
-                self.wall.bind(binding.cell, None)
-            except Exception:
-                pass
-        if not self._bindings:
-            if self._tick_timer is not None:
-                self._tick_timer.stop()
-            self._sync_pip_filter()
+        return self.playback.detach_binding(binding)
 
     # ------------------------------------------------------------------ ticker
     def _ensure_tick_timer(self) -> None:
-        if self._shutting_down:
-            return
-        if self._tick_timer is None:
-            # 宿主 api.Plugin 是普通 Python 类、不是 QObject，不能当 parent
-            # （实际运行环境 QTimer(self) 会 TypeError）。无 parent，卸载时显式释放。
-            self._tick_timer = QTimer()
-            self._tick_timer.setInterval(300)
-            self._tick_timer.timeout.connect(self._tick)
-        if not self._tick_timer.isActive():
-            self._tick_timer.start()
+        return self.playback.ensure_tick_timer()
 
-    @measure('playback_tick')
     def _tick(self) -> None:
-        if self._shutting_down:
-            return
-        if not self._bindings:
-            if self._tick_timer is not None:
-                self._tick_timer.stop()
-            return
-        self._sync_pip_filter()
-        tiles = self._host_tiles()
-        for binding in list(self._bindings.values()):
-            try:
-                self._tick_binding(binding, tiles)
-            except Exception as error:
-                self._log("tick failed type=" + type(error).__name__)
+        return self.playback.tick()
 
     def _hide_pause_overlay(self, tile) -> None:
-        """v1.0 任务 5：结束态不留「已暂停」浮层。
-
-        宿主 ``Tile.set_paused(True)``（widgets.py）会
-        ``pause_overlay.start()``，结束卡底下就叠着「已暂停」。这里只停
-        浮层，保留 ``tile.paused`` 状态本身 —— 宿主 watchdog
-        （player.py ``if self.paused: return``）与重连判定都还靠它安静。
-        """
-        overlay = getattr(tile, "pause_overlay", None)
-        if overlay is None:
-            return
-        try:
-            overlay.stop()
-        except Exception:
-            pass
-        try:
-            overlay.hide()
-        except RuntimeError:
-            pass
+        return self.playback.hide_pause_overlay(tile)
 
     def _cancel_host_retries(self, tile) -> None:
-        """v1.0 任务 6：取消宿主已排队的「画面静止/断流」重连。
-
-        宿主的冻结恢复（``playback_recovery.picture_frozen``，宿主
-        playback_recovery.py）会直接 ``start_tile`` 重新起播 —— 那一步
-        就是状态被打回 ``connecting``（用户看到的「连接中」）。它在
-        ``tile.paused`` 时本会早退，但全屏进出重排可能把 paused 复位，所以
-        进入 ended 时主动把已排队的刷新清掉，避免结束后又被拉起来连一次。
-        """
-        window = self._host_window()
-        recovery = getattr(window, "playback_recovery", None)
-        if recovery is None:
-            return
-        for name in ("clear_freeze", "cancel_retry"):
-            method = getattr(recovery, name, None)
-            if not callable(method):
-                continue
-            try:
-                method(tile)
-            except Exception:
-                pass
+        return self.playback.cancel_host_retries(tile)
 
     def _enter_ended(self, binding, tile, player) -> None:
-        """v1.0 任务 5/6：进入结束态只发生一次，之后这条绑定彻底停住。
-
-        * 任务 5：不上「已暂停」浮层，结束卡是唯一可见 UI。
-        * 任务 6：全屏 EOF 之后反复「连接中」的两条入口都要堵住 ——
-         ① 插件自己的续播分支（全屏重排释放播放器 → ``player is None``
-          → ``_start_resolution``）；② 宿主的冻结恢复
-          （``start_tile`` → 状态打回 ``connecting``）。前者靠
-          :meth:`_tick_binding` 的 ended 早退，后者靠
-          :meth:`_cancel_host_retries`。这里先清掉所有待续播状态。
-        """
-        if binding.state == 'ended':
-            return
-        binding.state = "ended"
-        binding.ended = True
-        binding.pending_seek = 0.0
-        binding.pending_audio = ""
-        binding.audio_attempts = 0
-        binding.resume_paused = False
-        try:
-            tile.set_paused(True)
-            player.set_paused(True)
-        except Exception:
-            pass
-        self._cancel_host_retries(tile)
-        self._hide_pause_overlay(tile)
-        if binding.strip is not None:
-            try:
-                binding.strip.hide()
-            except RuntimeError:
-                binding.strip = None
-        if binding.card is not None:
-            binding.card.sync_geometry(tile)
-            binding.card.show_ended(self._has_next(binding))
-        self._sync_position_badge(binding)
-        self._sync_subtitle_control(tile)
-        from .preferences import read_preferences
-        if read_preferences(self.context)['autoplay'] and self._has_next(binding):
-            QTimer.singleShot(0, lambda: self._auto_advance(binding))
+        return self.playback.enter_ended(binding, tile, player)
 
     def _auto_advance(self, binding):
-        from .preferences import read_preferences
-        if (not self._shutting_down and self._bindings.get(binding.bvid) is binding
-                and binding.state == 'ended' and read_preferences(self.context)['autoplay']
-                and self._has_next(binding)):
-            self._next_binding(binding)
+        return self.playback.auto_advance(binding)
 
     def _maybe_prefetch(self, binding):
-        from .preferences import read_preferences
-        enabled = read_preferences(self.context)['prefetch_next']
-        if not enabled:
-            if self._next_prefetch is not None:
-                self._next_prefetch.drop(id(binding))
-            return
-        if binding.state != 'playing' or binding.duration <= 0 or binding.duration - binding.progress > 30:
-            return
-        parts = int(getattr(binding.item, 'parts', 1) or 1)
-        if binding.part + 1 < parts:
-            item, part, quality = binding.item, binding.part + 1, int(binding.quality or 0)
-        else:
-            item, part, quality = self._next_item_for(binding.bvid), 0, 0
-            if item is None or item.bvid in self._bindings:
-                return
-        cookies = self._cookie_snapshot()
-        if self._next_prefetch is None:
-            from .next_prefetch import NextPrefetch
-            self._next_prefetch = NextPrefetch(QApplication.instance())
-        key = (self._account_generation, item.bvid, part, quality)
-        self._next_prefetch.prepare(id(binding), key, cookies, int(getattr(item, 'cid', 0)) if part == 0 else 0)
+        return self.playback.maybe_prefetch(binding)
 
     def _take_prefetched(self, binding, item, part, quality):
-        from .preferences import read_preferences
-        if self._next_prefetch is None or not read_preferences(self.context)['prefetch_next']:
-            return None
-        return self._next_prefetch.take(id(binding), (self._account_generation, item.bvid, part, quality))
+        return self.playback.take_prefetched(binding, item, part, quality)
 
     def _preferences_changed(self, values):
         order = getattr(self, 'watch_order', None)
@@ -3999,236 +3029,19 @@ class BiliWatchLaterPlugin(api.Plugin):
         self._sync_order_sidebar(values.get("show_watch_order", True))
         if not values.get('resume_session', False):
             self.playback_session.clear()
-        if self._next_prefetch is not None and not values['prefetch_next']:
-            self._next_prefetch.clear()
-        for binding in self._bindings.values():
+        if not values['prefetch_next']:
+            self.playback.clear_prefetch()
+        for binding in self.playback.bindings.values():
             self._configure_preview(binding, values['video_preview'])
 
     def _configure_preview(self, binding, enabled):
-        if not enabled and binding.preview is not None:
-            from .card_preview import retire_preview
-            retire_preview(binding.preview)
-            binding.preview = None
-        elif enabled and binding.preview is None:
-            from .vod_preview import VodPreviewProvider
-            binding.preview = VodPreviewProvider(binding.bvid, binding.cid)
-        if binding.strip is not None:
-            binding.strip.set_preview_provider(binding.preview)
-        entry = self._bar_progress.get(id(binding.tile))
-        if entry is not None:
-            entry['widget'].set_preview_provider(binding.preview)
+        return self.playback.configure_preview(binding, enabled)
 
     def _tick_binding(self, binding, tiles) -> None:
-        bvid = binding.bvid
-        tile = next(
-            (t for t in tiles
-             if isinstance(getattr(t, "room", None), dict)
-             and t.room.get("watchlater_bvid") == bvid),
-            None,
-        )
-        if tile is None:
-            if binding.state == "resolving":
-                if binding.request_id not in self._vod_context:
-                    self._detach_binding(binding)  # 请求已死，绑定成孤儿
-                return
-            # 格子被关/被直播拖入替换：合成房间已不在任何格子上，
-            # 格子当前的房间/播放器归宿主，只 detach 插件控件。
-            self._detach_binding(binding)
-            return
-        if tile is not binding.tile:
-            # 秒切回退路径：合成房间搬到了别的格子 → 控件跟着搬。
-            old_cell = binding.cell
-            binding.tile = tile
-            for widget in (binding.strip, binding.card, binding.line,
-                           binding.badge):
-                if widget is not None:
-                    try:
-                        widget.setParent(tile)
-                    except RuntimeError:
-                        pass
-            new_cell = self._resolve_cell_from_tile(tile)
-            if new_cell is None and self.wall is not None:
-                # 需求：加固：宿主链暂时查不到（布局过渡期）就按
-                # _cell_tiles 反查，绝不让 binding.cell 留在旧格子上——
-                # 否则旧格子下一次起播的 _cancel_cell_requests 会误杀
-                # 本格子的续播请求。
-                try:
-                    for candidate in list(self.wall._cells.values()):
-                        if self._cell_tiles.get(id(candidate)) is tile:
-                            new_cell = candidate
-                            break
-                except Exception:
-                    new_cell = None
-            if new_cell is not None:
-                binding.cell = new_cell
-                if self.wall is not None:
-                    try:
-                        if old_cell is not None and old_cell is not new_cell:
-                            self.wall.bind(old_cell, None)
-                        self.wall.bind(new_cell, binding.item)
-                    except Exception:
-                        pass
-            self._sync_tile_widgets(tile)
-        # 需求：：宿主 rewire/relayout 可能重新显示录制按钮，发现可见就再藏。
-        try:
-            rec = getattr(tile, "recording_button", None)
-            if rec is not None and rec.isVisible():
-                tile.set_recording_available(False)
-        except Exception:
-            pass
-        if binding.state == "ended":
-            # v1.0 任务 6：结束态是终止态，只做最小几何同步。
-            # 这里**绝不**再走 _start_resolution / _play_on / 续播分支：
-            # 全屏重排释放播放器后，``player is None`` 那条恢复分支正是
-            # 「反复连接中」的入口（宿主 _play_on 会把状态打回 connecting）。
-            self._hide_pause_overlay(tile)
-            self._sync_fullscreen_state(tile)
-            self._sync_next_button(binding)
-            card = binding.card
-            if card is not None:
-                try:
-                    if card.isVisible():
-                        card.sync_geometry(tile)
-                except RuntimeError:
-                    binding.card = None
-            return
-        player = self._host_player(tile)
-        if player is None:
-            # 布局隐藏确实会释放播放器，可见后才按进度重建。正常拖格
-            # 已在 Drop 阶段交换 Tile 对象，不会进入这个恢复分支。
-            if binding.state in ("playing", "paused"):
-                try:
-                    visible = tile.isVisible()
-                except Exception:
-                    visible = False
-                if visible:
-                    binding.resume_paused = binding.state == "paused"
-                    try:
-                        tile.set_status("正在续播…")
-                    except Exception:
-                        pass
-                    # 隐藏很久的签名URL可能过期；真正被释放后重新解析。
-                    self._start_resolution(binding, start=binding.progress)
-            return
-        prop = getattr(player, "_prop", None)
-        if not callable(prop):
-            return
-        duration = float(prop("duration", 0) or 0)
-        position = prop("time-pos", None)
-        position = float(position) if position is not None else None
-        loaded = duration > 0 or position is not None
-        if loaded:
-            self._apply_subtitle(binding, player)
-        if loaded and binding.resume_paused:
-            binding.resume_paused = False
-            try:
-                tile.set_paused(True)
-                player.set_paused(True)
-                binding.state = "paused"
-            except Exception:
-                pass
-        # DASH 音轨只能在文件加载后挂（v1.0 实际运行环境证据）。
-        if binding.pending_audio and loaded:
-            if self._mpv_command(
-                player, "audio-add", binding.pending_audio, "select"
-            ):
-                binding.pending_audio = ""
-            else:
-                binding.audio_attempts += 1
-                if binding.audio_attempts >= 3:
-                    binding.pending_audio = ""  # 有画无声胜过没画
-        # start 选项丢失校验（首播内核未 bind 时是空写）。
-        if binding.pending_seek > 0 and loaded:
-            target = binding.pending_seek
-            binding.pending_seek = 0.0
-            if position is None or position < target - 1.0:
-                self._mpv_command(player, "seek", target, "absolute")
-        # EOF：走宿主暂停 API 让 watchdog 安静，再上结束卡。
-        if binding.state == "playing" and bool(prop("eof-reached", False)):
-            self._enter_ended(binding, tile, player)
-        # 宿主暂停按钮/快捷键改了 tile.paused → 同步绑定状态。
-        try:
-            paused = bool(tile.paused)
-        except Exception:
-            paused = False
-        if binding.state == "playing" and paused:
-            binding.state = "paused"
-        elif binding.state == "paused" and not paused:
-            binding.state = "playing"
-        if position is not None:
-            binding.progress = position
-        if duration > 0:
-            binding.duration = duration
-        self._maybe_prefetch(binding)
-        self._sync_fullscreen_state(tile)
-        self._sync_subtitle_control(tile)
-        # v1.0 任务 3/8：列表刷新/删除后序号与总数要跟着变。
-        self._sync_position_badge(binding)
-        entry = self._bar_progress.get(id(tile))
-        if entry is not None and entry.get("visible"):
-            widget = entry.get("widget")
-            try:
-                if widget is not None:
-                    widget.set_duration(duration)
-                    widget.set_position(position or 0.0)
-            except RuntimeError:
-                self._bar_progress.pop(id(tile), None)
-        line = binding.line
-        if line is not None:
-            try:
-                if line.isVisible():
-                    if duration > 0:
-                        line.set_ratio(max(0.0, min(
-                            1.0, (position or 0.0) / duration)))
-                    line.sync_geometry(tile)
-            except RuntimeError:
-                binding.line = None
-        card = binding.card
-        if card is not None:
-            try:
-                if card.isVisible():
-                    card.sync_geometry(tile)
-            except RuntimeError:
-                binding.card = None
-        self._feed_danmaku(binding, tile, position, paused)
+        return self.playback.tick_binding(binding, tiles)
 
     def _feed_danmaku(self, binding, tile, position, paused: bool) -> None:
-        """按播放进度把点播弹幕喂给宿主原生引擎（需求 5）。
-
-        渲染/轨道/速度/开关全用宿主 ``tile.video_danmaku``；引擎满轨道或
-        弹幕开关关闭时 add_event 自己拒绝，这里像直播一样丢弃不积压。
-        """
-        if not binding.danmaku or paused or binding.state != "playing":
-            return
-        if position is None:
-            return
-        engine = getattr(tile, "video_danmaku", None)
-        add_event = getattr(engine, "add_event", None)
-        if not callable(add_event):
-            return
-        if position < binding.dm_last_pos - 2.0:
-            # 后退 seek：清屏并从新位置重新对表。
-            try:
-                engine.clear_comments()
-            except Exception:
-                pass
-            binding.dm_cursor = bisect.bisect_left(
-                [entry[0] for entry in binding.danmaku], position
-            )
-        horizon = position + 0.25
-        comments = binding.danmaku
-        cursor = binding.dm_cursor
-        while cursor < len(comments) and comments[cursor][0] <= horizon:
-            moment, mode, color, text = comments[cursor]
-            cursor += 1
-            if moment < binding.dm_last_pos - 0.5:
-                continue  # 前进 seek 跳过的历史弹幕不补喷
-            try:
-                add_event({"kind": "danmaku", "text": text, "color": color})
-            except Exception:
-                pass
-        binding.dm_cursor = cursor
-        binding.dm_last_pos = position
+        return self.playback.feed_danmaku(binding, tile, position, paused)
 
     # ------------------------------------------------------------- lifecycle
     def on_event(self, event, payload) -> None:
@@ -4239,13 +3052,11 @@ class BiliWatchLaterPlugin(api.Plugin):
                 isinstance(payload, dict)
                 and payload.get("platform") == "bilibili"
             ):
-                self._account_generation += 1
+                self.playback.advance_generation()
                 self.playback_session.clear()
-                if self._next_prefetch is not None:
-                    self._next_prefetch.clear()
+                self.playback.clear_prefetch()
                 self._cancel_all_requests()
-                for binding in list(self._bindings.values()):
-                    self._release_binding(binding, restart=True)
+                self.playback.release_all(restart=True)
                 if self.wall is not None:
                     try:
                         self.wall.clear_bindings()
@@ -4282,28 +3093,17 @@ class BiliWatchLaterPlugin(api.Plugin):
             container.deleteLater()
             self._order_container = None
             self.order_sidebar = None
-        if self._next_prefetch is not None:
-            self._next_prefetch.clear()
-            self._next_prefetch.deleteLater()
-            self._next_prefetch = None
+        self.playback.dispose_prefetch()
         if self._dpi_flush_timer is not None:
             self._dpi_flush_timer.stop()
             self._dpi_flush_timer.deleteLater()
             self._dpi_flush_timer = None
         self._dpi_pending = False
-        if self._tick_timer is not None:
-            self._tick_timer.stop()
-            try:
-                self._tick_timer.deleteLater()
-            except RuntimeError:
-                pass
-            self._tick_timer = None
+        self.playback.stop_tick_timer()
         self._drain_requests()
         # 关窗顺序（app.py）：EVENT_CLOSING → plugins.unload →
         # config save。这里把合成房间还原成原直播房/空格，配置永不留点播房。
-        for binding in list(self._bindings.values()):
-            self._release_binding(binding, restart=False)
-        self._bindings.clear()
+        self.playback.release_all(restart=False)
         self._sync_pip_filter()
         self._vod_press.clear()
         self._geometry_pending.clear()

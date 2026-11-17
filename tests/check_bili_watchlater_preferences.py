@@ -140,7 +140,7 @@ class PreferenceTests(unittest.TestCase):
         plugin._resolve_cell_from_tile = lambda _: object()
         plugin.host.tiles = lambda: [tile]
         item = models.WatchLaterItem(aid=1, bvid='fixture')
-        with patch.object(plugin, '_start_resolution') as resolve, patch.object(plugin, '_ensure_tick_timer'):
+        with patch.object(plugin.playback, 'start_resolution') as resolve, patch.object(plugin.playback, 'ensure_tick_timer'):
             plugin._start_vod_for_tile(tile, item)
         self.assertTrue(resolve.call_args.args[0].resume_paused)
 
@@ -361,7 +361,7 @@ class PrefetchTests(unittest.TestCase):
         plugin = plugin_module.BiliWatchLaterPlugin()
         plugin.context = context(dict(autoplay=True, prefetch_next=True))
         plugin._account_generation = 2
-        plugin._cookie_snapshot = lambda: {}
+        plugin.playback.cookie_snapshot = lambda: {}
         plugin._next_prefetch = Mock()
         binding = SimpleNamespace(item=SimpleNamespace(parts=2, bvid='current', cid=1), bvid='current',
                                   part=0, quality=80, state='playing', duration=100, progress=40)
@@ -375,7 +375,7 @@ class PrefetchTests(unittest.TestCase):
 
     def test_warm_handoff_skips_resolver_and_expired_data_falls_back(self):
         plugin = plugin_module.BiliWatchLaterPlugin()
-        plugin._cookie_snapshot = lambda: {}
+        plugin.playback.cookie_snapshot = lambda: {}
         plugin._account_generation = 1
         item = models.WatchLaterItem(aid=1, bvid='fixture')
         binding = plugin_module._VodBinding(item, object(), TileFixture({}))
@@ -383,7 +383,7 @@ class PrefetchTests(unittest.TestCase):
         prepared = Mock()
         stream, lease = Mock(), Mock()
         prepared.activate.return_value = (stream, lease)
-        with patch.object(plugin, '_on_vod_completed') as inject, \
+        with patch.object(plugin.playback, 'on_vod_completed') as inject, \
                 patch('ddm_plugin_bili_watchlater.workers.VodResolveRequest') as request:
             plugin._start_resolution(binding, start=0, prepared=prepared)
             inject.assert_called_once_with(binding.request_id, 1, stream)

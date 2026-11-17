@@ -225,26 +225,26 @@ class AutoplayTests(unittest.TestCase):
         self.plugin._bindings['fixture'] = self.binding
         for name in ('_cancel_host_retries', '_hide_pause_overlay', '_sync_position_badge', '_sync_subtitle_control'):
             setattr(self.plugin, name, Mock())
-        self.plugin._has_next = Mock(return_value=True)
-        self.plugin._next_binding = Mock()
+        self.plugin.playback.has_next = Mock(return_value=True)
+        self.plugin.playback.next_binding = Mock()
 
     def test_eof_queues_exactly_one_advance(self):
         self.plugin._enter_ended(self.binding, self.tile, self.player)
         self.plugin._enter_ended(self.binding, self.tile, self.player)
         APP.processEvents()
-        self.plugin._next_binding.assert_called_once_with(self.binding)
+        self.plugin.playback.next_binding.assert_called_once_with(self.binding)
 
     def test_default_off_and_last_item_do_not_advance(self):
         self.enabled = False
         self.plugin._enter_ended(self.binding, self.tile, self.player)
         APP.processEvents()
-        self.plugin._next_binding.assert_not_called()
+        self.plugin.playback.next_binding.assert_not_called()
         self.enabled = True
         self.binding.state = 'playing'
-        self.plugin._has_next.return_value = False
+        self.plugin.playback.has_next.return_value = False
         self.plugin._enter_ended(self.binding, self.tile, self.player)
         APP.processEvents()
-        self.plugin._next_binding.assert_not_called()
+        self.plugin.playback.next_binding.assert_not_called()
 
     def test_replaced_binding_shutdown_and_setting_change_cancel_queued_advance(self):
         for action in ('replace', 'shutdown', 'disable'):
@@ -260,7 +260,7 @@ class AutoplayTests(unittest.TestCase):
             else:
                 self.enabled = False
             APP.processEvents()
-        self.plugin._next_binding.assert_not_called()
+        self.plugin.playback.next_binding.assert_not_called()
 
     def test_next_path_uses_next_part_before_next_video_in_the_same_tile(self):
         plugin = plugin_module.BiliWatchLaterPlugin()
@@ -268,7 +268,7 @@ class AutoplayTests(unittest.TestCase):
         target = TileFixture({})
         binding = SimpleNamespace(item=item, bvid='first', part=0, quality=0, tile=target, preview=None, subtitles=[])
         plugin.host.tiles = lambda: [target]
-        with patch.object(plugin, '_cancel_binding_media'), patch.object(plugin, '_start_resolution') as resolve, \
+        with patch.object(plugin.playback, 'cancel_binding_media'), patch.object(plugin.playback, 'start_resolution') as resolve, \
                 patch.object(plugin, '_next_item_for') as next_item:
             plugin._next_binding(binding)
             self.assertEqual(binding.part, 1)
@@ -276,7 +276,7 @@ class AutoplayTests(unittest.TestCase):
             next_item.assert_not_called()
         next_video = models.WatchLaterItem(aid=2, bvid='second')
         with patch.object(plugin, '_next_item_for', return_value=next_video), \
-                patch.object(plugin, '_start_vod_for_tile') as play:
+                patch.object(plugin.playback, 'start_vod_for_tile') as play:
             plugin._next_binding(binding)
             play.assert_called_once_with(target, next_video)
 
