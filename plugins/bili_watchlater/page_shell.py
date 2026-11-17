@@ -3,7 +3,8 @@ from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QIcon, QPainter, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from ddm import theme
-from ddm.ui import ActionButton, HintLabel, SettingsSurface, TitleLabel, continuous_path
+from ddm.ui import HintLabel, SettingsSurface, TitleLabel, continuous_path
+from .button_feedback import StableActionButton as ActionButton
 from .entry_icon import GalleryIcon
 from .page_panels import GalleryToolButton
 
@@ -129,6 +130,7 @@ class BrowserTitleBar(QWidget):
 class BrowserWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setFocusPolicy(Qt.StrongFocus)
         if parent is None:
             self.setWindowFlag(Qt.FramelessWindowHint)
             self.setAttribute(Qt.WA_TranslucentBackground)

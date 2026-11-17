@@ -1,16 +1,18 @@
 """Grouped video-card, navigation and playback settings."""
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
-from ddm.ui import ActionButton, HintLabel, SelectControl, SettingsSurface, TitleLabel, ToggleSwitch
+from ddm.ui import HintLabel, SelectControl, SettingsSurface, TitleLabel, ToggleSwitch
+from .button_feedback import StableActionButton as ActionButton
 from .page_shell import InlinePanel
 from .preferences import DEFAULTS
 
 
 class WatchLaterSettings(InlinePanel):
-    applied = Signal(object)
+    changed = Signal(object)
 
     def __init__(self, values, parent=None):
         super().__init__(parent)
+        self._updating = True
         outer = QVBoxLayout(self)
         outer.setContentsMargins(28, 12, 28, 18)
         outer.setSpacing(16)
@@ -47,6 +49,8 @@ class WatchLaterSettings(InlinePanel):
         self._row(playback, '自动连播', '自然播放结束后先下一 P，再列表下一条；列表末尾停止。', self.autoplay)
         self.prefetch_next = self._toggle(values['prefetch_next'], '提前加载下一条')
         self._row(playback, '提前加载下一条', '仅在自动连播开启时可用。接近结束时预取下一项；每路最多约 10 MiB 音视频缓冲，会额外占用内存和流量，用于减少切换等待。', self.prefetch_next)
+        self.resume_session = self._toggle(values['resume_session'], '关闭软件后仍保留视频')
+        self._row(playback, '关闭软件后仍保留视频', '正常退出时保存视频的格子、分 P 和进度；同一账号再次启动时恢复。关闭自动播放后恢复为暂停。', self.resume_session)
         self.columns.currentIndexChanged.connect(self._sync_size)
         self.autoplay.toggled.connect(self._sync_prefetch)
         self._sync_size()
@@ -54,18 +58,19 @@ class WatchLaterSettings(InlinePanel):
         body.addStretch()
         buttons = QHBoxLayout()
         self.reset_button = ActionButton('恢复默认', self)
-        self.reset_button.setToolTip('恢复默认选项，点击应用后保存')
+        self.reset_button.setToolTip('恢复默认选项并自动保存')
         self.reset_button.clicked.connect(self._reset)
         buttons.addWidget(self.reset_button)
         buttons.addStretch()
-        cancel = ActionButton('取消', self)
-        cancel.clicked.connect(self.reject)
-        buttons.addWidget(cancel)
-        apply = ActionButton('应用', self)
-        apply.setObjectName('PrimaryButton')
-        apply.clicked.connect(self._apply)
-        buttons.addWidget(apply)
+        saved_hint = HintLabel('修改自动保存', self)
+        saved_hint.setWordWrap(False)
+        buttons.addWidget(saved_hint)
         outer.addLayout(buttons)
+        self._last_values = dict(values)
+        for control in self._controls().values():
+            signal = control.currentIndexChanged if isinstance(control, SelectControl) else control.toggled
+            signal.connect(self._save)
+        self._updating = False
 
     def _section(self, body, title, hint):
         heading = QLabel(title, self)
@@ -110,11 +115,31 @@ class WatchLaterSettings(InlinePanel):
         return control
 
     def _reset(self):
-        for name, key in (('view', 'default_view'), ('columns', 'grid_columns'), ('card_size', 'card_size')):
-            control = getattr(self, name)
-            control.setCurrentIndex(control.findData(DEFAULTS[key]))
-        for name in ('autoplay', 'video_preview', 'remember_state', 'auto_play', 'prefetch_next'):
-            getattr(self, name).setChecked(DEFAULTS[name])
+        self._set_values(DEFAULTS)
+        self._save()
+
+    def _controls(self):
+        return dict(default_view=self.view, grid_columns=self.columns, card_size=self.card_size,
+                    **{key: getattr(self, key) for key in ('autoplay', 'video_preview', 'remember_state',
+                                                         'auto_play', 'prefetch_next', 'resume_session')})
+
+    def _set_values(self, values):
+        self._updating = True
+        for key, control in self._controls().items():
+            blocked = control.blockSignals(True)
+            if isinstance(control, SelectControl):
+                control.setCurrentIndex(control.findData(values[key]))
+            else:
+                control.setChecked(values[key])
+            control.blockSignals(blocked)
+        self._sync_size()
+        self._sync_prefetch()
+        self._updating = False
+
+    def reopen(self, values):
+        self._finished = False
+        self._set_values(values)
+        self._last_values = dict(values)
 
     def _toggle(self, checked, title):
         control = ToggleSwitch(title, self)
@@ -130,9 +155,11 @@ class WatchLaterSettings(InlinePanel):
         if not enabled:
             self.prefetch_next.setChecked(False)
 
-    def _apply(self):
-        self.applied.emit(dict(default_view=self.view.currentData(), grid_columns=self.columns.currentData(),
-            card_size=self.card_size.currentData(), autoplay=self.autoplay.isChecked(),
-            remember_state=self.remember_state.isChecked(), auto_play=self.auto_play.isChecked(),
-            prefetch_next=self.prefetch_next.isChecked(), video_preview=self.video_preview.isChecked()))
-        self.accept()
+    def _save(self, *_args):
+        if self._updating:
+            return
+        values = {key: control.currentData() if isinstance(control, SelectControl) else control.isChecked()
+                  for key, control in self._controls().items()}
+        if values != self._last_values:
+            self._last_values = values
+            self.changed.emit(values)

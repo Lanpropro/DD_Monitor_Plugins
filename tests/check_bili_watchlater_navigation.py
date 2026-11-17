@@ -51,13 +51,13 @@ class NavigationTests(unittest.TestCase):
                 self.assertEqual(page.winId(), handle)
                 self.assertTrue(page._refresh_shortcut.isEnabled())
 
-    def test_back_and_escape_discard_settings_without_closing_browser(self):
+    def test_back_and_escape_keep_autosaved_settings_without_closing_browser(self):
         with self.shown():
             self.page._open_settings()
             self.page._settings_dialog.autoplay.setChecked(True)
             QTest.mouseClick(self.page.window_header.back, Qt.LeftButton)
             self.assertIsNone(self.page._settings_dialog)
-            self.assertEqual(self.values, {})
+            self.assertEqual(self.values, dict(autoplay=True))
             self.assertTrue(self.page.isVisible())
             self.page._select_item(self.item)
             self.page.window_header.back.setFocus()
@@ -84,7 +84,7 @@ class NavigationTests(unittest.TestCase):
             value, key = bar.value(), page._visible_anchor_key()
             page._open_settings()
             page._settings_dialog.auto_play.setChecked(False)
-            page._settings_dialog._apply()
+            page._back_to_browser()
             APP.processEvents()
             self.assertEqual(page._view_mode, 'list')
             self.assertEqual(page.search.text(), '视频')
@@ -99,7 +99,7 @@ class NavigationTests(unittest.TestCase):
             self.page._select_item(self.item)
             self.assertTrue(old._finished)
             self.assertIsNone(self.page._settings_dialog)
-            self.assertEqual(self.page.navigation.count(), 2)
+            self.assertEqual(self.page.navigation.count(), 3)
             self.page._open_settings()
             self.assertIsNone(self.page._placement_picker)
             self.assertEqual(self.page.navigation.count(), 2)
@@ -113,23 +113,21 @@ class NavigationTests(unittest.TestCase):
                 self.assertIsNone(self.page._settings_dialog)
                 self.assertIsNone(self.page._placement_picker)
                 self.assertIsNone(self.page._inline_panel)
-                self.assertEqual(self.page.navigation.count(), 1)
+                self.assertEqual(self.page.navigation.count(), 2)
                 self.page.show()
                 APP.processEvents()
                 self.assertIs(self.page.navigation.currentWidget(), self.page.browser_view)
 
-    def test_reset_is_draft_until_apply_and_retains_prefetch_dependency(self):
+    def test_reset_autosaves_once_and_retains_prefetch_dependency(self):
         self.page._open_settings()
         panel = self.page._settings_dialog
         panel.columns.setCurrentIndex(panel.columns.findData(6))
         panel.autoplay.setChecked(True)
         panel.prefetch_next.setChecked(True)
         panel._reset()
-        self.assertEqual(self.values, {})
         self.assertFalse(panel.prefetch_next.isEnabled())
         self.assertFalse(panel.prefetch_next.isChecked())
-        panel._apply()
-        self.assertEqual(self.values, DEFAULTS)
+        self.assertEqual(controls.read_preferences(self.context), DEFAULTS)
 
     def test_flat_material_tracks_host_settings_in_both_themes(self):
         from ddm.settings_material import BASE_COLORS
@@ -143,7 +141,7 @@ class NavigationTests(unittest.TestCase):
                 panel = self.page._settings_dialog
                 self.assertTrue(panel.window().property('settingsGlassContent'))
                 self.assertEqual(len(panel.findChildren(SettingsSurface)), 3)
-                self.assertEqual(len(panel.findChildren(QFrame, 'WatchLaterSettingsDivider')), 5)
+                self.assertEqual(len(panel.findChildren(QFrame, 'WatchLaterSettingsDivider')), 6)
                 panel.reject()
         finally:
             theme.apply('light' if original else 'dark')
@@ -214,7 +212,8 @@ class NavigationTests(unittest.TestCase):
                 APP.processEvents()
                 self.page._back_to_browser()
             records = [call.args[0] for call in log.call_args_list]
-            self.assertEqual(sum('phase=construct ' in record for record in records), 3)
+            self.assertEqual(sum('phase=construct ' in record for record in records), 1)
+            self.assertEqual(sum('phase=reuse ' in record for record in records), 2)
             self.assertTrue(all(record.startswith('settings timing phase=') for record in records))
             self.assertTrue(all('elapsed_ms=' in record and 'stage_ms=' in record for record in records))
 

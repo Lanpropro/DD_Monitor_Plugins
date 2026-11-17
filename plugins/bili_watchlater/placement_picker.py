@@ -3,11 +3,12 @@ from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QAbstractButton, QHBoxLayout, QVBoxLayout, QWidget
 from ddm import theme
-from ddm.ui import ActionButton, HintLabel, TitleLabel, continuous_path
+from ddm.ui import HintLabel, TitleLabel, continuous_path
+from .button_feedback import FocusVisible, StableActionButton as ActionButton
 from .page_shell import InlinePanel, card_color
 
 
-class CellChoice(QAbstractButton):
+class CellChoice(FocusVisible, QAbstractButton):
     def __init__(self, cell, parent):
         super().__init__(parent)
         self.cell = cell
@@ -48,8 +49,8 @@ class CellChoice(QAbstractButton):
             painter.drawPixmap(rect, image, source)
             painter.fillRect(rect, QColor(0, 0, 0, 75))
         painter.setClipping(False)
-        painter.setPen(QPen(theme.qcolor(theme.ACCENT if self.hasFocus() or self.isDown() else theme.BORDER_STRONG),
-                            1.8 if self.hasFocus() else 1))
+        painter.setPen(QPen(theme.qcolor(theme.ACCENT if self.focus_outline() or self.isDown() else theme.BORDER_STRONG),
+                            1.8 if self.focus_outline() else 1))
         painter.setBrush(Qt.NoBrush)
         painter.drawPath(path)
         painter.setPen(theme.qcolor('#ffffff' if image is not None and not image.isNull() else theme.TEXT2))

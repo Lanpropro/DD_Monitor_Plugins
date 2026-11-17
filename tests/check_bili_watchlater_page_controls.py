@@ -114,20 +114,19 @@ class PageControlsTests(unittest.TestCase):
         dialog.columns.setCurrentIndex(dialog.columns.findData(4))
         self.assertFalse(dialog.card_size.isEnabled())
         dialog.autoplay.setChecked(True)
-        dialog._apply()
-        self.assertEqual(self.values, dict(default_view='grid', grid_columns=4, card_size='standard', autoplay=True,
-            remember_state=True, auto_play=True, prefetch_next=False, video_preview=True))
+        self.assertEqual(self.values, dict(grid_columns=4, autoplay=True))
+        self.assertIs(self.page._inline_panel, dialog)
         self.card()
         self.page._fit_grid()
         self.assertEqual(self.page._grid_columns, 4)
         self.assertTrue(read_preferences(self.context)['autoplay'])
 
-    def test_settings_cancel_does_not_write_defaults(self):
+    def test_settings_autosave_survives_return_without_saving_unchanged_defaults(self):
         self.page._open_settings()
         self.page._settings_dialog.autoplay.setChecked(True)
         self.page._settings_dialog.reject()
-        self.assertEqual(self.values, {})
-        self.assertFalse(read_preferences(self.context)['autoplay'])
+        self.assertEqual(self.values, dict(autoplay=True))
+        self.assertTrue(read_preferences(self.context)['autoplay'])
 
     def test_fixed_six_columns_fit_narrow_window_with_compact_actions(self):
         self.page._items = [models.WatchLaterItem(aid=i+1, bvid=f'fixture{i}', title='测试', view_count=0, danmaku_count=0)

@@ -57,7 +57,8 @@ from PySide6.QtWidgets import (
 )
 
 from ddm import theme
-from ddm.ui import ActionButton, SegmentedControl, SelectControl, TitleLabel
+from ddm.ui import SegmentedControl, SelectControl, TitleLabel
+from .button_feedback import StableActionButton as ActionButton
 from .page_panels import BusyRefreshButton, GalleryToolButton, PlacementSelector
 from .placement_picker import PlacementPicker
 from .preferences import CARD_WIDTHS, read_preferences, save_preferences
@@ -453,6 +454,7 @@ class WatchLaterPage(BrowserWindow):
         self.context = context
         self.preferences = read_preferences(context)
         self._settings_dialog = None
+        self._settings_panel_cache = None
         self._placement_picker = None
         self._layout_provider = None
         self.wall = wall
@@ -965,8 +967,9 @@ class WatchLaterPage(BrowserWindow):
             return
         self._inline_panel = None
         self.navigation.setCurrentWidget(self.browser_view)
-        self.navigation.removeWidget(panel)
-        panel.deleteLater()
+        if panel is not self._settings_panel_cache:
+            self.navigation.removeWidget(panel)
+            panel.deleteLater()
         self.window_header.set_page()
         self._refresh_shortcut.setEnabled(True)
         self._refresh_multi_button()
@@ -974,7 +977,6 @@ class WatchLaterPage(BrowserWindow):
             self.covers.resume()
             self._schedule_visible_covers()
             (self.settings_button if isinstance(panel, WatchLaterSettings) else self.search).setFocus(Qt.OtherFocusReason)
-        self._sync_browser_palette()
 
     def _back_to_browser(self):
         if self._inline_panel is not None:
@@ -1016,29 +1018,36 @@ class WatchLaterPage(BrowserWindow):
         from .settings_trace import SettingsTrace
         trace = SettingsTrace(self) if getattr(self, '_settings_trace_count', 0) < 3 else None
         self._settings_trace_count = getattr(self, '_settings_trace_count', 0) + 1
-        dialog = WatchLaterSettings(self.preferences, self)
+        dialog = self._settings_panel_cache
+        if dialog is None:
+            dialog = WatchLaterSettings(self.preferences, self)
+            self._settings_panel_cache = dialog
+            dialog.changed.connect(self._apply_preferences)
+            dialog.finished.connect(lambda _result: setattr(self, '_settings_dialog', None))
+        else:
+            dialog.reopen(self.preferences)
         if trace is not None:
-            trace.mark('construct')
+            trace.mark('construct' if not dialog.property('openedBefore') else 'reuse')
+        dialog.setProperty('openedBefore', True)
         self._settings_dialog = dialog
-        dialog.applied.connect(self._apply_preferences)
-        dialog.finished.connect(lambda _result: setattr(self, '_settings_dialog', None))
         self._show_inline_panel(dialog, '设置')
         if trace is not None:
             trace.mark('attach')
             trace.watch(dialog)
 
     def _apply_preferences(self, values):
-        previous_default = self.preferences['default_view']
+        previous = self.preferences
         if callable(getattr(self.context, 'set_setting', None)):
             save_preferences(self.context, values)
         self.preferences = values
-        if not values['video_preview']:
+        if previous['video_preview'] and not values['video_preview']:
             self.card_preview.stop()
-        if not values['remember_state']:
+        if previous['remember_state'] and not values['remember_state']:
             self.browse_state.clear()
-        if values['default_view'] != previous_default:
+        if values['default_view'] != previous['default_view']:
             self._on_view_mode_changed(values['default_view'])
-        self._fit_grid()
+        if any(values[key] != previous[key] for key in ('grid_columns', 'card_size')):
+            self._fit_grid()
         self.preferences_changed.emit(values)
 
     def _open_placement_picker(self, item):
@@ -3092,8 +3101,8 @@ class WatchLaterPage(BrowserWindow):
     def activate(self) -> None:
         if self._shutting_down:
             return
-        if self.stack.currentWidget() is self._active_scroll():
-            self.search.setFocus(Qt.ShortcutFocusReason)
+        if self._inline_panel is None:
+            self.setFocus(Qt.OtherFocusReason)
 
     def shutdown(self) -> None:
         if self._shutting_down:

@@ -525,6 +525,8 @@ class BiliWatchLaterPlugin(api.Plugin):
         self._cell_vod: dict[int, int] = {}
         self._vod_seq = 0
         self._next_prefetch = None
+        from .playback_session import PlaybackSession
+        self.playback_session = PlaybackSession(self)
         self._account_generation = 0
         self._dm_requests: set = set()
         self._dm_context: dict[int, tuple] = {}
@@ -2807,7 +2809,7 @@ class BiliWatchLaterPlugin(api.Plugin):
             except Exception:
                 pass
 
-    def _start_vod_for_tile(self, tile, item, *, prepared=None) -> None:
+    def _start_vod_for_tile(self, tile, item, *, prepared=None, resume=None) -> None:
         if self._shutting_down or tile is None or item is None:
             return
         bvid = str(getattr(item, "bvid", "") or "")
@@ -2854,6 +2856,13 @@ class BiliWatchLaterPlugin(api.Plugin):
         from .preferences import read_preferences
         binding.resume_paused = not read_preferences(self.context)['auto_play']
         binding.part = 0          # v1.0 需求：：新片从第一 P 开始
+        start = self._resume_seconds(item)
+        if resume is not None:
+            binding.part = resume['part']
+            binding.quality = resume['quality']
+            binding.resume_paused = binding.resume_paused or resume['paused']
+            start = resume['progress']
+            binding.progress = start
         binding.prev_room = prev_room
         self._bindings[bvid] = binding
         if self.wall is not None:
@@ -2866,9 +2875,9 @@ class BiliWatchLaterPlugin(api.Plugin):
         except Exception:
             pass
         if prepared is not None:
-            self._start_resolution(binding, start=self._resume_seconds(item), prepared=prepared)
+            self._start_resolution(binding, start=start, prepared=prepared)
         else:
-            self._start_resolution(binding, start=self._resume_seconds(item))
+            self._start_resolution(binding, start=start)
         self._ensure_tick_timer()
 
     @staticmethod
@@ -3977,6 +3986,8 @@ class BiliWatchLaterPlugin(api.Plugin):
         return self._next_prefetch.take(id(binding), (self._account_generation, item.bvid, part, quality))
 
     def _preferences_changed(self, values):
+        if not values.get('resume_session', False):
+            self.playback_session.clear()
         if self._next_prefetch is not None and not values['prefetch_next']:
             self._next_prefetch.clear()
         for binding in self._bindings.values():
@@ -4210,12 +4221,15 @@ class BiliWatchLaterPlugin(api.Plugin):
 
     # ------------------------------------------------------------- lifecycle
     def on_event(self, event, payload) -> None:
-        if event == api.EVENT_ACCOUNT_CHANGED:
+        if event == api.EVENT_STARTED:
+            QTimer.singleShot(0, self.playback_session.restore)
+        elif event == api.EVENT_ACCOUNT_CHANGED:
             if (
                 isinstance(payload, dict)
                 and payload.get("platform") == "bilibili"
             ):
                 self._account_generation += 1
+                self.playback_session.clear()
                 if self._next_prefetch is not None:
                     self._next_prefetch.clear()
                 self._cancel_all_requests()
@@ -4240,6 +4254,8 @@ class BiliWatchLaterPlugin(api.Plugin):
                     except RuntimeError:
                         self.page = None
         elif event == api.EVENT_CLOSING:
+            if not self._shutting_down:
+                self.playback_session.capture()
             self.on_unload()
 
     def on_unload(self) -> None:

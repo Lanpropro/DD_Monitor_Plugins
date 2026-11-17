@@ -64,7 +64,7 @@ from .models import (
 
 from .entry_icon import BrowserIcon
 from .page_panels import GalleryToolButton, PlacementButton, ThumbnailSurface, two_line_title
-from ddm.ui import ActionButton
+from .button_feedback import StableActionButton as ActionButton
 
 
 def browser_button(parent):

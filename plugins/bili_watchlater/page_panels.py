@@ -3,7 +3,8 @@ from PySide6.QtCore import QAbstractAnimation, QEasingCurve, QPointF, QRectF, QS
 from PySide6.QtGui import QPainter, QPen, QTextLayout, QTextOption
 from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QToolButton, QWidget
 from ddm import motion, theme
-from ddm.ui import ActionButton, HintLabel, SelectControl, continuous_path
+from ddm.ui import HintLabel, SelectControl, continuous_path
+from .button_feedback import FocusVisible, StableActionButton as ActionButton
 
 
 class ThumbnailSurface(QWidget):
@@ -119,7 +120,7 @@ class PlacementButton(ActionButton):
             painter.drawText(QRectF(29, 0, self.width() - 36, self.height()), Qt.AlignVCenter | Qt.AlignLeft, self.text())
 
 
-class GalleryToolButton(QToolButton):
+class GalleryToolButton(FocusVisible, QToolButton):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(30, 30)
@@ -143,7 +144,7 @@ class GalleryToolButton(QToolButton):
         if not self.isEnabled() and not getattr(self, '_busy', False):
             painter.setOpacity(.4)
         painter.setBrush(theme.qcolor(theme.CONTENT_HOVER) if self.underMouse() or self.isDown() else Qt.NoBrush)
-        painter.setPen(QPen(theme.qcolor(theme.ACCENT), 1) if self.hasFocus() else Qt.NoPen)
+        painter.setPen(QPen(theme.qcolor(theme.ACCENT), 1) if self.focus_outline() else Qt.NoPen)
         painter.drawPath(continuous_path(QRectF(self.rect()).adjusted(1, 1, -1, -1), theme.RADIUS_MD))
         self._paint_icon(painter)
 
