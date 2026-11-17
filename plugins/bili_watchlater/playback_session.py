@@ -3,7 +3,7 @@ import hashlib
 import math
 import re
 from PySide6.QtCore import QTimer
-from .models import WatchLaterItem
+from .models import WatchLaterItem, clean_text, normalize_cover_url
 from .preferences import read_preferences
 from .acceptance_trace import record as trace_event
 
@@ -79,6 +79,7 @@ class PlaybackSession:
                         position = seconds(current)
             item = binding.item
             videos.append(dict(cell=cell, bvid=binding.bvid, aid=item.aid, title=item.title,
+                owner_name=item.owner_name, owner_mid=item.owner_mid, owner_face=item.owner_face,
                 duration=int(binding.duration or item.duration or 0), videos=int(item.parts or 1), cid=item.cid,
                 part=binding.part, progress=position, quality=int(binding.quality or 0),
                 paused=bool(getattr(tile, 'paused', binding.state == 'paused')),
@@ -137,6 +138,10 @@ class PlaybackSession:
             title = record.get('title')
             item = WatchLaterItem(aid=aid, bvid=bvid, title=title[:512] if isinstance(title, str) else '稍后再看视频',
                                  duration=int(seconds(record.get('duration'))), videos=parts, cid=max(0, cid))
+            item.owner_name = clean_text(record.get('owner_name'), '未知 UP 主')[:128]
+            mid = record.get('owner_mid', 0)
+            item.owner_mid = max(0, mid) if type(mid) is int else 0
+            item.owner_face = normalize_cover_url(record.get('owner_face'))
             quality = record.get('quality', 0)
             resume = dict(part=part, progress=seconds(record.get('progress')),
                           quality=quality if type(quality) is int and 0 <= quality <= 1000 else 0,

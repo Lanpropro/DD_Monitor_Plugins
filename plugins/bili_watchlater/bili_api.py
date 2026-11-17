@@ -531,11 +531,12 @@ class BiliWatchLaterAPI:
 
 @dataclass(frozen=True, slots=True)
 class VideoStat:
-    """v1.0：一次 ``video_stat`` 请求拿到的两个计数。"""
+    """One public view request supplies counts and normalized display metadata."""
 
     danmaku: int = 0
     #: 播放量；接口没给 stat.view 时为 None（界面据此不显示）。
     view: int | None = None
+    item: WatchLaterItem | None = None
 
 
 def video_stat(
@@ -640,7 +641,7 @@ def video_stat(
             return danmaku
         raw_view = stat.get("view")
         view = max(0, safe_int(raw_view)) if raw_view is not None else None
-        return VideoStat(danmaku=danmaku, view=view)
+        return VideoStat(danmaku=danmaku, view=view, item=WatchLaterItem.from_api(data))
     finally:
         if owns_session:
             try:

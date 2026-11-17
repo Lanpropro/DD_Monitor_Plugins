@@ -101,6 +101,7 @@ class VodResolveRequest(QThread):
 
     completed = Signal(int, int, object)
     failed = Signal(int, int, object)
+    metadata_ready = Signal(int, int, object)
 
     def __init__(
         self,
@@ -122,6 +123,7 @@ class VodResolveRequest(QThread):
         self.qn = int(qn or 0)
         self.hq = bool(hq)
         self.page = max(0, int(page or 0))   # v1.0 需求：：多 P 视频的 0 基页码
+        self.load_metadata = False
         self.cancelled = threading.Event()
 
     def cancel(self) -> None:
@@ -152,6 +154,17 @@ class VodResolveRequest(QThread):
         else:
             if not self.cancelled.is_set():
                 self.completed.emit(self.request_id, self.generation, stream)
+            # Old recovery snapshots lack owner fields. Repair only those,
+            # after handing off the stream, without delaying playback for metadata.
+            if self.load_metadata and not self.cancelled.is_set():
+                try:
+                    from .bili_api import video_stat
+                    result = video_stat(self.bvid, with_view=True)
+                    item = result.item
+                except Exception:
+                    return  # Optional metadata must not turn playback into failure.
+                if item is not None and item.bvid == self.bvid and not self.cancelled.is_set():
+                    self.metadata_ready.emit(self.request_id, self.generation, item)
 
 
 class SubtitleRequest(QThread):

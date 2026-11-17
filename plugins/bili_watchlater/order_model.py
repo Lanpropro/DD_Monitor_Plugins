@@ -19,7 +19,9 @@ class OrderModel(QAbstractListModel):
         if role == Qt.DisplayRole:
             return item.title
         if role == Qt.AccessibleTextRole:
-            return item.title + ' · ' + item.owner_name + (' · 已看完' if item.is_finished else '')
+            return (item.title + ' · ' + item.owner_name
+                    + (' · 已看完' if item.is_finished else '')
+                    + (' · 已入墙' if item.bvid in self.parent().wall_bvids else ''))
         return None
 
     def flags(self, index):

@@ -996,6 +996,7 @@ class BiliWatchLaterPlugin(api.Plugin):
         return self.page.items_snapshot() if self.page is not None else []
 
     def _watch_items_changed(self, items):
+        self.playback.refresh_items(items)
         self.watch_order.update(items, self.page._cookies.get('DedeUserID', ''))
         if self.order_sidebar is not None:
             self.order_sidebar.refresh()
@@ -1039,8 +1040,17 @@ class BiliWatchLaterPlugin(api.Plugin):
         from .order_sidebar import OrderSidebar
         self._watch_items_changed(page.items_snapshot())
         self.order_sidebar = OrderSidebar(page, self.watch_order, self._play_from_order)
+        self._sync_order_wall_marks()
         self.order_sidebar.order_changed.connect(self._watch_order_changed)
         return self.order_sidebar
+
+    def _sync_order_wall_marks(self):
+        sidebar = getattr(self, 'order_sidebar', None)
+        if sidebar is None:
+            return
+        keys = {(getattr(tile, 'room', None) or {}).get('watchlater_bvid')
+                for tile in self._playback_tiles()}
+        sidebar.list.set_on_wall(keys & self.playback.bindings.keys())
 
     def _play_from_order(self, item):
         tiles = self._playback_tiles()

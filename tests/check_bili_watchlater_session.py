@@ -109,6 +109,19 @@ class SessionTests(unittest.TestCase):
             self.assertEqual(start.call_count, 1)
         self.assertEqual(self.values[KEY], {})
 
+    def test_snapshot_restores_owner_without_waiting_for_network(self):
+        self.item.owner_name = 'Fixture UP'
+        self.item.owner_mid = 123
+        self.item.owner_face = 'https://i0.hdslb.com/bfs/face/fixture.jpg'
+        saved = self.saved()
+        self.assertEqual(saved['videos'][0]['owner_name'], 'Fixture UP')
+        second = self.make_plugin()
+        with patch.object(second, '_start_vod_for_tile') as start:
+            second.playback_session.restore()
+        item = start.call_args.args[1]
+        self.assertEqual((item.owner_name, item.owner_mid, item.owner_face),
+                         (self.item.owner_name, self.item.owner_mid, self.item.owner_face))
+
     def test_real_binding_resume_uses_saved_part_and_seek_and_respects_auto_play(self):
         second = self.make_plugin()
         self.values['auto_play'] = False

@@ -75,6 +75,15 @@ class OrderDelegate(QStyledItemDelegate):
         if item.is_finished:
             draw_finished_icon(painter,rect)
         painter.setClipping(False)
+        if item.bvid in view.wall_bvids:
+            accent = theme.qcolor(theme.ACCENT)
+            accent.setAlphaF(.62)
+            painter.setPen(QPen(accent, 1))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(rect,8,8)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(theme.qcolor(theme.ACCENT))
+            painter.drawRoundedRect(QRectF(0,rect.center().y()-12,3,24),1.5,1.5)
         if view.currentIndex() == index:
             painter.setPen(QPen(theme.qcolor(theme.ACCENT), 2))
             painter.setBrush(Qt.NoBrush)
@@ -94,6 +103,7 @@ class OrderList(QListView):
     def __init__(self, page, parent=None):
         super().__init__(parent)
         self.page = page
+        self.wall_bvids = set()
         self.setModel(OrderModel(self))
         self._pending_items = None
         self._press_pos = None
@@ -128,6 +138,18 @@ class OrderList(QListView):
         self.lift_trace = LiftTrace(self)
         self.avoidance = OrderAvoidance(self)
         self.drop_y = None
+
+    def set_on_wall(self, bvids):
+        keys = set(bvids)
+        changed = keys ^ self.wall_bvids
+        if not changed:
+            return
+        self.wall_bvids = keys
+        for row, item in enumerate(self.model().items):
+            if item.bvid in changed:
+                index = self.model().index(row, 0)
+                self.model().dataChanged.emit(index, index, [Qt.AccessibleTextRole])
+                self.viewport().update(self.visualRect(index))
 
     @measure('replace')
     def replace(self, items):

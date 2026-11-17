@@ -36,6 +36,35 @@ class PlaybackCoordinator:
         if self.next_prefetch is not None:
             self.next_prefetch.clear()
 
+    def refresh_items(self, items):
+        """Refresh display metadata without restarting or seeking a player."""
+        tiles = self.owner._host_tiles()
+        for item in items:
+            binding = self.bindings.get(item.bvid)
+            if binding is None or item.owner_name in ('', '未知 UP 主'):
+                continue
+            binding.item = item
+            tile = binding.tile
+            if tile not in tiles:
+                continue
+            room = getattr(tile, 'room', None) or {}
+            if room.get('watchlater_bvid') != binding.bvid:
+                continue  # Resolving bindings will use the item on injection.
+            room['face'] = item.owner_face
+            title = self.room_title(binding)
+            update = getattr(tile, 'set_uname_title', None)
+            if callable(update):
+                update(item.owner_name, title)
+
+    def on_item_metadata(self, request_id, generation, item):
+        if self.owner._shutting_down or generation != self.account_generation:
+            return
+        binding = self.bindings.get(item.bvid)
+        if (binding is None or binding.request_id != request_id
+                or binding.item.owner_name not in ('', '未知 UP 主')):
+            return
+        self.refresh_items([item])
+
     def dispose_prefetch(self):
         if self.next_prefetch is not None:
             self.next_prefetch.clear()
@@ -335,8 +364,10 @@ class PlaybackCoordinator:
             int(qn), hq=True, page=binding.part,
         )
         self.vod_requests.add(worker)
+        worker.load_metadata = binding.item.owner_name in ('', '未知 UP 主')
         worker.completed.connect(self.on_vod_completed)
         worker.failed.connect(self.on_vod_failed)
+        worker.metadata_ready.connect(self.on_item_metadata)
         try:
             worker.finished.connect(worker.deleteLater)
         except Exception:
@@ -664,6 +695,7 @@ class PlaybackCoordinator:
         self.owner._ensure_space_shortcut()
         self.owner._sync_fullscreen_state(tile)
         self.ensure_tick_timer()
+        self.owner._sync_order_wall_marks()
 
     def on_host_player_state(self, binding, state: str) -> None:
         """只观察宿主播放器状态，绝不回写宿主（宿主自己的槽已接好）。"""
@@ -910,6 +942,7 @@ class PlaybackCoordinator:
         """
         if self.bindings.get(binding.bvid) is binding:
             self.bindings.pop(binding.bvid, None)
+        self.owner._sync_order_wall_marks()
         self.owner._restore_tile_chrome(binding, quality=False)
         self.owner._vod_press.pop(id(binding.tile), None)
         self.cancel_binding_media(binding)
@@ -1010,6 +1043,7 @@ class PlaybackCoordinator:
                 self.tick_binding(binding, tiles)
             except Exception as error:
                 self.owner._log("tick failed type=" + type(error).__name__)
+        self.owner._sync_order_wall_marks()
 
     def hide_pause_overlay(self, tile) -> None:
         """v1.0 任务 5：结束态不留「已暂停」浮层。
