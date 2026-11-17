@@ -1037,8 +1037,14 @@ class WatchLaterPage(BrowserWindow):
 
     def _apply_preferences(self, values):
         previous = self.preferences
+        from .settings_trace import SettingsTrace
+        changed = [key for key in values if previous.get(key) != values[key]]
+        trace = SettingsTrace(self, 'settings change keys=' + ','.join(changed)) if changed and getattr(self, '_settings_change_count', 0) < 12 else None
+        self._settings_change_count = getattr(self, '_settings_change_count', 0) + 1
         if callable(getattr(self.context, 'set_setting', None)):
             save_preferences(self.context, values)
+        if trace is not None:
+            trace.mark('persist')
         self.preferences = values
         if previous['video_preview'] and not values['video_preview']:
             self.card_preview.stop()
@@ -1048,7 +1054,13 @@ class WatchLaterPage(BrowserWindow):
             self._on_view_mode_changed(values['default_view'])
         if any(values[key] != previous[key] for key in ('grid_columns', 'card_size')):
             self._fit_grid()
+        if trace is not None:
+            trace.mark('view')
         self.preferences_changed.emit(values)
+        if trace is not None:
+            trace.mark('playback')
+            panel = self._settings_dialog
+            trace.watch(panel._controls()[changed[0]] if panel is not None else self)
 
     def _open_placement_picker(self, item):
         self.card_preview.stop()

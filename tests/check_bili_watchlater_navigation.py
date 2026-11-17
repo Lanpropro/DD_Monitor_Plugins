@@ -6,7 +6,7 @@ import check_bili_watchlater_page_controls as controls
 from check_bili_watchlater import APP, models
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QFrame
+from PySide6.QtWidgets import QFrame, QPushButton
 from ddm import theme
 from ddm.ui import SettingsSurface
 from ddm_plugin_bili_watchlater.page_shell import background_color, card_color
@@ -118,13 +118,13 @@ class NavigationTests(unittest.TestCase):
                 APP.processEvents()
                 self.assertIs(self.page.navigation.currentWidget(), self.page.browser_view)
 
-    def test_reset_autosaves_once_and_retains_prefetch_dependency(self):
+    def test_no_reset_or_apply_button_and_retains_prefetch_dependency(self):
         self.page._open_settings()
         panel = self.page._settings_dialog
-        panel.columns.setCurrentIndex(panel.columns.findData(6))
+        self.assertFalse(any(button.text() in ('恢复默认', '应用', '取消') for button in panel.findChildren(QPushButton)))
         panel.autoplay.setChecked(True)
         panel.prefetch_next.setChecked(True)
-        panel._reset()
+        panel.autoplay.setChecked(False)
         self.assertFalse(panel.prefetch_next.isEnabled())
         self.assertFalse(panel.prefetch_next.isChecked())
         self.assertEqual(controls.read_preferences(self.context), DEFAULTS)

@@ -4,9 +4,10 @@ from PySide6.QtCore import QEvent, QObject, QTimer
 
 
 class SettingsTrace(QObject):
-    def __init__(self, page):
+    def __init__(self, page, prefix='settings timing'):
         super().__init__(page)
         self.page = page
+        self.prefix = prefix
         self.started = time.perf_counter()
         self.last = self.started
         self.target = None
@@ -14,7 +15,7 @@ class SettingsTrace(QObject):
 
     def mark(self, phase):
         now = time.perf_counter()
-        self.page._log(f'settings timing phase={phase} elapsed_ms={(now-self.started)*1000:.1f} stage_ms={(now-self.last)*1000:.1f}')
+        self.page._log(f'{self.prefix} phase={phase} elapsed_ms={(now-self.started)*1000:.1f} stage_ms={(now-self.last)*1000:.1f}')
         self.last = now
 
     def watch(self, panel):

@@ -2,9 +2,7 @@
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
 from ddm.ui import HintLabel, SelectControl, SettingsSurface, TitleLabel, ToggleSwitch
-from .button_feedback import StableActionButton as ActionButton
 from .page_shell import InlinePanel
-from .preferences import DEFAULTS
 
 
 class WatchLaterSettings(InlinePanel):
@@ -57,10 +55,6 @@ class WatchLaterSettings(InlinePanel):
         self._sync_prefetch()
         body.addStretch()
         buttons = QHBoxLayout()
-        self.reset_button = ActionButton('恢复默认', self)
-        self.reset_button.setToolTip('恢复默认选项并自动保存')
-        self.reset_button.clicked.connect(self._reset)
-        buttons.addWidget(self.reset_button)
         buttons.addStretch()
         saved_hint = HintLabel('修改自动保存', self)
         saved_hint.setWordWrap(False)
@@ -113,10 +107,6 @@ class WatchLaterSettings(InlinePanel):
             control.addItem(label, data)
         control.setCurrentIndex(control.findData(value))
         return control
-
-    def _reset(self):
-        self._set_values(DEFAULTS)
-        self._save()
 
     def _controls(self):
         return dict(default_view=self.view, grid_columns=self.columns, card_size=self.card_size,

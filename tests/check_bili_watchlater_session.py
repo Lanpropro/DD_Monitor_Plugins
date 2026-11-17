@@ -200,11 +200,14 @@ class ButtonTests(unittest.TestCase):
         page._geometry_settings = Mock()
         try:
             page._open_settings()
-            with patch.object(page, 'setStyleSheet') as styles, patch.object(page, '_fit_grid') as fit:
+            with patch.object(page, 'setStyleSheet') as styles, patch.object(page, '_fit_grid') as fit, patch.object(page, '_log') as log:
                 page._settings_dialog.autoplay.setChecked(True)
                 page._back_to_browser()
                 styles.assert_not_called()
                 fit.assert_not_called()
+                records = [call.args[0] for call in log.call_args_list if call.args[0].startswith('settings change')]
+                self.assertEqual([record.split('phase=')[1].split()[0] for record in records], ['persist', 'view', 'playback'])
+                self.assertTrue(all('keys=autoplay ' in record for record in records))
         finally:
             page.shutdown()
             page.deleteLater()
