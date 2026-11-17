@@ -3,6 +3,8 @@
 > 类型：参考 ｜ 状态：维护中 ｜ 适用版本：bili_watchlater 1.0 ｜ 更新：2026-11-17 ｜ 读者：插件作者、维护者
 
 原提交 ZIP 的 SHA256：`1F1C1FE7B61E04A8FEB2A50ACE5EEA9256BAB4EFC940773FE6C5A7687A555546`。
+
+实时弹幕源能力由本体 `ddm.danmaku_sources` 统一筛选。播放协调器为恢复占位和正式视频房间声明 `supports_live_danmaku=False`；原直播房间仍由绑定保存并在释放时还原，不把该字段写入原房间。入口检查公开常量 `api.ROOM_SUPPORTS_LIVE_DANMAKU`，缺失时要求配套本体。此声明不控制插件按时间轴注入的历史视频弹幕。
 包中未标注作者；本轮只进行宿主兼容和定向故障修复，不重构整个入口。
 
 后续外部修复包 SHA256 为 `6383F6CBB92AE9CD2D45182BE6292EBACD2ECD959AB5F0ECA282CB4D687BFEEC`，

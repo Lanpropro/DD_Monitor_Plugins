@@ -23,8 +23,9 @@
 
 - `PluginContext.register_sidebar_page`、`unregister_sidebar_page`：观看顺序作为关注栏的内容页。
 - `PluginContext.start_sidebar_drag`、`cancel_sidebar_drag`：与关注卡片一致的共享拖影，避免插件另走Windows OLE拖动。
+- `api.ROOM_SUPPORTS_LIVE_DANMAKU`：声明视频格不支持实时直播弹幕来源。本体必须在候选、自动关联、拖放及实时订阅中统一执行；配套修复提交 `3cb70472`，视频历史弹幕保留。
 
-当前候选清单 `min_app_version=0.7.3` 仅为开发环境数字下限，不能作为正式v0.7.3完整兼容的声明。入口已逐项检查上述接口，旧本体给出明确升级提示，避免静默少功能。`host_capabilities`仅为元数据说明，实际检查在插件入口执行。
+当前候选清单 `min_app_version=0.7.3` 仅为开发环境数字下限，不能作为正式v0.7.3完整兼容的声明。入口已逐项检查上述接口及来源能力常量，旧本体给出明确升级提示，避免静默少功能。`host_capabilities`仅为元数据说明，实际检查在插件入口执行。新增 `live_danmaku_source_filter` 描述配套筛选依赖；旧00dc58a候选不包含本轮来源声明，后续候选须重新生成。
 
 **发布前必须把 `min_app_version` 改成实际包含这些接口的本体正式版本；下一个版本号尚未确定，不预设为0.7.4。** 本机根工作区含未提交的配套宿主改动，不能仅凭当前本体HEAD构建宣称接口已发布。依赖过的共享拖影实现提交为 `38dca3c28da159743e67f222bba4ea13ce74c91b`；最终以本体实际发布标签内容为准，不按单个提交凑包。
 

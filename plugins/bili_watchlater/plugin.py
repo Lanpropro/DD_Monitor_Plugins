@@ -238,6 +238,12 @@ class BiliWatchLaterPlugin(api.Plugin):
                 "当前宿主缺少账号或退出事件"
             )
 
+        if getattr(api, "ROOM_SUPPORTS_LIVE_DANMAKU", None) != "supports_live_danmaku":
+            raise RuntimeError(
+                "bili_watchlater 需要支持实时弹幕来源能力筛选的配套本体；"
+                "请升级本体（缺少 ROOM_SUPPORTS_LIVE_DANMAKU）"
+            )
+
         self.context = context
         from .watch_order import WatchOrder
         from .preferences import read_preferences

@@ -256,6 +256,7 @@ class PlaybackCoordinator:
             self.owner._stop_host_tile(tile)
             try:
                 tile.set_room(dict(room_id='', live=False, live_known=True,
+                                   supports_live_danmaku=False,
                                    watchlater_bvid=bvid, watchlater_part=binding.part))
             except Exception as error:
                 self.owner._log('reserve restored slot failed type=' + type(error).__name__)
@@ -579,6 +580,7 @@ class PlaybackCoordinator:
             "room_id": binding.bvid,      # 无冒号：start_tile 不会当平台房
             "live": False,                # 离线分支：宿主绝不联网取直播
             "live_known": True,
+            "supports_live_danmaku": False,
             "platform": "bilibili",
             "uname": str(getattr(binding.item, "owner_name", "") or ""),
             # v1.0 需求：/17：画中画/头像位读 room["face"]，缺了就只剩空白。

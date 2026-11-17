@@ -8,7 +8,8 @@
     "credential_snapshots",
     "workspace_pages",
     "sidebar_pages",
-    "shared_sidebar_drag"
+    "shared_sidebar_drag",
+    "live_danmaku_source_filter"
   ],
   "min_app_version": "0.7.3"
 }

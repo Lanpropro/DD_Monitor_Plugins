@@ -175,9 +175,20 @@ class HostTests(unittest.TestCase):
         self.assertEqual(self.tile.stream_headers['Referer'], 'https://www.bilibili.com/')
         self.assertEqual(self.tile.room['watchlater_bvid'], binding.bvid)
         self.assertFalse(self.tile.room['live'])
+        self.assertIs(self.tile.room.get(api.ROOM_SUPPORTS_LIVE_DANMAKU), False)
+        self.assertTrue(self.tile.room['video_danmaku_enabled'])
+        wall = self.window.wall
+        wall.set_layout('dm_main2')
+        picker = wall.danmaku.source_picker
+        picker.refresh()
+        self.assertNotIn(self.tile, picker.buttons)
+        self.assertIsNone(wall.pane_danmaku.automatic_target())
         self.assertFalse(self.tile._recording_available)
         self.plugin._release_binding(binding, restart=False)
         self.assertEqual(self.tile.room['room_id'], original['room_id'])
+        picker.refresh()
+        self.assertIn(self.tile, picker.buttons)
+        self.assertIs(wall.pane_danmaku.automatic_target(), self.tile)
         self.assertNotIn(self.tile, self.window.players)
         self.assertEqual(self.plugin._bindings, {})
 
@@ -246,6 +257,7 @@ class HostTests(unittest.TestCase):
         self.assertTrue(composer.isHidden())
         self.assertEqual(self.tile.room.get('watchlater_bvid'), self.item.bvid)
         self.assertFalse(self.tile.room.get('room_id'))
+        self.assertIs(self.tile.room.get(api.ROOM_SUPPORTS_LIVE_DANMAKU), False)
         with patch('ddm.app.StreamResolver') as resolver:
             self.window.start_tile(self.tile)
         resolver.assert_not_called()
