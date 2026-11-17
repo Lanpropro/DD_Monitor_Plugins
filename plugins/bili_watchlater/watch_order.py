@@ -55,10 +55,18 @@ class WatchOrder:
             setter('watch_order', dict(account=self.account, keys=list(keys)))
         return True
 
-    def restore(self, keys):
-        """Restore available entries to their order before the undone removal."""
-        available = {item.bvid for item in self.items}
-        ordered = list(dict.fromkeys(key for key in [*keys,*self.keys] if key in available))
+    def restore(self, keys, restored):
+        """Insert only the restored video; keep subsequent edits to other videos."""
+        current = [item.bvid for item in self.snapshot(include_finished=True)]
+        if restored not in current or restored not in keys:
+            return False
+        ordered = [key for key in current if key != restored]
+        position = keys.index(restored)
+        previous = next((key for key in reversed(keys[:position]) if key in ordered),None)
+        following = next((key for key in keys[position+1:] if key in ordered),None)
+        index = (ordered.index(previous)+1 if previous is not None else
+                 ordered.index(following) if following is not None else len(ordered))
+        ordered.insert(index,restored)
         if ordered == self.keys:
             return False
         self.keys = ordered

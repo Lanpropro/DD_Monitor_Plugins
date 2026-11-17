@@ -21,7 +21,7 @@ class RemovalUndo(QObject):
         self.queue = []
         self.order_keys = []
         self.snapshot_order = lambda: []
-        self.restore_order = lambda keys: None
+        self.restore_order = lambda keys, restored: None
 
     def record(self, item):
         if not self.entries:
@@ -112,7 +112,7 @@ class RemovalUndo(QObject):
         if page._shutting_down or generation != page._generation:
             return
         page._publish_to_wall()
-        self.restore_order(self.order_keys)
+        self.restore_order(self.order_keys,item.bvid)
         if self.queue:
             QTimer.singleShot(0,self._start_next)
         elif self.entries:

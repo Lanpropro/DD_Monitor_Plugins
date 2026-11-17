@@ -184,6 +184,44 @@ class RemovalTests(unittest.TestCase):
         self.sent[-1].success()
         self.assertEqual(order.keys,keys)
 
+    def test_single_undo_preserves_reorder_made_after_removal_and_during_restore(self):
+        order=WatchOrder(self.context)
+        order.update(self.items,'fixture')
+        order.move(self.items[2].bvid,self.items[0].bvid)
+        self.page.items_changed.connect(lambda items:order.update(items,'fixture'))
+        self.page.removal_undo.snapshot_order=lambda:list(order.keys)
+        self.page.removal_undo.restore_order=order.restore
+        self.remove(self.items[1])
+        self.page.removal_undo.undo(self.items[1].key)
+        order.move(self.items[3].bvid,self.items[2].bvid)
+        self.sent[-1].success()
+        self.assertEqual(order.keys,[self.items[i].bvid for i in (3,2,0,1)])
+
+    def test_all_undo_inserts_removed_items_without_reordering_survivors(self):
+        order=WatchOrder(self.context)
+        order.update(self.items,'fixture')
+        self.page.items_changed.connect(lambda items:order.update(items,'fixture'))
+        self.page.removal_undo.snapshot_order=lambda:list(order.keys)
+        self.page.removal_undo.restore_order=order.restore
+        self.remove(self.items[1])
+        self.remove(self.items[2])
+        order.move(self.items[3].bvid,self.items[0].bvid)
+        self.page.removal_undo.undo()
+        self.sent[-1].success()
+        APP.processEvents()
+        self.sent[-1].success()
+        self.assertEqual(order.keys,[self.items[i].bvid for i in (3,0,1,2)])
+
+    def test_undo_order_uses_following_anchor_or_end_if_predecessor_is_missing(self):
+        order=WatchOrder(self.context)
+        order.update(self.items,'fixture')
+        baseline=list(order.keys)
+        order.move(self.items[0].bvid)
+        order.restore(baseline,self.items[0].bvid)
+        self.assertEqual(order.keys,baseline)
+        order.update(self.items[:1],'fixture')
+        self.assertFalse(order.restore(baseline,self.items[0].bvid))
+
     def test_notice_identifies_video_and_receives_uploader_avatar_from_shared_cache(self):
         from PySide6.QtGui import QPixmap
         from ddm_plugin_bili_watchlater.card_presentation import avatar_thumbnail

@@ -3642,8 +3642,8 @@ class BiliWatchLaterPlugin(api.Plugin):
             self._sync_next_button(binding)
             self._sync_position_badge(binding)
 
-    def _restore_removed_order(self, keys):
-        if self.watch_order.restore(keys):
+    def _restore_removed_order(self, keys, restored):
+        if self.watch_order.restore(keys,restored):
             if self.order_sidebar is not None:
                 self.order_sidebar.refresh()
             self._watch_order_changed()
