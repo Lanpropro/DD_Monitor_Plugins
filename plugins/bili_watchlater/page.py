@@ -105,6 +105,7 @@ from .widgets import (
     selection_toggle,
 )
 from .wheel_scroll import WheelScrollAccumulator
+from .motion_trace import measure
 from .request_retirement import dispose_finished_request, retire_page_request
 from .workers import ClearRequest, ListRequest, RemoveRequest
 
@@ -439,6 +440,7 @@ class _Account:
 class WatchLaterPage(BrowserWindow):
     closed = Signal()
     preferences_changed = Signal(object)
+    items_changed = Signal(object)
     #: v1.0 需求：：选片模式的取消出口。v1.0 删掉了横幅上的「退出选片」
     #: 按钮（需求：），页面侧不再主动 emit；信号本身必须保留——plugin.py
     #: 仍连接它，删掉会让插件在挂接页面时 AttributeError。
@@ -580,6 +582,9 @@ class WatchLaterPage(BrowserWindow):
         self._build_ui()
         self.browse_state = BrowseState(self)
         self.card_preview = CardPreview(self)
+        from .motion_trace import MotionTrace
+        self.motion_trace = MotionTrace(self)
+        self.external_cover_urls = lambda: []
         self._refresh_multi_button()
         self._connect_scroll_refetch()
         self._show_loading()
@@ -959,7 +964,7 @@ class WatchLaterPage(BrowserWindow):
         self._cover_scroll_timer.stop()
         self._grow_settle_timer.stop()
         self._grow_pending = False
-        self.covers.pause()
+        self._pause_covers()
         panel.finished.connect(lambda _result: self._finish_inline_panel(panel))
         panel.setFocus(Qt.OtherFocusReason)
 
@@ -1306,6 +1311,7 @@ class WatchLaterPage(BrowserWindow):
             self._grid_resize_timer.start()
         return super().eventFilter(watched, event)
 
+    @measure('grid_layout')
     def _fit_grid(self) -> None:
         """v1.0 需求 4：按 viewport 宽度重算列数 + 单元格尺寸（去抖后调用）。
 
@@ -1493,6 +1499,7 @@ class WatchLaterPage(BrowserWindow):
         self.browse_state.pending = None
         self._render(reset_scroll=True)
 
+    @measure('render')
     def _render(self, reset_scroll: bool = False, *,
                 keep_position: bool = False) -> None:
         """重排当前视图。
@@ -1684,6 +1691,7 @@ class WatchLaterPage(BrowserWindow):
         )
         return row
 
+    @measure('grid_build')
     def _rebuild_cards(self, items: list[WatchLaterItem]) -> None:
         wanted = {item.key for item in items[:self._render_limit] if item.key}
         existing = self._cards_by_key
@@ -1750,6 +1758,7 @@ class WatchLaterPage(BrowserWindow):
                         card.set_view_count(views)
         self._destructive_ready = None
 
+    @measure('list_build')
     def _rebuild_rows(self, items: list[WatchLaterItem]) -> None:
         """Reuse row widgets keyed by item key; only build what is new.
 
@@ -1857,6 +1866,7 @@ class WatchLaterPage(BrowserWindow):
         finally:
             self._building_rows = False
 
+    @measure('cover_ready')
     def _cover_ready(self, url: str) -> None:
         if self._shutting_down or self._building_rows:
             return
@@ -1985,6 +1995,7 @@ class WatchLaterPage(BrowserWindow):
         self._grow_pending = True
         self._grow_settle_timer.start(GROW_SETTLE_MS)
 
+    @measure('grow')
     def _grow_page(self) -> None:
         """追加一批 RowCard；只有当前分页窗口内的条目会被物化。"""
         self._grow_pending = False
@@ -2021,6 +2032,7 @@ class WatchLaterPage(BrowserWindow):
         ):
             QTimer.singleShot(0, self._grow_page)
 
+    @measure('visible_covers')
     def _refetch_visible_covers(self) -> None:
         """Re-run get() for the rows currently in (or just outside) the viewport.
 
@@ -2104,7 +2116,7 @@ class WatchLaterPage(BrowserWindow):
                 self._avatars_by_url.setdefault(row.avatar_url, []).append(row)
         visible.sort(key=lambda row: not (row.geometry().bottom() >= offset
             and row.geometry().top() <= offset + viewport_rect.height()))
-        self.covers.prioritize([row.item.cover_url for row in visible] +
+        self.covers.prioritize(self.external_cover_urls() + [row.item.cover_url for row in visible] +
                                [row.avatar_url for row in visible if isinstance(row, GridCard) and row.avatar_url])
         provider = self._danmaku_provider()
         for row in visible:
@@ -2149,6 +2161,7 @@ class WatchLaterPage(BrowserWindow):
         )
 
     def _clear_account_data(self, *, clear_credentials: bool = True) -> None:
+        self.card_preview.unavailable.clear()
         self._items.clear()
         self._items_version += 1
         self._clear_rows()
@@ -2169,10 +2182,12 @@ class WatchLaterPage(BrowserWindow):
         self._set_refreshing(False)
         self._update_header(0, 0)
         self._update_destructive_controls()
+        self.items_changed.emit([])
 
     def on_account_changed(self, generation: Any = None) -> None:
         if self._shutting_down:
             return
+        self.card_preview.unavailable.clear()
         self.browse_state.clear()
         self._request_seq += 1
         self._operation_seq += 1
@@ -2213,6 +2228,7 @@ class WatchLaterPage(BrowserWindow):
         self._set_refreshing(False)
         self._update_destructive_controls()
 
+        self.items_changed.emit([])
         if not self._visible:
             return
         if account.error is not None:
@@ -2237,6 +2253,8 @@ class WatchLaterPage(BrowserWindow):
         # 按钮、菜单、F5、画面墙共用单飞守卫，不取消后重开同一请求。
         if self._shutting_down or self._busy_operation or self._active_list is not None:
             return
+        if manual:
+            self.card_preview.unavailable.clear()
         self._clear_status()
         account = self._read_account()
         if account.error is not None:
@@ -2792,6 +2810,7 @@ class WatchLaterPage(BrowserWindow):
     # ------------------------------------------------------------------ wall
     def _publish_to_wall(self) -> None:
         """Push the current list and session state to the tile controller."""
+        self.items_changed.emit(self.items_snapshot())
         wall = self.wall
         if wall is None or self._shutting_down:
             return
@@ -3096,7 +3115,7 @@ class WatchLaterPage(BrowserWindow):
         self._cover_scroll_timer.stop()
         self._grid_resize_timer.stop()
         self._disconnect_scroll_refetch()
-        self.covers.pause()
+        self._pause_covers()
         self._release_covers()
         self._update_fabs()
         self._restore_entrance()
@@ -3122,13 +3141,17 @@ class WatchLaterPage(BrowserWindow):
         self._cancel_autoscroll()
         self._cover_scroll_timer.stop()
         self._disconnect_scroll_refetch()
-        self.covers.pause()
+        self._pause_covers()
         if self._danmaku is not None:
             self._danmaku.pause()
         self._restore_entrance()
         self._save_geometry_now()
         self.closed.emit()
         event.accept()
+
+    def _pause_covers(self):
+        if not self.external_cover_urls():
+            self.covers.pause()
 
     def activate(self) -> None:
         if self._shutting_down:

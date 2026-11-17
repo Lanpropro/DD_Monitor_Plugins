@@ -24,7 +24,6 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QColor,
-    QCursor,
     QDrag,
     QFont,
     QFontMetrics,
@@ -48,7 +47,6 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QToolButton,
-    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -112,42 +110,6 @@ def relative_font(base: QFont, factor: float, *, bold: bool = False) -> QFont:
     return font
 
 
-def item_tooltip(item: WatchLaterItem, hint: str = "") -> str:
-    """v1.0：悬停提示的纯文本全文（标题 + UP 主 + 可选操作提示）。
-
-    标题在列表/网格里会被省略号截断，悬停时必须能看到完整标题；拼装只
-    发生在这一个地方，避免在已有 tooltip 上再覆盖一层重复内容。
-    """
-    lines = [str(item.title or "").strip(), str(item.owner_name or "").strip()]
-    if item.is_finished:
-        lines.append('已看完')
-    if hint:
-        lines.append(str(hint).strip())
-    return "\n".join(line for line in lines if line)
-
-
-#: v1.0 需求 8：tooltip 每行最多这么多字符。中文没有空格，QToolTip 不会自己
-#: 断行，长标题会横着拉到屏幕外（用户实测只看到前几个字）。
-TOOLTIP_WRAP_CHARS = 34
-
-
-def wrap_tooltip_text(text: str, limit: int = TOOLTIP_WRAP_CHARS) -> str:
-    """把长文本按字符折行（纯函数）：优先在空格处断，其次硬断。"""
-    limit = max(8, int(limit))
-    lines: list[str] = []
-    for raw in str(text or "").splitlines():
-        line = raw.strip()
-        while len(line) > limit:
-            cut = line.rfind(" ", 0, limit + 1)
-            if cut < limit // 2:
-                cut = limit
-            lines.append(line[:cut].rstrip())
-            line = line[cut:].lstrip()
-        if line:
-            lines.append(line)
-    return "\n".join(lines)
-
-
 # ---------------------------------------------------------------- v1.0 共享
 #: 需求 12：标题行/筛选行与网格卡片共用的内容左右边距（逻辑像素）。
 #: 外层 root 有自己的 24px 边距，这里统一的是「头部按钮 vs 卡片内文字/封面」
@@ -185,164 +147,6 @@ def selection_toggle(keys, key: str) -> set:
 HOVER_TIP_DELAY_MS = 200
 
 
-class HoverTitleTip(QObject):
-    """v1.0 需求 8/9：稳定、可抑制的「完整标题 + UP 主」悬浮提示。
-
-    v1.0 版每次 MouseMove/HoverMove 都检查并 ``showText``：右键按下前 Qt 先
-    派发的一次 move 会把标题弹在菜单旁边；而右键/Wheel 触发的 hide 又会被
-    紧随的一次残留 move 立刻重新弹出来，肉眼就是「闪一下 / 右键冒标题」。
-    根因是 **没有抑制窗口 + 每次移动都重建显示**。这里改成：
-
-    * 仅 ``QEvent.Enter`` 后延迟 ``HOVER_TIP_DELAY_MS`` 显示一次（QTimer）；
-    * 卡片内移动不重建文本也不跟随（干脆不跟随），不重复 showText；
-    * 右键/菜单/滚轮/拖拽/窗口失焦 → :meth:`suppress` 立即收起并压住，
-      直到「真正的一次鼠标移动」才解除，解除后仍要等延迟才会再显示；
-    * 真正离开整张卡片（全局矩形判断）才 hide。
-    """
-
-    def __init__(self, card: QWidget, text_provider: Callable[[], str]) -> None:
-        super().__init__(card)
-        self._card = card
-        self._text_provider = text_provider
-        self._shown = False
-        self._armed = False        # Enter 之后允许（延迟）显示
-        self._suppressed = False   # 右键/菜单/滚轮期间压住，等真正 move 解除
-        self._delay_ms = HOVER_TIP_DELAY_MS
-        # parent=self：卡片销毁时定时器一起销毁，不会留下悬挂回调。
-        self._timer = QTimer(self)
-        self._timer.setSingleShot(True)
-        self._timer.timeout.connect(self._delayed_show)
-
-    # ------------------------------------------------------------- public
-    def watch(self, *widgets: QWidget) -> None:
-        for widget in widgets:
-            if widget is not None:
-                widget.installEventFilter(self)
-
-    def tooltip_text(self) -> str:
-        try:
-            text = self._text_provider()
-        except Exception:
-            return ""
-        return wrap_tooltip_text(text)
-
-    def is_showing(self) -> bool:
-        return self._shown
-
-    def hover_delay(self) -> int:
-        return self._delay_ms
-
-    def set_hover_delay(self, msec: int) -> None:
-        """测试可把延迟设成 0，用 ``processEvents`` 立即驱动一次显示。"""
-        self._delay_ms = max(0, int(msec))
-
-    def is_suppressed(self) -> bool:
-        return self._suppressed
-
-    def hide(self) -> None:
-        self._timer.stop()
-        self._shown = False
-        self._armed = False
-        try:
-            QToolTip.hideText()
-        except Exception:
-            pass
-
-    def suppress(self) -> None:
-        """右键/菜单/滚轮/拖拽/失焦：无条件收起并压住，等下一次真正 move。"""
-        self._timer.stop()
-        self._suppressed = True
-        self._shown = False
-        self._armed = False
-        try:
-            QToolTip.hideText()
-        except Exception:
-            pass
-
-    # ------------------------------------------------------------ helpers
-    def _inside(self, global_pos: QPoint) -> bool:
-        try:
-            return self._card.rect().contains(self._card.mapFromGlobal(global_pos))
-        except RuntimeError:
-            return False
-
-    def _show(self) -> None:
-        self.show_at(QCursor.pos())
-
-    def show_at(self, global_pos: QPoint) -> bool:
-        """在指定全局坐标显示提示；被抑制/无文本/不在卡片内则不显示（可单测）。"""
-        text = self.tooltip_text()
-        if not text or self._suppressed:
-            return False
-        if not self._inside(global_pos):
-            self.hide()
-            return False
-        try:
-            QToolTip.showText(global_pos, text, self._card)
-        except Exception:
-            return False
-        self._shown = True
-        return True
-
-    def _schedule(self) -> None:
-        if (self._suppressed or not self._armed or self._shown
-                or self._timer.isActive()):
-            return
-        self._timer.start(self._delay_ms)
-
-    def _delayed_show(self) -> None:
-        if self._suppressed or not self._armed or self._shown:
-            return
-        if not self._inside(QCursor.pos()):
-            self.hide()
-            return
-        self._show()
-
-    # ------------------------------------------------------------- filter
-    def eventFilter(self, watched, event) -> bool:  # type: ignore[override]
-        kind = event.type()
-        if kind == QEvent.ToolTip:
-            # 自己的文本已经显示，别让系统再弹第二个 tooltip。
-            return True
-        if kind == QEvent.Enter:
-            if not self._suppressed:
-                self._armed = True
-                self._schedule()
-            return False
-        if kind in (QEvent.MouseMove, QEvent.HoverMove):
-            # 拖拽（按住左键移动）也要收掉标题。
-            try:
-                dragging = bool(event.buttons() & Qt.LeftButton)
-            except (AttributeError, TypeError):
-                dragging = False
-            if dragging:
-                self.suppress()
-                return False
-            if self._suppressed:
-                # 菜单/滚轮之后的第一帧移动：只解除抑制，本次不排显示，
-                # 等「真正的一次鼠标移动」再走 Enter/延迟流程。
-                self._suppressed = False
-                self._armed = True
-                return False
-            if self._shown:
-                # 卡片内移动：不重建文本、不跟随、不重复 showText，避免闪。
-                return False
-            if self._armed:
-                self._schedule()
-            return False
-        if kind in (QEvent.Leave, QEvent.HoverLeave):
-            # 子控件之间互相切换也会收到 Leave，只有真的离开整张卡片才收起。
-            if not self._inside(QCursor.pos()):
-                self.hide()
-            return False
-        if kind in (QEvent.MouseButtonPress, QEvent.Wheel,
-                    QEvent.WindowDeactivate, QEvent.ApplicationDeactivate):
-            self.suppress()
-            return False
-        return False
-
-
-# 分 P 左上、完成图标右上、时长右下。
 BADGE_ALIGN_PARTS = Qt.AlignLeft | Qt.AlignTop
 BADGE_ALIGN_DURATION = Qt.AlignRight | Qt.AlignBottom
 
@@ -543,7 +347,6 @@ class ElidedLabel(QLabel):
 
     def set_full_text(self, text: str) -> None:
         self._full_text = text
-        self.setToolTip(text)
         self.setAccessibleName(text)
         self._apply_elide()
 
@@ -622,7 +425,7 @@ class CoverWidget(QWidget):
     # 更醒目；旧的 168x94 只有 1.787:1，会被 paintEvent 居中裁掉边缘。
     COVER_WIDTH = 224
     COVER_HEIGHT = 126
-    #: 悬停提示里的操作说明（标题/UP 主由 item_tooltip 拼在前面）。
+    #: 操作说明供无障碍阅读，避免悬浮详情遮住预览。
     DEFAULT_HINT = "点击选中缩略图；拖拽到画面墙格子直接置入"
 
     def __init__(self, parent: QWidget | None = None,
@@ -631,6 +434,7 @@ class CoverWidget(QWidget):
         self._item: WatchLaterItem | None = None
         self._pixmap: QPixmap | None = None
         self._preview_frame = None
+        self._preview_status = ""
         self._scaled: QPixmap | None = None
         self._scaled_key: tuple[int, int, int] | None = None
         self._render_cache: QPixmap | None = None
@@ -653,7 +457,7 @@ class CoverWidget(QWidget):
             self.setFixedSize(self.COVER_WIDTH, self.COVER_HEIGHT)
         self.setCursor(Qt.PointingHandCursor)
         self.setAccessibleName("视频封面")
-        self.setToolTip(self._hint)
+        self.setToolTip("")
 
     def hasHeightForWidth(self) -> bool:  # type: ignore[override]
         return self._flexible
@@ -667,8 +471,8 @@ class CoverWidget(QWidget):
         changed = item is not self._item
         self._item = item
         self.set_pixmap(pixmap)
-        # v1.0：封面也可能把标题藏在省略号后面，悬停给出完整标题 + UP 主。
-        self.setToolTip(item_tooltip(item, self._hint))
+        # Details remain accessible without covering the storyboard preview.
+        self.setToolTip("")
         self.setAccessibleDescription(cover_description(item))
         if changed:
             self.setAccessibleName(item.title)
@@ -678,9 +482,9 @@ class CoverWidget(QWidget):
         """换掉操作提示（网格/列表的拖拽说明不同），保留标题与 UP 主。"""
         self._hint = str(hint or "")
         if self._item is not None:
-            self.setToolTip(item_tooltip(self._item, self._hint))
+            self.setToolTip("")
         else:
-            self.setToolTip(self._hint)
+            self.setToolTip("")
 
     def set_pixmap(self, pixmap: QPixmap | None) -> None:
         old_key = self._pixmap.cacheKey() if self._pixmap is not None else None
@@ -697,6 +501,11 @@ class CoverWidget(QWidget):
         self._scaled_key = None
         self._render_cache = None
         self._render_key = None
+
+    def set_preview_status(self, text):
+        if self._preview_status != text:
+            self._preview_status = text
+            self.update()
 
     def set_preview_frame(self, pixmap):
         self._preview_frame = pixmap
@@ -813,12 +622,26 @@ class CoverWidget(QWidget):
         return layer
 
     def paintEvent(self, event) -> None:
+        started = time.perf_counter()
         layer = self._composited_cover()
         painter = QPainter(self)
         try:
             painter.drawPixmap(0, 0, layer)
+            if self._preview_status:
+                painter.setFont(relative_font(self.font(), .8))
+                label = painter.fontMetrics().elidedText(self._preview_status, Qt.ElideRight, max(1, self.width()-28))
+                width = painter.fontMetrics().horizontalAdvance(label) + 16
+                rect = QRectF(8, 8, width, painter.fontMetrics().height()+8)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QColor(15, 18, 22, 190))
+                painter.drawRoundedRect(rect, 6, 6)
+                painter.setPen(QColor('white'))
+                painter.drawText(rect, Qt.AlignCenter, label)
         finally:
             painter.end()
+        trace = getattr(self, '_motion_trace', None)
+        if trace is not None and trace.timer.isActive():
+            trace.sample('cover_paint', (time.perf_counter()-started)*1000)
 
     def _paint_content(self, painter) -> None:
         painter.setRenderHints(
@@ -1045,15 +868,6 @@ class RowCard(ThumbnailSurface):
         layout.addLayout(actions, 0)
         self.set_remove_available(True)
         self._sync_cover_item()
-        # v1.0 需求 8：卡片任意位置悬停都主动弹出完整标题 + UP 主。
-        self._title_tip = HoverTitleTip(self, lambda: item_tooltip(self.item))
-        self._title_tip.watch(
-            self,
-            self.cover,
-            self.title_label,
-            self.meta_label,
-            self.progress_label,
-        )
 
     @staticmethod
     def _progress_line_text(item: WatchLaterItem) -> str:
@@ -1081,13 +895,9 @@ class RowCard(ThumbnailSurface):
         return " · ".join(parts)
 
     def _sync_tooltips(self) -> None:
-        """v1.0 需求：：标题被省略号截断时，悬停给出完整标题 + UP 主。
-
-        只覆盖行/标题这两处（meta 行自己的 tooltip 就是 meta 全文，不能换）。
-        """
-        tip = item_tooltip(self.item)
-        self.setToolTip(tip)
-        self.title_label.setToolTip(tip)
+        """Keep video details out of pointer tooltips."""
+        self.setToolTip("")
+        self.title_label.setToolTip("")
 
     def set_danmaku_count(self, count: int | None) -> None:
         """弹幕数懒加载到位后只刷新 meta 行，不重建卡片。"""
@@ -1167,8 +977,6 @@ class RowCard(ThumbnailSurface):
         return build_item_context_menu(self)
 
     def _show_menu(self, position) -> None:
-        # v1.0 需求 8：菜单打开前先收掉悬浮标题并压住，别在菜单旁冒标题。
-        self._title_tip.suppress()
         # v1.0 需求 2：复用同一个菜单实例，避免「建 → 弹 → 隐藏时销毁」闪烁。
         self._menu = popup_item_context_menu(self, position)
 
@@ -1430,11 +1238,6 @@ class GridCard(ThumbnailSurface):
         self._destructive_ready = False
         self._sync_tooltips()
         self._sync_cover_item()
-        # v1.0 需求 8：卡片任意位置悬停都主动弹出完整标题 + UP 主。
-        self._title_tip = HoverTitleTip(self, lambda: item_tooltip(self.item))
-        self._title_tip.watch(
-            self, self.cover, self.title_label, self.owner_label, self.date_label
-        )
 
     def fit_cell(self, width: int, height: int) -> None:
         """Keep a natural 16:9 cover and one shared uploader/action row."""
@@ -1481,9 +1284,9 @@ class GridCard(ThumbnailSurface):
             self.avatar.set_pixmap(provider(self.avatar_url))
 
     def _sync_tooltips(self) -> None:
-        """v1.0 需求：：悬停显示完整标题 + UP 主。"""
-        self.setToolTip(item_tooltip(self.item))
-        self.title_label.setToolTip(item_tooltip(self.item))
+        """Keep video details out of pointer tooltips."""
+        self.setToolTip("")
+        self.title_label.setToolTip("")
 
     def set_danmaku_count(self, count: int | None) -> None:
         try:
@@ -1580,8 +1383,6 @@ class GridCard(ThumbnailSurface):
         return build_item_context_menu(self)
 
     def _show_menu(self, position) -> None:
-        # v1.0 需求 8：菜单打开前先收掉悬浮标题并压住，别在菜单旁冒标题。
-        self._title_tip.suppress()
         # v1.0 需求 2：同 RowCard，复用菜单实例，一次右键只弹一个。
         self._menu = popup_item_context_menu(self, position)
 

@@ -141,7 +141,7 @@ class NavigationTests(unittest.TestCase):
                 panel = self.page._settings_dialog
                 self.assertTrue(panel.window().property('settingsGlassContent'))
                 self.assertEqual(len(panel.findChildren(SettingsSurface)), 3)
-                self.assertEqual(len(panel.findChildren(QFrame, 'WatchLaterSettingsDivider')), 6)
+                self.assertEqual(len(panel.findChildren(QFrame, 'WatchLaterSettingsDivider')), 7)
                 panel.reject()
         finally:
             theme.apply('light' if original else 'dark')

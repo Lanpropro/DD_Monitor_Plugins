@@ -47,7 +47,7 @@ class CardStyleTests(unittest.TestCase):
             cover.set_item(self.item, None)
             self.assertNotIn('已看完', [text for text, _ in widgets.cover_badges(self.item)])
             self.assertIn('已看完', cover.accessibleDescription())
-            self.assertIn('已看完', cover.toolTip())
+            self.assertEqual(cover.toolTip(), '')
             self.assertTrue(cover._composited_cover())
             cover.deleteLater()
 

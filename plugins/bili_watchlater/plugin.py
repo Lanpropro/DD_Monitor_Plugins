@@ -96,6 +96,8 @@ if __spec__ is not None:
     __spec__.submodule_search_locations = __path__
 
 
+from .motion_trace import measure
+
 def _as_int(value) -> int:
     from .models import safe_int
 
@@ -614,6 +616,11 @@ class BiliWatchLaterPlugin(api.Plugin):
             )
 
         self.context = context
+        from .watch_order import WatchOrder
+        from .preferences import read_preferences
+        self.watch_order = WatchOrder(context)
+        self.order_sidebar = None
+        self._order_container = None
         self._shutting_down = False
         if context.window is None:
             return  # Package validation hosts have no Qt widgets or sidebar.
@@ -644,6 +651,7 @@ class BiliWatchLaterPlugin(api.Plugin):
                 "无法注册稍后再看入口"
             )
 
+        self._sync_order_sidebar(read_preferences(context)['show_watch_order'])
         self._register_tile_control(context)
         # 应用级按键过滤器：全屏窗口/画中画浮窗成为活动窗口时，挂在
         # 主窗口上的 QShortcut(Qt.WindowShortcut) 不再派发，必须由这一层补上。
@@ -3352,7 +3360,7 @@ class BiliWatchLaterPlugin(api.Plugin):
         try:
             from .models import format_position, list_position
 
-            return format_position(list_position(page.items_snapshot(), bvid))
+            return format_position(list_position(self._ordered_items(), bvid))
         except Exception:
             return ""
 
@@ -3615,6 +3623,65 @@ class BiliWatchLaterPlugin(api.Plugin):
         self._open_url(_video_page_url(binding.item))
 
     # ------------------------------------------------- v1.0 任务 7：下一个视频
+    def _ordered_items(self):
+        order = getattr(self, 'watch_order', None)
+        if order is not None and order.account is not None:
+            return order.snapshot()
+        return self.page.items_snapshot() if self.page is not None else []
+
+    def _watch_items_changed(self, items):
+        self.watch_order.update(items, self.page._cookies.get('DedeUserID', ''))
+        if self.order_sidebar is not None:
+            self.order_sidebar.refresh()
+        self._watch_order_changed()
+
+    def _watch_order_changed(self):
+        if self._next_prefetch is not None:
+            self._next_prefetch.clear()
+        for binding in self._bindings.values():
+            self._sync_next_button(binding)
+            self._sync_position_badge(binding)
+
+    def _sync_order_sidebar(self, enabled):
+        register = getattr(self.context, 'register_sidebar_page', None)
+        if not callable(register):
+            return
+        container = getattr(self, '_order_container', None)
+        if enabled and container is None:
+            from .order_sidebar import DeferredOrderSidebar
+            container = DeferredOrderSidebar(self._create_order_sidebar)
+            if register('watch_order', container, title='观看顺序', icon=self._make_icon(), on_filter=container.set_filter):
+                self._order_container = container
+            else:
+                container.deleteLater()
+        elif not enabled and container is not None:
+            self.context.unregister_sidebar_page('watch_order')
+            container.hide()
+            container.deleteLater()
+            self._order_container = None
+            self.order_sidebar = None
+
+    def _create_order_sidebar(self):
+        page = self._ensure_page()
+        if page is None:
+            return None
+        from .order_sidebar import OrderSidebar
+        self._watch_items_changed(page.items_snapshot())
+        self.order_sidebar = OrderSidebar(page, self.watch_order, self._play_from_order)
+        self.order_sidebar.order_changed.connect(self._watch_order_changed)
+        return self.order_sidebar
+
+    def _play_from_order(self, item):
+        tiles = self._playback_tiles()
+        bound = [binding.tile for binding in self._bindings.values() if binding.tile in tiles]
+        target = bound[0] if len(bound) == 1 else None
+        if not bound:
+            target = next((tile for tile in tiles if not (getattr(tile, 'room', None) or {}).get('room_id')), None)
+        if target is not None:
+            self._start_vod_for_tile(target, item)
+        elif self._show_page():
+            self.page._open_placement_picker(item)
+
     def _next_item_for(self, bvid: str):
         """稍后再看列表里 ``bvid`` 的下一条；已是最后一条/查不到返回 None。"""
         page = self.page
@@ -3623,7 +3690,7 @@ class BiliWatchLaterPlugin(api.Plugin):
         try:
             from .models import list_position
 
-            items = page.items_snapshot()
+            items = self._ordered_items()
             position = list_position(items, bvid)
             if position is None:
                 return None
@@ -3852,6 +3919,7 @@ class BiliWatchLaterPlugin(api.Plugin):
         if not self._tick_timer.isActive():
             self._tick_timer.start()
 
+    @measure('playback_tick')
     def _tick(self) -> None:
         if self._shutting_down:
             return
@@ -3986,6 +4054,7 @@ class BiliWatchLaterPlugin(api.Plugin):
         return self._next_prefetch.take(id(binding), (self._account_generation, item.bvid, part, quality))
 
     def _preferences_changed(self, values):
+        self._sync_order_sidebar(values.get("show_watch_order", True))
         if not values.get('resume_session', False):
             self.playback_session.clear()
         if self._next_prefetch is not None and not values['prefetch_next']:
@@ -4251,6 +4320,8 @@ class BiliWatchLaterPlugin(api.Plugin):
                         self.page.on_account_changed(
                             payload.get("generation")
                         )
+                        if self.order_sidebar is not None and self.order_sidebar.isVisible():
+                            self.page.refresh_from_wall()
                     except RuntimeError:
                         self.page = None
         elif event == api.EVENT_CLOSING:
@@ -4262,6 +4333,13 @@ class BiliWatchLaterPlugin(api.Plugin):
         if self._shutting_down:
             return
         self._shutting_down = True
+        container = getattr(self, '_order_container', None)
+        if container is not None:
+            self.context.unregister_sidebar_page('watch_order')
+            container.hide()
+            container.deleteLater()
+            self._order_container = None
+            self.order_sidebar = None
         if self._next_prefetch is not None:
             self._next_prefetch.clear()
             self._next_prefetch.deleteLater()
@@ -4438,6 +4516,7 @@ class BiliWatchLaterPlugin(api.Plugin):
 
             self.page = WatchLaterPage(self.context, wall=self.wall)
             self.page.closed.connect(self._page_closed)
+            self.page.items_changed.connect(self._watch_items_changed)
             self.page.preferences_changed.connect(self._preferences_changed)
             # v1.0 需求：：横幅「退出选片」→ 清目标格，「播放」回浏览语义。
             cancelled = getattr(self.page, "pick_cancelled", None)

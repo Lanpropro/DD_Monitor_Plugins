@@ -45,6 +45,7 @@ class CardPreview(QObject):
         self.target = None
         self.provider = None
         self.moment = 0.
+        self.unavailable = set()
         self.delay = QTimer(self)
         self.delay.setSingleShot(True)
         self.delay.setInterval(450)
@@ -54,6 +55,7 @@ class CardPreview(QObject):
         self.frames.timeout.connect(self.advance)
 
     def watch(self, cover):
+        cover._motion_trace = getattr(self.page, 'motion_trace', None)
         cover.setMouseTracking(True)
         cover.installEventFilter(self)
 
@@ -62,10 +64,15 @@ class CardPreview(QObject):
         if kind == QEvent.Enter and self.page.preferences['video_preview'] and self.page._visible:
             self.stop()
             item = cover._item
+            self.target = cover
             if item is not None and item.cid and item.duration > 0:
-                self.target = cover
-                self.moment = min(max(0, item.progress), item.duration - 1)
-                self.delay.start()
+                if (item.bvid, item.cid) in self.unavailable:
+                    cover.set_preview_status('暂无可用预览')
+                else:
+                    self.moment = min(max(0, item.progress), item.duration - 1)
+                    self.delay.start()
+            else:
+                cover.set_preview_status('此视频暂无预览')
         elif cover is self.target:
             if kind in (QEvent.Leave, QEvent.Hide, QEvent.MouseButtonPress, QEvent.Wheel):
                 self.stop()
@@ -80,6 +87,7 @@ class CardPreview(QObject):
             return
         item = self.target._item
         self.provider = VodPreviewProvider(item.bvid, item.cid, self)
+        self.target.set_preview_status('预览加载中…')
         self.provider.preview_ready.connect(self.draw)
         self.frames.start()
         self.draw()
@@ -92,15 +100,27 @@ class CardPreview(QObject):
     def draw(self):
         if self.provider is None or self.target is None:
             return
+        import time
+        started = time.perf_counter()
         frame, _stamp = self.provider.frame_at(self.moment)
         if frame is not None:
+            self.target.set_preview_status('')
             self.target.set_preview_frame(frame)
+        elif self.provider.state() == 'disabled':
+            self.target.set_preview_status('暂无可用预览')
+            item = self.target._item
+            self.unavailable.add((item.bvid, item.cid))
+            self.frames.stop()
+        trace = getattr(self.page, 'motion_trace', None)
+        if trace is not None:
+            trace.sample('preview', (time.perf_counter()-started)*1000)
 
     def stop(self):
         self.delay.stop()
         self.frames.stop()
         if self.target is not None:
             self.target.set_preview_frame(None)
+            self.target.set_preview_status('')
         self.target = None
         if self.provider is not None:
             provider, self.provider = self.provider, None
