@@ -7,6 +7,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--host', type=Path, required=True)
@@ -58,17 +59,38 @@ class SettingsTests(unittest.TestCase):
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         self.temp.cleanup()
 
-    def test_first_choice_can_be_deferred_and_persisted(self):
-        from ddcut_settings_check.recording_settings import CaptureModePrompt
-        prompt = CaptureModePrompt(self.owner, self.host)
-        prompt.reject()
-        self.assertNotIn('capture_mode', self.owner.hub.preferences)
-        prompt = CaptureModePrompt(self.owner, self.host)
-        prompt.mode.setCurrentIndex(prompt.mode.findData('both'))
-        prompt.apply()
-        self.assertEqual(self.owner.hub.preferences['capture_mode'], 'both')
-        self.assertEqual(prompt.result(), QDialog.DialogCode.Accepted)
-        prompt.deleteLater()
+    def test_load_without_startup_dialog_defaults_to_native_and_preserves_preferences(self):
+        from PySide6.QtTest import QTest
+        from ddm import images
+        from ddm.plugins import PluginContext, PluginManager
+        from ddm.recording import RecordingManager, RecordingSession
+        self.host.settings = dict(DEFAULT_SETTINGS)
+        self.host.wall = SimpleNamespace(tiles=[])
+        self.host.capture_control = SimpleNamespace()
+        self.host.recorder = RecordingManager(self.host.settings)
+        for saved in (None, 'clip', 'both'):
+            folder = Path(self.temp.name) / (saved or 'unset')
+            if saved:
+                hub = module.TaskHub(folder / 'ddcut_replay')
+                hub.preferences['capture_mode'] = saved
+                hub.save()
+                hub.close()
+            plugin = module.DDCutReplay()
+            manager = PluginManager(window=self.host, plugins_dir=str(folder/'plugins'), enabled=[])
+            with patch.dict(os.environ), patch.object(module.config, 'data_root', return_value=str(folder)), \
+                    patch.object(images, 'REPO', str(folder)), patch.object(QDialog, 'open') as opened:
+                os.environ.pop('DDM_NO_SAVE', None)  # Exercise real startup, without the old test-only suppression.
+                try:
+                    plugin.on_load(PluginContext(manager, 'ddcut_replay'))
+                    QTest.qWait(650)
+                    self.assertFalse(opened.called)
+                    self.assertEqual(plugin.capture_mode, saved or 'original')
+                    if saved is None:
+                        self.assertIs(self.host.recorder.session_factory, RecordingSession)
+                        self.assertNotIn('capture_mode', plugin.hub.preferences)
+                finally:
+                    plugin.on_unload()
+        self.host.recorder.shutdown()
 
     def test_workspace_covers_wallpaper_in_both_themes_and_restores(self):
         container = QWidget()
@@ -109,25 +131,25 @@ class SettingsTests(unittest.TestCase):
             panel.mode.setCurrentIndex(panel.mode.findData('clip'))
             self.assertTrue(self.backend)
             self.assertEqual(self.owner.hub.preferences['capture_mode'], 'clip')
-            self.assertEqual(view.capture_switch.currentData(), 'clip')
-            view.capture_switch.setCurrentIndex(view.capture_switch.findData('original'))
+            self.assertFalse(hasattr(view, 'capture_switch'))
+            self.owner.set_capture_mode('original')
             self.assertFalse(self.backend)
             self.assertEqual(panel.mode.currentData(), 'original')
             panel.mode.setCurrentIndex(panel.mode.findData('both'))
-            self.assertEqual(view.capture_switch.currentData(), 'both')
+            self.assertEqual(self.owner.capture_mode, 'both')
             self.assertEqual(self.owner.hub.preferences['capture_mode'], 'both')
             panel.segment.setValue(3)
             panel.danmaku.setChecked(False)
             self.assertEqual(self.owner.clip_options()['segment_seconds'], 3)
             self.assertFalse(self.owner.clip_options()['danmaku'])
-            view.capture_switch.setCurrentIndex(view.capture_switch.findData('original'))
+            self.owner.set_capture_mode('original')
             self.busy = True
             panel.mode.setCurrentIndex(panel.mode.findData('clip'))
             self.assertEqual(panel.mode.currentData(), 'original')
             self.assertIn('停止当前录制', panel.status.text())
             panel.mode.setCurrentIndex(panel.mode.findData('both'))
             self.assertEqual(panel.mode.currentData(), 'original')
-            self.assertEqual(view.capture_switch.currentData(), 'original')
+            self.assertEqual(self.owner.capture_mode, 'original')
             page.reset()
             self.assertEqual(len(self.owner.settings_panels), 1)
             self.assertEqual(panel.mode.currentData(), 'original')

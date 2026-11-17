@@ -36,8 +36,6 @@ class DDCutReplay(api.Plugin):
         self.links = None
         self.settings_panels = WeakSet()
         self.backends = None
-        self.mode_prompt = None
-        self.mode_prompt_timer = None
 
     def on_load(self, context):
         self.context = context
@@ -93,11 +91,6 @@ class DDCutReplay(api.Plugin):
             if hasattr(self.service, 'register_backend'):
                 selected = self.backends[1] if self.capture_mode == 'both' else self.backends[0]
                 self.service.register_backend(selected, enabled=self.capture_mode != 'original')
-            if 'capture_mode' not in self.hub.preferences and not os.environ.get('DDM_NO_SAVE'):
-                self.mode_prompt_timer = QTimer(action)
-                self.mode_prompt_timer.setSingleShot(True)
-                self.mode_prompt_timer.timeout.connect(self.choose_capture_mode)
-                self.mode_prompt_timer.start(500)
             self.timer = QTimer(action)
             self.timer.setInterval(250)
             self.timer.timeout.connect(self.poll)
@@ -119,11 +112,6 @@ class DDCutReplay(api.Plugin):
         self.capture_mode = mode
         self.hub.preferences['capture_mode'] = mode
         self.hub.save()
-        if self.workspace is not None:
-            switch = self.workspace.capture_switch
-            previous = switch.blockSignals(True)
-            switch.setCurrentIndex(switch.findData(mode))
-            switch.blockSignals(previous)
         for panel in self.settings_panels:
             panel.sync()
 
@@ -147,13 +135,6 @@ class DDCutReplay(api.Plugin):
         self.hub.save()
         for panel in self.settings_panels:
             panel.sync()
-
-    def choose_capture_mode(self):
-        from .recording_settings import CaptureModePrompt
-        if self.mode_prompt is None:
-            self.mode_prompt = CaptureModePrompt(self, self.context.window)
-            self.mode_prompt.finished.connect(lambda: setattr(self, 'mode_prompt', None))
-        self.mode_prompt.open()
 
     def recording_settings(self, parent):
         if self.service is None:
@@ -279,10 +260,6 @@ class DDCutReplay(api.Plugin):
                 self.workspace.refresh_live()
 
     def on_unload(self):
-        if self.mode_prompt_timer:
-            self.mode_prompt_timer.stop()
-        if self.mode_prompt is not None:
-            self.mode_prompt.close()
         for panel in tuple(self.settings_panels):
             panel.detach()
         self.settings_panels.clear()

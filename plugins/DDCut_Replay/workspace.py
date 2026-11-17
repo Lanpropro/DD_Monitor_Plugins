@@ -158,12 +158,6 @@ class Workspace(QWidget):
         button('封面制作', self.open_cover, header)
         button('外部输入', self.show_inputs, header)
         self.task_button.setCheckable(True)
-        from .recording_settings import mode_combo
-        self.capture_switch = mode_combo(compact=True)
-        self.capture_switch.setCurrentIndex(self.capture_switch.findData(getattr(owner, 'capture_mode', 'clip')))
-        self.capture_switch.setToolTip('格子录制按钮的行为。停止当前录制和缓存后可切换；本体参数在上，切片参数在下。')
-        self.capture_switch.currentIndexChanged.connect(self.change_capture_mode)
-        header.insertWidget(1, self.capture_switch)
         root.addLayout(header)
         self.content = QSplitter(Qt.Horizontal)
         root.addWidget(self.content, 1)
@@ -876,17 +870,6 @@ class Workspace(QWidget):
         if hasattr(self, 'task_panel'):
             self.update_media_layout()
 
-    def change_capture_mode(self, _index):
-        try:
-            self.owner.set_capture_mode(self.capture_switch.currentData())
-        except Exception as error:
-            self.capture_switch.blockSignals(True)
-            self.capture_switch.setCurrentIndex(self.capture_switch.findData(getattr(self.owner, 'capture_mode', 'clip')))
-            self.capture_switch.blockSignals(False)
-            self.report(error)
-        else:
-            self.report('格子录制按钮：' + self.capture_switch.currentText())
-
     def show_library(self):
         self.cover_editor.shutdown()
         self.project_editor.shutdown_preview()
@@ -1114,7 +1097,6 @@ class Workspace(QWidget):
             selected_id = selected.data(Qt.UserRole) if selected else ''
             data = self.service.sources()
             self.sources_data = {item['source_id']: item for item in data}
-            self.capture_switch.setEnabled(not any(item['state'] != 'idle' for item in data))
             if hasattr(self.service, 'options'):
                 pending = set(self.service.options().get('pending_outputs', []))
                 if getattr(self, '_pending_outputs', set()) - pending:

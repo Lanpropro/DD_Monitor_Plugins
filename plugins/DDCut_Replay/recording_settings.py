@@ -1,7 +1,7 @@
 """Plugin recording routing and lower-page HLS options; native settings stay above."""
 from pathlib import Path
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QFileDialog,
+from PySide6.QtWidgets import (QComboBox, QFileDialog,
     QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox, QCheckBox, QVBoxLayout, QWidget)
 from shiboken6 import isValid
 
@@ -11,11 +11,10 @@ MODES = [('仅本体：完整录像与即时回放', 'original'),
          ('同时录制：本体录像与切片归档', 'both')]
 
 
-def mode_combo(compact=False):
+def mode_combo():
     combo = QComboBox()
     for label, value in MODES:
-        short = {'original': '仅本体录制', 'clip': '仅切片录制', 'both': '同时录制'}
-        combo.addItem(short[value] if compact else label, value)
+        combo.addItem(label, value)
         combo.setItemData(combo.count()-1, label, Qt.ToolTipRole)
     combo.setAccessibleName('格子录制按钮的录制方式')
     return combo
@@ -29,39 +28,6 @@ def scan_recording_directories(job, directories):
         for row in scan_directory(job, directory):
             rows[row['path']] = row
     return list(rows.values())
-
-
-class CaptureModePrompt(QDialog):
-    def __init__(self, owner, parent=None):
-        super().__init__(parent)
-        self.owner = owner
-        self.setAttribute(Qt.WA_DeleteOnClose)
-        self.setWindowTitle('选择格子录制方式')
-        self.setMinimumWidth(460)
-        layout = QVBoxLayout(self)
-        hint = QLabel('已装载录制与切片插件。点击格子旁的录制按钮时，希望保存哪种内容？可以稍后在“设置 → 录制”修改。')
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
-        self.mode = mode_combo()
-        self.mode.setCurrentIndex(self.mode.findData(owner.capture_mode))
-        layout.addWidget(self.mode)
-        self.status = QLabel('同时录制共用一次取流，分别保存两种文件；本体重编码仍会使用相应计算资源。')
-        self.status.setWordWrap(True)
-        layout.addWidget(self.status)
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.button(QDialogButtonBox.Ok).setText('使用此方式')
-        buttons.button(QDialogButtonBox.Cancel).setText('稍后选择')
-        buttons.accepted.connect(self.apply)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-
-    def apply(self):
-        try:
-            self.owner.set_capture_mode(self.mode.currentData())
-        except (RuntimeError, ValueError, OSError) as error:
-            self.status.setText(str(error))
-        else:
-            self.accept()
 
 
 class RecordingOptions(QWidget):
