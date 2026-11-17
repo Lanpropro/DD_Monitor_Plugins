@@ -106,6 +106,10 @@ class GalleryIcon(WatchLaterIcon):
             path.moveTo(14, 5)
             path.lineTo(7, 12)
             path.lineTo(14, 19)
+        elif self.kind in ('expand', 'collapse'):
+            path.moveTo(6, 15 if self.kind == 'expand' else 9)
+            path.lineTo(12, 9 if self.kind == 'expand' else 15)
+            path.lineTo(18, 15 if self.kind == 'expand' else 9)
         elif self.kind == 'close':
             path.moveTo(6, 6)
             path.lineTo(18, 18)

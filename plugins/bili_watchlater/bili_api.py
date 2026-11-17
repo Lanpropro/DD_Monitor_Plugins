@@ -34,6 +34,7 @@ TIMEOUT = (5, 8)
 LIST_ENDPOINT = "https://api.bilibili.com/x/v2/history/toview"
 LIST_FALLBACK_ENDPOINT = "https://api.bilibili.com/x/v2/history/toview/web"
 REMOVE_ENDPOINT = "https://api.bilibili.com/x/v2/history/toview/del"
+ADD_ENDPOINT = "https://api.bilibili.com/x/v2/history/toview/add"
 CLEAR_ENDPOINT = "https://api.bilibili.com/x/v2/history/toview/clear"
 VIEW_ENDPOINT = "https://api.bilibili.com/x/web-interface/view"
 
@@ -501,6 +502,15 @@ class BiliWatchLaterAPI:
             data={"aid": str(identifier), "csrf": csrf},
             cancelled=cancelled,
         )
+
+    def add(self, cookies, aid, *, cancelled=None):
+        """Re-add an explicitly undone removal; issue one POST without retries."""
+        snapshot = self._write_cookies(cookies)
+        identifier = safe_int(aid)
+        if identifier <= 0:
+            raise ValueError("该条目缺少 aid，无法撤回")
+        return self._post_json(ADD_ENDPOINT, cookies=snapshot,
+            data={"aid": str(identifier), "csrf": snapshot["bili_jct"]}, cancelled=cancelled)
 
     def clear(
         self,

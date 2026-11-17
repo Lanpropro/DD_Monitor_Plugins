@@ -54,3 +54,13 @@ class WatchOrder:
         if callable(setter):
             setter('watch_order', dict(account=self.account, keys=list(keys)))
         return True
+
+    def restore(self, keys):
+        """Restore available entries to their order before the undone removal."""
+        available = {item.bvid for item in self.items}
+        ordered = list(dict.fromkeys(key for key in [*keys,*self.keys] if key in available))
+        if ordered == self.keys:
+            return False
+        self.keys = ordered
+        self.context.set_setting('watch_order', dict(account=self.account, keys=list(ordered)))
+        return True

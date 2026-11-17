@@ -3642,6 +3642,12 @@ class BiliWatchLaterPlugin(api.Plugin):
             self._sync_next_button(binding)
             self._sync_position_badge(binding)
 
+    def _restore_removed_order(self, keys):
+        if self.watch_order.restore(keys):
+            if self.order_sidebar is not None:
+                self.order_sidebar.refresh()
+            self._watch_order_changed()
+
     def _sync_order_sidebar(self, enabled):
         register = getattr(self.context, 'register_sidebar_page', None)
         if not callable(register):
@@ -4524,6 +4530,8 @@ class BiliWatchLaterPlugin(api.Plugin):
             from .page import WatchLaterPage
 
             self.page = WatchLaterPage(self.context, wall=self.wall)
+            self.page.removal_undo.snapshot_order = lambda: list(self.watch_order.keys)
+            self.page.removal_undo.restore_order = self._restore_removed_order
             self.page.closed.connect(self._page_closed)
             self.page.items_changed.connect(self._watch_items_changed)
             self.page.preferences_changed.connect(self._preferences_changed)

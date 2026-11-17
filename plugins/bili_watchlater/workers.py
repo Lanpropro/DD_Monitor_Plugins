@@ -76,6 +76,11 @@ class RemoveRequest(_WatchLaterRequest):
         )
 
 
+class AddRequest(RemoveRequest):
+    def _run_api(self, api: BiliWatchLaterAPI) -> Any:
+        return api.add(self.cookies, self.aid, cancelled=self.cancelled.is_set)
+
+
 class ClearRequest(_WatchLaterRequest):
     def _run_api(self, api: BiliWatchLaterAPI) -> Any:
         return api.clear(self.cookies, cancelled=self.cancelled.is_set)

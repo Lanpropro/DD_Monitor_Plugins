@@ -93,7 +93,7 @@ class PageControlsTests(unittest.TestCase):
         self.page._commit_placement(self.item, picker, 0)
         self.handler.assert_called_once_with(self.item, self.tiles[0])
 
-    def test_single_delete_icon_keeps_confirmation_and_multiselect_does_not_place(self):
+    def test_single_delete_icon_dispatches_remove_and_multiselect_does_not_place(self):
         self.page._has_session = self.page._has_csrf = True
         with patch.object(self.page, '_confirm_remove') as confirm:
             for mode in ('grid', 'list'):

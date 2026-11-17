@@ -146,7 +146,7 @@ class NavigationTests(unittest.TestCase):
                 panel = self.page._settings_dialog
                 self.assertTrue(panel.window().property('settingsGlassContent'))
                 self.assertEqual(len(panel.findChildren(SettingsSurface)), 3)
-                self.assertEqual(len(panel.findChildren(QFrame, 'WatchLaterSettingsDivider')), 8)
+                self.assertEqual(len(panel.findChildren(QFrame, 'WatchLaterSettingsDivider')), 9)
                 panel.reject()
         finally:
             theme.apply('light' if original else 'dark')
@@ -214,24 +214,14 @@ class NavigationTests(unittest.TestCase):
             self.assertTrue(WatchLaterPage._apply_saved_geometry(self.page))
             self.assertEqual((self.page.width(), self.page.height()), (850, 610))
 
-    def test_inline_delete_confirmation_requires_explicit_accept_and_rejects_old_account(self):
+    def test_delete_starts_directly_without_leaving_browser(self):
         self.page._has_session = self.page._has_csrf = True
         with self.shown(), patch.object(self.page, '_begin_remove') as remove:
             self.page._confirm_remove(self.item)
-            panel = self.page._inline_panel
-            self.assertFalse(panel.isWindow())
-            self.assertIs(panel.window(), self.page)
-            self.assertIs(panel.focusProxy(), panel.cancel_button)
-            self.page._escape_navigation()
-            remove.assert_not_called()
-            self.page._confirm_remove(self.item)
-            self.page._inline_panel.accept()
             remove.assert_called_once_with(self.item)
-            remove.reset_mock()
-            self.page._confirm_remove(self.item)
-            self.page._generation += 1
-            self.page._inline_panel.accept()
-            remove.assert_not_called()
+            self.assertIsNone(self.page._inline_panel)
+            self.assertIs(self.page.navigation.currentWidget(), self.page.browser_view)
+            self.assertTrue(self.page.window_header.breadcrumb.isHidden())
             self.assertEqual(self.page.navigation.count(), 1)
 
     def test_close_cancels_inline_clear_confirmation(self):

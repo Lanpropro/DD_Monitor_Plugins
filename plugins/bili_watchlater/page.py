@@ -67,6 +67,7 @@ from .browse_state import BrowseState
 from .card_preview import CardPreview
 from .page_shell import BrowserTitleBar, BrowserWindow, InlineConfirmation, background_color
 from .entry_icon import GalleryIcon
+from .removal_undo import RemovalUndo
 
 from .bili_api import BiliAPIError, describe_error
 from .covers import CoverLoader
@@ -582,6 +583,7 @@ class WatchLaterPage(BrowserWindow):
         self._build_ui()
         self.browse_state = BrowseState(self)
         self.card_preview = CardPreview(self)
+        self.removal_undo = RemovalUndo(self)
         from .motion_trace import MotionTrace
         self.motion_trace = MotionTrace(self)
         self.external_cover_urls = lambda: []
@@ -1052,6 +1054,7 @@ class WatchLaterPage(BrowserWindow):
         if trace is not None:
             trace.mark('persist')
         self.preferences = values
+        self.removal_undo.notice.reposition()
         if previous['video_preview'] and not values['video_preview']:
             self.card_preview.stop()
         if previous['remember_state'] and not values['remember_state']:
@@ -2116,7 +2119,7 @@ class WatchLaterPage(BrowserWindow):
                 self._avatars_by_url.setdefault(row.avatar_url, []).append(row)
         visible.sort(key=lambda row: not (row.geometry().bottom() >= offset
             and row.geometry().top() <= offset + viewport_rect.height()))
-        self.covers.prioritize(self.external_cover_urls() + [row.item.cover_url for row in visible] +
+        self.covers.prioritize(self.removal_undo.notice.image_urls() + self.external_cover_urls() + [row.item.cover_url for row in visible] +
                                [row.avatar_url for row in visible if isinstance(row, GridCard) and row.avatar_url])
         provider = self._danmaku_provider()
         for row in visible:
@@ -2161,6 +2164,7 @@ class WatchLaterPage(BrowserWindow):
         )
 
     def _clear_account_data(self, *, clear_credentials: bool = True) -> None:
+        self.removal_undo.clear()
         self.card_preview.unavailable.clear()
         self._items.clear()
         self._items_version += 1
@@ -2187,6 +2191,7 @@ class WatchLaterPage(BrowserWindow):
     def on_account_changed(self, generation: Any = None) -> None:
         if self._shutting_down:
             return
+        self.removal_undo.clear()
         self.card_preview.unavailable.clear()
         self.browse_state.clear()
         self._request_seq += 1
@@ -2361,8 +2366,7 @@ class WatchLaterPage(BrowserWindow):
         if reason:
             self._flash_status(reason)
             return
-        self._confirm_action('移除稍后再看', f'从稍后再看移除《{item.title}》？\n此操作会修改当前 B 站账号，无法撤销。',
-                             '移除', lambda: self._begin_remove(item))
+        self._begin_remove(item)
 
     def _confirm_action(self, title, message, action, callback):
         self.card_preview.stop()
@@ -2408,6 +2412,7 @@ class WatchLaterPage(BrowserWindow):
             return
         item = self._pending_remove
         if item is not None:
+            self.removal_undo.record(item)
             self._items = [
                 current
                 for current in self._items
@@ -2420,8 +2425,7 @@ class WatchLaterPage(BrowserWindow):
         self._end_operation()
         self._render_after_remove()
         self._publish_to_wall()
-        if not self._multi_remove_queue:
-            self._flash_status("已移除")
+        self.removal_undo.show_result()
         self._log("remove endpoint=del status=200 code=0 count=1")
         # v1.0 需求 10：多选删除串行推进下一个（队列空时立即返回）。
         QTimer.singleShot(0, self._pump_multi_remove)
@@ -2441,6 +2445,7 @@ class WatchLaterPage(BrowserWindow):
     def _begin_clear(self) -> None:
         if self._busy_operation or not self._has_csrf:
             return
+        self.removal_undo.clear()
         self._cancel_refresh_for_operation()
         self._operation_seq += 1
         request_id = self._operation_seq
@@ -2510,6 +2515,7 @@ class WatchLaterPage(BrowserWindow):
             self._show_login_state(expired=True)
             return
         self.error_bar.show_error("操作失败：" + describe_error(error))
+        self.removal_undo.show_result()
 
     def _end_operation(self) -> None:
         self._busy_operation = ""
@@ -3163,6 +3169,7 @@ class WatchLaterPage(BrowserWindow):
         if self._shutting_down:
             return
         self._shutting_down = True
+        self.removal_undo.clear()
         self.card_preview.stop()
         self._visible = False
         self._back_to_browser()
