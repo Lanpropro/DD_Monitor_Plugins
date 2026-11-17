@@ -168,3 +168,8 @@ MotionTrace复用于OrderList，拥有独立窗口预算和可见谓词，order 
 Windows拖动exec的嵌套事件循环中，列表刷新只记录最新pending快照；exec返回后统一应用，避免drop回调同步销毁/重置正在拖动的视图状态。每个QDrag在finally调用deleteLater，清定时器/插入线/按下状态；没有长期保留源项包装器。拖动像素使用宿主motion.lifted_drag，并按viewport鼠标按下点减去卡片rect原点设置hotspot，保持DPR和系统动画策略。
 
 专项含QAbstractItemModelTester、身份不变不reset、拖中刷新延后、拖动对象回收和热点；8轮“视频拖2次→关注拖1次→切回”使用真实Qt控件/拖动对象，但跳过Windows OLE exec，仅验证生命周期。首次无交互OLE检查无法由Qt定时取消而中止，未计为通过；最终必须用户按真实手势复验，不用该回归替代实机验收。
+
+
+### 拖动原位占位（后续候选）
+
+参考Sidebar/RoomListBox拖动时隐藏源卡片、保留占位的实现。OrderList在prepare_drag已捕获原图之后登记dragged_bvid，delegate只跳过该BV的绘制；模型/行几何/滚动不变，不调用setRowHidden或reset。exec前同步重绘源区域，finally无条件清源ID并恢复视图，再沿用pending刷新和QDrag回收路径。这样拖影完整，原位留空，同时保留已针对clear访问冲突做的生命周期修复。图像回归验证拖影仍为原图、原位图像消失、取消恢复、模型不reset及异常退出清理。

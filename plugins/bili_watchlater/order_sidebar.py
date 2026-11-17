@@ -21,6 +21,8 @@ class OrderDelegate(QStyledItemDelegate):
     def paint(self, painter, option, index):
         view = self.parent()
         item = index.data(Qt.UserRole)
+        if item.bvid == view.dragged_bvid:
+            return  # Keep the row's geometry, as the host's lifted follow card does.
         rect = QRectF(option.rect).adjusted(4, 4, -4, -8)
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing)
@@ -90,6 +92,7 @@ class OrderList(QListView):
         self.setModel(OrderModel(self))
         self._pending_items = None
         self._press_pos = None
+        self.dragged_bvid = None
         self.setFrameShape(QListView.NoFrame)
         self.setStyleSheet('QListView { background: transparent; border: 0; }')
         self.setItemDelegate(OrderDelegate(self))
@@ -169,18 +172,22 @@ class OrderList(QListView):
         self.feedback.clear()
         drag = self.prepare_drag(index)
         self.feedback.dragging = True
+        self.dragged_bvid = index.data(Qt.UserRole).bvid
         try:
+            self.viewport().repaint(self.visualRect(index))
             drag.exec(Qt.CopyAction | Qt.MoveAction, Qt.CopyAction)
         finally:
             self.drag_scroll.stop()
             self.set_drop_y(None)
             self.feedback.dragging = False
+            self.dragged_bvid = None
             self._press_pos = None
             drag.deleteLater()
             if self._pending_items is not None:
                 items, self._pending_items = self._pending_items, None
                 self.replace(items)
             self.feedback.sync_pointer()
+            self.viewport().update()
 
     def dragEnterEvent(self, event):
         if event.source() is self and event.mimeData().hasFormat(ORDER_MIME):

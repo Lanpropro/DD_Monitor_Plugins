@@ -225,6 +225,64 @@ class OrderTests(unittest.TestCase):
             self.assertIs(view.model().index(0,0).data(Qt.UserRole),self.items[0])
             self.assertFalse(view.drag_scroll.isActive())
 
+    def test_drag_lifts_original_into_gap_and_restores_without_resetting_model(self):
+        from ddm_plugin_bili_watchlater import order_sidebar
+        page=self.page()
+        panel=OrderSidebar(page,self.order,Mock())
+        self.addCleanup(lambda: (panel.close(),panel.deleteLater()))
+        with patch.object(page,'refresh_from_wall'),patch.object(page.covers,'_pump'):
+            panel.resize(300,650)
+            panel.show()
+            APP.processEvents()
+            view=panel.list
+            index=view.model().index(0,0)
+            view.setCurrentIndex(index)
+            view.feedback.clear()
+            rect=view.visualRect(index)
+            before=view.viewport().grab(rect).toImage()
+            reset=Mock()
+            view.model().modelReset.connect(reset)
+            prepared=[]
+            original_prepare=view.prepare_drag
+            def prepare(row):
+                drag=original_prepare(row)
+                prepared.append(drag.pixmap().toImage())
+                return drag
+            def during_exec(*_):
+                self.assertEqual(view.dragged_bvid,self.items[0].bvid)
+                self.assertEqual(view.visualRect(index),rect)
+                self.assertEqual(view.model().rowCount(),len(self.items))
+                self.assertNotEqual(view.viewport().grab(rect).toImage(),before)
+                self.assertEqual(prepared[0],before)
+                reset.assert_not_called()
+                return Qt.IgnoreAction
+            with patch.object(order_sidebar.motion,'enabled',return_value=False), \
+                    patch.object(view,'prepare_drag',side_effect=prepare), \
+                    patch.object(order_sidebar.QDrag,'exec',side_effect=during_exec):
+                view.startDrag(Qt.CopyAction)
+            self.assertIsNone(view.dragged_bvid)
+            view.feedback.clear()
+            self.assertEqual(view.viewport().grab(rect).toImage(),before)
+            reset.assert_not_called()
+
+    def test_drag_failure_clears_gap_before_rethrowing(self):
+        from ddm_plugin_bili_watchlater import order_sidebar
+        page=self.page()
+        panel=OrderSidebar(page,self.order,Mock())
+        self.addCleanup(lambda: (panel.close(),panel.deleteLater()))
+        with patch.object(page,'refresh_from_wall'),patch.object(page.covers,'_pump'):
+            panel.resize(300,650)
+            panel.show()
+            APP.processEvents()
+            view=panel.list
+            view.setCurrentIndex(view.model().index(0,0))
+            with patch.object(order_sidebar.QDrag,'exec',side_effect=RuntimeError('fixture')):
+                with self.assertRaisesRegex(RuntimeError,'fixture'):
+                    view.startDrag(Qt.CopyAction)
+            self.assertIsNone(view.dragged_bvid)
+            self.assertFalse(view.feedback.dragging)
+            self.assertFalse(view.drag_scroll.isActive())
+
     def test_two_video_drags_then_live_drag_and_switch_back(self):
         from ddm.widgets import Sidebar
         from ddm.sidebar_drag import ROOM_MIME, NAV_MIME
