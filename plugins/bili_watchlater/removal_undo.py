@@ -12,6 +12,7 @@ class RemovalUndo(QObject):
         self.page = page
         self.notice = UndoNotice(page)
         self.notice.undo_requested.connect(self.undo)
+        self.notice.details.undo_requested.connect(self.undo)
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(self.expire)
@@ -54,15 +55,17 @@ class RemovalUndo(QObject):
         self.order_keys = []
         self.notice.dismiss(animated=animated)
 
-    def undo(self):
+    def undo(self, key=None):
         page = self.page
         if page._shutting_down or page._busy_operation or page._multi_remove_queue or not self.entries:
             return
         if not page._has_csrf or not page._has_session:
             self.clear()
             return
+        if key is not None and key not in self.entries:
+            return
         self.timer.stop()
-        self.queue = list(self.entries.values())
+        self.queue = list(self.entries.values()) if key is None else [self.entries[key]]
         self._start_next()
 
     def _start_next(self):
@@ -112,6 +115,8 @@ class RemovalUndo(QObject):
         self.restore_order(self.order_keys)
         if self.queue:
             QTimer.singleShot(0,self._start_next)
+        elif self.entries:
+            self.show_result(f'已撤回该视频，另有 {len(self.entries)} 个可撤回')
         else:
             self.clear()
             self.notice.present('已撤回移除',action=False)

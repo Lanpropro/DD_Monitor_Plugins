@@ -200,3 +200,5 @@ OrderList保留ScrollPerPixel，但显式设定singleStep=20，与本体关注�
 UndoNotice是Page内的轻量提示，复用主题和StableActionButton，以宿主160ms/easing从底部进入，禁用动画时即时显示；不新增原生窗口或重排列表，悬停/键盘焦点保留操作机会。点击撤回后AddRequest通过同一API取消/凭据清理/风控路径串行POST add，复用Page的request_id/generation/active_operation与线程回收；成功后逐项恢复列表、本地次序并发布items_changed。失败不自动重试，尚未恢复项可手动重试；账号切换和卸载清记录，迟到结果由世代及请求号拒绝。平台重新添加可能改变网页添加时间/排序，不声明云端顺序回滚。
 
 UndoEntries只处理头像叠放与可见行绘制，使用既有OrderModel的数据投影，不为每项建控件或播放器。头像复用Page的无凭据CoverLoader/缓存，通知中的可见头像加入现有图片优先级；只有相关图片到达才更新通知。提示持有展示投影，过期/清理时释放。展开保持底边不动，160ms可中断高度过渡；undo_expand_rows严格为1–10整数、默认4，通过既有SelectControl即时保存。空间足够时按设定条数与实际条目数计算整行高度，只有窗口高度不足才减行；余项内部像素滚动，窗口放大恢复。
+
+逐项撤回使用仅覆盖可见行的StableActionButton池，滚动/模型变化时按当前索引绑定itemKey，标题预留按钮宽度；键盘和无障碍使用真实按钮，不为全部条目创建控件。RemovalUndo.undo(key)只将指定条目加入现有串行队列，成功后移除该项的撤回记录，剩余项继续展示并重启提示计时；全部撤回仍使用同一队列。请求进行中禁用全部及逐项按钮，失败保留未完成记录，无自动重试。

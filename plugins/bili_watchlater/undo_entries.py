@@ -1,11 +1,12 @@
 """Uploader pile and visible-only rows for expanded removal feedback."""
-from PySide6.QtCore import QPoint, QRectF, QSize, Qt
+from PySide6.QtCore import QPoint, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QPainter, QPainterPath
 from PySide6.QtWidgets import QAbstractItemView, QListView, QStyledItemDelegate, QWidget
 from ddm import theme
 from .card_presentation import UploaderAvatar, avatar_thumbnail
 from .order_model import OrderModel
 from .page_panels import two_line_title
+from .button_feedback import StableActionButton
 
 
 class AvatarPile(QWidget):
@@ -60,16 +61,20 @@ class RemovedDelegate(QStyledItemDelegate):
         painter.save()
         painter.setFont(self.parent().font())
         painter.setPen(theme.qcolor(theme.TEXT1))
-        text_rect = rect.adjusted(48,0,0,0)
+        text_rect = rect.adjusted(48,0,-self.parent().undo_button_width()-12,0)
         painter.drawText(text_rect,Qt.AlignLeft|Qt.AlignVCenter,
                          two_line_title(item.title,self.parent().font(),text_rect.width()))
         painter.restore()
 
 
 class RemovedEntries(QListView):
+    undo_requested = Signal(object)
+
     def __init__(self, page, parent):
         super().__init__(parent)
         self.page = page
+        self._undo_buttons = []
+        self._undo_enabled = False
         self.setModel(OrderModel(self))
         self.setItemDelegate(RemovedDelegate(self))
         self.setUniformItemSizes(True)
@@ -80,14 +85,66 @@ class RemovedEntries(QListView):
         self.setFrameShape(QListView.NoFrame)
         self.setStyleSheet('QListView { background: transparent; border: 0; }')
         self.setAccessibleName('本批已移除的视频')
+        self.model().modelReset.connect(self.sync_buttons)
+        self.model().dataChanged.connect(self.sync_buttons)
+
+    def undo_button_width(self):
+        return max(64,self.fontMetrics().horizontalAdvance('撤回')+28)
+
+    def set_undo_enabled(self, enabled):
+        self._undo_enabled = enabled
+        self.sync_buttons()
+
+    def sync_buttons(self, *_args):
+        visible = list(self.visible_indexes()) if self.isVisible() else []
+        while len(self._undo_buttons) < len(visible):
+            button = StableActionButton('撤回',self.viewport())
+            button.setCursor(Qt.PointingHandCursor)
+            button.clicked.connect(self._undo_row)
+            self._undo_buttons.append(button)
+        for position,button in enumerate(self._undo_buttons):
+            button.setVisible(position < len(visible))
+            if position < len(visible):
+                index = visible[position]
+                item = index.data(Qt.UserRole)
+                rect = self.visualRect(index)
+                width = self.undo_button_width()
+                button.setGeometry(rect.right()-width-8,rect.center().y()-17,width,34)
+                button.setProperty('itemKey',item.key)
+                button.setAccessibleName('撤回移除：'+item.title)
+                button.setEnabled(self._undo_enabled)
+                button.raise_()
+            else:
+                button.setProperty('itemKey',None)
+                button.setAccessibleName('撤回移除')
+
+    def _undo_row(self):
+        if self._undo_enabled:
+            self.undo_requested.emit(self.sender().property('itemKey'))
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.sync_buttons()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.sync_buttons()
+
+    def scrollContentsBy(self, dx, dy):
+        super().scrollContentsBy(dx,dy)
+        self.sync_buttons()
 
     def row_height(self):
         return self.itemDelegate().sizeHint(None,self.model().index(0,0)).height()
 
-    def visible_items(self):
+    def visible_indexes(self):
         first = max(0,self.indexAt(QPoint(1,0)).row())
         for row in range(first,self.model().rowCount()):
             index = self.model().index(row,0)
             if self.visualRect(index).top() > self.viewport().height():
                 break
+            yield index
+
+    def visible_items(self):
+        for index in self.visible_indexes():
             yield index.data(Qt.UserRole)

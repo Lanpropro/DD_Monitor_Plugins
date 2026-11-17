@@ -245,6 +245,79 @@ class RemovalTests(unittest.TestCase):
             self.values['undo_expand_rows']=invalid
             self.assertEqual(read_preferences(self.context)['undo_expand_rows'],4)
 
+    def test_row_button_restores_only_its_video_then_all_restores_remaining(self):
+        with self.shown(),patch.object(undo_notice.motion,'enabled',return_value=False):
+            for item in self.items[:3]:
+                self.remove(item)
+            undo=self.page.removal_undo
+            notice=undo.notice
+            notice.toggle_details()
+            APP.processEvents()
+            button=next(button for button in notice.details._undo_buttons
+                if button.isVisible() and button.property('itemKey') == self.items[1].key)
+            self.assertIn(self.items[1].title,button.accessibleName())
+            count=len(self.sent)
+            QTest.mouseClick(button,Qt.LeftButton)
+            self.assertEqual(len(self.sent),count+1)
+            self.assertEqual(self.sent[-1].aid,self.items[1].aid)
+            self.assertFalse(notice.undo.isEnabled())
+            self.assertTrue(all(not button.isEnabled() for button in notice.details._undo_buttons))
+            self.sent[-1].success()
+            self.assertEqual(self.page._items,[self.items[1],self.items[3]])
+            self.assertEqual(list(undo.entries),[self.items[0].key,self.items[2].key])
+            self.assertEqual(notice.details.model().rowCount(),2)
+            self.assertTrue(notice.undo.isEnabled())
+            QTest.mouseClick(notice.undo,Qt.LeftButton)
+            self.sent[-1].success()
+            APP.processEvents()
+            self.sent[-1].success()
+            self.assertEqual(self.page._items,self.items)
+            self.assertFalse(undo.entries)
+            self.assertTrue(all(button.property('itemKey') is None for button in notice.details._undo_buttons))
+
+    def test_row_buttons_are_bounded_and_follow_scrolled_identity_with_keyboard_access(self):
+        many=[models.WatchLaterItem(aid=i+10,bvid=f'row{i}',title=f'视频{i}') for i in range(100)]
+        with self.shown(),patch.object(undo_notice.motion,'enabled',return_value=False):
+            self.page._items=list(many)
+            undo=self.page.removal_undo
+            for item in many:
+                undo.record(item)
+            self.page._items=[]
+            undo.show_result()
+            notice=undo.notice
+            notice.toggle_details()
+            APP.processEvents()
+            view=notice.details
+            view.verticalScrollBar().setValue(view.verticalScrollBar().maximum())
+            APP.processEvents()
+            self.assertLessEqual(len(view._undo_buttons),self.page.preferences['undo_expand_rows']+2)
+            button=next(button for button in view._undo_buttons
+                if button.isVisible() and button.property('itemKey') == many[-1].key)
+            button.setFocus(Qt.TabFocusReason)
+            QTest.keyClick(button,Qt.Key_Space)
+            self.assertEqual(self.sent[-1].aid,many[-1].aid)
+            self.sent[-1].success()
+            self.assertEqual(self.page._items,[many[-1]])
+            self.assertEqual(len(undo.entries),99)
+            self.assertGreater(view.verticalScrollBar().value(),0)
+
+    def test_failed_single_undo_keeps_other_rows_and_does_not_auto_retry(self):
+        self.remove(self.items[0])
+        self.remove(self.items[1])
+        undo=self.page.removal_undo
+        undo.undo(self.items[1].key)
+        count=len(self.sent)
+        self.sent[-1].failure(http_api.BiliAPIError('fixture failure'))
+        APP.processEvents()
+        self.assertEqual(len(self.sent),count)
+        self.assertEqual(set(undo.entries),{self.items[0].key,self.items[1].key})
+        self.assertEqual(self.page._items,self.items[2:])
+        undo.undo('expired-key')
+        self.assertEqual(len(self.sent),count)
+        undo.undo(self.items[1].key)
+        self.sent[-1].success()
+        self.assertEqual(list(undo.entries),[self.items[0].key])
+
     def test_expand_animation_can_reverse_without_moving_bottom_anchor(self):
         with self.shown(),patch.object(undo_notice.motion,'enabled',return_value=True):
             notice=self.page.removal_undo.notice

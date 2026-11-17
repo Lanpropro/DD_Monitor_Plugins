@@ -77,12 +77,17 @@ class UndoNotice(QWidget):
         self.title.set_full_text(self.items[-1].title if self.items else '')
         self.undo.setText('全部撤回' if len(self.items) > 1 else '撤回')
         self.expand.setVisible(len(self.items) > 1)
+        scroll = self.details.verticalScrollBar()
+        position = scroll.value()
         self.details.model().replace(self.items)
+        self.details.doItemsLayout()
+        scroll.setValue(position)
         if len(self.items) < 2:
             self.expanded = False
             self.details_animation.stop()
         self._sync_expand_icon()
         self.reposition()
+        self.details.sync_buttons()
 
     def _sync_expand_icon(self):
         self.expand.setIcon(QIcon(GalleryIcon('collapse' if self.expanded else 'expand')))
@@ -139,6 +144,7 @@ class UndoNotice(QWidget):
         self.setAccessibleName(message)
         self.undo.setVisible(action)
         self.undo.setEnabled(enabled)
+        self.details.set_undo_enabled(enabled)
         self.show()
         self.raise_()
         self.animation.stop()
