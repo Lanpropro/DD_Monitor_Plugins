@@ -3688,6 +3688,9 @@ class BiliWatchLaterPlugin(api.Plugin):
         if page is None:
             return None
         try:
+            order = getattr(self, 'watch_order', None)
+            if order is not None and order.account is not None:
+                return order.next_after(bvid)
             from .models import list_position
 
             items = self._ordered_items()
@@ -4054,6 +4057,12 @@ class BiliWatchLaterPlugin(api.Plugin):
         return self._next_prefetch.take(id(binding), (self._account_generation, item.bvid, part, quality))
 
     def _preferences_changed(self, values):
+        order = getattr(self, 'watch_order', None)
+        if order is not None and order.include_finished != values.get('order_include_finished', True):
+            order.include_finished = values.get('order_include_finished', True)
+            if self.order_sidebar is not None:
+                self.order_sidebar.refresh()
+            self._watch_order_changed()
         self._sync_order_sidebar(values.get("show_watch_order", True))
         if not values.get('resume_session', False):
             self.playback_session.clear()

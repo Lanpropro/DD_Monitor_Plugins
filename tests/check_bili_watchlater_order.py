@@ -97,6 +97,124 @@ class OrderTests(unittest.TestCase):
         self.assertIsNone(plugin._next_item_for('video2'))
         self.assertEqual(plugin._list_position_text('video0'),'2/4')
 
+    def test_excluding_finished_preserves_hidden_order_and_next_anchor(self):
+        from ddm_plugin_bili_watchlater.preferences import read_preferences
+        self.assertTrue(read_preferences(self.context)['order_include_finished'])
+        self.items[0].progress=self.items[1].progress=60
+        self.order.include_finished=False
+        self.assertEqual(self.keys(),['video2','video3'])
+        self.assertIs(self.order.next_after('video0'),self.items[2])
+        self.order.move('video3','video2')
+        self.assertEqual(self.keys(),['video3','video2'])
+        self.assertEqual(self.saved['watch_order']['keys'],['video0','video1','video3','video2'])
+        self.order.include_finished=True
+        self.assertEqual(self.keys(),['video0','video1','video3','video2'])
+
+    def test_finished_setting_autosaves_refreshes_queue_and_clears_prefetch(self):
+        from ddm_plugin_bili_watchlater.settings_dialog import WatchLaterSettings
+        from ddm_plugin_bili_watchlater.preferences import read_preferences,save_preferences
+        settings=WatchLaterSettings(read_preferences(self.context))
+        self.addCleanup(settings.deleteLater)
+        settings.changed.connect(lambda values:save_preferences(self.context,values))
+        settings.order_include_finished.setChecked(False)
+        self.assertIs(self.saved['order_include_finished'],False)
+        plugin=plugin_module.BiliWatchLaterPlugin()
+        plugin.context=self.context
+        plugin.page=SimpleNamespace(items_snapshot=lambda:self.items)
+        plugin.watch_order=self.order
+        plugin.order_sidebar=SimpleNamespace(refresh=Mock())
+        plugin._next_prefetch=Mock()
+        plugin._sync_order_sidebar=Mock()
+        self.items[1].progress=60
+        values=read_preferences(self.context)
+        plugin._preferences_changed(values)
+        plugin.order_sidebar.refresh.assert_called_once()
+        plugin._next_prefetch.clear.assert_called()
+        self.assertFalse(self.order.include_finished)
+        self.assertIs(plugin.watch_order.next_after('video0'),self.items[2])
+        self.assertIs(plugin._next_item_for('video0'),self.items[2])
+
+    def test_avoidance_moves_painted_cards_without_model_reset_and_can_reverse(self):
+        from ddm_plugin_bili_watchlater import order_avoidance,order_sidebar
+        from PySide6.QtCore import QAbstractAnimation
+        page=self.page()
+        panel=OrderSidebar(page,self.order,Mock())
+        self.addCleanup(lambda:(panel.close(),panel.deleteLater()))
+        with patch.object(page,'refresh_from_wall'),patch.object(page.covers,'_pump'):
+            panel.resize(300,650)
+            panel.show()
+            APP.processEvents()
+            view=panel.list
+            view.setCurrentIndex(view.model().index(0,0))
+            callbacks=[]
+            page.context.start_sidebar_drag=lambda *args,**kwargs:callbacks.append(kwargs['on_finished']) or True
+            reset=Mock()
+            view.model().modelReset.connect(reset)
+            with patch.object(order_sidebar.QDrag,'exec',side_effect=AssertionError('No OLE')):
+                view.startDrag(Qt.CopyAction)
+            state=view.avoidance
+            self.assertTrue(state.active)
+            self.assertEqual(state.preview,[None,1,2,3])
+            original=view.visualRect(view.model().index(1,0))
+            with patch.object(order_avoidance.motion,'enabled',return_value=True):
+                point=view.visualRect(view.model().index(2,0)).bottomLeft()-QPoint(0,2)
+                before,_y=view.insertion_at(point)
+                self.assertEqual(before,3)
+                self.assertEqual(state.preview,[1,2,None,3])
+                state.animation.setCurrentTime(60)
+                self.assertLess(state.rect_for_row(1).top(),original.top())
+                current=dict(state.positions)
+                state.move_gap(1)
+                self.assertEqual(state.origins,current)
+                state.animation.setCurrentTime(state.animation.duration())
+                self.assertFalse(view.grab().isNull())
+            reset.assert_not_called()
+            self.assertEqual([item.bvid for item in view.model().items],self.keys())
+            with patch.object(order_avoidance.motion,'enabled',return_value=False):
+                state.reset_target()
+                self.assertEqual(state.animation.state(),QAbstractAnimation.Stopped)
+                self.assertEqual(state.before_row(),0)
+            callbacks[0]()
+            self.assertFalse(state.active)
+            self.assertEqual(state.animation.state(),QAbstractAnimation.Stopped)
+            self.assertEqual(view.visualRect(view.model().index(1,0)),original)
+            view.setRowHidden(1,True)
+            state.begin(2)
+            state.move_gap(0)
+            state.reset_target()
+            self.assertEqual(state.before_row(),2)
+            self.assertFalse(self.order.move('video2','video2'))
+            state.clear()
+
+    def test_finished_icon_appears_without_text_and_filtered_empty_is_explained(self):
+        from PySide6.QtGui import QPainter,QPixmap
+        from PySide6.QtWidgets import QStyleOptionViewItem
+        page=self.page()
+        panel=OrderSidebar(page,self.order,Mock())
+        self.addCleanup(lambda:(panel.close(),panel.deleteLater()))
+        panel.refresh()
+        view=panel.list
+        option=QStyleOptionViewItem()
+        from PySide6.QtCore import QRect
+        option.rect=QRect(0,0,300,170)
+        def render():
+            image=QPixmap(300,170)
+            image.fill(Qt.transparent)
+            painter=QPainter(image)
+            view.itemDelegate().paint(painter,option,view.model().index(0,0))
+            painter.end()
+            return image.toImage()
+        before=render()
+        self.items[0].progress=60
+        after=render()
+        self.assertNotEqual(before.copy(260,8,30,26),after.copy(260,8,30,26))
+        self.assertIn('已看完',view.model().index(0,0).data(Qt.AccessibleTextRole))
+        for item in self.items:item.progress=60
+        self.order.include_finished=False
+        panel.refresh()
+        self.assertEqual(view.model().rowCount(),0)
+        self.assertIn('没有未看完',panel.status.text())
+
     def test_quick_click_uses_single_vod_or_empty_but_ambiguous_opens_picker(self):
         plugin = plugin_module.BiliWatchLaterPlugin()
         occupied, empty = TileFixture({'room_id':'live'}), TileFixture({})

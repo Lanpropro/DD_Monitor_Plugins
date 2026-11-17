@@ -19,7 +19,7 @@ class OrderModel(QAbstractListModel):
         if role == Qt.DisplayRole:
             return item.title
         if role == Qt.AccessibleTextRole:
-            return item.title + ' · ' + item.owner_name
+            return item.title + ' · ' + item.owner_name + (' · 已看完' if item.is_finished else '')
         return None
 
     def flags(self, index):

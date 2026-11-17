@@ -2,14 +2,15 @@
 from PySide6.QtCore import QMimeData, QPoint, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QDrag, QLinearGradient, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (QAbstractItemView, QLabel, QListView,
-                              QStyledItemDelegate, QVBoxLayout, QWidget)
+                              QStyledItemDelegate, QStyleOptionViewItem, QVBoxLayout, QWidget)
 from ddm import motion, theme
 from .models import VOD_MIME, format_duration
-from .card_presentation import avatar_thumbnail
+from .card_presentation import avatar_thumbnail, draw_finished_icon
 from .widgets import relative_font
 from .motion_trace import MotionTrace, measure
 from .order_feedback import OrderFeedback
 from .order_model import OrderModel
+from .order_avoidance import OrderAvoidance
 
 ORDER_MIME = 'application/x-bili-watchlater-order'
 
@@ -62,13 +63,16 @@ class OrderDelegate(QStyledItemDelegate):
         painter.restore()
         painter.setPen(QColor('white'))
         painter.setFont(relative_font(view.font(), 1, bold=True))
-        title = painter.fontMetrics().elidedText(item.title, Qt.ElideRight, int(rect.width()-60))
-        painter.drawText(rect.adjusted(48,10,-10,-10), Qt.AlignTop|Qt.AlignLeft, title)
+        title_right = 40 if item.is_finished else 10
+        title = painter.fontMetrics().elidedText(item.title, Qt.ElideRight, int(rect.width()-48-title_right))
+        painter.drawText(rect.adjusted(48,10,-title_right,-10), Qt.AlignTop|Qt.AlignLeft, title)
         painter.setFont(relative_font(view.font(), .88))
         owner = painter.fontMetrics().elidedText(item.owner_name, Qt.ElideRight, int(rect.width()-60))
         painter.drawText(rect.adjusted(48,32,-10,-10), Qt.AlignTop|Qt.AlignLeft, owner)
         painter.drawText(rect.adjusted(10,10,-10,-10), Qt.AlignBottom|Qt.AlignLeft, str(index.row()+1))
         painter.drawText(rect.adjusted(10,10,-10,-10), Qt.AlignBottom|Qt.AlignRight, format_duration(item.duration))
+        if item.is_finished:
+            draw_finished_icon(painter,rect)
         painter.setClipping(False)
         if view.currentIndex() == index:
             painter.setPen(QPen(theme.qcolor(theme.ACCENT), 2))
@@ -118,6 +122,7 @@ class OrderList(QListView):
         self.motion_trace = MotionTrace(page, areas=[self], visible=self.isVisible,
                                         parent=self, prefix='order timing')
         self.feedback = OrderFeedback(self)
+        self.avoidance = OrderAvoidance(self)
         self.drop_y = None
 
     @measure('replace')
@@ -183,7 +188,8 @@ class OrderList(QListView):
                                 on_finished=self.finish_drag)
                 if started and self.feedback.dragging:
                     self.dragged_bvid = source
-                    self.viewport().repaint(self.visualRect(index))
+                    self.avoidance.begin(index.row())
+                    self.viewport().repaint()
                 elif self.feedback.dragging:
                     self.finish_drag()
             except BaseException:
@@ -192,6 +198,7 @@ class OrderList(QListView):
             return
         # Older hosts keep the existing native drag path.
         self.dragged_bvid = source
+        self.avoidance.begin(index.row())
         try:
             self.viewport().repaint(self.visualRect(index))
             drag.exec(Qt.CopyAction | Qt.MoveAction, Qt.CopyAction)
@@ -204,6 +211,7 @@ class OrderList(QListView):
         self.drag_scroll.stop()
         self.set_drop_y(None)
         self.feedback.dragging = False
+        self.avoidance.clear()
         self.dragged_bvid = None
         self._press_pos = None
         if drag is not None:
@@ -243,6 +251,7 @@ class OrderList(QListView):
     def dragLeaveEvent(self, event):
         self.drag_scroll.stop()
         self.set_drop_y(None)
+        self.avoidance.reset_target()
         super().dragLeaveEvent(event)
 
     def dropEvent(self, event):
@@ -259,6 +268,9 @@ class OrderList(QListView):
         event.accept()
 
     def insertion_at(self, point):
+        if self.avoidance.active:
+            self.avoidance.hover(point)
+            return self.avoidance.before_row(),self.avoidance.rect_for_slot(self.avoidance.gap).top()+2
         row = self.indexAt(point)
         if not row.isValid():
             return self.model().rowCount(), min(self.viewport().height()-2,point.y())
@@ -296,6 +308,11 @@ class OrderList(QListView):
         return [url for url in covers+avatars if url]
 
     def visible_items(self):
+        if self.avoidance.active:
+            for row in self.avoidance.preview:
+                if row is not None and self.avoidance.rect_for_row(row).intersects(self.viewport().rect()):
+                    yield self.model().index(row,0)
+            return
         start = max(0,self.indexAt(QPoint(1,0)).row())
         for index in range(start,self.model().rowCount()):
             row = self.model().index(index,0)
@@ -323,7 +340,17 @@ class OrderList(QListView):
 
     @measure('list_paint')
     def paintEvent(self, event):
-        super().paintEvent(event)
+        if self.avoidance.active:
+            painter = QPainter(self.viewport())
+            painter.setClipRegion(event.region())
+            option = QStyleOptionViewItem()
+            option.initFrom(self)
+            for index in self.visible_items():
+                option.rect = self.avoidance.rect_for_row(index.row())
+                self.itemDelegate().paint(painter,option,index)
+            painter.end()
+        else:
+            super().paintEvent(event)
         if self.drop_y is not None:
             painter = QPainter(self.viewport())
             painter.setPen(QPen(theme.qcolor(theme.ACCENT),2))
@@ -370,7 +397,10 @@ class OrderSidebar(QWidget):
     def refresh(self):
         items = self.order.snapshot()
         self.list.replace(items)
-        self.status.setText('' if items else '列表为空；打开稍后再看页面可刷新或登录。')
+        empty = ('没有未看完的视频；可在设置中选择包含已看完内容。'
+                 if self.order.items and not self.order.include_finished else
+                 '列表为空；打开稍后再看页面可刷新或登录。')
+        self.status.setText('' if items else empty)
         self.status.setVisible(not items)
 
     def reorder(self, key, before):

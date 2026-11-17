@@ -33,6 +33,8 @@ class WatchLaterSettings(InlinePanel):
         self._row(appearance, '启用视频预览（如果支持）', '悬停卡片显示 B 站预览帧；同时控制进度条预览。关闭后不请求预览数据。', self.video_preview)
         self.show_watch_order = self._toggle(values['show_watch_order'], '显示观看顺序栏')
         self._row(appearance, '显示观看顺序栏', '在关注栏增加视频卡片入口；拖动排序仅影响软件内连播，也可拖入格子。', self.show_watch_order)
+        self.order_include_finished = self._toggle(values['order_include_finished'], '观看顺序包含已看完视频')
+        self._row(appearance, '观看顺序包含已看完视频', '关闭后，播放列表、下一条、自动连播和预加载跳过已看完视频；保留本地排序，重新开启即可显示。', self.order_include_finished)
         self.remember_state = self._toggle(values['remember_state'], '留存状态')
         self._row(appearance, '留存状态', '再次打开选片页面时，恢复上次的浏览位置、视图、搜索和筛选。', self.remember_state)
 
@@ -113,7 +115,7 @@ class WatchLaterSettings(InlinePanel):
     def _controls(self):
         return dict(default_view=self.view, grid_columns=self.columns, card_size=self.card_size,
                     **{key: getattr(self, key) for key in ('autoplay', 'video_preview', 'remember_state',
-                                                         'auto_play', 'prefetch_next', 'resume_session', 'show_watch_order')})
+                                                         'auto_play', 'prefetch_next', 'resume_session', 'show_watch_order', 'order_include_finished')})
 
     def _set_values(self, values):
         self._updating = True

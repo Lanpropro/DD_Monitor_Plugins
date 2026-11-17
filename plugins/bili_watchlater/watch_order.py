@@ -1,10 +1,14 @@
 """Local order over the canonical account list; never writes to Bilibili."""
+from .preferences import read_preferences
+
+
 class WatchOrder:
     def __init__(self, context):
         self.context = context
         self.account = None
         self.items = []
         self.keys = []
+        self.include_finished = read_preferences(context)['order_include_finished']
 
     def update(self, items, account):
         account = str(account or '')
@@ -20,12 +24,24 @@ class WatchOrder:
             self.keys = [key for key in self.keys if key in available]
             self.keys.extend(item.bvid for item in self.items if item.bvid not in self.keys)
 
-    def snapshot(self):
+    def snapshot(self, *, include_finished=None):
+        if include_finished is None:
+            include_finished = self.include_finished
         by_key = {item.bvid: item for item in self.items}
-        return [by_key[key] for key in self.keys if key in by_key]
+        return [by_key[key] for key in self.keys if key in by_key
+                and (include_finished or not by_key[key].is_finished)]
+
+    def next_after(self, bvid):
+        found = False
+        for item in self.snapshot(include_finished=True):
+            if found and (self.include_finished or not item.is_finished):
+                return item
+            if item.bvid == bvid:
+                found = True
+        return None
 
     def move(self, bvid, before=None):
-        keys = [item.bvid for item in self.snapshot()]
+        keys = [item.bvid for item in self.snapshot(include_finished=True)]
         if bvid not in keys or before == bvid:
             return False
         keys.remove(bvid)
