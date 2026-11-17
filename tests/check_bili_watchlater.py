@@ -228,7 +228,7 @@ class HostTests(unittest.TestCase):
     def test_cancelled_resolution_does_not_restore_over_replacement(self):
         binding = self.binding('resolving')
         self.tile.set_room({'room_id': '90002', 'uname': 'Replacement', 'live': False})
-        with patch.object(self.plugin, '_stop_host_tile') as stop:
+        with patch.object(self.plugin.host, 'stop') as stop:
             self.plugin._release_binding(binding, restart=False)
         self.assertEqual(self.tile.room['room_id'], '90002')
         stop.assert_not_called()

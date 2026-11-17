@@ -16,6 +16,7 @@ DPI 通知仅登记一次延迟任务；处理期间和冷却期忽略重入，�
 | 所有者 | 职责与收尾 |
 | --- | --- |
 | `plugin.py` | 唯一持有点播绑定；通过本体格子控件工厂接线，跟踪账号代次、请求与格子归属；卸载还原仍属于该绑定的合成房间 |
+| `host_playback.py` | 集中适配本体window/Tile/Player查询、可用视频格筛选、播放/停止/恢复及能力探测；不持有绑定、工作线程或定时器 |
 | `page_panels.py` | 媒体卡片轻量背景、置入按钮／线条工具按钮、两行标题计算与目标格选择；复用公开选框；勾选层属于封面子控件，随卡片销毁 |
 | `page.py` | 浏览控件、导航、筛选与渲染；旧数据字段/方法为列表控制器的薄兼容入口，不复制状态 |
 | `list_controller.py` | 唯一持有canonical条目、账号快照、请求号、操作队列及QThread集合；列表/增删恢复和退休交接统一从此处执行，Qt父对象为Page |
@@ -211,3 +212,9 @@ UndoEntries只处理头像叠放与可见行绘制，使用既有OrderModel的�
 ListController拥有原Page的18项业务状态和20个列表/请求操作，Page旧字段通过property转发，旧方法保留薄委托，内部渲染直接读取控制器。账号世代、单飞守卫、Remove/Add/Clear串行与错误策略、超时及定时参数不变。控制器的removed/operation_finished/clearing信号分别驱动撤回记录、提示与清理，触发点保持原有顺序。RemovalUndo只管理撤回事务和提示，调用start_restore/current_operation/complete_restore，不再回写Page私有字段。
 
 控制器是Page的QObject子对象；finished回调连接控制器，Page.shutdown先停止UI再调用控制器取消、断开结果与finished并移交未结束线程。既有request_retirement仍应用级保活，未引入第二个线程管理器。兼容入口与直接控制器共享同一list/dict/set，未复制可变状态。
+
+### 宿主播放边界迁移（结构整理第3批）
+
+HostPlaybackAdapter通过当前context的读取函数取得宿主，不缓存原生窗口或播放器；原插件_host_window/_host_tiles/_playback_tiles/_host_player/_stop_host_tile/_start_host_tile/_play_on_host保留薄委托。暂停入格时临时静音、宿主接受暂停后还原声音的调用顺序不变。测试替身改在实际适配器上注入，而不是依赖旧入口内部互调。
+
+此批只迁移宿主播放边界；绑定映射、tick、事件过滤、快捷键及PiP/DPI生命周期仍由原插件负责，未在同批改写。后续迁移这些职责时仍须保持单一绑定所有者和原回收顺序。

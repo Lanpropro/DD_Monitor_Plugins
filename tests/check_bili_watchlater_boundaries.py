@@ -2,7 +2,7 @@
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock,patch
-from check_bili_watchlater import APP,models
+from check_bili_watchlater import APP,models,plugin_module
 import check_bili_watchlater_page_controls as controls
 from ddm_plugin_bili_watchlater import list_controller
 from PySide6.QtCore import QObject,Signal
@@ -51,6 +51,23 @@ class BoundaryTests(unittest.TestCase):
             old.completed.emit(old.request_id,old.generation,models.WatchLaterSnapshot(items=[self.item],total=1))
             self.assertEqual(controller.items,[])
             self.assertEqual(controller.generation,5)
+
+    def test_host_adapter_reads_current_context_and_preserves_legacy_delegates(self):
+        plugin=plugin_module.BiliWatchLaterPlugin()
+        self.assertIsNone(plugin._host_window())
+        self.assertFalse(plugin.host.supports_playback())
+        tile=object()
+        player=object()
+        first=SimpleNamespace(players={tile:player},wall=SimpleNamespace(tiles=[tile]),_play_on=Mock())
+        plugin.context=SimpleNamespace(window=first)
+        self.assertIs(plugin._host_window(),first)
+        self.assertIs(plugin._host_player(tile),player)
+        self.assertEqual(plugin._host_tiles(),[tile])
+        self.assertTrue(plugin.host.supports_playback())
+        plugin.context=SimpleNamespace(window=SimpleNamespace())
+        self.assertEqual(plugin._host_tiles(),[])
+        self.assertIsNone(plugin._host_player(tile))
+        self.assertFalse(plugin._play_on_host(tile,'fixture',{}))
 
 
 if __name__=='__main__': unittest.main()

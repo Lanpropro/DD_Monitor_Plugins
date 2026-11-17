@@ -267,7 +267,7 @@ class AutoplayTests(unittest.TestCase):
         item = SimpleNamespace(parts=2)
         target = TileFixture({})
         binding = SimpleNamespace(item=item, bvid='first', part=0, quality=0, tile=target, preview=None, subtitles=[])
-        plugin._host_tiles = lambda: [target]
+        plugin.host.tiles = lambda: [target]
         with patch.object(plugin, '_cancel_binding_media'), patch.object(plugin, '_start_resolution') as resolve, \
                 patch.object(plugin, '_next_item_for') as next_item:
             plugin._next_binding(binding)

@@ -124,8 +124,8 @@ class PreferenceTests(unittest.TestCase):
         player = Mock()
         def play_on(*args, **kwargs):
             self.assertTrue(tile.muted)
-        plugin._host_window = lambda: SimpleNamespace(_play_on=play_on, _match_sync_active=False)
-        plugin._host_player = lambda _: player
+        plugin.host.window = lambda: SimpleNamespace(_play_on=play_on, _match_sync_active=False)
+        plugin.host.player = lambda _: player
         self.assertTrue(plugin._play_on_host(tile, 'https://media.invalid/video', {}, start_paused=True))
         tile.set_paused.assert_called_once_with(True)
         player.set_paused.assert_called_once_with(True)
@@ -136,9 +136,9 @@ class PreferenceTests(unittest.TestCase):
         plugin = plugin_module.BiliWatchLaterPlugin()
         plugin.context = context(dict(auto_play=False))
         tile = TileFixture({})
-        plugin._host_window = lambda: SimpleNamespace(_play_on=Mock())
+        plugin.host.window = lambda: SimpleNamespace(_play_on=Mock())
         plugin._resolve_cell_from_tile = lambda _: object()
-        plugin._host_tiles = lambda: [tile]
+        plugin.host.tiles = lambda: [tile]
         item = models.WatchLaterItem(aid=1, bvid='fixture')
         with patch.object(plugin, '_start_resolution') as resolve, patch.object(plugin, '_ensure_tick_timer'):
             plugin._start_vod_for_tile(tile, item)

@@ -38,10 +38,10 @@ class SessionTests(unittest.TestCase):
     def make_plugin(self):
         plugin = plugin_module.BiliWatchLaterPlugin()
         plugin.context = context(self.values)
-        plugin._host_window = lambda: self.window
+        plugin.host.window = lambda: self.window
         plugin._cookie_snapshot = lambda: {'DedeUserID': 'fixture-account', 'SESSDATA': 'fixture-secret'}
         plugin._resolve_cell_from_tile = lambda tile: tile
-        plugin._host_player = lambda tile: None
+        plugin.host.player = lambda tile: None
         plugin._notify_warning = Mock()
         plugin._log = Mock()
         return plugin
@@ -52,7 +52,7 @@ class SessionTests(unittest.TestCase):
         return deepcopy(self.values[KEY])
 
     def test_shutdown_snapshot_and_new_instance_restore_exact_cell_part_and_progress(self):
-        self.plugin._host_player = lambda _: SimpleNamespace(_prop=lambda key, default: 123.5 if key == 'time-pos' else default)
+        self.plugin.host.player = lambda _: SimpleNamespace(_prop=lambda key, default: 123.5 if key == 'time-pos' else default)
         saved = self.saved()
         self.assertEqual(saved['videos'][0]['progress'], 123.5)
         self.assertNotIn('fixture-secret', json.dumps(saved))
@@ -130,7 +130,7 @@ class SessionTests(unittest.TestCase):
 
     def test_capture_uses_current_cell_and_preserves_pending_seek_if_player_not_ready(self):
         self.cells[1], self.cells[5] = self.cells[5], self.cells[1]
-        self.plugin._host_player = lambda _: SimpleNamespace(_prop=lambda *_: None)
+        self.plugin.host.player = lambda _: SimpleNamespace(_prop=lambda *_: None)
         self.plugin.playback_session.capture()
         self.assertEqual(self.values[KEY]['videos'][0]['cell'], 1)
         self.assertEqual(self.values[KEY]['videos'][0]['progress'], 50.)

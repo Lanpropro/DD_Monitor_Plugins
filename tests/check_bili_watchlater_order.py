@@ -255,7 +255,7 @@ class OrderTests(unittest.TestCase):
     def test_quick_click_uses_single_vod_or_empty_but_ambiguous_opens_picker(self):
         plugin = plugin_module.BiliWatchLaterPlugin()
         occupied, empty = TileFixture({'room_id':'live'}), TileFixture({})
-        plugin._playback_tiles = lambda: [occupied,empty]
+        plugin.host.playback_tiles = lambda: [occupied,empty]
         plugin._start_vod_for_tile = Mock()
         plugin._play_from_order(self.items[0])
         plugin._start_vod_for_tile.assert_called_with(empty,self.items[0])

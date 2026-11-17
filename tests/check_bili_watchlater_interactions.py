@@ -297,7 +297,7 @@ class PlaybackDestinationTests(unittest.TestCase):
         self.item = models.WatchLaterItem(aid=1, bvid='BV1xx411c7mD')
         self.playing = TileFixture({'room_id': self.item.bvid})
         self.empty = TileFixture({})
-        self.plugin._host_tiles = lambda: [self.playing, self.empty]
+        self.plugin.host.tiles = lambda: [self.playing, self.empty]
         self.plugin._bindings[self.item.bvid] = SimpleNamespace(tile=self.playing)
 
     def test_list_reselect_uses_existing_video_tile(self):
@@ -324,8 +324,8 @@ class PlaybackDestinationTests(unittest.TestCase):
                                _cell_order=lambda: list(range(6)))
         wall.pane_danmaku = PaneDanmaku(wall, {})
         wall.pane_danmaku.settings['fixture'] = {3: tiles[0], 4: tiles[1]}
-        self.plugin._host_window = lambda: SimpleNamespace(wall=wall)
-        self.plugin._host_tiles = lambda: tiles
+        self.plugin.host.window = lambda: SimpleNamespace(wall=wall)
+        self.plugin.host.tiles = lambda: tiles
         return tiles
 
     def test_one_plus_five_skips_two_empty_chat_backing_tiles(self):
@@ -344,7 +344,7 @@ class PlaybackDestinationTests(unittest.TestCase):
         self.assertIs(play.call_args.args[0], tiles[5])
 
     def test_missing_inline_capability_does_not_launch_browser(self):
-        self.plugin._host_window = lambda: SimpleNamespace()
+        self.plugin.host.window = lambda: SimpleNamespace()
         with patch.object(self.plugin, '_open_url') as browser, \
                 patch.object(self.plugin, '_notify_warning') as warning:
             self.plugin._start_vod_for_tile(self.empty, self.item)

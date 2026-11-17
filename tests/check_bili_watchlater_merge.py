@@ -59,7 +59,7 @@ class PlaybackMergeTests(unittest.TestCase):
         binding = SimpleNamespace(state='playing')
         event = QKeyEvent(QEvent.KeyPress, Qt.Key_B, Qt.NoModifier)
         try:
-            with patch.object(self.plugin, '_host_window', return_value=host), \
+            with patch.object(self.plugin.host, 'window', return_value=host), \
                     patch.object(self.plugin, '_key_window_ok', return_value=True), \
                     patch.object(self.plugin, '_active_vod_tile', return_value=tile), \
                     patch.object(self.plugin, '_binding_for_tile', return_value=binding):
@@ -78,7 +78,7 @@ class PlaybackMergeTests(unittest.TestCase):
         tile = QWidget()
         self.plugin._bindings['fixture'] = SimpleNamespace(tile=tile)
         try:
-            with patch.object(self.plugin, '_host_tiles', return_value=[tile]), \
+            with patch.object(self.plugin.host, 'tiles', return_value=[tile]), \
                     patch.object(self.plugin, '_cover_pip_dpi') as cover, \
                     patch.object(self.plugin, '_queue_tile_sync') as sync:
                 for _ in range(100):

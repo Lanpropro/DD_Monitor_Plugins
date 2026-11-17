@@ -97,6 +97,7 @@ if __spec__ is not None:
 
 
 from .motion_trace import measure
+from .host_playback import HostPlaybackAdapter
 
 def _as_int(value) -> int:
     from .models import safe_int
@@ -511,6 +512,7 @@ class BiliWatchLaterPlugin(api.Plugin):
     def __init__(self) -> None:
         super().__init__()
         self.context = None
+        self.host = HostPlaybackAdapter(lambda:self.context,self._log)
         self.page = None
         self.action: QAction | None = None
         self.button: QToolButton | None = None
@@ -930,99 +932,25 @@ class BiliWatchLaterPlugin(api.Plugin):
 
     # ------------------------------------------------------- host capability
     def _host_window(self):
-        if self.context is None:
-            return None
-        try:
-            return getattr(self.context, "window", None)
-        except Exception:
-            return None
+        return self.host.window()
 
     def _host_tiles(self):
-        window = self._host_window()
-        wall = getattr(window, "wall", None)
-        tiles = getattr(wall, "tiles", None)
-        try:
-            return list(tiles) if tiles is not None else []
-        except TypeError:
-            return []
+        return self.host.tiles()
 
     def _playback_tiles(self):
-        """Chat cells keep backing Tiles, but are not video destinations."""
-        tiles = self._host_tiles()
-        wall = getattr(self._host_window(), 'wall', None)
-        panes = getattr(wall, 'pane_danmaku', None)
-        if panes is None:
-            return tiles
-        chat_cells = panes.bindings()
-        return [tile for cell, tile in panes.cell_tiles().items()
-                if cell not in chat_cells and tile in tiles]
+        return self.host.playback_tiles()
 
     def _host_player(self, tile):
-        window = self._host_window()
-        players = getattr(window, "players", None)
-        if players is None:
-            return None
-        try:
-            return players.get(tile)
-        except Exception:
-            return None
+        return self.host.player(tile)
 
     def _stop_host_tile(self, tile) -> None:
-        """能力探测：停掉这一格的宿主播放器（释放解码/音频/网络/重连）。"""
-        window = self._host_window()
-        stop = getattr(window, "_stop_tile", None)
-        if not callable(stop):
-            return
-        try:
-            stop(tile)
-        except Exception as error:
-            self._log("host tile stop failed type=" + type(error).__name__)
+        return self.host.stop(tile)
 
     def _start_host_tile(self, tile) -> None:
-        """能力探测：恢复这一格的直播。宿主自己检查 room_id/live/关窗。"""
-        room = getattr(tile, "room", None)
-        if not isinstance(room, dict) or not str(room.get("room_id") or ""):
-            return
-        window = self._host_window()
-        start = getattr(window, "start_tile", None)
-        if not callable(start):
-            return
-        try:
-            start(tile)
-        except Exception as error:
-            self._log("host tile start failed type=" + type(error).__name__)
+        return self.host.start(tile)
 
     def _play_on_host(self, tile, url: str, headers: dict, *, start_paused=False) -> bool:
-        """v1.0 核心：把点播直链注入宿主自己的格子播放器。
-
-        ``_play_on``（app.py）会创建/复用 ``window.players[tile]``、
-        接好宿主状态槽、写 tile.stream_*、发 stream.resolved —— 底栏按钮、
-        占位符、暂停帧、快捷键、拖拽秒切因此全部原生生效。
-        """
-        window = self._host_window()
-        play_on = getattr(window, "_play_on", None)
-        if not callable(play_on):
-            return False
-        muted = bool(getattr(tile, 'muted', False))
-        if start_paused:
-            tile.muted = True  # Suppress audio until the host player has accepted pause.
-        try:
-            play_on(tile, url, profile="web", headers=headers)
-            if start_paused:
-                tile.set_paused(True)
-                player = self._host_player(tile)
-                if player is not None:
-                    player.set_paused(True)
-        except Exception as error:
-            self._log("host play_on failed type=" + type(error).__name__)
-            return False
-        finally:
-            if start_paused:
-                tile.muted = muted
-                player = self._host_player(tile)
-                if player is not None:
-                    player.set_muted(muted or bool(getattr(window, '_match_sync_active', False)))
-        return True
+        return self.host.play(tile, url, headers, start_paused=start_paused)
 
     # --------------------------------------------------------- tile watching
     def _watch_tile(self, tile) -> None:
@@ -2823,8 +2751,7 @@ class BiliWatchLaterPlugin(api.Plugin):
         bvid = str(getattr(item, "bvid", "") or "")
         if not bvid:
             return
-        window = self._host_window()
-        if not callable(getattr(window, "_play_on", None)):
+        if not self.host.supports_playback():
             self._notify_warning(
                 "当前宿主版本不支持内嵌播放，请用浏览器打开。"
             )
