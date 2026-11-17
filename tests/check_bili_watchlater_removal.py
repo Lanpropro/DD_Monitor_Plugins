@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import Mock,patch
 from check_bili_watchlater import APP,models,http_api
 import check_bili_watchlater_page_controls as controls
-from ddm_plugin_bili_watchlater import page as pages,removal_undo,workers,undo_notice
+from ddm_plugin_bili_watchlater import page as pages,removal_undo,workers,undo_notice,list_controller
 from ddm_plugin_bili_watchlater.watch_order import WatchOrder
 from PySide6.QtCore import QObject,Qt,Signal
 from PySide6.QtTest import QTest
@@ -32,9 +32,9 @@ class RemovalTests(unittest.TestCase):
         self.page._cookies={'SESSDATA':'fixture','bili_jct':'fixture-csrf'}
         self.page._generation=3
         self.sent=[]
-        self.patches=[patch.object(pages,'RemoveRequest',Request),
-            patch.object(removal_undo,'AddRequest',Request),
-            patch.object(self.page,'_track',side_effect=self.sent.append),
+        self.patches=[patch.object(list_controller,'RemoveRequest',Request),
+            patch.object(list_controller,'AddRequest',Request),
+            patch.object(self.page.list_controller,'track',side_effect=self.sent.append),
             patch.object(self.page,'_render_after_remove'),patch.object(self.page,'_render')]
         for patcher in self.patches:
             patcher.start()

@@ -1,15 +1,16 @@
 """Recent successful removals and serial server-side re-add, owned by the page."""
-import time
 from PySide6.QtCore import QObject, QTimer
 from PySide6.QtWidgets import QApplication
 from .undo_notice import UndoNotice
-from .workers import AddRequest
 
 
 class RemovalUndo(QObject):
     def __init__(self, page):
         super().__init__(page)
-        self.page = page
+        self.controller = page.list_controller
+        self.controller.removed.connect(self.record)
+        self.controller.operation_finished.connect(self.show_result)
+        self.controller.clearing.connect(self.clear)
         self.notice = UndoNotice(page)
         self.notice.undo_requested.connect(self.undo)
         self.notice.details.undo_requested.connect(self.undo)
@@ -25,14 +26,14 @@ class RemovalUndo(QObject):
 
     def record(self, item):
         if not self.entries:
-            self.baseline = [entry.key for entry in self.page._items]
+            self.baseline = [entry.key for entry in self.controller.items]
             self.order_keys = self.snapshot_order()
         self.entries[item.key] = item
 
     def show_result(self, message=None):
         if not self.entries:
             return
-        busy = bool(self.page._busy_operation or self.page._multi_remove_queue)
+        busy = bool(self.controller.busy_operation or self.controller.remove_queue)
         self.notice.set_items(list(self.entries.values()))
         self.notice.present(message or f'已移除 {len(self.entries)} 个视频', enabled=not busy)
         self.timer.stop()
@@ -56,10 +57,9 @@ class RemovalUndo(QObject):
         self.notice.dismiss(animated=animated)
 
     def undo(self, key=None):
-        page = self.page
-        if page._shutting_down or page._busy_operation or page._multi_remove_queue or not self.entries:
+        if self.controller.closing or self.controller.busy_operation or self.controller.remove_queue or not self.entries:
             return
-        if not page._has_csrf or not page._has_session:
+        if not self.controller.has_csrf or not self.controller.has_session:
             self.clear()
             return
         if key is not None and key not in self.entries:
@@ -69,49 +69,24 @@ class RemovalUndo(QObject):
         self._start_next()
 
     def _start_next(self):
-        page = self.page
-        if page._shutting_down or not self.queue:
+        if self.controller.closing or not self.queue:
             return
-        page._cancel_refresh_for_operation()
-        page._operation_seq += 1
-        page._busy_operation = 'restore'
-        page._set_refreshing(False)
-        page._update_destructive_controls()
-        page.error_bar.clear_error()
         self.notice.set_items(list(self.entries.values()))
         self.notice.present('正在撤回移除…')
-        worker = AddRequest(page._cookies,page._generation,page._operation_seq,self.queue[0].aid)
-        page._active_operation = worker
-        worker.completed.connect(self.completed)
-        worker.failed.connect(self.failed)
-        page._track(worker)
-        if page._active_operation is None:
+        if not self.controller.start_restore(self.queue[0],self.completed,self.failed):
             self.queue.clear()
             self.show_result('撤回失败，可重试')
 
     def accepts(self, request_id, generation):
-        page = self.page
-        return (not page._shutting_down and request_id == page._operation_seq and
-                generation == page._generation and page._busy_operation == 'restore' and bool(self.queue))
+        return bool(self.queue) and self.controller.current_operation(request_id,generation,'restore')
 
     def completed(self, request_id, generation, payload):
         if not self.accepts(request_id,generation):
             return
-        page = self.page
         item = self.queue.pop(0)
         self.entries.pop(item.key,None)
-        if not any(current.key == item.key for current in page._items):
-            page._items.append(item)
-            rank = {key:i for i,key in enumerate(self.baseline)}
-            page._items.sort(key=lambda current:rank.get(current.key,len(rank)))
-        page._items_version += 1
-        page._loaded_at, page._last_update_epoch = time.monotonic(), time.time()
-        if not self.queue:
-            page._end_operation()
-        page._render_after_remove()
-        if page._shutting_down or generation != page._generation:
+        if not self.controller.complete_restore(request_id,generation,item,self.baseline,has_more=bool(self.queue)):
             return
-        page._publish_to_wall()
         self.restore_order(self.order_keys,item.bvid)
         if self.queue:
             QTimer.singleShot(0,self._start_next)
@@ -126,5 +101,5 @@ class RemovalUndo(QObject):
         if not self.accepts(request_id,generation):
             return
         self.queue.clear()
-        self.page._operation_failed(request_id,generation,error)
+        self.controller.operation_failed(request_id,generation,error)
         self.show_result('撤回未完成，可重试')

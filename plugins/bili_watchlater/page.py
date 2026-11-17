@@ -8,7 +8,6 @@ selected destination. Covers and titles only select a thumbnail.
 from __future__ import annotations
 
 import ctypes
-from dataclasses import dataclass
 import math
 import sys
 import time
@@ -69,7 +68,6 @@ from .page_shell import BrowserTitleBar, BrowserWindow, InlineConfirmation, back
 from .entry_icon import GalleryIcon
 from .removal_undo import RemovalUndo
 
-from .bili_api import BiliAPIError, describe_error
 from .covers import CoverLoader
 from .danmaku_count import DanmakuCountProvider
 from .loading_skeleton import SkeletonLoadingView
@@ -79,10 +77,8 @@ from .models import (
     SORT_OPTIONS,
     SORT_RECENT,
     WatchLaterItem,
-    WatchLaterSnapshot,
     filtered_items,
     home_url,
-    safe_int,
     video_url,
     watch_later_web_url,
 )
@@ -107,12 +103,10 @@ from .widgets import (
 )
 from .wheel_scroll import WheelScrollAccumulator
 from .motion_trace import measure
-from .request_retirement import dispose_finished_request, retire_page_request
-from .workers import ClearRequest, ListRequest, RemoveRequest
+from .list_controller import Account as _Account, ListController, CACHE_TTL_SECONDS
 
 # v1.0 性能：缓存 60s 太短，超过一分钟的每次重开都要重新拉列表并走
 # 骨架屏；延长到 5 分钟，手动「刷新」仍可随时强制更新。
-CACHE_TTL_SECONDS = 300.0
 SEARCH_DEBOUNCE_MS = 200
 COVER_REFETCH_DEBOUNCE_MS = 200
 _VISIBLE_ROW_MARGIN = 2
@@ -429,16 +423,34 @@ def _system_animation_enabled() -> bool:
     return True
 
 
-@dataclass(slots=True)
-class _Account:
-    cookies: dict[str, str]
-    generation: int
-    has_session: bool
-    has_csrf: bool
-    error: BaseException | None = None
+
+
+def _list_field(name):
+    """Legacy page attributes forward to the controller's single state owner."""
+    return property(lambda page:getattr(page.list_controller,name),
+                    lambda page,value:setattr(page.list_controller,name,value))
 
 
 class WatchLaterPage(BrowserWindow):
+    _items = _list_field('items')
+    _items_version = _list_field('items_version')
+    _cookies = _list_field('cookies')
+    _has_session = _list_field('has_session')
+    _has_csrf = _list_field('has_csrf')
+    _generation = _list_field('generation')
+    _loaded_once = _list_field('loaded_once')
+    _loaded_at = _list_field('loaded_at')
+    _last_update_epoch = _list_field('last_update_epoch')
+    _request_seq = _list_field('request_seq')
+    _operation_seq = _list_field('operation_seq')
+    _active_list = _list_field('active_list')
+    _active_operation = _list_field('active_operation')
+    _busy_operation = _list_field('busy_operation')
+    _pending_remove = _list_field('pending_remove')
+    _requests = _list_field('requests')
+    _multi_remove_queue = _list_field('remove_queue')
+    _shutting_down = _list_field('closing')
+
     closed = Signal()
     preferences_changed = Signal(object)
     items_changed = Signal(object)
@@ -455,15 +467,14 @@ class WatchLaterPage(BrowserWindow):
     ) -> None:
         super().__init__(parent)
         self.context = context
+        self.list_controller = ListController(self,context)
         self.preferences = read_preferences(context)
         self._settings_dialog = None
         self._settings_panel_cache = None
         self._placement_picker = None
         self._layout_provider = None
         self.wall = wall
-        self._shutting_down = False
         self._visible = False
-        self._items: list[WatchLaterItem] = []
         self._selected_key = None
         self._placement_handler = None
         self._rows: list[RowCard] = []
@@ -480,22 +491,7 @@ class WatchLaterPage(BrowserWindow):
         self._grid_columns = GRID_COLUMNS
         self._grid_cell_size: tuple[int, int] | None = None
         self._filter_cache: tuple[tuple, list[WatchLaterItem]] | None = None
-        self._items_version = 0
         self._destructive_ready: bool | None = None
-        self._cookies: dict[str, str] = {}
-        self._has_session = False
-        self._has_csrf = False
-        self._generation = 0
-        self._loaded_once = False
-        self._loaded_at = 0.0
-        self._last_update_epoch = 0.0
-        self._request_seq = 0
-        self._operation_seq = 0
-        self._active_list: ListRequest | None = None
-        self._active_operation: Any = None
-        self._busy_operation = ""
-        self._pending_remove: WatchLaterItem | None = None
-        self._requests: set[Any] = set()
         self._login_expired = False
         self._last_open_at = 0.0
         self._last_open_url = ""
@@ -515,7 +511,6 @@ class WatchLaterPage(BrowserWindow):
         # v1.0 需求 10/11：多选快速删除状态机 + 快速选片入口。
         self._multiselect_state = MULTISELECT_IDLE
         self._multi_selected_keys: set[str] = set()
-        self._multi_remove_queue: list[str] = []
         self._quick_pick_active = False
         # v1.0 需求 3：窗口不允许最小化（去掉最小化按钮 + 拒绝最小化状态）。
         self._window_flag_guard = False
@@ -981,7 +976,7 @@ class WatchLaterPage(BrowserWindow):
         self.window_header.set_page()
         self._refresh_shortcut.setEnabled(True)
         self._refresh_multi_button()
-        if self._visible and not self._shutting_down:
+        if self._visible and not self.list_controller.closing:
             self.covers.resume()
             self._schedule_visible_covers()
             (self.settings_button if isinstance(panel, WatchLaterSettings) else self.search).setFocus(Qt.OtherFocusReason)
@@ -1153,7 +1148,7 @@ class WatchLaterPage(BrowserWindow):
         * 最后把滚动值夹回新的 maximum，保持原来的视觉锚点。
         多选删除串行推进时每条都走这里，不会越删越回到顶部。
         """
-        if self._shutting_down:
+        if self.list_controller.closing:
             return
         try:
             scroll = self._active_scroll()
@@ -1198,7 +1193,7 @@ class WatchLaterPage(BrowserWindow):
         if not key:
             return
         cached = self._filter_cache
-        selected = cached[1] if cached is not None else self._items
+        selected = cached[1] if cached is not None else self.list_controller.items
         for index, item in enumerate(selected):
             if item.key == key:
                 need = index + 1 + self._initial_limit()
@@ -1236,7 +1231,7 @@ class WatchLaterPage(BrowserWindow):
         return True
 
     def _on_view_mode_changed(self, mode: str) -> None:
-        if self._shutting_down or mode == self._view_mode:
+        if self.list_controller.closing or mode == self._view_mode:
             return
         anchor = self._visible_anchor_key()
         self._flush_wheel_scrollers()
@@ -1246,7 +1241,7 @@ class WatchLaterPage(BrowserWindow):
         self.view_switch.set_mode(self._view_mode)
         self._release_covers()
         # 未登录/加载失败等状态不因切换视图而被覆盖。
-        if self._loaded_once:
+        if self.list_controller.loaded_once:
             # v1.0 需求：：切换视图不再强制回到顶部，而是把同一视频留在顶边。
             self._ensure_anchor_materialized(anchor)
             self._render()
@@ -1268,7 +1263,7 @@ class WatchLaterPage(BrowserWindow):
         只在窗口模式（``isWindow()``）生效：内嵌到宿主面板时标志归宿主管，
         改了会连带把嵌入式页面变成独立窗口。
         """
-        if self._shutting_down or not self.isWindow():
+        if self.list_controller.closing or not self.isWindow():
             return False
         flags = (self.windowFlags() | Qt.FramelessWindowHint) & ~Qt.WindowMinimizeButtonHint
         if self.windowFlags() == flags:
@@ -1283,7 +1278,7 @@ class WatchLaterPage(BrowserWindow):
         右键都不看 Qt 的窗口标志。这里把 WindowMinimized 位抹掉并 show()，
         窗口原地回到正常态（不改几何）。
         """
-        if self._shutting_down or self._minimize_guard:
+        if self.list_controller.closing or self._minimize_guard:
             return
         if not self.isWindow():
             return
@@ -1305,12 +1300,12 @@ class WatchLaterPage(BrowserWindow):
         has_view = self.stack.currentWidget() is scroll
         self.fab_top.setVisible(True)
         self.fab_top.setEnabled(has_view and scroll.verticalScrollBar().value() > 0)
-        self.fab_bar.setVisible(self._visible and not self._shutting_down)
+        self.fab_bar.setVisible(self._visible and not self.list_controller.closing)
 
     def eventFilter(self, watched, event) -> bool:
         if (event.type() == QEvent.Resize
                 and watched is self.grid_scroll.viewport()
-                and not self._shutting_down):
+                and not self.list_controller.closing):
             self._grid_resize_timer.start()
         return super().eventFilter(watched, event)
 
@@ -1322,7 +1317,7 @@ class WatchLaterPage(BrowserWindow):
         状态都保留），并用「首个可见条目 key」把滚动位置钉回去；列数没变且
         单元格尺寸也没变时原地返回，滚动/拖动窗口不会做无谓的布局工作。
         """
-        if self._shutting_down or self._building_rows or not self._cards or self._view_mode != "grid":
+        if self.list_controller.closing or self._building_rows or not self._cards or self._view_mode != "grid":
             return
         viewport = self.grid_scroll.viewport()
         gap = self.grid_layout.spacing()
@@ -1397,7 +1392,7 @@ class WatchLaterPage(BrowserWindow):
     def _update_header(
         self, shown: int, total: int, filtered: bool = False
     ) -> None:
-        if not self._loaded_once:
+        if not self.list_controller.loaded_once:
             self.count_label.setText("")
             return
         if total == 0:
@@ -1406,15 +1401,15 @@ class WatchLaterPage(BrowserWindow):
             text = f"显示 {shown} / 共 {total} 个"
         else:
             text = f"共 {total} 个"
-        if self._last_update_epoch:
+        if self.list_controller.last_update_epoch:
             text += " · " + time.strftime(
-                "%H:%M", time.localtime(self._last_update_epoch)
+                "%H:%M", time.localtime(self.list_controller.last_update_epoch)
             ) + " 更新"
         self.count_label.setText(text)
 
     def _set_refreshing(self, active: bool) -> None:
-        ready = (not active and not self._busy_operation and self._has_session
-                 and not self._shutting_down)
+        ready = (not active and not self.list_controller.busy_operation and self.list_controller.has_session
+                 and not self.list_controller.closing)
         self.refresh_button.setText("刷新中…" if active else "刷新")
         self.refresh_button.setEnabled(ready)
         self.fab_refresh.set_busy(active)
@@ -1424,11 +1419,11 @@ class WatchLaterPage(BrowserWindow):
 
     def _update_destructive_controls(self) -> None:
         ready = (
-            self._has_session
-            and self._has_csrf
-            and bool(self._items)
-            and not self._busy_operation
-            and not self._shutting_down
+            self.list_controller.has_session
+            and self.list_controller.has_csrf
+            and bool(self.list_controller.items)
+            and not self.list_controller.busy_operation
+            and not self.list_controller.closing
         )
         # v1.0 需求：：右上角「更多」菜单已删除，「清空稍后再看」入口随之
         # 消失（_confirm_clear / _begin_clear 保留给未来的宿主入口）。
@@ -1442,17 +1437,7 @@ class WatchLaterPage(BrowserWindow):
         self._refresh_multi_button()
 
     def _remove_reason(self, item: WatchLaterItem) -> str:
-        if self._shutting_down:
-            return "插件正在关闭"
-        if not self._has_session:
-            return "请先登录 B 站"
-        if item.aid <= 0:
-            return "该条目缺少 aid，请到网页版处理"
-        if not self._has_csrf:
-            return "登录信息不完整，请重新登录后再试"
-        if self._busy_operation:
-            return "正在执行其他操作，请稍候"
-        return ""
+        return self.list_controller.remove_reason(item)
 
     # -------------------------------------------------------------- states
     def _show_loading(self) -> None:
@@ -1460,7 +1445,7 @@ class WatchLaterPage(BrowserWindow):
         self.loading_view.set_mode(self._view_mode)
         self.stack.setCurrentWidget(self.loading_view)
         self.loading_view.set_state("正在加载稍后再看…", loading=True)
-        self._update_header(0, len(self._items))
+        self._update_header(0, len(self.list_controller.items))
 
     def _show_login_state(self, expired: bool = False) -> None:
         self._login_expired = expired
@@ -1488,7 +1473,7 @@ class WatchLaterPage(BrowserWindow):
             self._clear_account_data()
             self._show_login_state(expired=True)
             return
-        if self._items:
+        if self.list_controller.items:
             self.error_bar.show_error("刷新失败：" + message)
             self._render()
             return
@@ -1511,7 +1496,7 @@ class WatchLaterPage(BrowserWindow):
         用户的滚动位置、已展开的分页量、隐藏视图里的封面都应保留，否则
         几百个控件会被销毁重建、滚动条范围骤降，整页跳一下并逐行闪。
         """
-        if self._shutting_down:
+        if self.list_controller.closing:
             return
         if self._building_rows:
             # 分批让出期间被定时器触发的重入：延后到构建完成后统一重排，
@@ -1519,10 +1504,10 @@ class WatchLaterPage(BrowserWindow):
             self._render_pending = True
             return
         self.browse_state.validate_account()
-        total = len(self._items)
+        total = len(self.list_controller.items)
         if not total:
             self._clear_rows()
-            if self._loaded_once:
+            if self.list_controller.loaded_once:
                 self.empty_view.set_state(
                     "稍后再看是空的",
                     "在 B 站点击“稍后再看”后，视频会出现在这里。",
@@ -1541,14 +1526,14 @@ class WatchLaterPage(BrowserWindow):
         # Cache the filtered/sorted view: repeated renders with unchanged inputs
         # (cover deliveries, status flashes, destructive-control refreshes) used
         # to re-run filter+sort over the whole list every time.
-        signature = (query, filter_mode, sort_mode, self._items_version)
+        signature = (query, filter_mode, sort_mode, self.list_controller.items_version)
         cached = self._filter_cache
         prev_signature = cached[0] if cached is not None else None
         if cached is not None and cached[0] == signature:
             selected = cached[1]
         else:
             selected = filtered_items(
-                self._items, query, filter_mode, sort_mode
+                self.list_controller.items, query, filter_mode, sort_mode
             )
             self._filter_cache = (signature, selected)
         # v1.0：新查询（搜索/筛选/排序/数据变化）回到首屏；滚动追加时
@@ -1705,7 +1690,7 @@ class WatchLaterPage(BrowserWindow):
         visible_items = items[:self._render_limit]
         allow_yield = (
             self._visible
-            and not self._shutting_down
+            and not self.list_controller.closing
             and len(visible_items) >= GRID_BUILD_YIELD_MIN
             and QApplication.instance() is not None
         )
@@ -1791,7 +1776,7 @@ class WatchLaterPage(BrowserWindow):
 
         allow_yield = (
             self._visible
-            and not self._shutting_down
+            and not self.list_controller.closing
             and len(visible_items) >= ROW_BUILD_YIELD_MIN
             and QApplication.instance() is not None
         )
@@ -1871,7 +1856,7 @@ class WatchLaterPage(BrowserWindow):
 
     @measure('cover_ready')
     def _cover_ready(self, url: str) -> None:
-        if self._shutting_down or self._building_rows:
+        if self.list_controller.closing or self._building_rows:
             return
         # v1 scanned every row per delivered cover (O(n) each).  Index by cover
         # URL instead, so a delivery touches only the rows that show it.
@@ -1890,7 +1875,7 @@ class WatchLaterPage(BrowserWindow):
     # -------------------------------------------------- visible-cover refill
     def _danmaku_provider(self) -> DanmakuCountProvider | None:
         """v1.0 需求：：弹幕数提供器懒创建；shutdown 后不再重建。"""
-        if self._shutting_down:
+        if self.list_controller.closing:
             return None
         if self._danmaku is None:
             try:
@@ -1905,7 +1890,7 @@ class WatchLaterPage(BrowserWindow):
         return self._danmaku
 
     def _danmaku_ready(self, bvid: str, count: int) -> None:
-        if self._shutting_down:
+        if self.list_controller.closing:
             return
         # 两种视图可能共享同一 item；每个 meta 都要更新，不能首个命中就返回。
         for index in (self._rows_by_key, self._cards_by_key):
@@ -1913,14 +1898,14 @@ class WatchLaterPage(BrowserWindow):
             if view is not None:
                 view.set_danmaku_count(count)
         # 行已滚出/被筛选掉：写回模型供下次物化。
-        for item in self._items:
+        for item in self.list_controller.items:
             if item.bvid == bvid:
                 item.danmaku_count = count
                 break
 
     def _view_count_ready(self, bvid: str, count: object) -> None:
         """v1.0 需求：：播放量到位，只改 meta 行，不重建行/卡。"""
-        if self._shutting_down or count is None:
+        if self.list_controller.closing or count is None:
             return
         try:
             value = max(0, int(count))
@@ -1930,7 +1915,7 @@ class WatchLaterPage(BrowserWindow):
             view = index.get(bvid)
             if view is not None:
                 view.set_view_count(value)
-        for item in self._items:
+        for item in self.list_controller.items:
             if item.bvid == bvid:
                 item.view_count = value
                 break
@@ -1959,7 +1944,7 @@ class WatchLaterPage(BrowserWindow):
         self._scroll_refetch_connected = False
 
     def _schedule_visible_covers(self, *_args) -> None:
-        if self._shutting_down or not self._visible or self._building_rows or self._inline_panel is not None:
+        if self.list_controller.closing or not self._visible or self._building_rows or self._inline_panel is not None:
             return
         # Deliveries and scrollbar signals must not indefinitely reset refill.
         if not self._cover_scroll_timer.isActive():
@@ -1980,7 +1965,7 @@ class WatchLaterPage(BrowserWindow):
         让出事件循环，一批 16 张是 4 段 ~5ms，不会出现 20ms 的整块冻结。
         """
         if (
-            self._shutting_down
+            self.list_controller.closing
             or not self._visible
             or self._building_rows
             or self._grow_busy
@@ -2003,7 +1988,7 @@ class WatchLaterPage(BrowserWindow):
         """追加一批 RowCard；只有当前分页窗口内的条目会被物化。"""
         self._grow_pending = False
         if (
-            self._shutting_down
+            self.list_controller.closing
             or not self._visible
             or self._inline_panel is not None
             or self._building_rows
@@ -2051,7 +2036,7 @@ class WatchLaterPage(BrowserWindow):
         「之前加载好的封面又要重新加载一次，很卡」。现在只有离视口超过保留带
         的卡片才释放，正常来回滚不会再触发重建。
         """
-        if self._shutting_down or not self._visible or self._building_rows or self._inline_panel is not None:
+        if self.list_controller.closing or not self._visible or self._building_rows or self._inline_panel is not None:
             return
         grid = self._view_mode == "grid"
         rows = self._cards if grid else self._rows
@@ -2137,230 +2122,30 @@ class WatchLaterPage(BrowserWindow):
 
     # -------------------------------------------------------------- account
     def _read_account(self) -> _Account:
-        try:
-            snapshot = self.context.credentials("bilibili")
-        except Exception as error:
-            return _Account({}, self._generation, False, False, error)
-        if snapshot is None:
-            return _Account({}, self._generation, False, False, None)
-        values = getattr(snapshot, "values", None)
-        if values is None and isinstance(snapshot, dict):
-            values = snapshot
-        cookies: dict[str, str] = {}
-        try:
-            if values is not None:
-                for key, value in dict(values).items():
-                    if value is not None:
-                        cookies[str(key)] = str(value)
-        except (TypeError, ValueError) as error:
-            return _Account({}, self._generation, False, False, error)
-        generation = safe_int(getattr(snapshot, "generation", 0))
-        return _Account(
-            cookies=cookies,
-            generation=generation,
-            has_session=bool(cookies.get("SESSDATA", "").strip()),
-            has_csrf=bool(cookies.get("bili_jct", "").strip()),
-            error=None,
-        )
+        return self.list_controller.read_account()
 
-    def _clear_account_data(self, *, clear_credentials: bool = True) -> None:
-        self.removal_undo.clear()
-        self.card_preview.unavailable.clear()
-        self._items.clear()
-        self._items_version += 1
-        self._clear_rows()
-        self.covers.clear()
-        # v1.0 需求：：账号数据作废时弹幕数缓存一并清空。
-        if self._danmaku is not None:
-            self._danmaku.clear()
-        self._loaded_once = False
-        self._loaded_at = 0.0
-        self._last_update_epoch = 0.0
-        self._pending_remove = None
-        self.error_bar.clear_error()
-        if clear_credentials:
-            self._cookies = {}
-            self._has_session = False
-            self._has_csrf = False
-        self._clear_status()
-        self._set_refreshing(False)
-        self._update_header(0, 0)
-        self._update_destructive_controls()
-        self.items_changed.emit([])
+    def _clear_account_data(self, *, clear_credentials: bool=True) -> None:
+        return self.list_controller.clear_account_data(clear_credentials=clear_credentials)
 
-    def on_account_changed(self, generation: Any = None) -> None:
-        if self._shutting_down:
-            return
-        self.removal_undo.clear()
-        self.card_preview.unavailable.clear()
-        self.browse_state.clear()
-        self._request_seq += 1
-        self._operation_seq += 1
-        self._cancel_request(self._active_list)
-        self._cancel_request(self._active_operation)
-        self._active_list = None
-        self._active_operation = None
-        self._busy_operation = ""
-        self._items.clear()
-        self._items_version += 1
-        self._clear_rows()
-        self.covers.clear()
-        # v1.0 需求：：账号数据作废时弹幕数缓存一并清空。
-        if self._danmaku is not None:
-            self._danmaku.clear()
-        self._loaded_once = False
-        self._loaded_at = 0.0
-        self._last_update_epoch = 0.0
-        self._pending_remove = None
-        self.error_bar.clear_error()
-        self._clear_status()
-        self._set_refreshing(False)
-        if self.wall is not None:
-            try:
-                self.wall.clear_bindings()
-            except Exception:
-                pass
-
-        account = self._read_account()
-        if account.generation:
-            self._generation = account.generation
-        else:
-            self._generation = safe_int(generation)
-        self._cookies = account.cookies
-        self._has_session = account.has_session
-        self._has_csrf = account.has_csrf
-        self._login_expired = False
-        self._set_refreshing(False)
-        self._update_destructive_controls()
-
-        self.items_changed.emit([])
-        if not self._visible:
-            return
-        if account.error is not None:
-            self._show_list_error(
-                "无法读取登录信息：" + describe_error(account.error),
-                login_expired=False,
-            )
-            return
-        if not account.has_session:
-            self._show_login_state(expired=False)
-            return
-        self._load(manual=False)
+    def on_account_changed(self, generation: Any=None) -> None:
+        return self.list_controller.on_account_changed(generation)
 
     # ---------------------------------------------------------------- load
     def _cache_fresh(self) -> bool:
-        return (
-            self._loaded_once
-            and time.monotonic() - self._loaded_at < CACHE_TTL_SECONDS
-        )
+        return self.list_controller.cache_fresh()
 
     def _load(self, *, manual: bool) -> None:
-        # 按钮、菜单、F5、画面墙共用单飞守卫，不取消后重开同一请求。
-        if self._shutting_down or self._busy_operation or self._active_list is not None:
-            return
-        if manual:
-            self.card_preview.unavailable.clear()
-        self._clear_status()
-        account = self._read_account()
-        if account.error is not None:
-            self._show_list_error(
-                "无法读取登录信息：" + describe_error(account.error),
-                login_expired=False,
-            )
-            return
-        if not account.has_session:
-            self._clear_account_data()
-            self._show_login_state(expired=False)
-            return
-        if account.generation and account.generation != self._generation:
-            self._generation = account.generation
-            self._clear_account_data(clear_credentials=False)
-        self._cookies = account.cookies
-        self._has_session = True
-        self._has_csrf = account.has_csrf
-        self._update_destructive_controls()
+        return self.list_controller.load(manual=manual)
 
-        self._request_seq += 1
-        request_id = self._request_seq
-        self._cancel_request(self._active_list)
-        self._active_list = None
+    def _list_completed(self, request_id: int, generation: int, snapshot: Any) -> None:
+        return self.list_controller.list_completed(request_id, generation, snapshot)
 
-        self.error_bar.clear_error()
-        self._set_refreshing(True)
-        if not self._loaded_once:
-            self._show_loading()
-
-        worker = ListRequest(
-            self._cookies, self._generation, request_id
-        )
-        self._active_list = worker
-        worker.completed.connect(self._list_completed)
-        worker.failed.connect(self._list_failed)
-        self._track(worker)
-
-    def _list_completed(
-        self, request_id: int, generation: int, snapshot: Any
-    ) -> None:
-        if self._shutting_down:
-            return
-        if request_id != self._request_seq or generation != self._generation:
-            return
-        self._active_list = None
-        self._set_refreshing(False)
-        if not isinstance(snapshot, WatchLaterSnapshot):
-            self._list_failed(
-                request_id,
-                generation,
-                BiliAPIError("数据格式异常", format_error=True),
-            )
-            return
-        self._items = list(snapshot.items)
-        self._items_version += 1
-        self._loaded_once = True
-        self._loaded_at = time.monotonic()
-        self._last_update_epoch = time.time()
-        self.error_bar.clear_error()
-        self._log(
-            "list endpoint=%s status=%s code=0 count=%s total=%s"
-            % (
-                snapshot.endpoint,
-                snapshot.http_status,
-                len(snapshot.items),
-                snapshot.total,
-            )
-        )
-        self._render()
-        self._publish_to_wall()
-
-    def _list_failed(
-        self, request_id: int, generation: int, error: Any
-    ) -> None:
-        if self._shutting_down:
-            return
-        if request_id != self._request_seq or generation != self._generation:
-            return
-        self._active_list = None
-        self._set_refreshing(False)
-        if not isinstance(error, BaseException):
-            error = BiliAPIError("请求失败，请重试")
-        self._log(
-            "list failed endpoint=%s status=%s code=%s"
-            % (
-                getattr(error, "endpoint", ""),
-                getattr(error, "http_status", ""),
-                getattr(error, "code", ""),
-            )
-        )
-        login_expired = bool(
-            isinstance(error, BiliAPIError) and error.login_required
-        )
-        self._show_list_error(
-            describe_error(error), login_expired=login_expired
-        )
+    def _list_failed(self, request_id: int, generation: int, error: Any) -> None:
+        return self.list_controller.list_failed(request_id, generation, error)
 
     # ---------------------------------------------------------- destructive
     def _confirm_remove(self, item: WatchLaterItem) -> None:
-        if self._shutting_down or self._busy_operation:
+        if self.list_controller.closing or self.list_controller.busy_operation:
             return
         reason = self._remove_reason(item)
         if reason:
@@ -2371,162 +2156,44 @@ class WatchLaterPage(BrowserWindow):
     def _confirm_action(self, title, message, action, callback):
         self.card_preview.stop()
         self._back_to_browser()
-        generation = self._generation
+        generation = self.list_controller.generation
         panel = InlineConfirmation(title, message, action, self)
         self._show_inline_panel(panel, title)
-        panel.finished.connect(lambda result: callback() if result == 1 and not self._shutting_down
-                               and generation == self._generation else None)
+        panel.finished.connect(lambda result: callback() if result == 1 and not self.list_controller.closing
+                               and generation == self.list_controller.generation else None)
 
     def _begin_remove(self, item: WatchLaterItem) -> None:
-        if self._busy_operation or not self._has_csrf:
-            return
-        self._cancel_refresh_for_operation()
-        self._operation_seq += 1
-        request_id = self._operation_seq
-        self._pending_remove = item
-        self._busy_operation = "remove"
-        self.error_bar.clear_error()
-        self._set_refreshing(False)
-        self._update_destructive_controls()
-        worker = RemoveRequest(
-            self._cookies,
-            self._generation,
-            request_id,
-            item.aid,
-        )
-        self._active_operation = worker
-        worker.completed.connect(self._remove_completed)
-        worker.failed.connect(self._operation_failed)
-        self._track(worker)
+        return self.list_controller.begin_remove(item)
 
-    def _remove_completed(
-        self, request_id: int, generation: int, _payload: Any
-    ) -> None:
-        if self._shutting_down:
-            return
-        if (
-            request_id != self._operation_seq
-            or generation != self._generation
-            or self._busy_operation != "remove"
-        ):
-            return
-        item = self._pending_remove
-        if item is not None:
-            self.removal_undo.record(item)
-            self._items = [
-                current
-                for current in self._items
-                if current.key != item.key
-            ]
-        self._pending_remove = None
-        self._items_version += 1
-        self._loaded_at = time.monotonic()
-        self._last_update_epoch = time.time()
-        self._end_operation()
-        self._render_after_remove()
-        self._publish_to_wall()
-        self.removal_undo.show_result()
-        self._log("remove endpoint=del status=200 code=0 count=1")
-        # v1.0 需求 10：多选删除串行推进下一个（队列空时立即返回）。
-        QTimer.singleShot(0, self._pump_multi_remove)
+    def _remove_completed(self, request_id: int, generation: int, _payload: Any) -> None:
+        return self.list_controller.remove_completed(request_id, generation, _payload)
 
     def _confirm_clear(self) -> None:
-        if self._shutting_down or self._busy_operation:
+        if self.list_controller.closing or self.list_controller.busy_operation:
             return
-        if not self._has_csrf:
+        if not self.list_controller.has_csrf:
             self._flash_status("登录信息不完整，请重新登录后再试")
             return
-        if not self._items:
+        if not self.list_controller.items:
             self._flash_status("稍后再看已经是空的")
             return
         self._confirm_action('清空稍后再看', '此操作会删除当前 B 站账号的全部稍后再看，无法撤销。',
                              '清空', self._begin_clear)
 
     def _begin_clear(self) -> None:
-        if self._busy_operation or not self._has_csrf:
-            return
-        self.removal_undo.clear()
-        self._cancel_refresh_for_operation()
-        self._operation_seq += 1
-        request_id = self._operation_seq
-        self._busy_operation = "clear"
-        self.error_bar.clear_error()
-        self._set_refreshing(False)
-        self._update_destructive_controls()
-        worker = ClearRequest(
-            self._cookies, self._generation, request_id
-        )
-        self._active_operation = worker
-        worker.completed.connect(self._clear_completed)
-        worker.failed.connect(self._operation_failed)
-        self._track(worker)
+        return self.list_controller.begin_clear()
 
-    def _clear_completed(
-        self, request_id: int, generation: int, _payload: Any
-    ) -> None:
-        if self._shutting_down:
-            return
-        if (
-            request_id != self._operation_seq
-            or generation != self._generation
-            or self._busy_operation != "clear"
-        ):
-            return
-        self._items.clear()
-        self._items_version += 1
-        self.covers.clear()
-        self._loaded_once = True
-        self._loaded_at = time.monotonic()
-        self._last_update_epoch = time.time()
-        self._end_operation()
-        self._render()
-        self._publish_to_wall()
-        self._flash_status("已清空")
-        self._log("clear endpoint=clear status=200 code=0 count=0")
+    def _clear_completed(self, request_id: int, generation: int, _payload: Any) -> None:
+        return self.list_controller.clear_completed(request_id, generation, _payload)
 
-    def _operation_failed(
-        self, request_id: int, generation: int, error: Any
-    ) -> None:
-        if self._shutting_down:
-            return
-        if (
-            request_id != self._operation_seq
-            or generation != self._generation
-            or not self._busy_operation
-        ):
-            return
-        if not isinstance(error, BaseException):
-            error = BiliAPIError("操作失败，请重试")
-        self._log(
-            "operation failed endpoint=%s status=%s code=%s"
-            % (
-                getattr(error, "endpoint", ""),
-                getattr(error, "http_status", ""),
-                getattr(error, "code", ""),
-            )
-        )
-        login_expired = bool(
-            isinstance(error, BiliAPIError) and error.login_required
-        )
-        self._end_operation()
-        self._multi_remove_queue.clear()  # v1.0：失败即停止后续多选删除
-        if login_expired:
-            self._clear_account_data()
-            self._show_login_state(expired=True)
-            return
-        self.error_bar.show_error("操作失败：" + describe_error(error))
-        self.removal_undo.show_result()
+    def _operation_failed(self, request_id: int, generation: int, error: Any) -> None:
+        return self.list_controller.operation_failed(request_id, generation, error)
 
     def _end_operation(self) -> None:
-        self._busy_operation = ""
-        self._pending_remove = None
-        self._set_refreshing(False)
-        self._update_destructive_controls()
+        return self.list_controller.end_operation()
 
     def _cancel_refresh_for_operation(self) -> None:
-        self._request_seq += 1
-        self._cancel_request(self._active_list)
-        self._active_list = None
+        return self.list_controller.cancel_refresh_for_operation()
 
     # --------------------------------------------------------------- actions
     # ----------------------------------------------------- v1.0 播放到格子
@@ -2571,7 +2238,7 @@ class WatchLaterPage(BrowserWindow):
         播放回调），所以「点视频即投放到目标格」链路完全复用、不改 plugin.py。
         再点一次退出并 emit ``pick_cancelled`` 通知 plugin 清目标格。
         """
-        if self._shutting_down:
+        if self.list_controller.closing:
             return
         if self._quick_pick_active:
             self.set_pick_target(None)
@@ -2592,7 +2259,7 @@ class WatchLaterPage(BrowserWindow):
         self.multi_delete_button.setToolTip('退出多选' if confirming else '多选删除')
 
     def _on_multi_delete_clicked(self) -> None:
-        if self._shutting_down:
+        if self.list_controller.closing:
             return
         if multiselect_is_confirming(self._multiselect_state):
             self._cancel_multiselect()
@@ -2610,7 +2277,7 @@ class WatchLaterPage(BrowserWindow):
         """取消/退出多选：清空选中且不删任何东西。"""
         self._multiselect_state = multiselect_cancel(self._multiselect_state)
         self._multi_selected_keys = set()
-        self._multi_remove_queue.clear()
+        self.list_controller.cancel_pending_removals()
         self._apply_multiselect_to_views()
         self._refresh_multi_button()
         self._clear_status()
@@ -2639,7 +2306,7 @@ class WatchLaterPage(BrowserWindow):
         if not keys:
             self._flash_status("请先选择要删除的视频")
             return  # 没选中就保持确认态，绝不静默删
-        items = [it for it in self._items if it.key in keys]
+        items = [it for it in self.list_controller.items if it.key in keys]
         reason = self._remove_reason(items[0]) if items else ""
         if reason:
             self._flash_status(reason)
@@ -2648,19 +2315,10 @@ class WatchLaterPage(BrowserWindow):
         self._multi_selected_keys = set()
         self._apply_multiselect_to_views()
         self._refresh_multi_button()
-        self._multi_remove_queue = [it.key for it in items]
-        self._pump_multi_remove()
+        self.list_controller.remove_many(items)
 
     def _pump_multi_remove(self) -> None:
-        if (self._shutting_down or self._busy_operation
-                or not self._multi_remove_queue):
-            return
-        key = self._multi_remove_queue.pop(0)
-        item = next((it for it in self._items if it.key == key), None)
-        if item is None:
-            QTimer.singleShot(0, self._pump_multi_remove)
-            return
-        self._begin_remove(item)
+        return self.list_controller.pump_multi_remove()
 
     def _play_item(self, item: WatchLaterItem) -> None:
         if callable(self._layout_provider):
@@ -2692,7 +2350,7 @@ class WatchLaterPage(BrowserWindow):
         and turn one double click into an unintended tile swap.
         """
         was_pick = self._quick_pick_active
-        if not was_pick and not self._shutting_down:
+        if not was_pick and not self.list_controller.closing:
             self.close()
 
     def _open_item(self, item: WatchLaterItem) -> None:
@@ -2758,54 +2416,16 @@ class WatchLaterPage(BrowserWindow):
     # --------------------------------------------------------------- threads
     @staticmethod
     def _cancel_request(worker: Any) -> None:
-        if worker is None:
-            return
-        try:
-            worker.cancel()
-        except Exception:
-            pass
+        return ListController.cancel_request(worker)
 
     def _track(self, worker: Any) -> None:
-        self._requests.add(worker)
-        worker.finished.connect(
-            self._request_finished,
-            Qt.QueuedConnection,
-        )
-        try:
-            worker.start()
-        except Exception as error:
-            self._requests.discard(worker)
-            list_failed = self._active_list is worker
-            if self._active_list is worker:
-                self._active_list = None
-            if self._active_operation is worker:
-                self._active_operation = None
-            dispose_finished_request(worker)
-            self._busy_operation = ""
-            self._set_refreshing(False)
-            self._update_destructive_controls()
-            if list_failed:
-                self._show_list_error(
-                    "请求失败：" + describe_error(error),
-                    login_expired=False,
-                )
-            else:
-                self.error_bar.show_error(
-                    "操作失败：" + describe_error(error)
-                )
+        return self.list_controller.track(worker)
 
     def _request_finished(self) -> None:
-        worker = self.sender()
-        if worker is not None:
-            self._retire(worker)
+        return self.list_controller.request_finished()
 
     def _retire(self, worker: Any) -> None:
-        self._requests.discard(worker)
-        if self._active_list is worker:
-            self._active_list = None
-        if self._active_operation is worker:
-            self._active_operation = None
-        dispose_finished_request(worker)
+        return self.list_controller.retire(worker)
 
     def _log(self, message: str) -> None:
         try:
@@ -2818,44 +2438,44 @@ class WatchLaterPage(BrowserWindow):
         """Push the current list and session state to the tile controller."""
         self.items_changed.emit(self.items_snapshot())
         wall = self.wall
-        if wall is None or self._shutting_down:
+        if wall is None or self.list_controller.closing:
             return
         try:
-            wall.set_items(self._items)
+            wall.set_items(self.list_controller.items)
             wall.set_session_state(
-                has_session=self._has_session and self._has_csrf,
-                busy=bool(self._busy_operation),
+                has_session=self.list_controller.has_session and self.list_controller.has_csrf,
+                busy=bool(self.list_controller.busy_operation),
             )
         except Exception:
             pass
 
     def items_snapshot(self) -> list[WatchLaterItem]:
         """Read-only copy of the current list for the tile picker."""
-        return list(self._items)
+        return list(self.list_controller.items)
 
     def has_session(self) -> bool:
-        return bool(self._has_session)
+        return bool(self.list_controller.has_session)
 
     def pick_item_for_tile(self, parent=None) -> WatchLaterItem | None:
         """Show the picker over the in-memory list; never touches the network."""
         from .picker import WatchLaterPicker
 
-        if self._shutting_down:
+        if self.list_controller.closing:
             return None
-        if not self._items:
+        if not self.list_controller.items:
             self._flash_status("稍后再看列表为空，请先刷新")
             return None
-        return WatchLaterPicker.pick(self._items, parent or self)
+        return WatchLaterPicker.pick(self.list_controller.items, parent or self)
 
     def refresh_from_wall(self) -> None:
         """Refresh requested from a tile menu; keeps the current tile state."""
-        if self._shutting_down or self._busy_operation:
+        if self.list_controller.closing or self.list_controller.busy_operation:
             return
         self._load(manual=True)
 
     def remove_from_wall(self, item: WatchLaterItem) -> None:
         """Remove one item requested from a tile menu, with the same guards."""
-        if self._shutting_down or self._busy_operation:
+        if self.list_controller.closing or self.list_controller.busy_operation:
             return
         reason = self._remove_reason(item)
         if reason:
@@ -2866,7 +2486,7 @@ class WatchLaterPage(BrowserWindow):
     # ------------------------------------------------------------ lifecycle
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
-        if self._shutting_down:
+        if self.list_controller.closing:
             return
         # v1.0 需求 3：先摘掉最小化按钮。setWindowFlag 会让 Qt 把窗口藏起来
         # （原生窗口重建），所以补一次 show() 再走完本轮 showEvent；这一 hides
@@ -2896,7 +2516,7 @@ class WatchLaterPage(BrowserWindow):
             if not self._apply_saved_geometry():
                 self._center_on_parent()
             self._start_entrance()
-        if self._shutting_down:
+        if self.list_controller.closing:
             return
         self._connect_scroll_refetch()
         self._schedule_visible_covers()
@@ -3160,15 +2780,15 @@ class WatchLaterPage(BrowserWindow):
             self.covers.pause()
 
     def activate(self) -> None:
-        if self._shutting_down:
+        if self.list_controller.closing:
             return
         if self._inline_panel is None:
             self.setFocus(Qt.OtherFocusReason)
 
     def shutdown(self) -> None:
-        if self._shutting_down:
+        if self.list_controller.closing:
             return
-        self._shutting_down = True
+        self.list_controller.closing = True
         self.removal_undo.clear()
         self.card_preview.stop()
         self._visible = False
@@ -3183,24 +2803,7 @@ class WatchLaterPage(BrowserWindow):
         self._status_timer.stop()
         self._cover_scroll_timer.stop()
         self._disconnect_scroll_refetch()
-        self._request_seq += 1
-        self._operation_seq += 1
-        self._cancel_request(self._active_list)
-        self._cancel_request(self._active_operation)
-        for worker in tuple(self._requests):
-            self._cancel_request(worker)
-        for worker in tuple(self._requests):
-            worker.finished.disconnect(self._request_finished)
-            for name in ('completed', 'failed'):
-                signal = getattr(worker, name, None)
-                if signal is not None:
-                    signal.disconnect()
-            retire_page_request(worker)
-            self._requests.discard(worker)
-        self._active_list = None
-        self._active_operation = None
-        self._busy_operation = ""
-        self._pending_remove = None
+        self.list_controller.shutdown()
         try:
             self.covers.image_ready.disconnect(self._cover_ready)
         except (RuntimeError, TypeError):
@@ -3219,10 +2822,4 @@ class WatchLaterPage(BrowserWindow):
                     pass
             self._danmaku.shutdown()
             self._danmaku = None
-        self._items.clear()
-        self._items_version += 1
-        self._clear_rows()
-        self._cookies.clear()
-        self._has_session = False
-        self._has_csrf = False
-        self._update_destructive_controls()
+        self.list_controller.clear_shutdown_data()

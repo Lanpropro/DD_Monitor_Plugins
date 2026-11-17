@@ -17,7 +17,8 @@ DPI 通知仅登记一次延迟任务；处理期间和冷却期忽略重入，�
 | --- | --- |
 | `plugin.py` | 唯一持有点播绑定；通过本体格子控件工厂接线，跟踪账号代次、请求与格子归属；卸载还原仍属于该绑定的合成房间 |
 | `page_panels.py` | 媒体卡片轻量背景、置入按钮／线条工具按钮、两行标题计算与目标格选择；复用公开选框；勾选层属于封面子控件，随卡片销毁 |
-| `page.py` | 列表、筛选、删除操作和页面线程；关闭弹窗保留缓存，shutdown 作废结果，短暂收尾后移交仍在运行的页面请求 |
+| `page.py` | 浏览控件、导航、筛选与渲染；旧数据字段/方法为列表控制器的薄兼容入口，不复制状态 |
+| `list_controller.py` | 唯一持有canonical条目、账号快照、请求号、操作队列及QThread集合；列表/增删恢复和退休交接统一从此处执行，Qt父对象为Page |
 | `wheel_scroll.py` | 按帧累计滚轮量；视图切换／隐藏时落定残量，shutdown 摘除 viewport 过滤器并停止定时器 |
 | `request_retirement.py` | 应用级 QObject 持有未退出的页面请求；完成后移出集合、清理快照并 deleteLater；应用退出信号中等待剩余请求收尾 |
 | `entry_icon.py` | 按分辨率绘制稍后再看／外链图标；按钮持有 hover 动画，隐藏及键盘操作时复位，复用本体动画设置与 easing |
@@ -204,3 +205,9 @@ UndoEntries只处理头像叠放与可见行绘制，使用既有OrderModel的�
 逐项撤回使用仅覆盖可见行的StableActionButton池，滚动/模型变化时按当前索引绑定itemKey，标题预留按钮宽度；键盘和无障碍使用真实按钮，不为全部条目创建控件。RemovalUndo.undo(key)只将指定条目加入现有串行队列，成功后移除该项的撤回记录，剩余项继续展示并重启提示计时；全部撤回仍使用同一队列。请求进行中禁用全部及逐项按钮，失败保留未完成记录，无自动重试。
 
 观看顺序撤回使用删除时的邻接锚点，只插回当前成功恢复的BV，不重放整份旧排序；优先仍存在的前邻项，其次后邻项，其他条目保持当前相对顺序。这样删除之后或恢复请求期间的手动调序不会被撤回覆盖。
+
+### 列表业务边界迁移（结构整理第2批）
+
+ListController拥有原Page的18项业务状态和20个列表/请求操作，Page旧字段通过property转发，旧方法保留薄委托，内部渲染直接读取控制器。账号世代、单飞守卫、Remove/Add/Clear串行与错误策略、超时及定时参数不变。控制器的removed/operation_finished/clearing信号分别驱动撤回记录、提示与清理，触发点保持原有顺序。RemovalUndo只管理撤回事务和提示，调用start_restore/current_operation/complete_restore，不再回写Page私有字段。
+
+控制器是Page的QObject子对象；finished回调连接控制器，Page.shutdown先停止UI再调用控制器取消、断开结果与finished并移交未结束线程。既有request_retirement仍应用级保活，未引入第二个线程管理器。兼容入口与直接控制器共享同一list/dict/set，未复制可变状态。
