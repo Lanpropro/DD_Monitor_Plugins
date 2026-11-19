@@ -27,6 +27,7 @@ from ddm.app import MainWindow
 from ddm.config import DEFAULT_SETTINGS
 from ddm.plugins import PluginContext, PluginManager
 from selfcheck_recording import isolated_window_tasks
+from selfcheck_mpv_com_lifetime import apartment
 from unittest.mock import patch
 from ddm import config, images
 from ddm.recording import input_args
@@ -49,8 +50,9 @@ with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_
     cleanup.enter_context(patch.object(images, 'REPO', str(root)))
     source = root / 'local.mp4'
     subprocess.run([shutil.which('ffmpeg'), '-y', '-hide_banner', '-loglevel', 'error',
-        '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30', '-t', '18',
-        '-c:v', 'libx264', '-threads', '1', '-g', '30', str(source)], check=True,
+        '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30',
+        '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo', '-t', '18',
+        '-c:v', 'libx264', '-threads', '1', '-g', '30', '-c:a', 'aac', str(source)], check=True,
         creationflags=subprocess.CREATE_NO_WINDOW)
     window = MainWindow([], [], layout_id='1x1', state={'settings': {
         **DEFAULT_SETTINGS, 'close_behavior': 'exit', 'recording_dir': directory}})
@@ -141,7 +143,10 @@ with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_
                 app.processEvents()
                 window.grab().save(str(args.screenshots / f'ddcut-software-library-{mode}.png'))
                 view.tabs.setCurrentWidget(view.review_page)
-        view.close()
+        baseline = apartment()
+        assert baseline[0] == 0 and baseline[1] in (0, 3), f'Expected Qt STA, got {baseline}'
+        view.back_button.click()
+        assert apartment() == baseline, f'Closing archive preview changed Qt COM: {baseline} -> {apartment()}'
         assert view.preview.core is None and not plugin.hub.closed
         tile = window.wall.tiles[0]
         for cached in (Path(images.room_cover_path('offline')), Path(images.room_avatar_path('offline'))):
@@ -192,13 +197,32 @@ with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_
             image = QImage(str(picture))
             assert image.width() == 320 and image.height() == 180
             assert image.pixelColor(20, 20) != image.pixelColor(280, 20)
-            view.close()
+            view.toggle_mute()
+            wait_for(lambda: view.preview.core.current_ao == 'wasapi')
+            live_path = view.current['path']
+            view.back_button.click()
+            assert apartment() == baseline, f'Closing live preview changed Qt COM: {baseline} -> {apartment()}'
             assert not session.stopping and session.process.poll() is None
             tile.recording_button.click()
             wait_for(lambda: tile not in window.recorder.sessions)
-        assert context.show_workspace(view)
+            assert '#EXT-X-ENDLIST' in Path(live_path).read_text(encoding='utf-8')
+        plugin.open()
+        view.show_library()
+        view.category.setCurrentIndex(view.category.findData('archive'))
+        wait_for(lambda: (plugin.poll() or True) and any(
+            view.library.item(i).data(Qt.UserRole) == live_path for i in range(view.library.count())))
+        item = next(view.library.item(i) for i in range(view.library.count())
+                    if view.library.item(i).data(Qt.UserRole) == live_path)
+        view.library.scrollToItem(item)
+        app.processEvents()
+        QTest.mouseClick(view.library.viewport(), Qt.LeftButton, pos=view.library.visualItemRect(item).center())
+        wait_for(lambda: view.current and view.current['path'] == live_path and view.preview.position() > .1)
+        assert view.live_source is None and view.review_panel.isVisible()
+        assert apartment() == baseline
+        view.back_button.click()
+        assert apartment() == baseline, f'Closing saved HLS changed Qt COM: {baseline} -> {apartment()}'
         manager.unload()
         assert plugin.hub.closed and not window.recorder._part_leases
     window.close()
     app.processEvents()
-print('PASS: installed ZIP, original recording button, growing timeline, native libmpv picture/seek/pause/mute, close/reopen/unload; no foreground activation')
+print('PASS: installed ZIP, original recording button, growing timeline, native libmpv picture/seek/pause and WASAPI teardown, live-to-history reopen and unload; no foreground activation')

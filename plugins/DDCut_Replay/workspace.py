@@ -97,8 +97,11 @@ class Preview(QWidget):
         # Reuse the host's bundled libmpv, loader setup and safe embedded options.
         from ddm.player import EMBEDDED_OPTIONS
         import mpv
+        # Like the wall player, release WASAPI on mpv's core thread before
+        # destroying the player. Retaining it can tear down Qt's COM apartment.
         self.core = mpv.MPV(wid=str(int(self.winId())), mute=True, volume=50,
-                            keep_open=True, **EMBEDDED_OPTIONS, **preview_options(path),
+                            keep_open=True, gapless_audio=False,
+                            **EMBEDDED_OPTIONS, **preview_options(path),
                             **({'input_default_bindings': False, 'input_vo_keyboard': True,
                                 'input_cursor': True, 'input_builtin_dragging': False} if self.interactive else {}))
         self.core.play(self.source_url(path))
@@ -108,6 +111,7 @@ class Preview(QWidget):
         self.chat_timer.stop()
         if self.core is not None:
             self.chat.clear()
+            self.core.command("stop")
             self.core.terminate()
             self.core = None
 
