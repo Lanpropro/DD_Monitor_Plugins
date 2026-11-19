@@ -4,7 +4,7 @@
 
 ## 安装和发布边界
 
-新增`huya_live`、`douyu_live`、`douyin_live`、`twitch_live`、`youtube_live`、`chzzk_live`六个独立包，均为0.1开发候选，尚未公开发布。每个包只注册一个平台；二路、B站互动、翻译和代理仍按功能组织。
+新增`huya_live`、`douyu_live`、`douyin_live`、`twitch_live`、`youtube_live`、`chzzk_live`六个独立包，本次准备以1.0独立发布，正式包以各自GitHub Release为准。每个包只注册一个平台；二路、B站互动、翻译和代理仍按功能组织。
 
 六个独立包需要本体 0.8 提供的平台接管接口。YouTube 高画质还需要本体的私有媒体交付接口。先公开兼容的本体版本，再公开独立包。0.7.3 用户继续使用旧组合包，升级本体后再安装独立 ZIP。0.7.3 的手动 ZIP 安装入口不会校验最低本体版本。
 

@@ -158,14 +158,14 @@ B站直播互动 1.1 已发布，下载入口和在线插件目录已更新。
 <td width="50%" valign="top">
 <h3><a href="plugins/huya_live/README.md">虎牙直播（独立开发候选）</a></h3>
 <p><img src="docs/assets/platforms/huya.png" alt="虎牙直播" width="24" height="24"></p>
-<p>独立启用、更新与回滚，版本0.1，最低支持 DD Monitor CE 0.8。</p>
+<p>独立启用、更新与回滚，版本1.0，最低支持 DD Monitor CE 0.8。</p>
 <p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
 <p>下载插件：仅本地候选，尚未发布。</p>
 </td>
 <td width="50%" valign="top">
 <h3><a href="plugins/douyu_live/README.md">斗鱼直播（独立开发候选）</a></h3>
 <p><img src="docs/assets/platforms/douyu.png" alt="斗鱼直播" width="24" height="24"></p>
-<p>独立启用、更新与回滚，版本0.1，最低支持 DD Monitor CE 0.8。</p>
+<p>独立启用、更新与回滚，版本1.0，最低支持 DD Monitor CE 0.8。</p>
 <p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
 <p>下载插件：仅本地候选，尚未发布。</p>
 </td>
@@ -174,14 +174,14 @@ B站直播互动 1.1 已发布，下载入口和在线插件目录已更新。
 <td width="50%" valign="top">
 <h3><a href="plugins/douyin_live/README.md">抖音直播（独立开发候选）</a></h3>
 <p><img src="docs/assets/platforms/douyin.png" alt="抖音直播" width="24" height="24"></p>
-<p>独立启用、更新与回滚，版本0.1，最低支持 DD Monitor CE 0.8。</p>
+<p>独立启用、更新与回滚，版本1.0，最低支持 DD Monitor CE 0.8。</p>
 <p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
 <p>下载插件：仅本地候选，尚未发布。</p>
 </td>
 <td width="50%" valign="top">
 <h3><a href="plugins/twitch_live/README.md">Twitch直播（独立开发候选）</a></h3>
 <p><img src="docs/assets/platforms/twitch.png" alt="Twitch直播" width="24" height="24"></p>
-<p>独立启用、更新与回滚，版本0.1，最低支持 DD Monitor CE 0.8。</p>
+<p>独立启用、更新与回滚，版本1.0，最低支持 DD Monitor CE 0.8。</p>
 <p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
 <p>下载插件：仅本地候选，尚未发布。</p>
 </td>
@@ -190,14 +190,14 @@ B站直播互动 1.1 已发布，下载入口和在线插件目录已更新。
 <td width="50%" valign="top">
 <h3><a href="plugins/youtube_live/README.md">YouTube直播（独立开发候选）</a></h3>
 <p><img src="docs/assets/platforms/youtube.png" alt="YouTube直播" width="24" height="24"></p>
-<p>独立启用、更新与回滚，版本0.1，最低支持 DD Monitor CE 0.8。</p>
+<p>独立启用、更新与回滚，版本1.0，最低支持 DD Monitor CE 0.8。</p>
 <p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
 <p>下载插件：仅本地候选，尚未发布。</p>
 </td>
 <td width="50%" valign="top">
 <h3><a href="plugins/chzzk_live/README.md">CHZZK直播（独立开发候选）</a></h3>
 
-<p>独立启用、更新与回滚，版本0.1，最低支持 DD Monitor CE 0.8。</p>
+<p>独立启用、更新与回滚，版本1.0，最低支持 DD Monitor CE 0.8。</p>
 <p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
 <p>下载插件：仅本地候选，尚未发布。</p>
 </td>
