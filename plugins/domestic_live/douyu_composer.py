@@ -12,9 +12,8 @@ from PySide6.QtWidgets import (QApplication, QDialog, QFrame, QGridLayout, QHBox
     QSpinBox, QTabBar, QVBoxLayout, QWidget)
 
 from ddm import plugins as api, theme
-from .douyu_interaction import DouyuAPI, GiftPanel, InteractionError, LoginRequired, format_yuchi, room_number
+from .interaction_models import GiftPanel, InteractionError, LoginRequired, format_yuchi, room_number
 from .interaction_popup import AnchoredPopup, RefreshSpinner, picker_style
-from .douyu_danmaku import relay_for
 
 
 def style_button(button, *, diameter=None):
@@ -464,7 +463,10 @@ class DouyuComposer(QWidget):
     def __init__(self, owner, parent=None):
         super().__init__(parent)
         self.owner, self.room = owner, {}
-        self.chat_relay = relay_for(owner.platform)
+        self.chat_relay = None
+        if owner.platform.kind == "douyu":
+            from .douyu_danmaku import relay_for
+            self.chat_relay = relay_for(owner.platform)
         self.pending = self.popup = None
         self.closing = False
         self.identity_timer = QTimer(self)
@@ -615,8 +617,8 @@ class DouyuComposer(QWidget):
             self.popup.set_panel(value)
         else:
             if kind == "text":
-                from .douyu_interaction import ChatReceipt
-                if isinstance(value, ChatReceipt):
+                from .interaction_models import ChatReceipt
+                if isinstance(value, ChatReceipt) and self.chat_relay is not None:
                     self.chat_relay.confirmed.emit(key[0], value)
                 if self.edit.text() == draft:
                     self.edit.clear()
@@ -633,6 +635,7 @@ class DouyuComposer(QWidget):
         if not text:
             return
         key = self.snapshot()
+        from .douyu_interaction import DouyuAPI
         client = DouyuAPI(self.owner.platform._playback_cookies())
         self.start("text", lambda cancelled, progress: client.send_text(key[0], text, cancelled, progress=progress), key=key)
 
@@ -644,17 +647,20 @@ class DouyuComposer(QWidget):
 
     def load_gifts(self):
         key = self.snapshot()
+        from .douyu_interaction import DouyuAPI
         client = DouyuAPI(self.owner.platform._playback_cookies())
         self.start("catalog", lambda cancelled, progress: client.gift_panel(key[0], cancelled), key=key)
 
     def refresh_wallet(self):
         key = self.snapshot()
+        from .douyu_interaction import DouyuAPI
         client = DouyuAPI(self.owner.platform._playback_cookies())
         self.start("wallet", lambda cancelled, progress: client.wallet(key[0], cancelled), key=key)
 
     def send_gift(self, gift, count, key):
         if key != self.snapshot():
             return
+        from .douyu_interaction import DouyuAPI
         client = DouyuAPI(self.owner.platform._playback_cookies())
         self.start("gift", lambda cancelled, progress: client.send_gift(key[0], gift, count, cancelled), key=key)
 

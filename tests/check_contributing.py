@@ -131,6 +131,7 @@ class ContributionGuideTests(unittest.TestCase):
         self.assertIn('(CONTRIBUTING.md)', readme)
         documents = ['README.md', 'CONTRIBUTING.md', 'docs/repository-layout.md',
                      'docs/releases/README.md', 'docs/archive/README.md',
+                     'docs/development/domestic-modules.md',
                      'plugins/DDCut_Replay/README.md']
         documents += [str(path.relative_to(ROOT)) for path in (ROOT / 'docs/changes').glob('*.md')]
         for relative in documents:
@@ -154,6 +155,12 @@ class ContributionGuideTests(unittest.TestCase):
             'global_live': {'twitch', 'youtube'},
             'match_sync': {'bilibili', 'huya', 'douyu', 'douyin', 'twitch', 'youtube'},
             'bili_live': {'bilibili'},
+            'huya_live': {'huya'},
+            'douyu_live': {'douyu'},
+            'douyin_live': {'douyin'},
+            'twitch_live': {'twitch'},
+            'youtube_live': {'youtube'},
+            'chzzk_live': set(),
             'proxy_control': set(),
         }
         for path in manifests:
@@ -264,6 +271,7 @@ class ContributionGuideTests(unittest.TestCase):
             ROOT / 'docs/changes/domestic_live.md', ROOT / 'docs/changes/match_sync.md',
             ROOT / 'plugins/bili_live/README.md', ROOT / 'plugins/domestic_live/README.md',
             ROOT / 'plugins/match_sync/README.md',
+            ROOT / 'plugins/chzzk_live/README.md', ROOT / 'plugins/chzzk_live/ACCEPTANCE.md',
         ]
         for document in documents:
             for target in re.findall(r'\]\(([^)]+)\)', document.read_text(encoding='utf-8')):

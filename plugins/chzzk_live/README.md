@@ -1,0 +1,11 @@
+# CHZZK直播独立插件（开发候选）
+
+插件ID：`chzzk_live`，候选版本0.1。只注册`chzzk`，可以独立启用、更新与回滚。最低支持 DD Monitor CE 0.8。请先升级本体，再安装插件。当前为发布候选。
+
+平台协议的唯一维护源码仍在`plugins/global_live/`对应职责模块中；入口与清单在本目录。构建工具按`tools/platform_bundles.json`将本平台协议及公共组件内置到ZIP，安装后不需要组合包或其他平台插件。不要直接复制本目录作为安装包。
+
+旧组合包仍保留兼容。新插件首次启动继承旧启用状态和声明的设置，房间ID、账号身份、关注、分组及画质不改名；安装新插件后，对应平台由它接管，禁用后不会由组合包重新启用。
+
+详情与验证见[平台独立包迁移](../../docs/development/platform-packages.md)。构建：`python tools/build_plugins.py`，验证：`python tests/check_platform_packages.py --host <宿主目录>`。候选包：`chzzk_live-0.1.zip`。
+
+从本体根 `run.cmd` 执行[CHZZK 人工验收步骤](ACCEPTANCE.md)，分别记录真实声音、最高画质持续播放、预览、停止重播及禁用重启结果。本候选不提供 CHZZK 登录、官网关注导入、聊天、回放或年龄验证；维护者已确认正常播放。

@@ -1,0 +1,18 @@
+{
+  "id": "youtube_live",
+  "name": "YouTube直播",
+  "description": "YouTube公开直播、画质、账号订阅与聊天",
+  "version": "0.1",
+  "min_app_version": "0.8",
+  "platforms": [
+    "youtube"
+  ],
+  "replaces": "global_live",
+  "inherit_settings": [
+    "show_platform_logo"
+  ],
+  "replaces_platforms": [
+    "twitch",
+    "youtube"
+  ]
+}

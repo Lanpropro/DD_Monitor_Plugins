@@ -1,0 +1,77 @@
+{
+  "huya_live": {
+    "platform_base.py": "plugins/domestic_live/platform_base.py",
+    "platform_logo.py": "plugins/domestic_live/platform_logo.py",
+    "playback_diagnostics.py": "plugins/domestic_live/playback_diagnostics.py",
+    "diagnostic_errors.py": "plugins/domestic_live/diagnostic_errors.py",
+    "douyin_errors.py": "plugins/domestic_live/douyin_errors.py",
+    "platform_single.py": "plugins/domestic_live/platform_single.py",
+    "interaction_models.py": "plugins/domestic_live/interaction_models.py",
+    "douyu_composer.py": "plugins/domestic_live/douyu_composer.py",
+    "interaction_popup.py": "plugins/domestic_live/interaction_popup.py",
+    "interaction_native_follow.py": "plugins/domestic_live/interaction_native_follow.py",
+    "huya_platform.py": "plugins/domestic_live/huya_platform.py",
+    "huya_protocol.py": "plugins/domestic_live/huya_protocol.py",
+    "huya_interaction.py": "plugins/domestic_live/huya_interaction.py",
+    "biliup-MIT.txt": "plugins/domestic_live/biliup-MIT.txt"
+  },
+  "douyu_live": {
+    "platform_base.py": "plugins/domestic_live/platform_base.py",
+    "platform_logo.py": "plugins/domestic_live/platform_logo.py",
+    "playback_diagnostics.py": "plugins/domestic_live/playback_diagnostics.py",
+    "diagnostic_errors.py": "plugins/domestic_live/diagnostic_errors.py",
+    "douyin_errors.py": "plugins/domestic_live/douyin_errors.py",
+    "platform_single.py": "plugins/domestic_live/platform_single.py",
+    "interaction_models.py": "plugins/domestic_live/interaction_models.py",
+    "douyu_composer.py": "plugins/domestic_live/douyu_composer.py",
+    "interaction_popup.py": "plugins/domestic_live/interaction_popup.py",
+    "interaction_native_follow.py": "plugins/domestic_live/interaction_native_follow.py",
+    "douyu_platform.py": "plugins/domestic_live/douyu_platform.py",
+    "douyu_interaction.py": "plugins/domestic_live/douyu_interaction.py",
+    "douyu_danmaku.py": "plugins/domestic_live/douyu_danmaku.py",
+    "biliup-MIT.txt": "plugins/domestic_live/biliup-MIT.txt"
+  },
+  "douyin_live": {
+    "platform_base.py": "plugins/domestic_live/platform_base.py",
+    "platform_logo.py": "plugins/domestic_live/platform_logo.py",
+    "playback_diagnostics.py": "plugins/domestic_live/playback_diagnostics.py",
+    "diagnostic_errors.py": "plugins/domestic_live/diagnostic_errors.py",
+    "douyin_errors.py": "plugins/domestic_live/douyin_errors.py",
+    "platform_single.py": "plugins/domestic_live/platform_single.py",
+    "interaction_models.py": "plugins/domestic_live/interaction_models.py",
+    "douyu_composer.py": "plugins/domestic_live/douyu_composer.py",
+    "interaction_popup.py": "plugins/domestic_live/interaction_popup.py",
+    "interaction_native_follow.py": "plugins/domestic_live/interaction_native_follow.py",
+    "douyin_platform.py": "plugins/domestic_live/douyin_platform.py",
+    "douyin_interaction.py": "plugins/domestic_live/douyin_interaction.py",
+    "douyin_browser.py": "plugins/domestic_live/douyin_browser.py",
+    "douyin_native.js": "plugins/domestic_live/douyin_native.js",
+    "douyin_profile.js": "plugins/domestic_live/douyin_profile.js",
+    "douyin_room.js": "plugins/domestic_live/douyin_room.js",
+    "douyin_follows.js": "plugins/domestic_live/douyin_follows.js",
+    "biliup-MIT.txt": "plugins/domestic_live/biliup-MIT.txt"
+  },
+  "twitch_live": {
+    "public_live.py": "plugins/global_live/public_live.py",
+    "platform_single.py": "plugins/global_live/platform_single.py",
+    "twitch_platform.py": "plugins/global_live/twitch_platform.py",
+    "twitch_accounts.py": "plugins/global_live/twitch_accounts.py",
+    "account_common.py": "plugins/global_live/account_common.py",
+    "platform_logo.py": "plugins/domestic_live/platform_logo.py"
+  },
+  "youtube_live": {
+    "public_live.py": "plugins/global_live/public_live.py",
+    "platform_single.py": "plugins/global_live/platform_single.py",
+    "youtube_platform.py": "plugins/global_live/youtube_platform.py",
+    "youtube_accounts.py": "plugins/global_live/youtube_accounts.py",
+    "account_common.py": "plugins/global_live/account_common.py",
+    "youtube_account_errors.py": "plugins/global_live/youtube_account_errors.py",
+    "platform_logo.py": "plugins/domestic_live/platform_logo.py"
+  },
+  "chzzk_live": {
+    "public_live.py": "plugins/global_live/public_live.py",
+    "platform_single.py": "plugins/global_live/platform_single.py",
+    "chzzk.py": "plugins/global_live/chzzk.py",
+    "platform_logo.py": "plugins/domestic_live/platform_logo.py"
+  }
+}
