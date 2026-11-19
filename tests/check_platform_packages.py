@@ -38,6 +38,22 @@ class PackageTests(unittest.TestCase):
         self.assertTrue(all(not offer['available'] for offer in _compatible_offers(offers, '0.7.3')))
         self.assertTrue(all(offer['available'] for offer in _compatible_offers(offers, '0.8')))
 
+    def test_each_zip_includes_a_decodable_platform_icon(self):
+        from PySide6.QtGui import QImage
+
+        icons = set()
+        for kind in KINDS:
+            plugin_id = f'{kind}_live'
+            with zipfile.ZipFile(ROOT / 'dist' / f'{plugin_id}-0.1.zip') as archive:
+                manifest = json.loads(archive.read(f'{plugin_id}/plugin.json'))
+                self.assertEqual(manifest['icon'], 'icon.png', plugin_id)
+                icon = archive.read(f'{plugin_id}/{manifest["icon"]}')
+            image = QImage.fromData(icon, 'PNG')
+            self.assertFalse(image.isNull(), plugin_id)
+            self.assertGreaterEqual(min(image.width(), image.height()), 16)
+            icons.add(icon)
+        self.assertEqual(len(icons), len(KINDS))
+
     def test_each_zip_runs_without_bundle_or_sibling_plugins(self):
         for kind in KINDS:
             with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:

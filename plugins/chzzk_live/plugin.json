@@ -4,6 +4,7 @@
   "description": "CHZZK公开直播、状态与画质；暂不含账号和聊天",
   "version": "0.1",
   "min_app_version": "0.8",
+  "icon": "icon.png",
   "platforms": [
     "chzzk"
   ],

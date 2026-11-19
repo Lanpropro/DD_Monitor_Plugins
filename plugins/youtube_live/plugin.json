@@ -4,6 +4,7 @@
   "description": "YouTube公开直播、画质、账号订阅与聊天",
   "version": "0.1",
   "min_app_version": "0.8",
+  "icon": "icon.png",
   "platforms": [
     "youtube"
   ],
