@@ -217,7 +217,6 @@ class HostTests(unittest.TestCase):
         self.item.duration = 600
         previous_recording = self.tile._recording_available
         previous_quality = self.tile.quality
-        previous_label = self.tile.quality_button.text()
         with patch.object(self.plugin.playback, 'start_resolution'), \
                 patch.object(self.plugin.playback, 'ensure_tick_timer'):
             self.plugin._start_vod_for_tile(self.tile, self.item,
@@ -234,7 +233,8 @@ class HostTests(unittest.TestCase):
         self.assertFalse(self.tile._recording_available)
         self.assertTrue(self.tile.volume_button.compact_popup)
         self.assertEqual(self.tile.quality, previous_quality)
-        self.assertEqual(self.tile.quality_button.text(), previous_label)
+        # Newer hosts clear the old live quality description for an empty VOD reservation.
+        self.assertEqual(self.tile.quality_button.text(), self.tile._quality_text())
         # A narrow host can hide the wrapper while its child stays eligible.
         self.plugin._bar_progress[id(self.tile)]['visible'] = False
         self.plugin._release_binding(binding, restart=False)

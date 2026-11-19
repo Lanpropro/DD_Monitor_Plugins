@@ -18,7 +18,9 @@ def main():
     manager.load()
     platform = manager.platforms['douyu']
     module = sys.modules[type(platform).__module__]
-    session = module.Streamlink()
+    base_module = sys.modules["ddm_plugin_domestic_live.platform_base"]
+    entry = sys.modules["ddm_plugin_domestic_live"]
+    session = base_module.Streamlink()
     calls = []
     clock = [100.]
     source = {'rtmp_url': 'https://edge.test.edgesrv.com', 'rtmp_live': 'live?token=private',
@@ -68,9 +70,10 @@ def main():
             failed = platform._failed_cdns['douyu:789']
             assert 'scdncttbej' in failed, 'Actual returned CDN must be rejected even when it differs from the request'
             assert 'scdncmccanhhf' in failed, 'The request route that led to the failed stream must also be avoided'
-        plugin = module.LivePlatformsPlugin()
+        plugin = entry.LivePlatformsPlugin()
         plugin.context = plugins.PluginContext(manager, 'domestic_live')
         plugin._diagnostic_enabled = False
+        plugin._owned_kinds = ("huya", "douyu", "douyin")
         with patch.object(platform, 'report_playback_failure') as report:
             plugin.on_event(plugins.EVENT_STREAM_FAILED, {'room': {'room_id': 'douyu:123'},
                 'source_url': 'https://hw.test/live', 'reason': 'STALL'})

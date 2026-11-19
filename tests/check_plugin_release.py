@@ -79,6 +79,53 @@ class ReleaseTests(unittest.TestCase):
         with zipfile.ZipFile(self.archive) as package:
             self.assertIn(b'never execute', package.read('example/plugin.py'))
 
+    def tagged_bundle(self, recipe=None):
+        source = self.root / 'plugins/shared/protocol.py'
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(b'TAGGED_PROTOCOL = True\n')
+        tools = self.root / 'tools'
+        tools.mkdir(exist_ok=True)
+        (tools / 'platform_bundles.json').write_text(
+            json.dumps({'example': recipe if recipe is not None else {'protocol.py': 'plugins/shared/protocol.py'}}),
+            encoding='utf-8')
+        self.git('add', 'plugins/shared', 'tools')
+        self.git('commit', '-qm', 'bundle dependency')
+        self.git('branch', '-f', 'develop')
+        self.git('branch', '-f', 'main')
+        self.git('tag', '-f', 'example-v1.0')
+        return source
+
+    def test_bundle_build_and_verify_use_tagged_recipe_and_dependency(self):
+        source = self.tagged_bundle()
+        source.write_text('DIRTY_PROTOCOL = True\n', encoding='utf-8')
+        (self.root / 'tools/platform_bundles.json').write_text('{}', encoding='utf-8')
+        self.archive.unlink()
+        result = release_check.verify(self.root, 'example', 'example-v1.0', self.archive,
+                                      ('develop', 'main'), build=True)
+        self.assertEqual(result['files'], 5)
+        with zipfile.ZipFile(self.archive) as package:
+            self.assertEqual(package.read('example/protocol.py'), b'TAGGED_PROTOCOL = True\n')
+        self.assertEqual(self.verify()['files'], 5)
+
+    def test_bundle_missing_or_modified_dependency_rejected(self):
+        self.tagged_bundle()
+        with self.assertRaisesRegex(ValueError, 'file list'):
+            self.verify()
+        with zipfile.ZipFile(self.archive, 'a') as package:
+            package.writestr('example/protocol.py', b'modified dependency')
+        with self.assertRaisesRegex(ValueError, 'bytes differ'):
+            self.verify()
+
+    def test_bundle_requires_tracked_input_without_overwriting_package_files(self):
+        for recipe in ({'protocol.py': 'plugins/shared/missing.py'},
+                       {'plugin.py': 'plugins/shared/protocol.py'},
+                       {'../protocol.py': 'plugins/shared/protocol.py'},
+                       {'LICENSE': 'plugins/shared/protocol.py'}):
+            with self.subTest(recipe=recipe):
+                self.tagged_bundle(recipe)
+                with self.assertRaisesRegex(ValueError, 'bundle input'):
+                    self.verify()
+
     def test_extra_file_rejected(self):
         self.write_zip(extra=True)
         with self.assertRaisesRegex(ValueError, 'file list'):

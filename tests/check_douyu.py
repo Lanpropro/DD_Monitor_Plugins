@@ -29,6 +29,7 @@ def main():
     manager.load()
     platform = manager.platforms["douyu"]
     module = sys.modules[type(platform).__module__]
+    base_module = sys.modules["ddm_plugin_domestic_live.platform_base"]
     room = {"room_id": 6979222, "vipId": 6657, "show_status": 1, "videoLoop": 0,
             "nickname": "Machine", "room_name": "6657",
             "owner_avatar": "//apic.douyucdn.cn/avatar.jpg",
@@ -77,7 +78,7 @@ def main():
         else:
             raise AssertionError("Timeout cannot be treated as offline")
         assert get.call_count == 1
-    session = module.Streamlink()
+    session = base_module.Streamlink()
     try:
         with patch.object(platform, "room_info", return_value=RoomInfo("douyu:6979222", live=True)), \
                 patch.object(module, "Douyu") as douyu, \

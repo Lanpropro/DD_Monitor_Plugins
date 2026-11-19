@@ -1,0 +1,20 @@
+{
+  "id": "douyu_live",
+  "name": "斗鱼直播",
+  "description": "斗鱼直播播放、登录关注、弹幕与礼物互动",
+  "version": "0.1",
+  "min_app_version": "0.8",
+  "icon": "icon.png",
+  "platforms": [
+    "douyu"
+  ],
+  "replaces": "domestic_live",
+  "inherit_settings": [
+    "show_platform_logo"
+  ],
+  "replaces_platforms": [
+    "huya",
+    "douyu",
+    "douyin"
+  ]
+}

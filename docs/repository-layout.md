@@ -2,7 +2,7 @@
 
 > 类型：参考 ｜ 状态：维护中 ｜ 适用版本：全部版本 ｜ 更新：2026-11-15 ｜ 读者：维护者
 
-本分支包含五个插件的源码，网站在独立仓库维护。公开版本以[发布记录](releases/README.md)和 GitHub Releases 为准。
+本分支包含五个插件系列及六个独立平台开发候选的源码，网站在独立仓库维护。公开版本以[发布记录](releases/README.md)和 GitHub Releases 为准；开发候选不代表已发布。
 
 ## 持续维护的文件
 
@@ -48,3 +48,5 @@ git log --oneline --left-right HEAD...origin/develop
 ```
 
 不根据分支名、日期或工作树干净就认定工作已经合入；squash 合并也不能只靠祖先关系判断。删除工作树或分支前另行核对 PR、提交差异和保留需求。
+
+独立平台候选的入口和清单位于各自`plugins/<平台>_live/`，共享源码收集清单见[平台独立包迁移](development/platform-packages.md)。

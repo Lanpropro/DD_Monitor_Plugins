@@ -25,6 +25,7 @@ def main():
     manager.load()
     platform = manager.platforms['huya']
     module = sys.modules[type(platform).__module__]
+    protocol = sys.modules["ddm_plugin_domestic_live.huya_protocol"]
     saved = ['auth=fixture; Domain=.huya.com; Path=/; Secure; HttpOnly',
              'expired=old; Domain=.huya.com; Expires=Sat, 01 Jan 2000 00:00:00 GMT',
              'foreign=secret; Domain=.example.com; Path=/',
@@ -94,7 +95,7 @@ def main():
                     patch.object(module.time, 'time', return_value=1700000000):
                 params = platform._account_stream_params(session, '1099511627777', info, 20000, parser)
             assert wup.call_args.args[1:4] == ('liveui', 'getCdnTokenInfoEx', '1099511627777')
-            req = module.tars_fields(wup.call_args.args[4])[0]
+            req = protocol.tars_fields(wup.call_args.args[4])[0]
             assert req[0] == info['sFlvUrl'] and req[1] == info['sStreamName']
             assert req[3][0] == 1099511627777 and 'auth=fixture' in req[3][4]
             assert params['u'] == 1099511628032, 'Account UID high bits must survive rotation'
@@ -108,9 +109,9 @@ def main():
 
         def response(method, fields):
             values = (b'\x08' + module.tars_int(0, 2) + module.huya_string(0, '') +
-                      module.tars_bytes(1, module.tars_int(0, 0)) + module.huya_string(0, 'tRsp') +
-                      module.tars_bytes(1, b'\x0a' + fields + b'\x0b'))
-            body = module.tars_int(1, 3) + module.huya_string(6, method) + module.tars_bytes(7, values)
+                      protocol.tars_bytes(1, module.tars_int(0, 0)) + module.huya_string(0, 'tRsp') +
+                      protocol.tars_bytes(1, b'\x0a' + fields + b'\x0b'))
+            body = module.tars_int(1, 3) + module.huya_string(6, method) + protocol.tars_bytes(7, values)
             result = Mock()
             result.content = struct.pack('>I', len(body) + 4) + body
             result.__enter__ = Mock(return_value=result)
@@ -122,7 +123,7 @@ def main():
             result = module.huya_wup_request(session, 'wupui', 'getPlatformVIPUserInfo', '1', b'\x0a\x0b')
             assert result == {0: 1, 3: 1}
             assert post.call_args.args[0] == 'https://cdnws.api.huya.com/'
-            envelope = module.tars_fields(post.call_args.kwargs['data'][4:])
+            envelope = protocol.tars_fields(post.call_args.kwargs['data'][4:])
             assert envelope[5] == 'wupui' and envelope[6] == 'getPlatformVIPUserInfo'
         with patch.object(session, 'post', return_value=response('wrongMethod', module.tars_int(0, 1))):
             try:
