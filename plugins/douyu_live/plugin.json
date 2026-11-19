@@ -3,7 +3,7 @@
   "name": "斗鱼直播",
   "description": "斗鱼直播播放、登录关注、弹幕与礼物互动",
   "version": "0.1",
-  "min_app_version": "0.7.3",
+  "min_app_version": "0.8",
   "platforms": [
     "douyu"
   ],

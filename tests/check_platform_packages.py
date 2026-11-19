@@ -16,6 +16,7 @@ sys.path.insert(0,str(args.host.resolve()))
 os.environ['DDM_NO_SAVE']='1'
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 ROOT=Path(__file__).resolve().parents[1]
+from ddm.plugin_catalog_api import _compatible_offers
 from ddm.plugins import PluginManager
 
 KINDS=('huya','douyu','douyin','twitch','youtube','chzzk')
@@ -25,6 +26,17 @@ class PackageTests(unittest.TestCase):
     def install(self,manager,plugin_id):
         version='2.0' if plugin_id=='domestic_live' else '1.2' if plugin_id=='global_live' else '0.1'
         manager.install_zip(str(ROOT/'dist'/f'{plugin_id}-{version}.zip'))
+
+    def test_independent_packages_require_app_08(self):
+        offers = []
+        for kind in KINDS:
+            plugin_id = f'{kind}_live'
+            with zipfile.ZipFile(ROOT / 'dist' / f'{plugin_id}-0.1.zip') as archive:
+                manifest = json.loads(archive.read(f'{plugin_id}/plugin.json'))
+            self.assertEqual(manifest['min_app_version'], '0.8', plugin_id)
+            offers.append(dict(id=plugin_id, available=True, min_app_version=manifest['min_app_version']))
+        self.assertTrue(all(not offer['available'] for offer in _compatible_offers(offers, '0.7.3')))
+        self.assertTrue(all(offer['available'] for offer in _compatible_offers(offers, '0.8')))
 
     def test_each_zip_runs_without_bundle_or_sibling_plugins(self):
         for kind in KINDS:

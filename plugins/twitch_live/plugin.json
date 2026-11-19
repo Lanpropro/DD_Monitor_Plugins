@@ -3,7 +3,7 @@
   "name": "Twitch直播",
   "description": "Twitch公开直播、画质、账号关注与聊天",
   "version": "0.1",
-  "min_app_version": "0.7.3",
+  "min_app_version": "0.8",
   "platforms": [
     "twitch"
   ],
