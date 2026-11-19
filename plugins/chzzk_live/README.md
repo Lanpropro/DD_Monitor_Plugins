@@ -8,4 +8,4 @@
 
 详情与验证见[平台独立包迁移](../../docs/development/platform-packages.md)。构建：`python tools/build_plugins.py`，验证：`python tests/check_platform_packages.py --host <宿主目录>`。候选包：`chzzk_live-0.1.zip`。
 
-从本体根 `run.cmd` 执行[CHZZK 人工验收步骤](ACCEPTANCE.md)，分别记录真实声音、最高画质持续播放、预览、停止重播及禁用重启结果。本候选不提供 CHZZK 登录、官网关注导入、聊天、回放或年龄验证；当前尚未人工验收。
+从本体根 `run.cmd` 执行[CHZZK 人工验收步骤](ACCEPTANCE.md)，分别记录真实声音、最高画质持续播放、预览、停止重播及禁用重启结果。本候选不提供 CHZZK 登录、官网关注导入、聊天、回放或年龄验证；维护者已确认正常播放。

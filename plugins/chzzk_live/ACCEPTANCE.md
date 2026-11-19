@@ -2,7 +2,7 @@
 
 > 类型：指南 ｜ 状态：草案 ｜ 适用版本：chzzk_live 0.1 ｜ 更新：2026-11-16 ｜ 读者：维护者
 
-本清单用于 [PR #67](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/67) 的公开直播验收，当前尚未执行。配套本体需支持平台替代迁移接口及 CHZZK 媒体转发；日常验收从本体根 `run.cmd` 启动。离线测试通过不能代替以下真实操作。[PR #76](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/76) 的后续重构不在本次范围。
+本清单用于 [PR #67](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/67) 的公开直播验收。维护者于 2026-11-19 确认正常播放。配套本体需支持平台替代迁移接口及 CHZZK 媒体转发；日常验收从本体根 `run.cmd` 启动。离线测试通过不能代替以下真实操作。[PR #76](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/76) 的后续重构不在本次范围。
 
 ## 准备
 
