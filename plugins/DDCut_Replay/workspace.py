@@ -23,7 +23,7 @@ from .highlights import HighlightReader
 from .selections import restore_ranges, enabled_ranges
 from .chat import ChatReader, trim_events, write_json, write_ass
 from .chat_render import ReplayChat
-from .chat_model import ChatModel
+from .chat_model import ChatDelegate, ChatModel
 from .encoding_widgets import EncodingOptions
 
 STATES = {'idle': '未录制', 'recording': '录制中', 'buffering': '缓存中',
@@ -64,6 +64,8 @@ def table(headers):
 
 
 class Preview(QWidget):
+    clicked = Signal()
+
     def __init__(self, source_url, interactive=False):
         super().__init__()
         self.source_url = source_url
@@ -81,6 +83,13 @@ class Preview(QWidget):
         self.chat_timer = QTimer(self)
         self.chat_timer.setInterval(33)
         self.chat_timer.timeout.connect(self.tick_chat)
+
+    def mouseReleaseEvent(self, event):
+        if not self.interactive and event.button() == Qt.LeftButton and self.rect().contains(event.position().toPoint()):
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def tick_chat(self):
         if self.core is not None and self.isVisible():
@@ -104,6 +113,8 @@ class Preview(QWidget):
                             **EMBEDDED_OPTIONS, **preview_options(path),
                             **({'input_default_bindings': False, 'input_vo_keyboard': True,
                                 'input_cursor': True, 'input_builtin_dragging': False} if self.interactive else {}))
+        if not self.interactive:
+            self.core.register_key_binding('MBTN_LEFT', 'cycle pause')
         self.core.play(self.source_url(path))
         self.chat_timer.start()
 
@@ -133,6 +144,7 @@ class Workspace(QWidget):
         self.hub = owner.hub
         self.current = None
         self.pending_review = ''
+        self.chat_anchor = None
         self.sources_data = {}
         self.live_source = None
         self.pending_live = None
@@ -279,6 +291,7 @@ class Workspace(QWidget):
         self.category = QComboBox()
         for title, kind in [('正在录制', 'live'), ('历史录播', 'archive'), ('已生成切片', 'clip')]:
             self.category.addItem(title, kind)
+        self.category.setCurrentIndex(self.category.findData('archive'))
         self.category.setAccessibleName('录像分类')
         self.category.currentIndexChanged.connect(self.refresh_library)
         row.addWidget(self.category)
@@ -361,14 +374,14 @@ class Workspace(QWidget):
         self.review_title.setObjectName('SettingsTitle')
         self.review_title.setMinimumWidth(0)
         self.review_title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        button('← 录像库', self.show_library, row)
         row.addWidget(self.review_title, 1)
         self.review_state = QLabel('请先从录像库选择素材')
         self.review_state.setObjectName('SettingsHint')
         row.addWidget(self.review_state)
-        button('录像列表', self.show_library, row)
         self.edit_button = button('收起检查器', self.toggle_editor, row)
         self.edit_button.setCheckable(True)
-        button('弹幕亮点', self.show_highlights, row)
+        self.highlights_button = button('弹幕亮点', self.show_highlights, row)
         layout.addLayout(row)
         self.review_split = split = QSplitter(Qt.Horizontal)
         layout.addWidget(split, 1)
@@ -377,6 +390,7 @@ class Workspace(QWidget):
         middle_box.setContentsMargins(0, 0, 8, 0)
         middle_box.setSpacing(8)
         self.preview = Preview(self.owner.preview_server.source_url)
+        self.preview.clicked.connect(self.toggle_play)
         middle_box.addWidget(self.preview, 1)
         row = QHBoxLayout()
         self.play_button = button('播放', self.toggle_play, row)
@@ -393,7 +407,6 @@ class Workspace(QWidget):
         self.heat_status = QLabel('弹幕热度：尚未打开录像')
         self.heat_status.setObjectName('SettingsHint')
         self.heat_status.setWordWrap(True)
-        middle_box.addWidget(self.heat_status)
         self.timeline = Timeline()
         self.timeline.seekRequested.connect(self.seek_position)
         self.timeline.selectionChanged.connect(self.set_selection)
@@ -462,38 +475,6 @@ class Workspace(QWidget):
         inspector_box.addLayout(row)
         self.selection_button = button('预览选区', self.play_selection, inspector_box)
         self.selection_button.setEnabled(False)
-        self.heat_heading = QLabel('亮点推荐')
-        self.heat_heading.setObjectName('SettingsTitle')
-        inspector_box.addWidget(self.heat_heading)
-        button('全部添加亮点', self.add_all_highlights, inspector_box)
-        hint = QLabel('基于弹幕热度发现候选片段。每5秒统计30秒窗口，选择后请回看确认。')
-        hint.setObjectName('SettingsHint')
-        hint.setWordWrap(True)
-        inspector_box.addWidget(hint)
-        self.heat_keywords = QLineEdit()
-        self.heat_keywords.setPlaceholderText('关键词，逗号分隔；留空统计全部弹幕')
-        self.heat_keywords.setAccessibleName('亮点关键词过滤')
-        self.heat_keywords.editingFinished.connect(self.save_heat_options)
-        inspector_box.addWidget(self.heat_keywords)
-        self.heat_threshold_label = QLabel('峰值阈值 80%')
-        inspector_box.addWidget(self.heat_threshold_label)
-        self.heat_threshold = QSlider(Qt.Horizontal)
-        self.heat_threshold.setRange(50, 100)
-        self.heat_threshold.setValue(80)
-        self.heat_threshold.setAccessibleName('弹幕峰值阈值百分比')
-        self.heat_threshold.valueChanged.connect(self.save_heat_options)
-        inspector_box.addWidget(self.heat_threshold)
-        self.heat_results = QListWidget()
-        self.heat_results.setObjectName('FollowList')
-        self.heat_results.setAccessibleName('弹幕亮点推荐区间')
-        self.heat_results.setWordWrap(True)
-        self.heat_results.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.heat_results.setMinimumHeight(68)
-        self.heat_results.setMaximumHeight(220)
-        self.heat_results.itemClicked.connect(lambda *_: self.apply_highlight())
-        self.heat_results.itemActivated.connect(lambda *_: self.apply_highlight())
-        inspector_box.addWidget(self.heat_results)
-        button('应用所选亮点为选区', self.apply_highlight, inspector_box)
         inspector_box.addWidget(QLabel('导出设置'))
         self.export_scope = QComboBox()
         self.export_scope.addItem('当前选区', 'current')
@@ -591,6 +572,7 @@ class Workspace(QWidget):
         self.chat_list.setAccessibleName('录像弹幕与醒目留言')
         self.chat_list.setUniformItemSizes(True)
         self.chat_list.setModel(self.chat_model)
+        self.chat_list.setItemDelegate(ChatDelegate(self.chat_list))
         self.chat_list.clicked.connect(self.seek_chat)
         chat_box.addWidget(self.chat_list, 1)
         self.chat_follow = QCheckBox('列表跟随播放')
@@ -605,6 +587,43 @@ class Workspace(QWidget):
         button('导出 ASS', lambda: self.export_chat('ass'), row)
         chat_box.addLayout(row)
         tools.insertTab(1, chat_page, '弹幕')
+        self.highlights_page = QWidget()
+        heat_box = QVBoxLayout(self.highlights_page)
+        self.heat_heading = QLabel('亮点推荐')
+        self.heat_heading.setObjectName('SettingsTitle')
+        heat_box.addWidget(self.heat_heading)
+        heat_box.addWidget(self.heat_status)
+        button('全部添加亮点', self.add_all_highlights, heat_box)
+        hint = QLabel('基于弹幕热度发现候选片段。每5秒统计30秒窗口，选择后请回看确认。')
+        hint.setObjectName('SettingsHint')
+        hint.setWordWrap(True)
+        heat_box.addWidget(hint)
+        self.heat_keywords = QLineEdit()
+        self.heat_keywords.setPlaceholderText('关键词，逗号分隔；留空统计全部弹幕')
+        self.heat_keywords.setAccessibleName('亮点关键词过滤')
+        self.heat_keywords.editingFinished.connect(self.save_heat_options)
+        heat_box.addWidget(self.heat_keywords)
+        self.heat_threshold_label = QLabel('峰值阈值 80%')
+        heat_box.addWidget(self.heat_threshold_label)
+        self.heat_threshold = QSlider(Qt.Horizontal)
+        self.heat_threshold.setRange(50, 100)
+        self.heat_threshold.setValue(80)
+        self.heat_threshold.setAccessibleName('弹幕峰值阈值百分比')
+        self.heat_threshold.valueChanged.connect(self.save_heat_options)
+        heat_box.addWidget(self.heat_threshold)
+        self.heat_results = QListWidget()
+        self.heat_results.setObjectName('FollowList')
+        self.heat_results.setAccessibleName('弹幕亮点推荐区间')
+        self.heat_results.setWordWrap(True)
+        self.heat_results.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.heat_results.setMinimumHeight(68)
+        self.heat_results.setMaximumHeight(220)
+        self.heat_results.itemClicked.connect(lambda *_: self.apply_highlight())
+        self.heat_results.itemActivated.connect(lambda *_: self.apply_highlight())
+        heat_box.addWidget(self.heat_results)
+        button('应用所选亮点为选区', self.apply_highlight, heat_box)
+        heat_box.addStretch()
+        tools.addTab(self.highlights_page, '亮点')
         self.playback_rate = QComboBox()
         for rate in (.5, 1, 1.5, 2, 5):
             self.playback_rate.addItem(f'{rate:g}倍', rate)
@@ -879,6 +898,8 @@ class Workspace(QWidget):
             self.update_media_layout()
 
     def show_library(self):
+        self.pending_live = None
+        self.pending_review = ''
         self.cover_editor.shutdown()
         self.project_editor.shutdown_preview()
         self.library_review.setCurrentWidget(self.listing)
@@ -900,8 +921,7 @@ class Workspace(QWidget):
         self.edit_button.setChecked(True)
         self.toggle_tasks(False)
         self.toggle_editor(True)
-        self.tools.setCurrentIndex(0)
-        self.inspector_scroll.ensureWidgetVisible(self.heat_heading)
+        self.tools.setCurrentWidget(self.highlights_page)
         self.heat_next_check = 0
         self.refresh_highlights()
 
@@ -951,8 +971,12 @@ class Workspace(QWidget):
                     self.heat_results.addItem(item)
                 row_height = max(56, self.heat_results.fontMetrics().lineSpacing() * 2 + 20)
                 self.heat_results.setFixedHeight(max(68, min(220, self.heat_results.count() * row_height + 4)))
-                status = (f"弹幕热度：{result['total']}条，匹配{result['matched']}条 · {len(result['peaks'])}个候选亮点"
-                          if result['total'] else '暂无弹幕数据；请确认本体已连接该直播间弹幕。')
+                if result['total']:
+                    status = f"弹幕热度：{result['total']}条，匹配{result['matched']}条 · {len(result['peaks'])}个候选亮点"
+                elif result['events']:
+                    status = '已录制醒目留言，亮点统计需要普通弹幕。'
+                else:
+                    status = '这段录像未收到可回放的弹幕。'
                 if self.current['duration'] < 30:
                     status += ' · 可读录像满30秒后生成推荐。'
                 self.heat_status.setText(status)
@@ -976,6 +1000,8 @@ class Workspace(QWidget):
         self.heat_requested_reader = self.heat_reader
         self.heat_requested_options = options
         keywords = options[1].replace('，', ',').split(',')
+        if not self.heat_results.count():
+            self.heat_status.setText('正在分析弹幕…')
         self.heat_future = self.hub.pool.submit(self.heat_reader.analyze, path,
             list(self.current.get('segments', [])), self.current['duration'], options[0],
             [word.strip() for word in keywords if word.strip()], options[2])
@@ -1275,6 +1301,7 @@ class Workspace(QWidget):
             self.seek_position(max(0, self.current['duration'] - 1))
 
     def seek_position(self, position):
+        self.chat_anchor = None
         if not self.current:
             return
         self.selection_playing = False
@@ -1375,6 +1402,7 @@ class Workspace(QWidget):
         self.guard(submit)
 
     def review(self, entry):
+        self.chat_anchor = None
         self.live_source = None
         self.pending_live = None
         self.resume_position = None
@@ -1595,13 +1623,34 @@ class Workspace(QWidget):
 
     def filter_chat(self, *_):
         self.chat_model.filter(self.chat_search.text(), self.chat_kind.currentData(), self.chat_offset.value())
+        if self.chat_anchor is not None:
+            index = self.chat_model.index_for_event(self.chat_anchor)
+            if index.isValid():
+                self.chat_list.setCurrentIndex(index)
         self.chat_count.setText(f'共 {len(self.chat_model.events)} 条 · 显示 {self.chat_model.rowCount()} 条'
             if self.current and self.current.get('danmaku_path') else '没有弹幕记录；旧录像或原版单文件无法补回。')
 
     def seek_chat(self, index):
         event = index.data(Qt.UserRole)
-        if event:
+        if event and self.current:
             self.seek_position(event['time'] + self.chat_offset.value())
+            self.chat_anchor = event
+            self.chat_list.setCurrentIndex(index)
+
+    def follow_chat(self, position):
+        core = self.preview.core
+        if not self.chat_follow.isChecked() or core is None or core.seeking or self.resume_position is not None:
+            return
+        if self.chat_anchor is not None:
+            target = max(0, min(self.current['duration'], self.chat_anchor['time'] + self.chat_offset.value()))
+            # Keep the clicked row while paused, including seeks to equal timestamps.
+            if core.pause or position <= target + .12:
+                return
+            self.chat_anchor = None
+        index = self.chat_model.index_at(position)
+        if index.isValid() and index != self.chat_list.currentIndex():
+            self.chat_list.setCurrentIndex(index)
+            self.chat_list.scrollTo(index, QAbstractItemView.PositionAtCenter)
 
     def export_chat(self, extension):
         if not self.current or not self.current.get('danmaku_path'):
@@ -1740,11 +1789,7 @@ class Workspace(QWidget):
                 self.preview.seek(self.outpoint.value())
                 self.selection_playing = False
             self.timeline.set_position(position)
-            if self.chat_follow.isChecked():
-                index = self.chat_model.index_at(position)
-                if index.isValid() and index != self.chat_list.currentIndex():
-                    self.chat_list.setCurrentIndex(index)
-                    self.chat_list.scrollTo(index, QAbstractItemView.PositionAtCenter)
+            self.follow_chat(position)
             if self.preview.chat_error:
                 self.chat_count.setText('画面弹幕：' + self.preview.chat_error)
             if self.preview.core:
@@ -1813,7 +1858,7 @@ class Workspace(QWidget):
             return
         if hasattr(self, 'project_editor') and self.library_review.currentWidget() is self.project_editor:
             QTimer.singleShot(0, self.project_editor.request_preview)
-        if self.current and self.preview.core is None:
+        if self.current and self.library_review.currentWidget() is self.review_panel and self.preview.core is None:
             self.guard(lambda: self.preview.load(self.current['path']))
             self.change_playback_rate()
             self.mute_button.setText('开启声音')

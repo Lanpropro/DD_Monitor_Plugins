@@ -39,8 +39,12 @@ class ReplayRecordingSession(RecordingSession):
         self.danmaku_error = ''
         self._emoticon_loaders = {}
 
+    @property
+    def wants_danmaku(self):
+        return self.clip_options.get('danmaku', True)
+
     def record_danmaku(self, message):
-        if not self.clip_options.get('danmaku', True):
+        if not self.wants_danmaku:
             return
         kind = message.get('kind') or 'danmaku'
         if (not self._archive or self._saved or self.stopping or not self.process

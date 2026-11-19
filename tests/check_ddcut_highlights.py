@@ -201,9 +201,11 @@ class HighlightTests(unittest.TestCase):
                     if args.native:
                         until(lambda: view.preview.position() > .1)
                         original_core = view.preview.core
-                    view.show_highlights()
+                    view.edit_button.click()
+                    view.highlights_button.click()
                     until(lambda: view.heat_results.count() > 0)
-                    self.assertEqual(view.tools.currentIndex(), 0)
+                    self.assertIs(view.tools.currentWidget(), view.highlights_page)
+                    self.assertTrue(view.heat_results.isVisible())
                     self.assertEqual(len(view.timeline.heat_points), 13)
                     rect = view.heat_results.visualItemRect(view.heat_results.item(0))
                     QTest.mouseClick(view.heat_results.viewport(), Qt.LeftButton, pos=rect.center())
@@ -239,6 +241,8 @@ class HighlightTests(unittest.TestCase):
                     view.review({**entry, 'danmaku_path': '', 'title': '旧录像'})
                     self.assertEqual(view.heat_results.count(), 0)
                     self.assertFalse(view.timeline.heat_points)
+                    view.highlights_button.click()
+                    self.assertTrue(view.heat_status.isVisible())
                     self.assertIn('没有弹幕记录', view.heat_status.text())
                     self.assertIsNotNone(view.current)
                 finally:

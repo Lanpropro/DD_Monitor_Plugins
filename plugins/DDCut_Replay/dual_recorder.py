@@ -55,6 +55,10 @@ class DualRecordingSession(RecordingSession):
         self._sync_clip()
         self.clip.update_review()
 
+    @property
+    def wants_danmaku(self):
+        return self.clip.wants_danmaku
+
     def record_danmaku(self, message):
         self._sync_clip()
         self.clip.record_danmaku(message)

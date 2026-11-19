@@ -181,6 +181,7 @@ class DDCutReplayTests(unittest.TestCase):
         self.assertEqual(view.markers.objectName(), 'FollowList')
         try:
             host.show()
+            view.category.setCurrentIndex(view.category.findData('live'))
             for mode in ('dark', 'light'):
                 ui.theme.apply(mode)
                 host.setStyleSheet(ui.theme.qss())
@@ -361,9 +362,9 @@ class DDCutReplayTests(unittest.TestCase):
             view.show()
             self.assertEqual(view.tabs.count(), 1)
             self.assertEqual(view.tabs.currentWidget(), view.library_page)
-            self.assertEqual(view.category.currentData(), 'live')
+            self.assertEqual(view.category.currentData(), 'archive')
             self.assertEqual(view.sources.count(), 1)
-            view.category.setCurrentIndex(1)
+            view.refresh_library()
             self.assertEqual(view.library.count(), 1)
             view.search.setText('不存在的录像')
             self.assertTrue(view.library.item(0).isHidden())

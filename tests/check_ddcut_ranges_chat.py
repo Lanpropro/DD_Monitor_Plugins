@@ -328,6 +328,77 @@ class RangeChatTests(unittest.TestCase):
         self.assertEqual(selection.restore_ranges(old), [{'start': 2, 'end': 6, 'enabled': True}])
 
     @unittest.skipUnless(args.native, 'Native MPV overlay check is explicit')
+    def test_clicked_chat_stays_selected_and_inline_emotes_render_after_name(self):
+        hub = media.TaskHub(self.root / 'chat-feedback')
+        host = QMainWindow()
+        host.setAttribute(Qt.WA_ShowWithoutActivating if args.native else Qt.WA_DontShowOnScreen)
+        if args.native:
+            host.move(-30000, -30000)
+        owner = SimpleNamespace(context=SimpleNamespace(window=host), hub=hub,
+            service=SimpleNamespace(sources=lambda: [], options=lambda: {'ffmpeg': ffmpeg}),
+            preview_server=SimpleNamespace(source_url=lambda path: path))
+        with (nullcontext() if args.native else patch.object(ui.Preview, 'load')):
+            view = ui.Workspace(owner)
+            host.setCentralWidget(view)
+            host.resize(1440, 880)
+            host.show()
+            try:
+                view.review({**self.entry, 'danmaku_path': ''})
+                if args.native:
+                    until(lambda: view.preview.position() > .1)
+                    QTest.mouseClick(view.preview, Qt.LeftButton)
+                    self.assertTrue(view.preview.core.pause)
+                url = 'https://invalid.local/emote.png'
+                picture = QImage(str(self.emote))
+                view.preview.chat.images[url] = picture
+                events = [
+                    {'kind': 'danmaku', 'time': 1.98, 'uname': 'Previous', 'text': 'previous'},
+                    {'kind': 'danmaku', 'time': 2, 'uname': 'Alice', 'text': 'hello [smile] world',
+                     'emoticons': {'[smile]': url}},
+                    {'kind': 'danmaku', 'time': 2, 'uname': 'Next', 'text': '[smile]', 'emoticon': url},
+                    {'kind': 'super_chat', 'time': 3, 'uname': 'Bob', 'text': 'SC', 'price': 30},
+                ]
+                view.chat_model.events = events
+                view.filter_chat()
+                view.tools.setCurrentIndex(1)
+                app.processEvents()
+                index = view.chat_model.index(1)
+                rect = view.chat_list.visualRect(index)
+                QTest.mouseClick(view.chat_list.viewport(), Qt.LeftButton, pos=rect.center())
+                self.assertEqual(view.chat_list.currentIndex(), index)
+                if args.native:
+                    until(lambda: abs(view.preview.position() - 2) < .08)
+                    for position in (1.98, 2, 2.04, 1.99):
+                        view.follow_chat(position)
+                        self.assertEqual(view.chat_list.currentIndex(), index)
+                    view.preview.core.command('keypress', 'MBTN_LEFT')
+                    until(lambda: not view.preview.core.pause)
+                    until(lambda: view.chat_list.currentIndex().data(Qt.UserRole) == events[-1])
+                view.chat_model.events = [*events, {'kind': 'danmaku', 'time': 4, 'text': 'new'}]
+                view.seek_chat(view.chat_model.index(1))
+                view.filter_chat()
+                self.assertEqual(view.chat_list.currentIndex().data(Qt.UserRole), events[1])
+                runs = list(view.chat_model.runs(view.chat_model.index(1)))
+                self.assertEqual([text for text, _ in runs], ['00:00:02  Alice: ', 'hello ', '[smile]', ' world'])
+                self.assertIs(runs[2][1], picture)
+                self.assertIs(list(view.chat_model.runs(view.chat_model.index(2)))[1][1], picture)
+                self.assertIn('SC ¥30 Bob', list(view.chat_model.runs(view.chat_model.index(3)))[0][0])
+                viewport = view.chat_list.viewport()
+                shot = viewport.grab()
+                image = shot.toImage()
+                ratio = shot.devicePixelRatio()
+                y = round(view.chat_list.visualRect(view.chat_model.index(1)).center().y() * ratio)
+                if args.screenshots:
+                    args.screenshots.mkdir(parents=True, exist_ok=True)
+                    host.grab().save(str(args.screenshots / 'inline-chat.png'))
+                image_x = [x for x in range(image.width()) if image.pixelColor(x, y) == QColor('#00ff00')]
+                self.assertTrue(image_x)
+                self.assertGreater(min(image_x) / ratio, 65, '表情应在时间、用户名和正文之后')
+            finally:
+                view.close()
+                hub.close()
+                host.close()
+
     def test_native_overlay_pixels_pause_rate_seek_and_image(self):
         host = QMainWindow()
         host.setAttribute(Qt.WA_ShowWithoutActivating)

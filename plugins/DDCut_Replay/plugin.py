@@ -174,7 +174,8 @@ class DDCutReplay(api.Plugin):
             self.action.setChecked(True)
             self.workspace.refresh_sources()
             self.workspace.scan()
-            self.workspace.open_current_recording()
+            self.workspace.show_library()
+            self.workspace.category.setCurrentIndex(self.workspace.category.findData('archive'))
         else:
             self.action.setChecked(False)
 

@@ -171,7 +171,7 @@ with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_
             assert 'local highlight check' in chat.read_text(encoding='utf-8')
             assert all('wall_start' in part for part in session.review_info()['segments'])
             view.show_highlights()
-            assert view.tools.currentIndex() == 0 and view.tools.isVisible()
+            assert view.tools.currentWidget() is view.highlights_page and view.tools.isVisible()
             view.edit_button.click()
             original_core = view.preview.core
             view.tabs.setCurrentWidget(view.library_page)
