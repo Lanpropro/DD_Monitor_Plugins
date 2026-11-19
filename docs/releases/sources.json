@@ -379,6 +379,69 @@
           "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/proxy-control-v1.0/plugin-catalog.json"
         }
       ]
+    },
+    {
+      "tag": "bili-watchlater-v1.0",
+      "file": "RELEASE-bili-watchlater-v1.0.md",
+      "status": "prepared",
+      "source_kind": "repository_candidate",
+      "base_commit": "ae3d1c64763284a7f82930491aee684210dd719f",
+      "last_edit_verified": false,
+      "sha256": "298ad345066247a716c7c6c63073dfbdf15d25ad761d8f01956d99cc7f66d8ad"
+    },
+    {
+      "tag": "huya-live-v1.0",
+      "file": "RELEASE-huya-live-v1.0.md",
+      "status": "prepared",
+      "source_kind": "repository_candidate",
+      "base_commit": "ae3d1c64763284a7f82930491aee684210dd719f",
+      "last_edit_verified": false,
+      "sha256": "cb7b43c26d557125b5f44173ac93aaee676d87498b02fe66b3a9314e22a772a4"
+    },
+    {
+      "tag": "douyu-live-v1.0",
+      "file": "RELEASE-douyu-live-v1.0.md",
+      "status": "prepared",
+      "source_kind": "repository_candidate",
+      "base_commit": "ae3d1c64763284a7f82930491aee684210dd719f",
+      "last_edit_verified": false,
+      "sha256": "0c828f7587166f6f4d7be8374283650e85f0c71f87cbc8a4c868ffa0589c3397"
+    },
+    {
+      "tag": "douyin-live-v1.0",
+      "file": "RELEASE-douyin-live-v1.0.md",
+      "status": "prepared",
+      "source_kind": "repository_candidate",
+      "base_commit": "ae3d1c64763284a7f82930491aee684210dd719f",
+      "last_edit_verified": false,
+      "sha256": "62f935da98466353e17e0f08f329427611597c21098fd63997bbd3e8fb3202f4"
+    },
+    {
+      "tag": "twitch-live-v1.0",
+      "file": "RELEASE-twitch-live-v1.0.md",
+      "status": "prepared",
+      "source_kind": "repository_candidate",
+      "base_commit": "ae3d1c64763284a7f82930491aee684210dd719f",
+      "last_edit_verified": false,
+      "sha256": "3a994aa2639da8c6cd8eb23702bdaf1066aa7a88f7052d806527d18e3efe0b54"
+    },
+    {
+      "tag": "youtube-live-v1.0",
+      "file": "RELEASE-youtube-live-v1.0.md",
+      "status": "prepared",
+      "source_kind": "repository_candidate",
+      "base_commit": "ae3d1c64763284a7f82930491aee684210dd719f",
+      "last_edit_verified": false,
+      "sha256": "ad02f33a4ccca0911658f117a391cece9e3b082f2314d751b3f1af1a73bdc686"
+    },
+    {
+      "tag": "chzzk-live-v1.0",
+      "file": "RELEASE-chzzk-live-v1.0.md",
+      "status": "prepared",
+      "source_kind": "repository_candidate",
+      "base_commit": "ae3d1c64763284a7f82930491aee684210dd719f",
+      "last_edit_verified": false,
+      "sha256": "7c0cd06ae70aae3e47a0475d65ceed22289bc90dd1b064b425b2b95c96496cf8"
     }
   ],
   "tags_without_recoverable_body": [

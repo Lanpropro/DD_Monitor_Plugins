@@ -28,7 +28,7 @@ class CompatibilityTests(unittest.TestCase):
     def test_released_context_gets_actionable_upgrade_message(self):
         context=self.context()
         for name in NEW_APIS:delattr(context,name)
-        with self.assertRaisesRegex(RuntimeError,'晚于已发布的 v0.7.3'):
+        with self.assertRaisesRegex(RuntimeError,'0.8 热修复1'):
             plugin_module.BiliWatchLaterPlugin().on_load(context)
 
     def test_capable_headless_context_still_loads_and_unloads(self):
@@ -63,9 +63,17 @@ class CompatibilityTests(unittest.TestCase):
         self.assertIn('sidebar_pages',manifest['host_capabilities'])
         self.assertIn('shared_sidebar_drag',manifest['host_capabilities'])
         self.assertIn('live_danmaku_source_filter',manifest['host_capabilities'])
+        self.assertEqual(manifest['min_app_version'],'0.8')
         draft=(ROOT/'docs/releases/DRAFT-bili-watchlater-v1.0.md').read_text(encoding='utf-8')
         for text in ('v0.7.3','min_app_version','未正式发布','ROOM_SUPPORTS_LIVE_DANMAKU',*NEW_APIS):
             self.assertIn(text,draft)
+
+    def test_original_v08_release_lacks_the_required_hotfix_capabilities(self):
+        context_source=subprocess.check_output(['git','-C',str(HOST),'show','v0.8:ddm/plugin_types.py'],text=True,encoding='utf-8')
+        api_source=subprocess.check_output(['git','-C',str(HOST),'show','v0.8:ddm/plugins.py'],text=True,encoding='utf-8')
+        for name in ('start_sidebar_drag','cancel_sidebar_drag'):
+            self.assertNotIn('def '+name+'(',context_source)
+        self.assertNotIn('ROOM_SUPPORTS_LIVE_DANMAKU',api_source)
 
 
 if __name__=='__main__':unittest.main()

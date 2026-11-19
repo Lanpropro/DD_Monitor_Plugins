@@ -48,12 +48,12 @@
 | B站直播互动 | 1.1 | [README](../plugins/bili_live/README.md) |
 | 网络代理 | 1.0 | [README](../plugins/proxy_control/README.md) |
 | B站稍后再看（验收候选） | 1.0 | [README](../plugins/bili_watchlater/README.md) |
-| 虎牙直播（独立开发候选） | 0.1 | [README](../plugins/huya_live/README.md) |
-| 斗鱼直播（独立开发候选） | 0.1 | [README](../plugins/douyu_live/README.md) |
-| 抖音直播（独立开发候选） | 0.1 | [README](../plugins/douyin_live/README.md) |
-| Twitch直播（独立开发候选） | 0.1 | [README](../plugins/twitch_live/README.md) |
-| YouTube直播（独立开发候选） | 0.1 | [README](../plugins/youtube_live/README.md) |
-| CHZZK直播（独立开发候选） | 0.1 | [README](../plugins/chzzk_live/README.md) |
+| 虎牙直播（独立平台） | 1.0 | [README](../plugins/huya_live/README.md) |
+| 斗鱼直播（独立平台） | 1.0 | [README](../plugins/douyu_live/README.md) |
+| 抖音直播（独立平台） | 1.0 | [README](../plugins/douyin_live/README.md) |
+| Twitch直播（独立平台） | 1.0 | [README](../plugins/twitch_live/README.md) |
+| YouTube直播（独立平台） | 1.0 | [README](../plugins/youtube_live/README.md) |
+| CHZZK直播（独立平台） | 1.0 | [README](../plugins/chzzk_live/README.md) |
 
 源码版本取自各插件 `plugin.json` 的当前分支值，不代表已发布的安装包。线上公开版本以[发布记录](releases/README.md)和 GitHub Releases 为准。
 

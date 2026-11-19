@@ -24,14 +24,14 @@ KINDS=('huya','douyu','douyin','twitch','youtube','chzzk')
 
 class PackageTests(unittest.TestCase):
     def install(self,manager,plugin_id):
-        version='2.0' if plugin_id=='domestic_live' else '1.2' if plugin_id=='global_live' else '0.1'
+        version='2.0' if plugin_id=='domestic_live' else '1.2' if plugin_id=='global_live' else '1.0'
         manager.install_zip(str(ROOT/'dist'/f'{plugin_id}-{version}.zip'))
 
     def test_independent_packages_require_app_08(self):
         offers = []
         for kind in KINDS:
             plugin_id = f'{kind}_live'
-            with zipfile.ZipFile(ROOT / 'dist' / f'{plugin_id}-0.1.zip') as archive:
+            with zipfile.ZipFile(ROOT / 'dist' / f'{plugin_id}-1.0.zip') as archive:
                 manifest = json.loads(archive.read(f'{plugin_id}/plugin.json'))
             self.assertEqual(manifest['min_app_version'], '0.8', plugin_id)
             offers.append(dict(id=plugin_id, available=True, min_app_version=manifest['min_app_version']))
@@ -44,7 +44,7 @@ class PackageTests(unittest.TestCase):
         icons = set()
         for kind in KINDS:
             plugin_id = f'{kind}_live'
-            with zipfile.ZipFile(ROOT / 'dist' / f'{plugin_id}-0.1.zip') as archive:
+            with zipfile.ZipFile(ROOT / 'dist' / f'{plugin_id}-1.0.zip') as archive:
                 manifest = json.loads(archive.read(f'{plugin_id}/plugin.json'))
                 self.assertEqual(manifest['icon'], 'icon.png', plugin_id)
                 icon = archive.read(f'{plugin_id}/{manifest["icon"]}')
@@ -148,18 +148,18 @@ class PackageTests(unittest.TestCase):
 
     def test_selected_build_leaves_other_platform_archives_untouched(self):
         import subprocess
-        other=ROOT/'dist/twitch_live-0.1.zip'
+        other=ROOT/'dist/twitch_live-1.0.zip'
         before=other.stat().st_mtime_ns
         result=subprocess.run([sys.executable,str(ROOT/'tools/build_plugins.py'),'--plugin','youtube_live'],
                               capture_output=True,text=True,timeout=30)
         self.assertEqual(result.returncode,0,result.stderr)
-        self.assertEqual(result.stdout.strip(),'youtube_live-0.1.zip')
+        self.assertEqual(result.stdout.strip(),'youtube_live-1.0.zip')
         self.assertEqual(other.stat().st_mtime_ns,before)
 
     def test_bundled_files_match_the_single_maintained_source(self):
         recipes=json.loads((ROOT/'tools/platform_bundles.json').read_text(encoding='utf-8'))
         for plugin_id,recipe in recipes.items():
-            with zipfile.ZipFile(ROOT/'dist'/f'{plugin_id}-0.1.zip') as archive:
+            with zipfile.ZipFile(ROOT/'dist'/f'{plugin_id}-1.0.zip') as archive:
                 for destination,source in recipe.items():
                     self.assertEqual(archive.read(plugin_id+'/'+destination),(ROOT/source).read_bytes())
                 self.assertIsNone(archive.testzip())

@@ -2,7 +2,7 @@
   "id": "douyin_live",
   "name": "抖音直播",
   "description": "抖音直播播放、登录关注与官网弹幕输入（实验功能）",
-  "version": "0.1",
+  "version": "1.0",
   "min_app_version": "0.8",
   "icon": "icon.png",
   "platforms": [

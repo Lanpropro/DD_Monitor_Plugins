@@ -226,8 +226,7 @@ class BiliWatchLaterPlugin(api.Plugin):
         ]
         if missing:
             raise RuntimeError(
-                "bili_watchlater 需要支持侧栏页面和共享拖影的本体开发版"
-                "（晚于已发布的 v0.7.3）；"
+                "bili_watchlater 需要 DD监控室CE 0.8 热修复1或更新版本；"
                 "当前宿主缺少接口：" + "、".join(missing)
             )
         if not hasattr(api, "EVENT_ACCOUNT_CHANGED") or not hasattr(
@@ -241,7 +240,7 @@ class BiliWatchLaterPlugin(api.Plugin):
         if getattr(api, "ROOM_SUPPORTS_LIVE_DANMAKU", None) != "supports_live_danmaku":
             raise RuntimeError(
                 "bili_watchlater 需要支持实时弹幕来源能力筛选的配套本体；"
-                "请升级本体（缺少 ROOM_SUPPORTS_LIVE_DANMAKU）"
+                "请升级到0.8 热修复1或更新版本（缺少 ROOM_SUPPORTS_LIVE_DANMAKU）"
             )
 
         self.context = context
