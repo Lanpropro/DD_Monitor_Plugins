@@ -103,7 +103,9 @@ with tempfile.TemporaryDirectory(prefix='ddcut-native-') as directory, isolated_
         assert view.preview.core is card_core and view.review_panel.isVisible()
         view.inpoint.setValue(.5)
         view.outpoint.setValue(2)
-        assert view.export_button.isEnabled()
+        assert not view.current['ranges'] and view.new_range_button.isEnabled()
+        view.new_range_button.click()
+        assert view.current['selection'] == [.5, 2] and view.export_button.isEnabled()
         assert view.tabs.count() == 1 and view.review_page is view.library_page
         assert view.tools.isVisible() and view.listing.isHidden() and view.filters.isHidden()
         view.edit_button.click()

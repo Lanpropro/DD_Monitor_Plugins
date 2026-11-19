@@ -265,9 +265,16 @@ class RangeChatTests(unittest.TestCase):
                 view.remove_range()
                 view.remove_range()
                 view.add_range(1, 4)
-                view.add_range(7, 9)
+                view.outpoint.setValue(9)
+                view.inpoint.setValue(7)
+                self.assertEqual(view.current['ranges'], [{'start': 1, 'end': 4, 'enabled': True}])
+                view.new_range_button.click()
+                self.assertEqual(view.current['ranges'][1], {'start': 7, 'end': 9, 'enabled': True})
                 view.select_range(0)
                 view.outpoint.setValue(5)
+                self.assertEqual(view.current['ranges'][0]['end'], 4)
+                view.apply_range_button.click()
+                self.assertEqual(view.current['ranges'][0]['end'], 5)
                 self.assertEqual(view.current['ranges'][1]['end'], 9)
                 view.range_list.item(0).setCheckState(Qt.Unchecked)
                 self.assertEqual(len(selection.enabled_ranges(view.current)), 1)
@@ -326,6 +333,8 @@ class RangeChatTests(unittest.TestCase):
         restored.close()
         old = {'duration': 10, 'selection': [2, 6]}
         self.assertEqual(selection.restore_ranges(old), [{'start': 2, 'end': 6, 'enabled': True}])
+        inverted = {'duration': 10, 'ranges': [{'start': 5, 'end': 0, 'enabled': True}]}
+        self.assertEqual(selection.restore_ranges(inverted), [{'start': 0, 'end': 5, 'enabled': False}])
 
     @unittest.skipUnless(args.native, 'Native MPV overlay check is explicit')
     def test_clicked_chat_stays_selected_and_inline_emotes_render_after_name(self):

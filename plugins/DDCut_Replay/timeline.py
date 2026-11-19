@@ -176,16 +176,18 @@ class Timeline(QWidget):
             painter.drawRect(rect)
             painter.setPen(muted)
             painter.drawText(rect.adjusted(4, 0, -4, 0), Qt.AlignVCenter | Qt.AlignLeft, str(index + 1))
-        selected = QRectF(self.x_for(self.start), track.top(),
-                         max(0, self.x_for(self.end) - self.x_for(self.start)), track.height())
-        painter.fillRect(selected, fill)
-        painter.setPen(QPen(accent, 2))
-        painter.drawRect(selected)
+        if self.selected_range >= 0:
+            selected = QRectF(self.x_for(self.start), track.top(),
+                             max(0, self.x_for(self.end) - self.x_for(self.start)), track.height())
+            painter.fillRect(selected, fill)
+            painter.setPen(QPen(accent, 2))
+            painter.drawRect(selected)
         painter.restore()
-        for value in (self.start, self.end):
-            x = self.x_for(value)
-            if track.left() <= x <= track.right():
-                painter.fillRect(QRectF(x - 4, track.top() - 3, 8, track.height() + 6), accent)
+        if self.selected_range >= 0:
+            for value in (self.start, self.end):
+                x = self.x_for(value)
+                if track.left() <= x <= track.right():
+                    painter.fillRect(QRectF(x - 4, track.top() - 3, 8, track.height() + 6), accent)
         x = self.x_for(self.position)
         if track.left() <= x <= track.right():
             painter.setPen(QPen(QColor('#fb7185'), 2))
@@ -207,9 +209,10 @@ class Timeline(QWidget):
             return super().mousePressEvent(event)
         x, y = event.position().x(), event.position().y()
         self.setFocus(Qt.MouseFocusReason)
-        if self.track().top() - 4 <= y <= self.track().bottom() + 6 and abs(x - self.x_for(self.start)) <= 9:
+        near_track = self.selected_range >= 0 and self.track().top() - 4 <= y <= self.track().bottom() + 6
+        if near_track and abs(x - self.x_for(self.start)) <= 9:
             self.dragging = 'start'
-        elif self.track().top() - 4 <= y <= self.track().bottom() + 6 and abs(x - self.x_for(self.end)) <= 9:
+        elif near_track and abs(x - self.x_for(self.end)) <= 9:
             self.dragging = 'end'
         else:
             value = self.seconds_at(x)
@@ -232,7 +235,7 @@ class Timeline(QWidget):
             else:
                 self.seekRequested.emit(value)
         else:
-            near = min(abs(x - self.x_for(self.start)), abs(x - self.x_for(self.end))) <= 9
+            near = self.selected_range >= 0 and min(abs(x - self.x_for(self.start)), abs(x - self.x_for(self.end))) <= 9
             self.setCursor(Qt.SizeHorCursor if near else Qt.ArrowCursor)
 
     def mouseReleaseEvent(self, event):

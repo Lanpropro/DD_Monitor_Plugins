@@ -12,8 +12,10 @@ def restore_ranges(entry):
     for item in saved:
         start, end = float(item['start']), float(item['end'])
         if math.isfinite(start) and math.isfinite(end):
-            ranges.append({'start': max(0, min(duration, start)), 'end': max(0, min(duration, end)),
-                           'enabled': item.get('enabled', True)})
+            start, end = max(0, min(duration, start)), max(0, min(duration, end))
+            # Preserve both endpoints of old inverted rows, but require opt-in before export.
+            ranges.append({'start': min(start, end), 'end': max(start, end),
+                           'enabled': start < end and item.get('enabled', True)})
     entry['ranges'] = ranges
     entry['selected_range'] = min(max(0, int(entry.get('selected_range', 0))), len(ranges) - 1)
     return ranges

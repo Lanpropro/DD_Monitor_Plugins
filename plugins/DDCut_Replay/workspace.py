@@ -454,7 +454,8 @@ class Workspace(QWidget):
         self.range_list.itemChanged.connect(self.range_toggled)
         inspector_box.addWidget(self.range_list)
         row = QHBoxLayout()
-        button('新建选区', self.add_range, row)
+        self.new_range_button = button('新建选区', self.add_range, row)
+        self.new_range_button.setEnabled(False)
         button('删除', self.remove_range, row)
         button('↑', lambda: self.move_range(-1), row).setFixedWidth(36)
         button('↓', lambda: self.move_range(1), row).setFixedWidth(36)
@@ -465,7 +466,8 @@ class Workspace(QWidget):
         self.inpoint, self.outpoint = TimeInput(), TimeInput()
         for spin in (self.inpoint, self.outpoint):
             spin.setRange(0, 0)
-            spin.valueChanged.connect(self.save_selection)
+            spin.setKeyboardTracking(True)
+            spin.valueChanged.connect(self.refresh_selection)
         form.addRow('入点', self.inpoint)
         form.addRow('出点', self.outpoint)
         inspector_box.addLayout(form)
@@ -473,8 +475,12 @@ class Workspace(QWidget):
         button('设为入点 I', lambda: self.inpoint.setValue(self.preview.position()), row)
         button('设为出点 O', lambda: self.outpoint.setValue(self.preview.position()), row)
         inspector_box.addLayout(row)
-        self.selection_button = button('预览选区', self.play_selection, inspector_box)
+        row = QHBoxLayout()
+        self.apply_range_button = button('应用到当前选区', self.apply_range, row)
+        self.apply_range_button.setEnabled(False)
+        self.selection_button = button('预览选区', self.play_selection, row)
         self.selection_button.setEnabled(False)
+        inspector_box.addLayout(row)
         inspector_box.addWidget(QLabel('导出设置'))
         self.export_scope = QComboBox()
         self.export_scope.addItem('当前选区', 'current')
@@ -1085,13 +1091,19 @@ class Workspace(QWidget):
             self.open_selected()
 
     def set_selection(self, start, end):
-        self.inpoint.blockSignals(True)
-        self.outpoint.blockSignals(True)
-        self.inpoint.setValue(start)
-        self.outpoint.setValue(end)
-        self.inpoint.blockSignals(False)
-        self.outpoint.blockSignals(False)
-        self.save_selection()
+        if not self.current or end <= start:
+            return
+        if self.current['selected_range'] < 0:
+            self.add_range(start, end)
+        else:
+            self.set_range_inputs(start, end)
+            self.apply_range()
+
+    def set_range_inputs(self, start, end):
+        for widget, value in ((self.inpoint, start), (self.outpoint, end)):
+            blocked = widget.blockSignals(True)
+            widget.setValue(value)
+            widget.blockSignals(blocked)
 
     def update_timeline_view(self):
         self.timeline_scroll.blockSignals(True)
@@ -1102,12 +1114,13 @@ class Workspace(QWidget):
         self.zoom_label.setText(f'{self.timeline.zoom:g}×')
 
     def play_selection(self):
-        if self.current and self.outpoint.value() > self.inpoint.value():
-            self.seek_position(self.inpoint.value())
+        if self.current and self.selection_button.isEnabled():
+            start, _ = self.current['selection']
+            self.seek_position(start)
             if self.preview.core:
                 self.preview.core.pause = False
                 if self.resume_position is not None:
-                    self.resume_position = (self.inpoint.value(), False)
+                    self.resume_position = (start, False)
                 self.selection_playing = True
 
     def report(self, message):
@@ -1416,9 +1429,6 @@ class Workspace(QWidget):
         duration = entry['duration']
         for spin in (self.inpoint, self.outpoint):
             spin.setRange(0, duration)
-        saved = entry.get('selection', [0, duration])
-        self.inpoint.setValue(min(duration, saved[0]))
-        self.outpoint.setValue(min(duration, saved[1]))
         self.timeline.segments = entry.get('segments', [])
         self.timeline.set_duration(duration, reset=True)
         self.timeline.set_position(0)
@@ -1463,7 +1473,6 @@ class Workspace(QWidget):
         self.loaded_duration = duration
         self.position_label.setText(clock(0) + ' / ' + clock(duration))
         self.refresh_markers()
-        self.save_selection()
         self.tabs.setCurrentWidget(self.library_page)
         self.library_review.setCurrentWidget(self.review_panel)
         self.filters.hide()
@@ -1476,35 +1485,47 @@ class Workspace(QWidget):
         self.change_playback_rate()
         self.mute_button.setText('开启声音')
 
-    def save_selection(self, *_):
-        if not self.current:
+    def apply_range(self):
+        if not self.current or self.current['selected_range'] < 0:
             return
         start, end = self.inpoint.value(), self.outpoint.value()
+        if end <= start:
+            return
+        index = self.current['selected_range']
+        self.current['ranges'][index].update(start=start, end=end)
+        self.range_list.blockSignals(True)
+        self.range_list.item(index).setText(f'{index + 1}. {clock(start)} → {clock(end)}')
+        self.range_list.blockSignals(False)
+        self.select_range(index)
+
+    def refresh_selection(self, *_):
+        if not self.current or 'selection' not in self.current:
+            return
         ranges = self.current['ranges']
         selected = self.current['selected_range']
-        if selected < 0 and (start or end):
-            ranges.append({'start': start, 'end': end, 'enabled': True})
-            self.current['selected_range'] = selected = len(ranges) - 1
-            self.refresh_ranges(update_selection=False)
-        if 0 <= selected < len(ranges):
-            ranges[selected].update(start=start, end=end)
-            self.range_list.blockSignals(True)
-            self.range_list.item(selected).setText(f'{selected + 1}. {clock(start)} → {clock(end)}')
-            self.range_list.blockSignals(False)
-        self.current['selection'] = [start, end]
-        self.timeline.ranges = ranges
-        self.timeline.selected_range = selected
-        self.timeline.set_selection(start, end)
-        valid = selected >= 0 and end > start
+        start, end = self.current['selection']
+        draft = (self.inpoint.value(), self.outpoint.value())
+        valid_draft = draft[1] > draft[0]
+        changed = tuple(round(value, 3) for value in (start, end)) != draft
+        self.new_range_button.setEnabled(valid_draft)
+        self.apply_range_button.setEnabled(selected >= 0 and valid_draft and changed)
         active = enabled_ranges(self.current)
         all_valid = bool(active) and all(0 <= item['start'] < item['end'] <= self.current['duration'] for item in active)
         total = sum(max(0, item['end'] - item['start']) for item in active)
-        self.selection_label.setText(f'当前 {clock(start)} → {clock(end)}\n启用 {len(active)}/{len(ranges)} 段 · 合计 {total:.3f} 秒')
-        self.export_button.setEnabled(valid if self.export_scope.currentData() == 'current' else all_valid)
+        if changed:
+            label = '端点待保存 · 可新建或应用' if valid_draft else '出点必须晚于入点'
+        else:
+            label = f'当前 {clock(start)} → {clock(end)}' if selected >= 0 else '请设置入点和出点'
+        self.selection_label.setText(f'{label}\n启用 {len(active)}/{len(ranges)} 段 · 合计 {total:.3f} 秒')
+        valid = selected >= 0 and end > start and not changed
+        scope = self.export_scope.currentData()
+        if scope == 'full':
+            self.export_button.setEnabled(self.current['duration'] > 0)
+        else:
+            self.export_button.setEnabled(valid if scope == 'current' else all_valid)
         self.selection_button.setEnabled(valid)
-        self.hub.save()
 
-    def refresh_ranges(self, *, update_selection=True):
+    def refresh_ranges(self):
         if not self.current:
             return
         ranges = self.current['ranges']
@@ -1522,8 +1543,7 @@ class Workspace(QWidget):
         self.ranges_all.blockSignals(True)
         self.ranges_all.setChecked(bool(ranges) and all(item.get('enabled', True) for item in ranges))
         self.ranges_all.blockSignals(False)
-        if update_selection:
-            self.select_range(selected)
+        self.select_range(selected)
 
     def select_range(self, index):
         if not self.current:
@@ -1535,18 +1555,20 @@ class Workspace(QWidget):
         self.range_list.setCurrentRow(index)
         self.range_list.blockSignals(False)
         item = ranges[index] if index >= 0 else {'start': 0, 'end': 0}
-        for widget, value in ((self.inpoint, item['start']), (self.outpoint, item['end'])):
-            widget.blockSignals(True)
-            widget.setValue(value)
-            widget.blockSignals(False)
-        self.save_selection()
+        start, end = item['start'], item['end']
+        self.set_range_inputs(start, end)
+        self.current['selection'] = [start, end]
+        self.timeline.ranges = ranges
+        self.timeline.selected_range = index
+        self.timeline.set_selection(start, end)
+        self.refresh_selection()
+        self.hub.save()
 
     def add_range(self, start=None, end=None):
         if not self.current or self.current['duration'] <= 0:
             return
         if start is None or isinstance(start, bool):
-            start = min(self.preview.position(), max(0, self.current['duration'] - 10))
-            end = min(self.current['duration'], start + 10)
+            start, end = self.inpoint.value(), self.outpoint.value()
         start, end = max(0, float(start)), min(self.current['duration'], float(end))
         if end <= start:
             return
@@ -1596,7 +1618,7 @@ class Workspace(QWidget):
         if precise:
             self.mode.setCurrentIndex(1)
         if self.current and 'ranges' in self.current:
-            self.save_selection()
+            self.refresh_selection()
 
     def save_burn_options(self, *_):
         if self.current:
@@ -1656,7 +1678,7 @@ class Workspace(QWidget):
         if not self.current or not self.current.get('danmaku_path'):
             self.report('这份录像没有弹幕记录。')
             return
-        start, end = (self.inpoint.value(), self.outpoint.value()) if self.chat_scope.currentData() == 'selection' else (0, self.current['duration'])
+        start, end = self.current['selection'] if self.chat_scope.currentData() == 'selection' else (0, self.current['duration'])
         if end <= start:
             self.report('请先选择有效的时间范围。')
             return
@@ -1699,6 +1721,7 @@ class Workspace(QWidget):
             return
         mode = self.mode.currentData()
         scope = self.export_scope.currentData()
+        start, end = (0, self.current['duration']) if scope == 'full' else self.current['selection']
         burn = self.burn_chat.isChecked()
         encoding = self.encoding.value()
         suffix = '.mkv' if mode == 'copy' else '.mp4'
@@ -1727,8 +1750,8 @@ class Workspace(QWidget):
                     [target], self.hub.root / 'work', True, burn, encoding)
             else:
                 job = self.hub.submit('导出：' + self.current['title'], 'export', export_clip,
-                    self.service.options()['ffmpeg'], dict(self.current), 0 if scope == 'full' else self.inpoint.value(),
-                    self.current['duration'] if scope == 'full' else self.outpoint.value(), mode, target, self.hub.root / 'work', burn, encoding)
+                    self.service.options()['ffmpeg'], dict(self.current), start, end,
+                    mode, target, self.hub.root / 'work', burn, encoding)
             self.toggle_tasks(True)
             self.report('导出已排队：' + job.title)
         self.guard(submit)
@@ -1784,9 +1807,10 @@ class Workspace(QWidget):
                 self.preview.core.pause = paused
                 self.resume_position = None
             position = self.preview.position()
-            if self.selection_playing and position >= self.outpoint.value() and self.preview.core:
+            end = self.current['selection'][1]
+            if self.selection_playing and position >= end and self.preview.core:
                 self.preview.core.pause = True
-                self.preview.seek(self.outpoint.value())
+                self.preview.seek(end)
                 self.selection_playing = False
             self.timeline.set_position(position)
             self.follow_chat(position)
