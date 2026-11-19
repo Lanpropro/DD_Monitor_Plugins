@@ -1,12 +1,17 @@
 # B站稍后再看增量记录
 
-> 类型：记录 ｜ 状态：已验收，待配套本体发布 ｜ 适用版本：bili_watchlater 1.0 ｜ 更新：2026-11-18 ｜ 读者：维护者
+> 类型：记录 ｜ 状态：已发布 ｜ 适用版本：bili_watchlater 1.0 ｜ 更新：2026-11-18 ｜ 读者：维护者
 
-插件 ID：`bili_watchlater`。尚无公开发布。
+插件 ID：`bili_watchlater`。当前公开基线为 [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-watchlater-v1.0)。
+
+## 已发布 v1.0（2026-11-19）
+
+- 与 [本体 0.8 热修复 1](https://github.com/Lanpropro/DD_Monitor_CE/releases/tag/v0.8) 配套发布。 [公开说明](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-watchlater-v1.0) · [ZIP](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/bili-watchlater-v1.0/bili_watchlater-1.0.zip)
+- 标签源码 a7c9316134a0e85f36bcbcdf2d05d0ced4b48cc0 已进入 `develop` 与 `main`。正式包 310165 字节，SHA-256 `e5cd0732adb0bddee0287107cd48e63ce7b6e882755da3332b0b37c5a34f7505`。
 
 ## 待发布
 
-### 2026-11-19｜1.0正式发布准备
+### 2026-11-19｜1.0正式发布准备（历史记录）
 
 维护者要求随0.8热修复1发布，六个独立平台插件的版本统一为1.0，稍后再看保持1.0。保留最新develop中的海外播放、账号、音频同步和平台拆分修复；旧组合包版本及附件不覆盖。源码先经PR进入develop/main，再从标签Git对象构建并由受检工作流公开。尚未公开发布，最终包大小和SHA256在发布后核对记录。
 

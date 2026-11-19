@@ -63,11 +63,11 @@
 </tr>
 <tr>
 <td colspan="2" valign="top">
-<h3><a href="plugins/bili_watchlater/README.md">B站稍后再看（验收候选）</a></h3>
+<h3><a href="plugins/bili_watchlater/README.md">B站稍后再看</a></h3>
 <p><img src="docs/assets/platforms/bilibili.png" alt="哔哩哔哩" width="24" height="24"></p>
-<p>使用本体登录，浏览稍后再看并将点播视频放入画面墙。尚未公开发布。</p>
+<p>使用本体登录，浏览稍后再看并将点播视频放入画面墙。请先升级本体至 0.8 热修复 1。</p>
 <p>兼容维护：<a href="https://github.com/Lanpropro">@Lanpropro</a>；原提交包未标注作者。</p>
-<p><a href="plugins/bili_watchlater/ACCEPTANCE.md">本地候选包与验收步骤</a></p>
+<p><a href="plugins/bili_watchlater/ACCEPTANCE.md">本地候选包与验收步骤</a> · <a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-watchlater-v1.0">下载插件</a></p>
 </td>
 </tr>
 </table>
@@ -117,7 +117,7 @@ ZIP 内只有插件 ID 对应的顶层文件夹。GitHub 自动生成的 **Sourc
 | 比赛二路同步 | `match_sync` | 1.7.0 |
 | B站直播互动 | `bili_live` | 1.1 |
 | 网络代理 | `proxy_control` | 1.0 |
-| B站稍后再看（验收候选） | `bili_watchlater` | 1.0 |
+| B站稍后再看 | `bili_watchlater` | 1.0 |
 
 先按文件明确暂存需要发布的源码，再执行：
 
@@ -149,66 +149,66 @@ B站直播互动 1.1 已发布，下载入口和在线插件目录已更新。
 插件首次提取自 [DD监控室CE](https://github.com/Lanpropro/DD_Monitor_CE) 的 `4bf84bc` 基线，后续在本仓库独立维护。
 保留原项目的 GNU LGPL v2.1 许可，第三方来源与声明见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE.md)。
 
-## 按平台安装的开发候选
+## 按平台安装
 
-国内／海外组合包保留兼容；以下独立插件尚未正式发布。新包内置所需公共组件，无需安装基础插件。
+国内／海外组合包保留兼容；以下独立插件已发布 1.0。新包内置所需公共组件，无需安装基础插件。
 
 <table>
 <tr>
 <td width="50%" valign="top">
-<h3><a href="plugins/huya_live/README.md">虎牙直播（独立开发候选）</a></h3>
+<h3><a href="plugins/huya_live/README.md">虎牙直播</a></h3>
 <p><img src="docs/assets/platforms/huya.png" alt="虎牙直播" width="24" height="24"></p>
 <p>独立启用、更新与回滚，版本1.0，最低支持 DD Monitor CE 0.8。</p>
 <p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
-<p>下载插件：仅本地候选，尚未发布。</p>
+<p><a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/huya-live-v1.0">下载插件</a></p>
 </td>
 <td width="50%" valign="top">
-<h3><a href="plugins/douyu_live/README.md">斗鱼直播（独立开发候选）</a></h3>
+<h3><a href="plugins/douyu_live/README.md">斗鱼直播</a></h3>
 <p><img src="docs/assets/platforms/douyu.png" alt="斗鱼直播" width="24" height="24"></p>
 <p>独立启用、更新与回滚，版本1.0，最低支持 DD Monitor CE 0.8。</p>
 <p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
-<p>下载插件：仅本地候选，尚未发布。</p>
+<p><a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyu-live-v1.0">下载插件</a></p>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
-<h3><a href="plugins/douyin_live/README.md">抖音直播（独立开发候选）</a></h3>
+<h3><a href="plugins/douyin_live/README.md">抖音直播</a></h3>
 <p><img src="docs/assets/platforms/douyin.png" alt="抖音直播" width="24" height="24"></p>
 <p>独立启用、更新与回滚，版本1.0，最低支持 DD Monitor CE 0.8。</p>
 <p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
-<p>下载插件：仅本地候选，尚未发布。</p>
+<p><a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyin-live-v1.0">下载插件</a></p>
 </td>
 <td width="50%" valign="top">
-<h3><a href="plugins/twitch_live/README.md">Twitch直播（独立开发候选）</a></h3>
+<h3><a href="plugins/twitch_live/README.md">Twitch直播</a></h3>
 <p><img src="docs/assets/platforms/twitch.png" alt="Twitch直播" width="24" height="24"></p>
 <p>独立启用、更新与回滚，版本1.0，最低支持 DD Monitor CE 0.8。</p>
 <p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
-<p>下载插件：仅本地候选，尚未发布。</p>
+<p><a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/twitch-live-v1.0">下载插件</a></p>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
-<h3><a href="plugins/youtube_live/README.md">YouTube直播（独立开发候选）</a></h3>
+<h3><a href="plugins/youtube_live/README.md">YouTube直播</a></h3>
 <p><img src="docs/assets/platforms/youtube.png" alt="YouTube直播" width="24" height="24"></p>
 <p>独立启用、更新与回滚，版本1.0，最低支持 DD Monitor CE 0.8。</p>
 <p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
-<p>下载插件：仅本地候选，尚未发布。</p>
+<p><a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.0">下载插件</a></p>
 </td>
 <td width="50%" valign="top">
-<h3><a href="plugins/chzzk_live/README.md">CHZZK直播（独立开发候选）</a></h3>
+<h3><a href="plugins/chzzk_live/README.md">CHZZK直播</a></h3>
 
 <p>独立启用、更新与回滚，版本1.0，最低支持 DD Monitor CE 0.8。</p>
 <p>维护：<a href="https://github.com/Lanpropro">@Lanpropro</a></p>
-<p>下载插件：仅本地候选，尚未发布。</p>
+<p><a href="https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/chzzk-live-v1.0">下载插件</a></p>
 </td>
 </tr>
 </table>
 
-| 插件ID | 候选版本 | 状态 |
+| 插件ID | 版本 | 状态 |
 | --- | --- | --- |
-| `huya_live` | 1.0 | 独立开发候选，未发布 |
-| `douyu_live` | 1.0 | 独立开发候选，未发布 |
-| `douyin_live` | 1.0 | 独立开发候选，未发布 |
-| `twitch_live` | 1.0 | 独立开发候选，未发布 |
-| `youtube_live` | 1.0 | 独立开发候选，未发布 |
-| `chzzk_live` | 1.0 | 独立开发候选，未发布 |
+| `huya_live` | 1.0 | [正式发布](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/huya-live-v1.0) |
+| `douyu_live` | 1.0 | [正式发布](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyu-live-v1.0) |
+| `douyin_live` | 1.0 | [正式发布](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyin-live-v1.0) |
+| `twitch_live` | 1.0 | [正式发布](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/twitch-live-v1.0) |
+| `youtube_live` | 1.0 | [正式发布](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.0) |
+| `chzzk_live` | 1.0 | [正式发布](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/chzzk-live-v1.0) |

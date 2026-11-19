@@ -6,16 +6,9 @@
 
 删除 GitHub Release 不会删除已提交的说明。网页后续修改不会自动回写仓库；删除发布页前，应先再次同步并提交。[来源记录](sources.json)保存各文件的来源、网页更新时间及正文校验值。
 
-## 待发布草稿
+## 配套验收记录
 
-- [虎牙直播1.0](RELEASE-huya-live-v1.0.md)：独立平台首发，保留最新海外及平台拆分修复，待受检发布。
-- [斗鱼直播1.0](RELEASE-douyu-live-v1.0.md)：独立平台首发，保留最新海外及平台拆分修复，待受检发布。
-- [抖音直播1.0](RELEASE-douyin-live-v1.0.md)：独立平台首发，保留最新海外及平台拆分修复，待受检发布。
-- [Twitch直播1.0](RELEASE-twitch-live-v1.0.md)：独立平台首发，保留最新海外及平台拆分修复，待受检发布。
-- [YouTube直播1.0](RELEASE-youtube-live-v1.0.md)：独立平台首发，保留最新海外及平台拆分修复，待受检发布。
-- [CHZZK直播1.0](RELEASE-chzzk-live-v1.0.md)：独立平台首发，保留最新海外及平台拆分修复，待受检发布。
-
-- [B站稍后再看1.0发布正文](RELEASE-bili-watchlater-v1.0.md) · [验收及联发记录](DRAFT-bili-watchlater-v1.0.md)：维护者已验收，含2026-11-18实时弹幕来源排除修复；等待含侧栏页面、共享拖影与来源筛选能力的配套本体版本及正式集成标签，未公开发布。
+- [0.8 热修复 1 与 B站稍后再看 1.0](DRAFT-bili-watchlater-v1.0.md)
 
 ## 当前在线发布说明
 
@@ -26,6 +19,13 @@
 | 国内直播平台 | [2.0](RELEASE-domestic-live-v2.0.md) | [domestic-live-v2.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v2.0) |
 | 海外直播平台 | [1.2](RELEASE-global-live-v1.2.md) | [global-live-v1.2](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2) |
 | 网络代理 | [1.0](RELEASE-proxy-control-v1.0.md) | [proxy-control-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/proxy-control-v1.0) |
+| 抖音直播 | [1.0](RELEASE-douyin-live-v1.0.md) | [douyin-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyin-live-v1.0) |
+| 斗鱼直播 | [1.0](RELEASE-douyu-live-v1.0.md) | [douyu-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyu-live-v1.0) |
+| 虎牙直播 | [1.0](RELEASE-huya-live-v1.0.md) | [huya-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/huya-live-v1.0) |
+| YouTube 直播 | [1.0](RELEASE-youtube-live-v1.0.md) | [youtube-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.0) |
+| Twitch 直播 | [1.0](RELEASE-twitch-live-v1.0.md) | [twitch-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/twitch-live-v1.0) |
+| CHZZK 直播 | [1.0](RELEASE-chzzk-live-v1.0.md) | [chzzk-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/chzzk-live-v1.0) |
+| B站稍后再看 | [1.0](RELEASE-bili-watchlater-v1.0.md) | [bili-watchlater-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-watchlater-v1.0) |
 
 
 ## 替代版本的核验归档

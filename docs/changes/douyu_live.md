@@ -1,12 +1,17 @@
 # 斗鱼直播增量记录
 
-插件ID：`douyu_live`。本插件尚未公开发布，当前为0.1开发候选。
+插件ID：`douyu_live`。当前公开基线为 [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyu-live-v1.0)。
 
-协议实现来源于[组合插件公开基线](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v2.0)及后续开发源码；独立包当前没有自己的公开发布基线。
+协议实现来源于[组合插件公开基线](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v2.0)及后续开发源码；独立包的发布记录见下文。
+
+## 已发布 v1.0（2026-11-19）
+
+- 与 [本体 0.8 热修复 1](https://github.com/Lanpropro/DD_Monitor_CE/releases/tag/v0.8) 配套发布。 [公开说明](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyu-live-v1.0) · [ZIP](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/douyu-live-v1.0/douyu_live-1.0.zip)
+- 标签源码 a7c9316134a0e85f36bcbcdf2d05d0ced4b48cc0 已进入 `develop` 与 `main`。正式包 54830 字节，SHA-256 `11a499f4424c486c80916a8677e3691b3183cf9799481eca2c7f1f502616f0c6`。
 
 ## 待发布
 
-### 2026-11-19｜1.0正式发布准备
+### 2026-11-19｜1.0正式发布准备（历史记录）
 
 维护者要求随0.8热修复1发布，六个独立平台插件的版本统一为1.0，稍后再看保持1.0。保留最新develop中的海外播放、账号、音频同步和平台拆分修复；旧组合包版本及附件不覆盖。源码先经PR进入develop/main，再从标签Git对象构建并由受检工作流公开。尚未公开发布，最终包大小和SHA256在发布后核对记录。
 

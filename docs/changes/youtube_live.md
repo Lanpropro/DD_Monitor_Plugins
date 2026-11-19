@@ -1,12 +1,17 @@
 # YouTube直播增量记录
 
-插件ID：`youtube_live`。本插件尚未公开发布，当前为0.1开发候选。
+插件ID：`youtube_live`。当前公开基线为 [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.0)。
 
-协议实现来源于[组合插件公开基线](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2)及后续开发源码；独立包当前没有自己的公开发布基线。
+协议实现来源于[组合插件公开基线](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2)及后续开发源码；独立包的发布记录见下文。
+
+## 已发布 v1.0（2026-11-19）
+
+- 与 [本体 0.8 热修复 1](https://github.com/Lanpropro/DD_Monitor_CE/releases/tag/v0.8) 配套发布。 [公开说明](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.0) · [ZIP](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/youtube-live-v1.0/youtube_live-1.0.zip)
+- 标签源码 a7c9316134a0e85f36bcbcdf2d05d0ced4b48cc0 已进入 `develop` 与 `main`。正式包 12163116 字节，SHA-256 `cd81a1b67aabb44286dcd8e13e45cb4114c3da674cfd20210c15c0d9037e115d`。
 
 ## 待发布
 
-### 2026-11-19｜1.0正式发布准备
+### 2026-11-19｜1.0正式发布准备（历史记录）
 
 维护者要求随0.8热修复1发布，六个独立平台插件的版本统一为1.0，稍后再看保持1.0。保留最新develop中的海外播放、账号、音频同步和平台拆分修复；旧组合包版本及附件不覆盖。源码先经PR进入develop/main，再从标签Git对象构建并由受检工作流公开。尚未公开发布，最终包大小和SHA256在发布后核对记录。
 
