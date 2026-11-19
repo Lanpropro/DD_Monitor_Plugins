@@ -6,6 +6,7 @@
 
 | 资料 | 状态与用途 |
 | --- | --- |
+| [稍后再看历史验收记录，截至2026-11-17](bili-watchlater-acceptance-history-20261117.md) | 旧候选的故障、失败及分批验证原文；当前操作以插件ACCEPTANCE为准 |
 | [B站互动体验实施计划，2026-10-23](plans/2026-10-23-bili-live-experience.md) | 原计划已勾选完成，包含当时的提交、测试及宿主依赖记录；原文保留 |
 | [B站互动 README 开发与验证历史](bili-live-readme-history-202610.md) | 从插件 README 移出的旧接口研究、逐次修正和测试记录；原文保留 |
 | [国内平台 README 版本历史](domestic-live-readme-history.md) | 从插件 README 移出的 1.2～1.4 更新过程；原文保留 |

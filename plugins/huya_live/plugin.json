@@ -2,7 +2,7 @@
   "id": "huya_live",
   "name": "虎牙直播",
   "description": "虎牙直播播放、画质、登录关注与弹幕互动",
-  "version": "0.1",
+  "version": "1.0",
   "min_app_version": "0.8",
   "icon": "icon.png",
   "platforms": [

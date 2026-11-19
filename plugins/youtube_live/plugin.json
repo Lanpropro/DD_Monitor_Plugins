@@ -2,7 +2,7 @@
   "id": "youtube_live",
   "name": "YouTube直播",
   "description": "YouTube公开直播、画质、账号订阅与聊天",
-  "version": "0.1",
+  "version": "1.0",
   "min_app_version": "0.8",
   "icon": "icon.png",
   "platforms": [
