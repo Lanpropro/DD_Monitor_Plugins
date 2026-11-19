@@ -19,8 +19,8 @@ ROOT = Path(__file__).resolve().parents[1] if Path(__file__).parent.name == 'tes
 sys.path.insert(0, str(args.host.resolve()))
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 os.environ['DDM_NO_SAVE'] = '1'
-from PySide6.QtCore import QCoreApplication, QEvent, Qt
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, Qt
+from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtWidgets import QApplication, QDialog, QMainWindow, QWidget
 from ddm import theme
 from ddm.config import DEFAULT_SETTINGS
@@ -92,30 +92,76 @@ class SettingsTests(unittest.TestCase):
                     plugin.on_unload()
         self.host.recorder.shutdown()
 
-    def test_workspace_covers_wallpaper_in_both_themes_and_restores(self):
+    def test_workspace_matches_host_wall_veil_at_real_sizes_and_restores(self):
+        from ddm.skin_background import BackgroundLayer
         container = QWidget()
-        colors = container.palette()
-        colors.setColor(QPalette.Window, QColor('#ff00ff'))
-        container.setPalette(colors)
-        container.setAutoFillBackground(True)
+        container.setObjectName('Root')
         self.host.setCentralWidget(container)
-        self.host.resize(1180, 760)
+        image = QImage(160, 90, QImage.Format_RGB32)
+        painter = QPainter(image)
+        painter.fillRect(0, 0, 80, 90, QColor('#f04e2a'))
+        painter.fillRect(80, 0, 80, 90, QColor('#2785ee'))
+        painter.end()
+        path = Path(self.temp.name) / 'background.png'
+        self.assertTrue(image.save(str(path)))
+        layer = BackgroundLayer(container, self.host)
+        layer.load(str(path))
+        layer.mask = 35
         self.host.show()
         pages = WorkspacePages(container)
         view = self.owner.workspace = module.Workspace(self.owner)
-        for mode in ('dark', 'light'):
-            theme.apply(mode)
-            self.host.setStyleSheet(theme.qss())
-            pages.show_page('ddcut_replay', view)
-            APP.processEvents()
-            picture = view.grab().toImage()
-            for x, y in ((3, 3), (3, picture.height()-4), (picture.width()-4, 3)):
-                self.assertEqual(picture.pixelColor(x, y), theme.qcolor(theme.BG))
-            if args.screenshots:
-                args.screenshots.mkdir(parents=True, exist_ok=True)
-                self.host.grab().save(str(args.screenshots/f'workspace-{mode}.png'))
-            self.assertTrue(pages.close_active())
-            self.assertIsNone(pages.active)
+        reference = QWidget(container)
+        reference.setObjectName('Tile')
+        reference.setAttribute(Qt.WA_StyledBackground)
+        try:
+            theme.set_skin_active(True)
+            for mode in ('dark', 'light'):
+                theme.apply(mode)
+                self.host.setStyleSheet(theme.qss())
+                for width, height in ((920, 600), (3840, 2160)):
+                    self.host.resize(width, height)
+                    APP.processEvents()
+                    reference.setGeometry(container.rect())
+                    for mask in (0, 35, 80, 100):
+                        layer.mask = mask
+                        layer.update()
+                        reference.show()
+                        reference.raise_()
+                        APP.processEvents()
+                        origin = container.mapTo(self.host, QPoint())
+                        # Compare fully composited window pixels. Child grabs retain alpha.
+                        expected = self.host.grab().toImage().copy(origin.x(), origin.y(), container.width(), container.height())
+                        reference.hide()
+                        pages.show_page('ddcut_replay', view)
+                        APP.processEvents()
+                        actual = self.host.grab().toImage().copy(origin.x(), origin.y(), container.width(), container.height())
+                        behind = layer.grab().toImage()
+                        # Sample the flat side margins, outside Tile's rounded corners and text.
+                        points = ((3, actual.height()//2), (actual.width()-4, actual.height()//2))
+                        for x, y in points:
+                            pixel = actual.pixelColor(x, y)
+                            wall = expected.pixelColor(x, y)
+                            self.assertTrue(all(abs(a-b) <= 1 for a, b in zip(pixel.getRgb(), wall.getRgb())),
+                                (mode, width, mask, pixel.name(), wall.name()))
+                            if mask < 100:
+                                self.assertNotEqual(pixel, behind.pixelColor(x, y), 'Page must retain the host veil')
+                                self.assertNotEqual(pixel, theme.qcolor(theme.BG), 'Wallpaper must remain visible')
+                            else:
+                                self.assertEqual(pixel, theme.qcolor(theme.BG))
+                        if mask < 100:
+                            self.assertNotEqual(actual.pixelColor(*points[0]), actual.pixelColor(*points[1]))
+                        if args.screenshots and width == 3840 and mask == 35:
+                            self.assertTrue(self.host.grab().save(str(args.screenshots/f'workspace-wallpaper-{mode}.png')))
+                        self.assertTrue(pages.close_active())
+                        APP.processEvents()
+                        self.assertIsNone(pages.active)
+                        restored = self.host.grab().toImage().copy(origin.x(), origin.y(), container.width(), container.height())
+                        self.assertEqual(restored.pixelColor(*points[0]), behind.pixelColor(*points[0]))
+        finally:
+            reference.hide()
+            view.close()
+            layer.load('')
+            theme.set_skin_active(False)
 
     def test_recording_page_saves_syncs_rejects_busy_and_unloads(self):
         view = self.owner.workspace = module.Workspace(self.owner)

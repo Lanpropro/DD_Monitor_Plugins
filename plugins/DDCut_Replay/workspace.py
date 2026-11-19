@@ -194,8 +194,11 @@ class Workspace(QWidget):
         # Media cards, the task table and time input need styles absent from host QSS.
         panel = theme.CONTENT if theme.is_light() else '#171c24'
         stage = theme.BG if theme.is_light() else '#0e1219'
+        # Match the host Tile backdrop; tint the surface, never its controls.
+        tint = theme.qcolor(theme.BG)
+        backdrop = f'rgba({tint.red()}, {tint.green()}, {tint.blue()}, 0.84)'
         self.setStyleSheet(f'''
-            QWidget#replayWorkspace {{background: {theme.BG};}}
+            QWidget#replayWorkspace {{background: {backdrop};}}
             #replayReview {{background: {stage};}}
             #replayInspector, #replaySelection {{background: {panel};}}
             #replayInspector {{border-left: 1px solid {theme.BORDER};}}

@@ -240,7 +240,7 @@ class DDCutReplayTests(unittest.TestCase):
             self.hub.add_entry({**self.entry, 'path': str(path), 'cover_path': cover,
                 'avatar_path': cover, 'kind': 'recording', 'title': f'本地录像 {index + 1}',
                 'room': {'platform': 'bilibili', 'room_id': 'offline', 'uname': '测试主播',
-                         'title': f'直播标题 {index + 1}'}})
+                         'title': f'直播标题{index + 1}'}})
         owner = SimpleNamespace(context=SimpleNamespace(window=host), hub=self.hub,
             service=SimpleNamespace(sources=lambda: [], options=lambda: {'ffmpeg': FFMPEG}),
             preview_server=SimpleNamespace(source_url=lambda path: path))
@@ -301,7 +301,8 @@ class DDCutReplayTests(unittest.TestCase):
             view.refresh_library()
             APP.processEvents()
             self.assertEqual(scroll.value(), previous)
-            view.search.setText('直播标题 4')
+            # A bare '4' also matches every .mp4 suffix under token-based search.
+            view.search.setText('直播标题4')
             APP.processEvents()
             visible = [view.library.item(i) for i in range(6) if not view.library.item(i).isHidden()]
             self.assertEqual(len(visible), 1)
