@@ -37,7 +37,7 @@ def main():
     from PySide6.QtWidgets import QApplication
     from ddm.plugins import PluginManager
     from ddm.bili import InfoResolver
-    from ddm.app import MainWindow
+    from ddm.room_navigation import RoomNavigation
     from ddm.room_input import extract_room_input
 
     app = QApplication.instance() or QApplication([])
@@ -54,7 +54,7 @@ def main():
                 assert manager.platform_for(url) is providers[kind]
                 assert providers[kind].normalize(url) == url
                 text = '主播(房间号314957)正在直播，分享自平台' + url + '。'
-                assert MainWindow._normalize_room_input(SimpleNamespace(plugins=manager), text) == url
+                assert RoomNavigation(SimpleNamespace(plugins=manager)).normalize_room_input(text) == url
             assert providers['huya'].normalize('https://m.huya.com/314957?shareid=1') == 'huya:314957'
             assert providers['douyu'].normalize('https://www.douyu.com/6657?dyshid=1') == 'douyu:6657'
             assert providers['douyin'].normalize('https://live.douyin.com/458897981613') == 'douyin:458897981613'
@@ -148,6 +148,8 @@ def main():
                     pass
                 else:
                     raise AssertionError('Missing or mismatched fixed room identity must fail')
+        # Avatar lookup is covered separately; keep this fixture's request budget on shares.
+        douyin._follow_faces['10001'] = 'https://p3.douyinpic.com/fixture.jpg'
         with patch.object(module.requests, 'get', side_effect=[response(302, target=target), response(page=reflow(status=4))]):
             assert douyin.room_info(shares['douyin']).live is False
         try:

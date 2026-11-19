@@ -1,4 +1,4 @@
-"""校验 ZIP、源码一致、真实宿主导入及五个平台注册。"""
+"""校验 ZIP、源码一致、真实宿主导入及六个平台注册。"""
 import argparse
 import json
 import os
@@ -9,7 +9,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-from build_plugins import build  # noqa: E402
+from build_plugins import build, package_sources  # noqa: E402
 
 
 def main():
@@ -42,7 +42,7 @@ def main():
     assert f'proxy_control-{proxy_version}.zip' in proxy_readme
     proxy_notes = ROOT / 'docs/releases' / f'RELEASE-proxy-control-v{proxy_version}.md'
     assert proxy_notes.read_text(encoding='utf-8').startswith(f'# 网络代理 v{proxy_version}\n')
-    display_names = {"domestic_live": "国内直播平台", "global_live": "海外直播平台", "match_sync": "比赛二路同步", "bili_live": "B站直播互动", "proxy_control": "网络代理"}
+    display_names = {'domestic_live': '国内直播平台', 'global_live': '海外直播平台', 'match_sync': '比赛二路同步', 'bili_live': 'B站直播互动', 'proxy_control': '网络代理', 'huya_live': '虎牙直播', 'douyu_live': '斗鱼直播', 'douyin_live': '抖音直播', 'twitch_live': 'Twitch直播', 'youtube_live': 'YouTube直播', 'chzzk_live': 'CHZZK直播', 'bili_watchlater': 'B站稍后再看'}
     with tempfile.TemporaryDirectory() as directory:
         manager = PluginManager(plugins_dir=directory, enabled=[])
         for path in build():
@@ -90,28 +90,31 @@ def main():
                 if plugin_id == 'domestic_live':
                     assert 'domestic_live/douyin_native.js' in names, 'Official native input requires its browser script'
                     assert 'domestic_live/douyin_browser.py' in names
+                    for module in ('platform_base', 'huya_protocol', 'douyin_errors', 'diagnostic_errors', 'huya_platform', 'douyu_platform',
+                                   'douyin_platform', 'platform_logo', 'playback_diagnostics'):
+                        assert f'domestic_live/{module}.py' in names, module
                 assert f"{plugin_id}-{manifest['version']}.zip" == path.name
                 assert archive.read(f"{plugin_id}/LICENSE") == (ROOT / "LICENSE").read_bytes()
                 for name in names:
-                    source = ROOT / "plugins" / name
+                    source = package_sources(plugin_id).get(name, ROOT / "plugins" / name)
                     if source.is_file():
                         assert archive.read(name) == source.read_bytes()
             assert manager.install_zip(str(path)) == plugin_id
         assert not manager.plugins  # 安装阶段不执行插件代码
         manager.load()
-        assert len(manager.plugins) == len(versions) and not manager.skipped
+        assert len(manager.plugins) == len(versions) - len(manager._replaced_plugins) and not manager.skipped
         assert all(plugin.version == versions[plugin.context.name] for plugin in manager.plugins)
-        assert set(manager.platforms) == {"huya", "douyu", "douyin", "twitch", "youtube"}
+        assert set(manager.platforms) == {"huya", "douyu", "douyin", "twitch", "youtube", "chzzk"}
         assert all(platform.room_input_hint for platform in manager.platforms.values())
         assert manager.platforms['douyin'].room_input_hint == '抖音直播间链接'
         assert '__ddmDouyinProfile' in manager.platforms['douyin'].profile_browser_init_script
-        assert manager._platform_owner["huya"] == "domestic_live"
-        assert manager._platform_owner["youtube"] == "global_live"
-        assert {entry["id"] for entry in manager.catalog()} == set(versions)
+        assert manager._platform_owner["huya"] == "huya_live"
+        assert manager._platform_owner["youtube"] == "youtube_live"
+        assert {entry["id"] for entry in manager.catalog()} == set(versions) - manager._replaced_plugins
         assert all(entry["name"] == display_names[entry["id"]] for entry in manager.catalog())
         assert all(entry["version"] == versions[entry["id"]] for entry in manager.catalog())
         manager.unload()
-    print("PASS: package integrity, source consistency, install without execution and five platforms")
+    print("PASS: package integrity, source consistency, install without execution and six platforms")
 
 
 if __name__ == "__main__":

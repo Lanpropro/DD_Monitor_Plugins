@@ -11,7 +11,7 @@ import struct
 import requests
 from ddm.live_danmaku import tars_int, tars_bytes, tars_fields
 from . import huya_string, huya_user
-from .douyu_interaction import InteractionError, LoginRequired
+from .interaction_models import InteractionError, LoginRequired
 
 
 def message_request(user, room, text):

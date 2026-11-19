@@ -20,6 +20,7 @@ def main():
     manager.load()
     platform = manager.platforms["douyu"]
     module = sys.modules[type(platform).__module__]
+    base_module = sys.modules["ddm_plugin_domestic_live.platform_base"]
     saved = ["auth=fixture; Domain=.douyu.com; Path=/; Secure; HttpOnly",
              "expired=old; Domain=.douyu.com; Expires=Sat, 01 Jan 2000 00:00:00 GMT",
              "foreign=secret; Domain=.example.com; Path=/",
@@ -43,7 +44,7 @@ def main():
               "multirates": [{"rate": 0, "bit": 16000, "name": "原画1080P60"},
                              {"rate": 15, "bit": 15000, "name": "2K超高清"},
                              {"rate": 4, "bit": 4000, "name": "蓝光4M"}]}
-    session = module.Streamlink()
+    session = base_module.Streamlink()
 
     def resolve(_parser, _room, cdn="", *, rate=0):
         assert session.http.cookies.get("auth") == "fixture"
@@ -70,7 +71,7 @@ def main():
                 assert "所选画质" in str(error)
             else:
                 raise AssertionError("Failed source selection must not silently reuse default 4M")
-        with patch.object(module, "Streamlink", return_value=session), \
+        with patch.object(base_module, "Streamlink", return_value=session), \
                 patch.object(platform, "_streams", return_value={"source": stream}):
             _url, quality, _profile, headers = platform.play_url("douyu:123", 10000)
             assert quality == 10000 and set(headers) == {"User-Agent", "Referer"}

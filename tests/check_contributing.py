@@ -30,7 +30,9 @@ class ContributionGuideTests(unittest.TestCase):
         self.assertNotIn('RELEASE-domestic-live-v1.5.md', online)
 
     def test_accepted_douyu_quality_change_records_scope_and_source(self):
-        source = (ROOT / 'docs/changes/domestic_live.md').read_text(encoding='utf-8')
+        current = (ROOT / 'docs/changes/domestic_live.md').read_text(encoding='utf-8')
+        self.assertIn('(../archive/domestic-live-v2.0-development.md)', current)
+        source = (ROOT / 'docs/archive/domestic-live-v2.0-development.md').read_text(encoding='utf-8')
         for text in ('2026-11-02', '清晰度验收通过', '9f533b6', 'ba058ef',
                      '尚未合入 develop', 'BUG-071 仍待定位'):
             self.assertIn(text, source)
@@ -129,6 +131,7 @@ class ContributionGuideTests(unittest.TestCase):
         self.assertIn('(CONTRIBUTING.md)', readme)
         documents = ['README.md', 'CONTRIBUTING.md', 'docs/repository-layout.md',
                      'docs/releases/README.md', 'docs/archive/README.md',
+                     'docs/development/domestic-modules.md',
                      'plugins/DDCut_Replay/README.md']
         documents += [str(path.relative_to(ROOT)) for path in (ROOT / 'docs/changes').glob('*.md')]
         for relative in documents:
@@ -152,7 +155,14 @@ class ContributionGuideTests(unittest.TestCase):
             'global_live': {'twitch', 'youtube'},
             'match_sync': {'bilibili', 'huya', 'douyu', 'douyin', 'twitch', 'youtube'},
             'bili_live': {'bilibili'},
+            'huya_live': {'huya'},
+            'douyu_live': {'douyu'},
+            'douyin_live': {'douyin'},
+            'twitch_live': {'twitch'},
+            'youtube_live': {'youtube'},
+            'chzzk_live': set(),
             'proxy_control': set(),
+            'bili_watchlater': {'bilibili'},
         }
         for path in manifests:
             manifest = json.loads(path.read_text(encoding='utf-8'))
@@ -162,7 +172,11 @@ class ContributionGuideTests(unittest.TestCase):
                 self.assertEqual(len(matches), 1)
                 author = manifest.get('author', 'Lanpropro')
                 self.assertIn(f'href="https://github.com/{author}"', matches[0])
-                self.assertIn('下载插件', matches[0])
+                if manifest['id'] == 'bili_watchlater':
+                    self.assertIn('尚未公开发布', matches[0])
+                    self.assertIn('本地候选包与验收步骤', matches[0])
+                else:
+                    self.assertIn('下载插件', matches[0])
                 icons = re.findall(r'<img src="docs/assets/platforms/([^"/]+)\.png"', matches[0])
                 self.assertEqual(set(icons), platforms[manifest['id']])
 
@@ -229,7 +243,13 @@ class ContributionGuideTests(unittest.TestCase):
                 self.assertIn(f']({note.name})', index)
                 self.assertIn(f'`{plugin_id}`', source)
                 self.assertIn('## 待发布', source)
-                self.assertRegex(source, r'https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/')
+                if plugin_id == 'bili_watchlater':
+                    self.assertIn('尚无公开发布', source)
+                    self.assertIn('验收通过', source)
+                    self.assertIn('等待配套本体', source)
+                    self.assertIn('尚未公开发布', source)
+                else:
+                    self.assertRegex(source, r'https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/')
         self.assertIn('(docs/changes/README.md)', (ROOT / 'README.md').read_text(encoding='utf-8'))
         self.assertIn('(docs/changes/README.md)', (ROOT / 'CONTRIBUTING.md').read_text(encoding='utf-8'))
 
@@ -237,6 +257,70 @@ class ContributionGuideTests(unittest.TestCase):
         relative = 'plans/2026-10-23-bili-live-experience.md'
         self.assertFalse((ROOT / 'docs/superpowers' / relative).exists())
         self.assertTrue((ROOT / 'docs/archive' / relative).is_file())
+
+    def test_documentation_center_matches_manifests_and_local_links(self):
+        current = (ROOT / 'docs/changes/match_sync.md').read_text(encoding='utf-8')
+        self.assertIn('pull/65) 已按维护者要求关闭，未合并', current)
+        self.assertIn('实现分支保留', current)
+        self.assertNotIn('仍在未合并的 Draft PR 中', current)
+        history = (ROOT / 'docs/archive/match-sync-development-through-20261116.md').read_text(encoding='utf-8')
+        self.assertIn('状态补记', history)
+        self.assertIn('Draft PR65', history)
+        center = (ROOT / 'docs/README.md').read_text(encoding='utf-8')
+        self.assertIn('(docs/README.md)', (ROOT / 'README.md').read_text(encoding='utf-8'))
+        self.assertIn('(docs/README.md)', (ROOT / 'CONTRIBUTING.md').read_text(encoding='utf-8'))
+        for manifest in (ROOT / 'plugins').glob('*/plugin.json'):
+            version = json.loads(manifest.read_text(encoding='utf-8'))['version']
+            self.assertRegex(
+                center,
+                rf'\|[^\n]*\| {re.escape(version)} \| \[README\]\(\.\./plugins/{manifest.parent.name}/README\.md\) \|',
+            )
+
+        documents = [
+            ROOT / 'docs/README.md', ROOT / 'docs/development/README.md',
+            ROOT / 'docs/standards/documentation.md', ROOT / 'docs/archive/README.md',
+            ROOT / 'docs/changes/domestic_live.md', ROOT / 'docs/changes/match_sync.md',
+            ROOT / 'plugins/bili_live/README.md', ROOT / 'plugins/domestic_live/README.md',
+            ROOT / 'plugins/match_sync/README.md',
+            ROOT / 'plugins/chzzk_live/README.md', ROOT / 'plugins/chzzk_live/ACCEPTANCE.md',
+        ]
+        for document in documents:
+            for target in re.findall(r'\]\(([^)]+)\)', document.read_text(encoding='utf-8')):
+                if '://' in target or target.startswith(('#', 'mailto:')):
+                    continue
+                destination = document.parent / target.split('#', 1)[0]
+                with self.subTest(document=document, target=target):
+                    self.assertTrue(destination.exists())
+
+    def test_development_guide_preserves_candidate_build_and_verified_draft_release(self):
+        guide = (ROOT / 'docs/development/README.md').read_text(encoding='utf-8')
+        for entry in ('python tools/build_plugins.py', 'python tests/check_packages.py',
+                      'tools/verify_plugin_release.py', '--build', '草稿 Release',
+                      '../../CONTRIBUTING.md#新版本发布门槛', '../../.github/workflows/publish-plugin.yml'):
+            with self.subTest(entry=entry):
+                self.assertIn(entry, guide)
+        workflow = (ROOT / '.github/workflows/publish-plugin.yml').read_text(encoding='utf-8')
+        self.assertIn('tools/verify_plugin_release.py', workflow)
+        self.assertLess(workflow.index('tools/verify_plugin_release.py'), workflow.index('--draft=false'))
+
+    def test_global_readme_names_current_host_playback_and_test_root(self):
+        guide = (ROOT / 'plugins/global_live/README.md').read_text(encoding='utf-8')
+        self.assertIn('libmpv', guide)
+        self.assertNotIn('VLC', guide)
+        self.assertIn('本体源码根目录', guide)
+        self.assertIn('(../../docs/assets/platforms/README.md)', guide)
+        self.assertTrue((ROOT / 'docs/assets/platforms/README.md').is_file())
+
+    def test_integrated_pending_changes_keep_acceptance_and_release_separate(self):
+        for plugin_id, commit in (('bili_live', 'ddd502a'), ('domestic_live', '7c1e8bf')):
+            current = (ROOT / 'docs/changes' / (plugin_id + '.md')).read_text(encoding='utf-8')
+            pending = current.split('## 待发布', 1)[1].split('## 已发布', 1)[0]
+            with self.subTest(plugin=plugin_id):
+                self.assertIn(commit, pending)
+                self.assertIn('源码已合入 `develop`', pending)
+                self.assertNotIn('尚未合入 develop', pending)
+                self.assertIn('待人工验收', pending)
+                self.assertIn('尚未公开发布', pending)
 
     def test_public_release_sources_have_matching_local_notes(self):
         directory = ROOT / 'docs/releases'

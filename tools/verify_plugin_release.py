@@ -27,8 +27,8 @@ def verify(root, plugin_id, tag, archive, integrated_refs=('origin/develop', 'or
         if result.returncode:
             raise ValueError(f'Tag source is not integrated into {ref}')
     prefix = f'plugins/{plugin_id}/'
-    paths = git(root, 'ls-tree', '-r', '--name-only', '-z', commit, '--', prefix).decode().split('\0')
-    paths = [path for path in paths if path]
+    tracked = set(git(root, 'ls-tree', '-r', '--name-only', '-z', commit).decode().split('\0')) - {''}
+    paths = sorted(path for path in tracked if path.startswith(prefix))
     manifest = json.loads(git(root, 'show', f'{commit}:{prefix}plugin.json'))
     version = tag.rsplit('-v', 1)[1]
     if manifest.get('id') != plugin_id or manifest.get('version') != version:
@@ -36,6 +36,16 @@ def verify(root, plugin_id, tag, archive, integrated_refs=('origin/develop', 'or
     if archive.name != f'{plugin_id}-{version}.zip':
         raise ValueError('Archive filename does not match the tagged manifest')
     expected = {plugin_id + '/' + path[len(prefix):]: path for path in paths}
+    bundle_path = 'tools/platform_bundles.json'
+    if bundle_path in tracked:
+        bundles = json.loads(git(root, 'show', f'{commit}:{bundle_path}'))
+        for name, source in bundles.get(plugin_id, {}).items():
+            destination = plugin_id + '/' + name
+            if (not re.fullmatch(r'[^/\\]+', name) or name in ('.', '..')
+                    or source not in tracked or destination in expected
+                    or name in ('LICENSE', 'NOTICE.md')):
+                raise ValueError('Invalid or conflicting tagged bundle input: ' + name)
+            expected[destination] = source
     expected.update({f'{plugin_id}/{name}': name for name in ('LICENSE', 'NOTICE.md')})
     if f'{plugin_id}/plugin.py' not in expected:
         raise ValueError('Missing plugin entry')

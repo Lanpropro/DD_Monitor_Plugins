@@ -1,0 +1,19 @@
+{
+  "id": "twitch_live",
+  "name": "Twitch直播",
+  "description": "Twitch公开直播、画质、账号关注与聊天",
+  "version": "1.0",
+  "min_app_version": "0.8",
+  "icon": "icon.png",
+  "platforms": [
+    "twitch"
+  ],
+  "replaces": "global_live",
+  "inherit_settings": [
+    "show_platform_logo"
+  ],
+  "replaces_platforms": [
+    "twitch",
+    "youtube"
+  ]
+}
