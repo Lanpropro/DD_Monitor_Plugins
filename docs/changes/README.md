@@ -14,6 +14,7 @@
 | B站直播互动 | [bili_live](bili_live.md) | [bili-live-v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.1) |
 | 网络代理 | [proxy_control](proxy_control.md) | [proxy-control-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/proxy-control-v1.0) |
 | B站稍后再看（验收候选） | [bili_watchlater](bili_watchlater.md) | 尚无公开发布 |
+| F1 Play（开发候选） | [f1_play](f1_play.md) | 尚无公开发布 |
 
 基线按正式 Release 核对，使用公开发布版本，不以开发分支的清单版本替代。该机制从 2026-10-31 起启用；此前的开发增量尚未逐项回溯，文件没有条目不代表发布后没有改动。
 

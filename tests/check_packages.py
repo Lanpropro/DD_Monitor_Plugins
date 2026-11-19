@@ -43,6 +43,7 @@ def main():
     proxy_notes = ROOT / 'docs/releases' / f'RELEASE-proxy-control-v{proxy_version}.md'
     assert proxy_notes.read_text(encoding='utf-8').startswith(f'# 网络代理 v{proxy_version}\n')
     display_names = {'domestic_live': '国内直播平台', 'global_live': '海外直播平台', 'match_sync': '比赛二路同步', 'bili_live': 'B站直播互动', 'proxy_control': '网络代理', 'huya_live': '虎牙直播', 'douyu_live': '斗鱼直播', 'douyin_live': '抖音直播', 'twitch_live': 'Twitch直播', 'youtube_live': 'YouTube直播', 'chzzk_live': 'CHZZK直播', 'bili_watchlater': 'B站稍后再看'}
+    display_names['f1_play'] = 'F1 Play'
     with tempfile.TemporaryDirectory() as directory:
         manager = PluginManager(plugins_dir=directory, enabled=[])
         for path in build():

@@ -180,6 +180,10 @@ class ContributionGuideTests(unittest.TestCase):
                     self.assertIn('0.8 热修复 1', row)
                 download = re.search(
                     r'\[v([\d.]+)\]\(https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/([^/)]+)\)', row)
+                if row.endswith('| 开发候选 |'):
+                    self.assertIsNone(download)
+                    self.assertNotIn(row, platform_table)
+                    continue
                 self.assertIsNotNone(download)
                 self.assertEqual(download[2], f'{plugin_id.replace("_", "-")}-v{download[1]}')
                 self.assertIn(download[2], release_tags)
@@ -258,6 +262,8 @@ class ContributionGuideTests(unittest.TestCase):
                     self.assertIn('验收通过', source)
                     self.assertIn('等待配套本体', source)
                     self.assertIn('尚未公开发布', source)
+                elif plugin_id == 'f1_play':
+                    self.assertIn('尚无公开发布', source)
                 else:
                     self.assertRegex(source, r'https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/')
         self.assertIn('(docs/changes/README.md)', (ROOT / 'README.md').read_text(encoding='utf-8'))

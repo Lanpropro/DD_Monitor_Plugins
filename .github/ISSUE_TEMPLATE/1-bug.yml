@@ -25,6 +25,7 @@ body:
         - YouTube直播
         - CHZZK直播
         - 网络代理
+        - F1 Play
         - 多个插件或暂不确定
     validations:
       required: true

@@ -47,6 +47,7 @@
 | 比赛二路同步 | 1.7.0 | [README](../plugins/match_sync/README.md) |
 | B站直播互动 | 1.1 | [README](../plugins/bili_live/README.md) |
 | 网络代理 | 1.0 | [README](../plugins/proxy_control/README.md) |
+| F1 Play（开发候选） | 0.1 | [README](../plugins/f1_play/README.md) |
 | B站稍后再看（验收候选） | 1.0 | [README](../plugins/bili_watchlater/README.md) |
 | 虎牙直播（独立平台） | 1.0 | [README](../plugins/huya_live/README.md) |
 | 斗鱼直播（独立平台） | 1.0 | [README](../plugins/douyu_live/README.md) |
