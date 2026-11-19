@@ -17,7 +17,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLineEdit, QToolButton
 from ddm import theme
 from ddm_plugin_bili_live import emoticons as image_api
-from bili_live_support import bili, session
+from bili_live_support import bili, package_tab, session
 APP = QApplication.instance() or QApplication([])
 
 def settle(predicate, seconds=3):
@@ -30,6 +30,11 @@ def settle(predicate, seconds=3):
     raise AssertionError('后台请求未在限时内完成')
 
 class ComposerTests(unittest.TestCase):
+
+    def select_loaded_package(self, key):
+        settle(lambda: self.composer._catalog_pending is None)
+        popup = self.composer.popup
+        popup.tabs.setCurrentIndex(package_tab(popup, key))
 
     def test_repeat_large_emoticon_sends_identifier_and_keeps_draft(self):
         self.composer.edit.setText('keep my draft')
@@ -124,6 +129,7 @@ class ComposerTests(unittest.TestCase):
         packs=[{'pkg_type':3,'pkg_name':'保留','emoticons':[{'emoji':'[保留]','perm':1}]}]
         with patch.object(bili,'get_emoticons',return_value=packs):
             self.composer.open_emoticons()
+            self.select_loaded_package('3:保留')
             settle(lambda:len(self.composer.popup.scroll.findChildren(QToolButton))==1)
         popup=self.composer.popup;body=popup.scroll.widget()
         entered,release=threading.Event(),threading.Event()
@@ -138,7 +144,7 @@ class ComposerTests(unittest.TestCase):
                 self.assertTrue(popup.refresh_spinner.isVisible())
                 popup.scroll.findChildren(QToolButton)[0].click()
                 self.assertEqual(self.composer.edit.text(),'[保留]')
-                self.composer.open_emoticons()
+                self.assertTrue(popup.isVisible())
                 self.assertTrue(popup.refresh_spinner.isVisible())
                 release.set();settle(lambda:self.composer._catalog_pending is None)
                 self.assertIs(popup.scroll.widget(),body)
@@ -146,7 +152,7 @@ class ComposerTests(unittest.TestCase):
                 self.assertFalse(popup.refresh_spinner.isVisible())
                 self.composer.set_room('202')
                 self.assertEqual(popup.scroll.findChildren(QToolButton),[])
-                self.assertEqual(popup.tabs.count(),0)
+                self.assertEqual([popup.tabs.tabToolTip(i) for i in range(popup.tabs.count())], ['最近发送'])
         finally:release.set()
 
 
@@ -424,16 +430,17 @@ class ComposerTests(unittest.TestCase):
         with patch.object(bili, 'get_emoticons', return_value=packs), patch.object(image_api, '_load_image', return_value=pixmap):
             self.composer.emote_button.click()
             popup = self.composer.popup
+            self.select_loaded_package('3:小表情')
             settle(lambda: any((b.text() == '[doge]' for b in popup.findChildren(QToolButton))))
-            self.assertEqual([popup.tabs.tabToolTip(i) for i in range(popup.tabs.count())], ['小表情', '主播表情'])
-            popup.tabs.setCurrentIndex(1)
+            self.assertEqual([popup.tabs.tabToolTip(i) for i in range(popup.tabs.count())], ['最近发送', '小表情', '主播表情'])
+            self.select_loaded_package('2:主播表情')
             settle(lambda: any((b.text() == '锁定' for b in popup.findChildren(QToolButton))))
             buttons = popup.findChildren(QToolButton)
             locked = next((b for b in buttons if b.text() == '锁定'))
             self.assertFalse(locked.isEnabled())
             self.assertIn('粉丝团', locked.toolTip())
             self.assertTrue(self.composer.emote_button.screen().availableGeometry().contains(popup.geometry()))
-            popup.tabs.setCurrentIndex(0)
+            self.select_loaded_package('3:小表情')
             settle(lambda: any((b.text() == '[doge]' for b in popup.findChildren(QToolButton))))
             next((b for b in popup.findChildren(QToolButton) if b.text() == '[doge]')).click()
             self.assertEqual(self.composer.edit.text(), '[doge]')
@@ -461,6 +468,7 @@ class ComposerTests(unittest.TestCase):
             return packs
         with patch.object(bili, 'get_emoticons', side_effect=load):
             self.composer.open_emoticons()
+            self.select_loaded_package('3:小表情')
             settle(lambda: any((b.text() == '[好]' for b in self.composer.popup.findChildren(QToolButton))))
         self.assertTrue(self.composer.popup.retry_button.isEnabled())
 
@@ -482,7 +490,9 @@ class ComposerTests(unittest.TestCase):
             settle(lambda: not _active_requests)
         with patch.object(bili, 'get_emoticons', return_value=[]):
             self.composer.open_emoticons()
-            settle(lambda: '暂无' in self.composer.popup.status.text())
+            settle(lambda: self.composer._catalog_pending is None)
+            self.assertEqual(self.composer.popup._packages, [])
+            self.assertIn('暂无', self.composer.popup.status.text())
         self.assertFalse(any((b.text() == '旧账号表情' for b in self.composer.popup.findChildren(QToolButton))))
 
     def test_manual_refresh_replaces_cached_catalog_after_error_and_empty_result(self):
@@ -490,8 +500,11 @@ class ComposerTests(unittest.TestCase):
             self.composer.open_emoticons()
             settle(lambda: '临时失败' in self.composer.popup.status.text())
             self.composer.popup.retry_button.click()
-            settle(lambda: '暂无' in self.composer.popup.status.text())
+            settle(lambda: self.composer._catalog_pending is None)
+            self.assertEqual(self.composer.popup._packages, [])
+            self.assertIn('暂无', self.composer.popup.status.text())
             self.composer.popup.retry_button.click()
+            self.select_loaded_package('3:')
             settle(lambda: any((b.text() == '[刷新]' for b in self.composer.popup.findChildren(QToolButton))))
         self.assertEqual(get.call_count, 3)
 

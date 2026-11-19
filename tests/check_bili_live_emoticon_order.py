@@ -15,7 +15,7 @@ from unittest.mock import patch
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 os.environ['DDM_NO_SAVE'] = '1'
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from bili_live_support import session
+from bili_live_support import package_tab, session
 from PySide6.QtCore import QByteArray, QBuffer, QEvent, QIODevice, QPointF, Qt
 from PySide6.QtGui import QColor, QImage, QMouseEvent
 from PySide6.QtTest import QTest
@@ -163,12 +163,14 @@ class PopupOrderTests(unittest.TestCase):
         self.popups = []
         self.addCleanup(self.cleanup)
 
-    def popup(self, packs):
+    def popup(self, packs, selected=None):
         popup = api.EmoticonPopup(order=self.order)
         self.popups.append(popup)
         popup.set_packages(packs)
         popup.show()
-        settle(lambda: popup.grid.count() == len(popup._emotes))
+        if selected is not None:
+            popup.tabs.setCurrentIndex(package_tab(popup, selected))
+            settle(lambda: popup.grid.count() == len(popup._emotes))
         return popup
 
     def cleanup(self):
@@ -191,12 +193,12 @@ class PopupOrderTests(unittest.TestCase):
         second = self.popup(catalog_b)
         self.assertEqual([p['pkg_name'] for p in second._packages],
                          ['emoji', 'room B', 'bought B', 'bought A'])
-        second.tabs.setCurrentIndex(1)
+        second.tabs.setCurrentIndex(package_tab(second, '2:room B'))
         self.order.save('2:room A', list(reversed(room_a['emoticons'])))
         self.assertEqual([p['pkg_name'] for p in second._packages],
                          ['emoji', 'room B', 'bought B', 'bought A'])
 
-        second.tabs.moveTab(3, 2)
+        second.tabs.moveTab(package_tab(second, '5:bought A'), package_tab(second, '5:bought B'))
         self.assertEqual([p['pkg_name'] for p in first._packages],
                          ['emoji', 'room A', 'bought A', 'bought B'])
         second.set_packages(catalog_b)
@@ -209,13 +211,12 @@ class PopupOrderTests(unittest.TestCase):
 
     def test_tab_drag_refresh_and_reopen_share_order_without_losing_selection(self):
         packs = [package('A'), package('B'), package('C')]
-        first = self.popup(packs)
+        first = self.popup(packs, '2:B')
         second = self.popup(packs)
-        first.tabs.setCurrentIndex(1)
-        settle(lambda: first.grid.count() == 3)
+        self.assertEqual(first.grid.count(), 3)
         body = first.scroll.widget()
         self.assertTrue(first.tabs.isMovable())
-        first.tabs.moveTab(2, 0)
+        first.tabs.moveTab(package_tab(first, '2:C'), package_tab(first, '2:A'))
         self.assertEqual([p['pkg_name'] for p in second._packages], ['C', 'A', 'B'])
         self.assertEqual(first.tabs.tabData(first.tabs.currentIndex()), '2:B')
         self.assertIs(first.scroll.widget(), body, 'moving tabs must retain active cells')
@@ -230,8 +231,8 @@ class PopupOrderTests(unittest.TestCase):
         self.assertEqual([p['pkg_name'] for p in third._packages], ['B', 'A', 'C'])
 
     def test_in_package_drag_reorders_other_popup_without_emitting_selection(self):
-        first = self.popup([package('A')])
-        second = self.popup([package('A')])
+        first = self.popup([package('A')], '2:A')
+        second = self.popup([package('A')], '2:A')
         selected = []
         first.selected.connect(lambda *args: selected.append(args))
         original = first.grid.itemAtPosition(0, 0).widget()
@@ -261,8 +262,7 @@ class PopupOrderTests(unittest.TestCase):
         image = QImage(32, 32, QImage.Format_ARGB32)
         image.fill(QColor('green'))
         with patch.object(api, '_load_image', return_value=image):
-            popup = self.popup(packs)
-            popup.tabs.setCurrentIndex(1)
+            popup = self.popup(packs, '2:B')
             settle(lambda: popup.grid.count() == 3 and not popup._buttons[0].icon().isNull())
             settle(lambda: not _active_requests)
         refreshed = deepcopy(packs)
@@ -271,14 +271,14 @@ class PopupOrderTests(unittest.TestCase):
             popup.set_packages(refreshed)
             settle(lambda: popup.grid.count() == 3)
             self.assertEqual(popup.tabs.tabData(popup.tabs.currentIndex()), '2:B')
-            self.assertFalse(popup.tabs.tabIcon(1).isNull())
+            self.assertFalse(popup.tabs.tabIcon(package_tab(popup, '2:B')).isNull())
             self.assertFalse(popup._buttons[0].icon().isNull())
             self.assertFalse(popup._buttons[1].isEnabled())
             settle(lambda: not _active_requests)
 
     def test_shared_emote_order_retains_icons_and_scroll(self):
         pack = package('A', tuple(str(i) for i in range(40)))
-        popup = self.popup([pack])
+        popup = self.popup([pack], '2:A')
         bar = popup.scroll.verticalScrollBar()
         bar.setValue(120)
         APP.processEvents()

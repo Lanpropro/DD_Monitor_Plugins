@@ -18,7 +18,9 @@ class BiliLive(api.Plugin):
         self.context = context
         self.session = BiliSession(context)
         from .gift_controller import GiftCoordinator
+        from .recent_emoticons import RecentEmoticons
         self.coordinator = GiftCoordinator()
+        self.recent = RecentEmoticons(context)
         self.controls = weakref.WeakSet()
         context.register_tile_control('interaction', self._make_control, priority=100)
 
@@ -40,7 +42,9 @@ class BiliLive(api.Plugin):
                 self.widget.shutdown()
             def repeat_message(self, event):
                 return self.widget.repeat_message(event)
-        control = BiliControl(DanmakuComposer(self.session, context.parent, coordinator=self.coordinator, notifier=NotificationReporter(self.context)), minimum_width=90, preferred_width=240)
+        composer = DanmakuComposer(self.session, context.parent, coordinator=self.coordinator,
+                                   notifier=NotificationReporter(self.context), recent=self.recent)
+        control = BiliControl(composer, minimum_width=90, preferred_width=240)
         self.controls.add(control)
         return control
 

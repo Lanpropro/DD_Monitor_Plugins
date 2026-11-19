@@ -97,6 +97,8 @@ class CatalogCacheTests(unittest.TestCase):
             return [dict(PACKAGES[0],emoticons=[dict(PACKAGES[0]['emoticons'][0],perm=0)])]
         with patch.object(bili,'get_emoticons',side_effect=fresh),patch.object(bili,'send_danmaku') as post:
             widget.open_emoticons();settle(entered.is_set)
+            self.assertEqual(widget.popup.tabs.tabData(1),'2:7')
+            widget.popup.tabs.setCurrentIndex(1)
             settle(lambda:bool(widget.popup.scroll.findChildren(QToolButton)))
             button=widget.popup.scroll.findChildren(QToolButton)[0]
             self.assertEqual(button.text(),'好');self.assertFalse(button.isEnabled())
@@ -113,8 +115,10 @@ class CatalogCacheTests(unittest.TestCase):
         second=self.composer()
         with patch.object(bili,'get_emoticons',side_effect=ValueError('offline')):
             second.open_emoticons();settle(lambda:second._catalog_pending is None)
+            self.assertIn('offline',second.popup.status.text())
+            self.assertEqual(second.popup.tabs.tabData(1),'2:7')
+            second.popup.tabs.setCurrentIndex(1)
             settle(lambda:bool(second.popup.scroll.findChildren(QToolButton)))
-        self.assertIn('offline',second.popup.status.text())
         self.assertFalse(second.popup.scroll.findChildren(QToolButton)[0].isEnabled())
         self.assertEqual(self.cache.load('101',self.cookies),PACKAGES)
     def test_stale_account_result_cannot_persist_or_show_other_accounts_catalog(self):
@@ -127,6 +131,8 @@ class CatalogCacheTests(unittest.TestCase):
             from ddm_plugin_bili_live.workers import _active_requests
             settle(lambda:not _active_requests)
         self.assertEqual(list(self.root.glob('*.json')),[])
-        self.assertEqual(widget.popup.tabs.count(),0)
+        self.assertEqual(widget.popup._packages,[])
+        self.assertEqual([widget.popup.tabs.tabToolTip(i) for i in range(widget.popup.tabs.count())],
+                         ['最近发送'])
 
 if __name__=='__main__':unittest.main()
