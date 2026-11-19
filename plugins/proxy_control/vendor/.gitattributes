@@ -1,0 +1,3 @@
+# Preserve upstream bytes, including its original whitespace.
+yaml/*.py -text -whitespace
+yaml/LICENSE -text

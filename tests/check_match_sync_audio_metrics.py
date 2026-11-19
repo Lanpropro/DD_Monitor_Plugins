@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 
 def check(app, host, module):
+    audio = import_module(module.__package__ + '.audio')
     diagnostic = import_module(module.__package__ + '.diagnostics')
     metrics = diagnostic.AudioReadMetrics()
     metrics.record(10, 100., .01, 1., 3, 40., at=8.)
@@ -60,9 +61,9 @@ def check(app, host, module):
     pump.sink, pump.device = sink, device
     pump.snapshot = (1., ((history, 0., 1.02, 3, 40.),))
     try:
-        with patch.object(module, 'route_pcm_s16_stereo', lambda data, channel: data), \
-             patch.object(module, 'resample_pcm', lambda data, frames: data), \
-             patch.object(module, 'mix_pcm', lambda inputs, frames: output):
+        with patch.object(audio, 'route_pcm_s16_stereo', lambda data, channel: data), \
+             patch.object(audio, 'resample_pcm', lambda data, frames: data), \
+             patch.object(audio, 'mix_pcm', lambda inputs, frames: output):
             sink.free, device.accepted = 480 * 4, 240 * 4
             with patch.object(pump, 'update_snapshot'):
                 pump.fill()

@@ -6,7 +6,7 @@ from collections import deque
 import re
 from types import SimpleNamespace
 import requests
-from .douyu_interaction import ChatReceipt, InteractionError, LoginRequired
+from .interaction_models import ChatReceipt, InteractionError, LoginRequired
 
 
 class DeliveryUnconfirmed(InteractionError):

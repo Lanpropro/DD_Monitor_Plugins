@@ -1,4 +1,4 @@
-# Twitch 与 YouTube
+# Twitch、YouTube 与 CHZZK
 
 ## v1.2 更新日志
 
@@ -19,7 +19,7 @@
   关注频道会在下次刷新/取流时解析该频道当前直播，适合继续观看后续直播。
   直接关注视频链接则固定该场直播，不会自动换到频道的另一场直播。
 
-关注卡片支持昵称、标题、开播状态、头像与封面；拖入格子由 VLC 播放。
+关注卡片支持昵称、标题、开播状态、头像与封面；拖入格子由本体的 libmpv 播放。
 平台标识只用图标，关注栏仅有一个平台时隐藏。
 人数不查询、不显示。网络失败保留上次开播状态。
 关闭插件后关注及格子转为暂存，重新启用恢复位置和画质等设置。
@@ -38,6 +38,19 @@ Twitch 使用匿名只读 IRC WebSocket，处理 PING/PONG；YouTube 使用网�
 未启用 YouTube 聊天的直播显示对应提示，播放仍可使用。
 
 ## 账号登录
+
+### 网页登录（配套开发版宿主）
+
+配套宿主提供“打开网页登录／登录并读取关注”：直接在软件创建的独立Chrome或Edge窗口完成官方登录，无需自行注册OAuth客户端；登录完成后由用户关闭本次窗口，软件读取该独立会话并返回关注勾选页。人工登录时为普通浏览器窗口，关闭后才启动后台会话读取，不在登录页面中启用调试控制。窗口沿用当前进程代理，内置代理无需改为系统代理。
+登录身份由官网响应确认，不以Cookie存在作为成功依据。Twitch读取当前账号关注分页，YouTube读取订阅管理页及其后续分页；按频道ID去重，失败或取消不提交半份列表，读取时显示数量。未知页面结构显示失败，不冒充空订阅。
+记住登录沿用宿主DPAPI；不勾选则仅在当前进程保留，退出只清除对应平台。不会读取日常浏览器资料、自动填写账号密码、发送聊天或更改官网关注。
+网页登录依赖官网接口，平台验证或结构变化可能导致失败；可使用“OAuth授权（高级）”。已有OAuth会话继续沿用原方式。旧宿主没有网页登录入口时使用下方OAuth流程；本开发候选保持版本1.2，未发布。
+
+设计参考：[Fy1Sync独立Chrome登录](https://github.com/Fy1ng/Fy1Sync/blob/fc875cc3a4761878db273f1cefaf19ed50379d7e/electron/login.ts)。该项目只将YouTube会话用于取流，未提供本插件的两平台关注导入；本实现独立编写，未复制其代码。网页登录不表示已接入登录态受限播放，也不代表卡顿已优化。
+
+### OAuth授权（备选）
+
+YouTube订阅读取失败时显示HTTP状态与已知原因代码，区分权限未勾选、API未启用、配额和频道设置；不输出Google响应正文或用户令牌。离线专项：`python tests/check_youtube_account_errors.py --host ../DD_Monitor_CE`。
 
 底部账号条的“登录其他平台”提供 Twitch 与 YouTube；授权通过系统默认浏览器完成。
 已登录平台只展示账号身份，不会再次弹出登录网页。两个平台沿用头像、昵称、ID、
@@ -77,7 +90,7 @@ Twitch 使用匿名只读 IRC WebSocket，处理 PING/PONG；YouTube 使用网�
 
 ## 实现范围
 
-使用项目已固定的 Streamlink 8.6.1 解析公开直播 HLS，由 FFmpeg 复制音视频并转封装后交给 VLC。
+使用本体固定的 Streamlink 8.6.1 解析公开直播 HLS，将地址与请求头交给本体，经本机 HLS 转发后由 libmpv 解码播放。
 不重新编码、不写录像文件、不保存带签名的媒体 URL 或访客 continuation。
 播放、图片和聊天遵循当前系统/环境 HTTP 代理；需网络能够访问对应平台。
 海外 HLS 经本机转发，清单/分片与取流使用相同 HTTP/TLS 栈及代理，
@@ -88,9 +101,11 @@ Twitch 使用匿名只读 IRC WebSocket，处理 PING/PONG；YouTube 使用网�
 参考：[Streamlink 插件文档](https://streamlink.github.io/plugins.html)、
 [Twitch IRC 协议](https://dev.twitch.tv/docs/chat/irc/)、
 [YouTube 网页聊天协议研究实现](https://github.com/xenova/chat-downloader/blob/master/chat_downloader/sites/youtube.py)。
-图标为平台官网 favicon，仅用于来源识别，出处见 `assets/platforms/README.md`。
+图标为平台官网 favicon，仅用于来源识别，出处见[平台图标说明](../../docs/assets/platforms/README.md)。
 
 ## 验收
+
+以下命令从本体源码根目录执行。宿主集成专项使用 `plugins_user` 中已安装的插件，运行前安装要验收的版本；插件源码与正式包的一致性仍由插件仓库的发布检查负责。标注真实直播的命令需要明确选择当前开播房间，离线或本机服务通过不代表真实直播已验收。
 
 - `python dev/selfcheck_oauth_guide.py`：编号步骤与官方链接、配置收起与滚动布局、JSON 导入、浏览器重试、授权码复制和取消隔离。
 - `python dev/selfcheck_oauth.py`：真实本机 HTTP 回调、PKCE/state 校验、取消清理、设备轮询和刷新令牌轮换。
@@ -101,9 +116,9 @@ Twitch 使用匿名只读 IRC WebSocket，处理 PING/PONG；YouTube 使用网�
   PING/PONG、YouTube 轮询/全部聊天 continuation、去重、Unicode、线程取消。
 - `python dev/selfcheck_auto_quality.py`：带宽升降、缓冲降档、迟滞、手动/预览隔离、保存恢复与真实 Qt 取流接线。
 - `python dev/selfcheck_auto_quality_live.py youtube:@LofiGirl` 或 `twitch:正在直播的频道`：
-  真实分片下载与 VLC 播放、限速降档、取消限速后升档，以及进程/本机转发清理。
+  真实分片下载与 libmpv 播放、限速降档、取消限速后升档，以及进程/本机转发清理。
 - `python dev/selfcheck_platform_quality_live.py twitch:sodapoppin` 或 `youtube:@LofiGirl`：
-  逐档 VLC 解码、尺寸、保存值及进程释放。
+  逐档 libmpv 解码、尺寸、保存值及进程释放。
 - `python dev/selfcheck_platform_preview_live.py youtube:@LofiGirl 15`：
   四种预览形态、静音、持续解码、主格子不刷新和关闭/旋转/禁用后的资源释放；也可指定 Twitch。
 - `python dev/selfcheck_live_danmaku_live.py 90 twitch:sodapoppin youtube:@LofiGirl`：
@@ -115,3 +130,24 @@ Twitch 使用匿名只读 IRC WebSocket，处理 PING/PONG；YouTube 使用网�
 - 上述自检设置 `DDM_NO_SAVE=1`，不修改用户配置；截图存放在 `work/<平台>-preview-live/`。
 
 在“设置 → 常规”可切换“显示海外平台 Logo”，仅控制该插件平台的关注栏卡片标识。默认开启，保存后立即生效；取消不改变设置，重启后保留选择。开关仅在插件已装载时显示。
+
+## CHZZK 公开直播（开发候选）
+
+添加 `https://chzzk.naver.com/live/<32位频道ID>`、频道主页链接或 `chzzk:<32位频道ID>`，即可加入本地关注并拖入画面墙。
+支持频道名称、头像、封面、开播状态、H.264 画质和低画质悬停预览；自动画质及本机代理转发需配套包含 CHZZK 接入的本体。
+本批不提供 CHZZK 登录、关注导入、聊天、回放或需要账号／年龄验证的直播。
+
+`chzzk.py` 负责链接校验、公开频道元数据与实时 HLS 解析；复用 Streamlink 8.6.1 的 CHZZK 响应校验，
+使用实时清单，不使用需要专用分片签名的时光机回看路径。媒体 URL 仅用于本次播放，不持久化。
+这里使用网页公开接口，并非 CHZZK Open API 授权接入；官方 Live API 提供直播列表和推流设置，未提供观众播放地址。
+参考：[CHZZK 官方 Live API](https://chzzk.gitbook.io/chzzk/chzzk-api/live)、[Streamlink CHZZK](https://github.com/streamlink/streamlink/blob/8.6.1/src/streamlink/plugins/chzzk.py)。
+
+离线回归：`python tests/check_chzzk.py --host <宿主目录>`；实际播放请从宿主根 `run.cmd` 添加正在直播的公开频道，检查画质切换、预览和停止清理。
+
+## 模块职责
+
+入口只组合平台，Twitch／YouTube／CHZZK协议及两平台网页登录分别维护；旧类和函数入口保留兼容导出。缓存属于每个平台实例，Logo控制对象由插件创建并在卸载时移除。详见[海外模块边界](../../docs/development/global-modules.md)。
+
+## 独立平台开发候选
+
+各平台已有0.1独立安装包，组合包保留兼容。迁移、共享源码收集与回滚方式见[平台独立包迁移](../../docs/development/platform-packages.md)；这些候选尚未正式发布。
