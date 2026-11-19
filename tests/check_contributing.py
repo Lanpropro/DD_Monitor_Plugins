@@ -172,11 +172,11 @@ class ContributionGuideTests(unittest.TestCase):
                 self.assertEqual(len(matches), 1)
                 author = manifest.get('author', 'Lanpropro')
                 self.assertIn(f'href="https://github.com/{author}"', matches[0])
+                self.assertIn('下载插件', matches[0])
                 if manifest['id'] == 'bili_watchlater':
-                    self.assertIn('尚未公开发布', matches[0])
+                    self.assertIn('0.8 热修复 1', matches[0])
                     self.assertIn('本地候选包与验收步骤', matches[0])
-                else:
-                    self.assertIn('下载插件', matches[0])
+                    self.assertIn('/releases/tag/bili-watchlater-v1.0', matches[0])
                 icons = re.findall(r'<img src="docs/assets/platforms/([^"/]+)\.png"', matches[0])
                 self.assertEqual(set(icons), platforms[manifest['id']])
 
@@ -243,13 +243,11 @@ class ContributionGuideTests(unittest.TestCase):
                 self.assertIn(f']({note.name})', index)
                 self.assertIn(f'`{plugin_id}`', source)
                 self.assertIn('## 待发布', source)
+                self.assertRegex(source, r'https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/')
                 if plugin_id == 'bili_watchlater':
-                    self.assertIn('尚无公开发布', source)
+                    self.assertIn('## 已发布 v1.0', source)
                     self.assertIn('验收通过', source)
-                    self.assertIn('等待配套本体', source)
-                    self.assertIn('尚未公开发布', source)
-                else:
-                    self.assertRegex(source, r'https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/')
+                    self.assertIn('/releases/tag/bili-watchlater-v1.0', source)
         self.assertIn('(docs/changes/README.md)', (ROOT / 'README.md').read_text(encoding='utf-8'))
         self.assertIn('(docs/changes/README.md)', (ROOT / 'CONTRIBUTING.md').read_text(encoding='utf-8'))
 

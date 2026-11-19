@@ -13,7 +13,15 @@
 | 比赛二路同步 | [match_sync](match_sync.md) | [match-sync-v1.7.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.7.0) |
 | B站直播互动 | [bili_live](bili_live.md) | [bili-live-v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.1) |
 | 网络代理 | [proxy_control](proxy_control.md) | [proxy-control-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/proxy-control-v1.0) |
-| B站稍后再看（验收候选） | [bili_watchlater](bili_watchlater.md) | 尚无公开发布 |
+| 抖音直播 | [douyin_live](douyin_live.md) | [douyin-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyin-live-v1.0) |
+| 斗鱼直播 | [douyu_live](douyu_live.md) | [douyu-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyu-live-v1.0) |
+| 虎牙直播 | [huya_live](huya_live.md) | [huya-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/huya-live-v1.0) |
+| YouTube 直播 | [youtube_live](youtube_live.md) | [youtube-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.0) |
+| Twitch 直播 | [twitch_live](twitch_live.md) | [twitch-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/twitch-live-v1.0) |
+| CHZZK 直播 | [chzzk_live](chzzk_live.md) | [chzzk-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/chzzk-live-v1.0) |
+| B站稍后再看 | [bili_watchlater](bili_watchlater.md) | [bili-watchlater-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-watchlater-v1.0) |
+
+六个独立平台的兼容与回滚见[平台独立包迁移](../development/platform-packages.md)。
 
 基线按正式 Release 核对，使用公开发布版本，不以开发分支的清单版本替代。该机制从 2026-10-31 起启用；此前的开发增量尚未逐项回溯，文件没有条目不代表发布后没有改动。
 
@@ -49,14 +57,3 @@
 4. 更新本索引和插件记录的上次公开发布基线，开始下一轮增量；原始验收记录继续保留。候选构建、提交和推送不视为正式发布。
 
 返回[开发与贡献](../../CONTRIBUTING.md) · [仓库目录](../repository-layout.md)。
-
-## 独立平台候选
-
-六个0.1独立候选尚未公开发布，迁移进度分别记在国内和海外组合的待发布段，设计见[平台独立包迁移](../development/platform-packages.md)。正式发布前再建立各平台独立公开基线，不把候选写成已发布版本。
-
-- [虎牙直播候选记录](huya_live.md)
-- [斗鱼直播候选记录](douyu_live.md)
-- [抖音直播候选记录](douyin_live.md)
-- [Twitch直播候选记录](twitch_live.md)
-- [YouTube直播候选记录](youtube_live.md)
-- [CHZZK直播候选记录](chzzk_live.md)

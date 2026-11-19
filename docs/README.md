@@ -27,7 +27,7 @@
 | [插件开发指南](development/README.md) | 宿主契约、环境、测试、打包、发布与文档清单 |
 | [插件文档规范](standards/documentation.md) | 本仓库的文档分层、元信息、记录与校验规则 |
 | [真实使用监测记录](development/match-live-evidence.md) | 比赛二路现场数据的保留方式 |
-| [平台独立包迁移](development/platform-packages.md) | 六个独立平台候选的依赖打包、组合包兼容及回滚 |
+| [平台独立包迁移](development/platform-packages.md) | 六个独立平台包的依赖打包、组合包兼容及回滚 |
 | [CHZZK 人工验收](../plugins/chzzk_live/ACCEPTANCE.md) | 公开直播、声音、画质、预览及禁用重启步骤；尚未执行 |
 
 ### 变更与发布
@@ -47,7 +47,7 @@
 | 比赛二路同步 | 1.7.0 | [README](../plugins/match_sync/README.md) |
 | B站直播互动 | 1.1 | [README](../plugins/bili_live/README.md) |
 | 网络代理 | 1.0 | [README](../plugins/proxy_control/README.md) |
-| B站稍后再看（验收候选） | 1.0 | [README](../plugins/bili_watchlater/README.md) |
+| B站稍后再看 | 1.0 | [README](../plugins/bili_watchlater/README.md) |
 | 虎牙直播（独立平台） | 1.0 | [README](../plugins/huya_live/README.md) |
 | 斗鱼直播（独立平台） | 1.0 | [README](../plugins/douyu_live/README.md) |
 | 抖音直播（独立平台） | 1.0 | [README](../plugins/douyin_live/README.md) |

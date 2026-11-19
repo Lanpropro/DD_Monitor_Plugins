@@ -383,65 +383,163 @@
     {
       "tag": "bili-watchlater-v1.0",
       "file": "RELEASE-bili-watchlater-v1.0.md",
-      "status": "prepared",
-      "source_kind": "repository_candidate",
-      "base_commit": "ae3d1c64763284a7f82930491aee684210dd719f",
-      "last_edit_verified": false,
-      "sha256": "298ad345066247a716c7c6c63073dfbdf15d25ad761d8f01956d99cc7f66d8ad"
+      "status": "online",
+      "source_kind": "github_release",
+      "last_edit_verified": true,
+      "sha256": "298ad345066247a716c7c6c63073dfbdf15d25ad761d8f01956d99cc7f66d8ad",
+      "release_id": 451100520,
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-watchlater-v1.0",
+      "release_updated_at": "2026-11-19T09:18:30Z",
+      "release_published_at": "2026-11-19T09:18:30Z",
+      "raw_body_sha256": "298ad345066247a716c7c6c63073dfbdf15d25ad761d8f01956d99cc7f66d8ad",
+      "source_commit": "a7c9316134a0e85f36bcbcdf2d05d0ced4b48cc0",
+      "assets": [
+        {
+          "id": 766985264,
+          "name": "bili_watchlater-1.0.zip",
+          "size": 310165,
+          "sha256": "e5cd0732adb0bddee0287107cd48e63ce7b6e882755da3332b0b37c5a34f7505",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/bili-watchlater-v1.0/bili_watchlater-1.0.zip"
+        }
+      ]
     },
     {
       "tag": "huya-live-v1.0",
       "file": "RELEASE-huya-live-v1.0.md",
-      "status": "prepared",
-      "source_kind": "repository_candidate",
-      "base_commit": "ae3d1c64763284a7f82930491aee684210dd719f",
-      "last_edit_verified": false,
-      "sha256": "cb7b43c26d557125b5f44173ac93aaee676d87498b02fe66b3a9314e22a772a4"
+      "status": "online",
+      "source_kind": "github_release",
+      "last_edit_verified": true,
+      "sha256": "cb7b43c26d557125b5f44173ac93aaee676d87498b02fe66b3a9314e22a772a4",
+      "release_id": 451099748,
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/huya-live-v1.0",
+      "release_updated_at": "2026-11-19T09:17:50Z",
+      "release_published_at": "2026-11-19T09:17:50Z",
+      "raw_body_sha256": "cb7b43c26d557125b5f44173ac93aaee676d87498b02fe66b3a9314e22a772a4",
+      "source_commit": "a7c9316134a0e85f36bcbcdf2d05d0ced4b48cc0",
+      "assets": [
+        {
+          "id": 766982978,
+          "name": "huya_live-1.0.zip",
+          "size": 52146,
+          "sha256": "bcd65fd725efb48d5692cc678b6f678b6725b5d235753eb2a6ff441525e99c65",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/huya-live-v1.0/huya_live-1.0.zip"
+        }
+      ]
     },
     {
       "tag": "douyu-live-v1.0",
       "file": "RELEASE-douyu-live-v1.0.md",
-      "status": "prepared",
-      "source_kind": "repository_candidate",
-      "base_commit": "ae3d1c64763284a7f82930491aee684210dd719f",
-      "last_edit_verified": false,
-      "sha256": "0c828f7587166f6f4d7be8374283650e85f0c71f87cbc8a4c868ffa0589c3397"
+      "status": "online",
+      "source_kind": "github_release",
+      "last_edit_verified": true,
+      "sha256": "0c828f7587166f6f4d7be8374283650e85f0c71f87cbc8a4c868ffa0589c3397",
+      "release_id": 451099596,
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyu-live-v1.0",
+      "release_updated_at": "2026-11-19T09:17:38Z",
+      "release_published_at": "2026-11-19T09:17:38Z",
+      "raw_body_sha256": "0c828f7587166f6f4d7be8374283650e85f0c71f87cbc8a4c868ffa0589c3397",
+      "source_commit": "a7c9316134a0e85f36bcbcdf2d05d0ced4b48cc0",
+      "assets": [
+        {
+          "id": 766982538,
+          "name": "douyu_live-1.0.zip",
+          "size": 54830,
+          "sha256": "11a499f4424c486c80916a8677e3691b3183cf9799481eca2c7f1f502616f0c6",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/douyu-live-v1.0/douyu_live-1.0.zip"
+        }
+      ]
     },
     {
       "tag": "douyin-live-v1.0",
       "file": "RELEASE-douyin-live-v1.0.md",
-      "status": "prepared",
-      "source_kind": "repository_candidate",
-      "base_commit": "ae3d1c64763284a7f82930491aee684210dd719f",
-      "last_edit_verified": false,
-      "sha256": "62f935da98466353e17e0f08f329427611597c21098fd63997bbd3e8fb3202f4"
+      "status": "online",
+      "source_kind": "github_release",
+      "last_edit_verified": true,
+      "sha256": "62f935da98466353e17e0f08f329427611597c21098fd63997bbd3e8fb3202f4",
+      "release_id": 451099403,
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyin-live-v1.0",
+      "release_updated_at": "2026-11-19T09:17:27Z",
+      "release_published_at": "2026-11-19T09:17:27Z",
+      "raw_body_sha256": "62f935da98466353e17e0f08f329427611597c21098fd63997bbd3e8fb3202f4",
+      "source_commit": "a7c9316134a0e85f36bcbcdf2d05d0ced4b48cc0",
+      "assets": [
+        {
+          "id": 766981993,
+          "name": "douyin_live-1.0.zip",
+          "size": 66960,
+          "sha256": "572facc667e25df8420afeb92374b68ce3a8dd8a9955a30c15782f07aa0683bd",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/douyin-live-v1.0/douyin_live-1.0.zip"
+        }
+      ]
     },
     {
       "tag": "twitch-live-v1.0",
       "file": "RELEASE-twitch-live-v1.0.md",
-      "status": "prepared",
-      "source_kind": "repository_candidate",
-      "base_commit": "ae3d1c64763284a7f82930491aee684210dd719f",
-      "last_edit_verified": false,
-      "sha256": "3a994aa2639da8c6cd8eb23702bdaf1066aa7a88f7052d806527d18e3efe0b54"
+      "status": "online",
+      "source_kind": "github_release",
+      "last_edit_verified": true,
+      "sha256": "3a994aa2639da8c6cd8eb23702bdaf1066aa7a88f7052d806527d18e3efe0b54",
+      "release_id": 451100156,
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/twitch-live-v1.0",
+      "release_updated_at": "2026-11-19T09:18:08Z",
+      "release_published_at": "2026-11-19T09:18:08Z",
+      "raw_body_sha256": "3a994aa2639da8c6cd8eb23702bdaf1066aa7a88f7052d806527d18e3efe0b54",
+      "source_commit": "a7c9316134a0e85f36bcbcdf2d05d0ced4b48cc0",
+      "assets": [
+        {
+          "id": 766984140,
+          "name": "twitch_live-1.0.zip",
+          "size": 22637,
+          "sha256": "269fcf1ee5b109c417f0b1dbb42b1f7c79c30971f6ded1baf62ac96e0dae5f66",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/twitch-live-v1.0/twitch_live-1.0.zip"
+        }
+      ]
     },
     {
       "tag": "youtube-live-v1.0",
       "file": "RELEASE-youtube-live-v1.0.md",
-      "status": "prepared",
-      "source_kind": "repository_candidate",
-      "base_commit": "ae3d1c64763284a7f82930491aee684210dd719f",
-      "last_edit_verified": false,
-      "sha256": "ad02f33a4ccca0911658f117a391cece9e3b082f2314d751b3f1af1a73bdc686"
+      "status": "online",
+      "source_kind": "github_release",
+      "last_edit_verified": true,
+      "sha256": "ad02f33a4ccca0911658f117a391cece9e3b082f2314d751b3f1af1a73bdc686",
+      "release_id": 451099919,
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.0",
+      "release_updated_at": "2026-11-19T09:17:57Z",
+      "release_published_at": "2026-11-19T09:17:57Z",
+      "raw_body_sha256": "ad02f33a4ccca0911658f117a391cece9e3b082f2314d751b3f1af1a73bdc686",
+      "source_commit": "a7c9316134a0e85f36bcbcdf2d05d0ced4b48cc0",
+      "assets": [
+        {
+          "id": 766983477,
+          "name": "youtube_live-1.0.zip",
+          "size": 12163116,
+          "sha256": "cd81a1b67aabb44286dcd8e13e45cb4114c3da674cfd20210c15c0d9037e115d",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/youtube-live-v1.0/youtube_live-1.0.zip"
+        }
+      ]
     },
     {
       "tag": "chzzk-live-v1.0",
       "file": "RELEASE-chzzk-live-v1.0.md",
-      "status": "prepared",
-      "source_kind": "repository_candidate",
-      "base_commit": "ae3d1c64763284a7f82930491aee684210dd719f",
-      "last_edit_verified": false,
-      "sha256": "7c0cd06ae70aae3e47a0475d65ceed22289bc90dd1b064b425b2b95c96496cf8"
+      "status": "online",
+      "source_kind": "github_release",
+      "last_edit_verified": true,
+      "sha256": "7c0cd06ae70aae3e47a0475d65ceed22289bc90dd1b064b425b2b95c96496cf8",
+      "release_id": 451100289,
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/chzzk-live-v1.0",
+      "release_updated_at": "2026-11-19T09:18:16Z",
+      "release_published_at": "2026-11-19T09:18:16Z",
+      "raw_body_sha256": "7c0cd06ae70aae3e47a0475d65ceed22289bc90dd1b064b425b2b95c96496cf8",
+      "source_commit": "a7c9316134a0e85f36bcbcdf2d05d0ced4b48cc0",
+      "assets": [
+        {
+          "id": 766984709,
+          "name": "chzzk_live-1.0.zip",
+          "size": 22594,
+          "sha256": "75fa71ef15613b6ce5e7abb019a38dfacd3a50878521e3be954a1ae3dd4aa943",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/chzzk-live-v1.0/chzzk_live-1.0.zip"
+        }
+      ]
     }
   ],
   "tags_without_recoverable_body": [
