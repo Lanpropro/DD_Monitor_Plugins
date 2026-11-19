@@ -129,6 +129,11 @@ class ContributionGuideTests(unittest.TestCase):
     def test_readme_entry_and_local_links(self):
         readme = (ROOT / 'README.md').read_text(encoding='utf-8')
         self.assertIn('(CONTRIBUTING.md)', readme)
+        self.assertRegex(
+            readme,
+            r'\[!\[[^\]]+\]\(https://contrib\.rocks/image\?repo=Lanpropro/DD_Monitor_Plugins\)\]'
+            r'\(https://github\.com/Lanpropro/DD_Monitor_Plugins/graphs/contributors\)',
+        )
         documents = ['README.md', 'CONTRIBUTING.md', 'docs/repository-layout.md',
                      'docs/releases/README.md', 'docs/archive/README.md',
                      'docs/development/domestic-modules.md',
@@ -149,6 +154,7 @@ class ContributionGuideTests(unittest.TestCase):
         readme = (ROOT / 'README.md').read_text(encoding='utf-8')
         rows = [line for line in readme.splitlines()
                 if line.startswith('|') and re.search(r'\]\(plugins/[^/]+/README\.md\)', line)]
+        platform_table = readme.split('## 直播平台', 1)[1].split('<details>', 1)[0]
         manifests = list((ROOT / 'plugins').glob('*/plugin.json'))
         self.assertEqual(len(rows), len(manifests))
         release_sources = json.loads((ROOT / 'docs/releases/sources.json').read_text(encoding='utf-8'))
@@ -170,7 +176,7 @@ class ContributionGuideTests(unittest.TestCase):
                 author = manifest.get('author', 'Lanpropro')
                 self.assertIn(f'[@{author}](https://github.com/{author})', row)
                 if plugin_id == 'bili_watchlater':
-                    self.assertIn('原投稿未署名', row)
+                    self.assertIn('[@Mrhaimian](https://github.com/Mrhaimian)', row)
                     self.assertIn('0.8 热修复 1', row)
                 download = re.search(
                     r'\[v([\d.]+)\]\(https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/([^/)]+)\)', row)
@@ -181,6 +187,8 @@ class ContributionGuideTests(unittest.TestCase):
                 self.assertEqual(set(icons), platforms.get(plugin_id, set()))
                 if 'icon' in manifest:
                     self.assertIn(f'<img src="plugins/{plugin_id}/{manifest["icon"]}"', row)
+                if row in platform_table:
+                    self.assertRegex(row.split(' | ')[1], r'^(公开)?直播播放、画质选择(?:、|$)')
 
     def test_release_notes_are_indexed_in_one_directory(self):
         self.assertFalse(list(ROOT.glob('RELEASE-*.md')))

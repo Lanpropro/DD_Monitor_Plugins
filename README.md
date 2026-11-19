@@ -13,16 +13,16 @@
 
 ## 直播平台
 
-按平台安装和更新。六个独立平台插件支持 **DD监控室CE 0.8 或更新版本**，建议先升级至 **0.8 热修复 1**，以获得完整的插件商店识别支持。
+按平台安装和更新。六个独立平台插件支持 **DD监控室CE 0.8 或更新版本**，建议先升级至 **0.8 hotfix.1**，以获得完整的插件商店识别支持。
 
 | 平台 | 功能 | 维护 | 下载 |
 | --- | --- | --- | --- |
-| <img src="plugins/huya_live/icon.png" alt="" width="20" height="20"> [虎牙直播](plugins/huya_live/README.md) | 播放、选画质、登录关注和弹幕互动 | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/huya-live-v1.0) |
-| <img src="plugins/douyu_live/icon.png" alt="" width="20" height="20"> [斗鱼直播](plugins/douyu_live/README.md) | 播放、选画质、登录关注、弹幕及礼物互动 | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyu-live-v1.0) |
-| <img src="plugins/douyin_live/icon.png" alt="" width="20" height="20"> [抖音直播](plugins/douyin_live/README.md) | 播放、登录关注、实验性官网弹幕输入 | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyin-live-v1.0) |
-| <img src="plugins/twitch_live/icon.png" alt="" width="20" height="20"> [Twitch直播](plugins/twitch_live/README.md) | 公开直播、选画质、账号关注与聊天 | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/twitch-live-v1.0) |
-| <img src="plugins/youtube_live/icon.png" alt="" width="20" height="20"> [YouTube直播](plugins/youtube_live/README.md) | 公开直播、账号关注，支持来源提供的 1440p 等档位 | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.0) |
-| <img src="plugins/chzzk_live/icon.png" alt="" width="20" height="20"> [CHZZK直播](plugins/chzzk_live/README.md) | 公开直播、选画质与弹幕 | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/chzzk-live-v1.0) |
+| <img src="plugins/huya_live/icon.png" alt="" width="20" height="20"> [虎牙直播](plugins/huya_live/README.md) | 直播播放、画质选择、账号关注、弹幕互动 | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/huya-live-v1.0) |
+| <img src="plugins/douyu_live/icon.png" alt="" width="20" height="20"> [斗鱼直播](plugins/douyu_live/README.md) | 直播播放、画质选择、账号关注、弹幕互动、礼物互动 | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyu-live-v1.0) |
+| <img src="plugins/douyin_live/icon.png" alt="" width="20" height="20"> [抖音直播](plugins/douyin_live/README.md) | 直播播放、画质选择、账号关注、官网弹幕输入（实验性） | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyin-live-v1.0) |
+| <img src="plugins/twitch_live/icon.png" alt="" width="20" height="20"> [Twitch直播](plugins/twitch_live/README.md) | 公开直播播放、画质选择、账号关注 | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/twitch-live-v1.0) |
+| <img src="plugins/youtube_live/icon.png" alt="" width="20" height="20"> [YouTube直播](plugins/youtube_live/README.md) | 公开直播播放、画质选择、账号关注 | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.0) |
+| <img src="plugins/chzzk_live/icon.png" alt="" width="20" height="20"> [CHZZK直播](plugins/chzzk_live/README.md) | 公开直播播放、画质选择、弹幕观看 | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/chzzk-live-v1.0) |
 
 <details>
 <summary>旧版组合包与迁移</summary>
@@ -42,7 +42,7 @@
 | --- | --- | --- | --- |
 | [比赛二路同步](plugins/match_sync/README.md) | 对齐比赛主画面与多路解说，混合声音及弹幕。使用其他平台前先启用对应平台插件。 | 维护 [@Lanpropro](https://github.com/Lanpropro) | [v1.7.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.7.0) |
 | <img src="docs/assets/platforms/bilibili.png" alt="" width="20" height="20"> [B站直播互动](plugins/bili_live/README.md) | 使用本体登录，发送弹幕和表情，浏览礼物目录及背包。 | 作者 [@reon-nynes](https://github.com/reon-nynes)，兼容维护 [@Lanpropro](https://github.com/Lanpropro) | [v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.1) |
-| <img src="docs/assets/platforms/bilibili.png" alt="" width="20" height="20"> [B站稍后再看](plugins/bili_watchlater/README.md) | 浏览稍后再看，将视频放入画面墙。需要本体 **0.8 热修复 1** 或具备相同接口的更新版本。 | 原投稿未署名，兼容维护 [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-watchlater-v1.0) |
+| <img src="docs/assets/platforms/bilibili.png" alt="" width="20" height="20"> [B站稍后再看](plugins/bili_watchlater/README.md) | 浏览稍后再看，将视频放入画面墙。需要本体 **0.8 热修复 1** 或具备相同接口的更新版本。 | 作者[@Mrhaimian](https://github.com/Mrhaimian)，兼容维,UI制作 [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-watchlater-v1.0) |
 | [网络代理](plugins/proxy_control/README.md) | 导入订阅与节点，按需启动代理，查看连接、测速与切换配置。 | 维护 [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/proxy-control-v1.0) |
 
 ## 安装与更新
@@ -99,6 +99,8 @@ python tests/check_packages.py --host ../DD_Monitor_CE
 
 ## 致谢与许可
 
-感谢 [@reon-nynes](https://github.com/reon-nynes) 提供 B站直播互动插件，感谢 [@Soraray](https://github.com/Soraray) 对 Enter 交互的贡献。
+感谢所有为 DD监控室CE 插件贡献代码、修复问题和完善文档的朋友。
+
+[![DD监控室CE 插件贡献者](https://contrib.rocks/image?repo=Lanpropro/DD_Monitor_Plugins)](https://github.com/Lanpropro/DD_Monitor_Plugins/graphs/contributors)
 
 本仓库从 [DD监控室CE](https://github.com/Lanpropro/DD_Monitor_CE) 的 `4bf84bc` 基线提取并独立维护，采用 [GNU LGPL v2.1](LICENSE)。第三方来源与声明见 [NOTICE](NOTICE.md)。
