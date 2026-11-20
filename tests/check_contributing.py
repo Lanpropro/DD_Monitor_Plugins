@@ -43,7 +43,7 @@ class ContributionGuideTests(unittest.TestCase):
         readme = (ROOT / 'README.md').read_text(encoding='utf-8')
         changes = (ROOT / 'docs/changes/bili_live.md').read_text(encoding='utf-8')
         self.assertIn(url, readme)
-        self.assertIn('1.1 已发布', readme)
+        self.assertIn(f'[v1.1]({url})', readme)
         self.assertIn('## 已发布 v1.1（2026-11-05）', changes)
         self.assertIn(url, (ROOT / 'docs/changes/README.md').read_text(encoding='utf-8'))
         entries = json.loads((ROOT / 'docs/releases/sources.json').read_text(encoding='utf-8'))['entries']
@@ -129,6 +129,11 @@ class ContributionGuideTests(unittest.TestCase):
     def test_readme_entry_and_local_links(self):
         readme = (ROOT / 'README.md').read_text(encoding='utf-8')
         self.assertIn('(CONTRIBUTING.md)', readme)
+        self.assertRegex(
+            readme,
+            r'\[!\[[^\]]+\]\(https://contrib\.rocks/image\?repo=Lanpropro/DD_Monitor_Plugins\)\]'
+            r'\(https://github\.com/Lanpropro/DD_Monitor_Plugins/graphs/contributors\)',
+        )
         documents = ['README.md', 'CONTRIBUTING.md', 'docs/repository-layout.md',
                      'docs/releases/README.md', 'docs/archive/README.md',
                      'docs/development/domestic-modules.md',
@@ -147,38 +152,43 @@ class ContributionGuideTests(unittest.TestCase):
 
     def test_readme_showcases_each_plugin_with_author_credit(self):
         readme = (ROOT / 'README.md').read_text(encoding='utf-8')
-        cards = re.findall(r'<td\b[^>]*>(.*?)</td>', readme, re.DOTALL)
+        rows = [line for line in readme.splitlines()
+                if line.startswith('|') and re.search(r'\]\(plugins/[^/]+/README\.md\)', line)]
+        platform_table = readme.split('## 直播平台', 1)[1].split('<details>', 1)[0]
         manifests = list((ROOT / 'plugins').glob('*/plugin.json'))
-        self.assertEqual(len(cards), len(manifests))
+        self.assertEqual(len(rows), len(manifests))
+        release_sources = json.loads((ROOT / 'docs/releases/sources.json').read_text(encoding='utf-8'))
+        release_tags = {entry['tag'] for entry in release_sources['entries']
+                        if entry['status'] != 'archived_verified'}
         platforms = {
             'domestic_live': {'huya', 'douyu', 'douyin'},
             'global_live': {'twitch', 'youtube'},
-            'match_sync': {'bilibili', 'huya', 'douyu', 'douyin', 'twitch', 'youtube'},
             'bili_live': {'bilibili'},
-            'huya_live': {'huya'},
-            'douyu_live': {'douyu'},
-            'douyin_live': {'douyin'},
-            'twitch_live': {'twitch'},
-            'youtube_live': {'youtube'},
-            'chzzk_live': set(),
-            'proxy_control': set(),
             'bili_watchlater': {'bilibili'},
         }
         for path in manifests:
             manifest = json.loads(path.read_text(encoding='utf-8'))
-            with self.subTest(plugin=manifest['id']):
-                matches = [card for card in cards
-                           if f'href="plugins/{manifest["id"]}/README.md"' in card]
+            plugin_id = manifest['id']
+            with self.subTest(plugin=plugin_id):
+                matches = [row for row in rows if f'](plugins/{plugin_id}/README.md)' in row]
                 self.assertEqual(len(matches), 1)
+                row = matches[0]
                 author = manifest.get('author', 'Lanpropro')
-                self.assertIn(f'href="https://github.com/{author}"', matches[0])
-                self.assertIn('下载插件', matches[0])
-                if manifest['id'] == 'bili_watchlater':
-                    self.assertIn('0.8 热修复 1', matches[0])
-                    self.assertIn('本地候选包与验收步骤', matches[0])
-                    self.assertIn('/releases/tag/bili-watchlater-v1.0', matches[0])
-                icons = re.findall(r'<img src="docs/assets/platforms/([^"/]+)\.png"', matches[0])
-                self.assertEqual(set(icons), platforms[manifest['id']])
+                self.assertIn(f'[@{author}](https://github.com/{author})', row)
+                if plugin_id == 'bili_watchlater':
+                    self.assertIn('[@Mrhaimian](https://github.com/Mrhaimian)', row)
+                    self.assertIn('0.8 热修复 1', row)
+                download = re.search(
+                    r'\[v([\d.]+)\]\(https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/([^/)]+)\)', row)
+                self.assertIsNotNone(download)
+                self.assertEqual(download[2], f'{plugin_id.replace("_", "-")}-v{download[1]}')
+                self.assertIn(download[2], release_tags)
+                icons = re.findall(r'<img src="docs/assets/platforms/([^"/]+)\.png"', row)
+                self.assertEqual(set(icons), platforms.get(plugin_id, set()))
+                if 'icon' in manifest:
+                    self.assertIn(f'<img src="plugins/{plugin_id}/{manifest["icon"]}"', row)
+                if row in platform_table:
+                    self.assertRegex(row.split(' | ')[1], r'^(公开)?直播播放、画质选择(?:、|$)')
 
     def test_release_notes_are_indexed_in_one_directory(self):
         self.assertFalse(list(ROOT.glob('RELEASE-*.md')))
