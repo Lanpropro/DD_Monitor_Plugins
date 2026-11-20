@@ -1,0 +1,9 @@
+{
+  "id": "qie_live",
+  "name": "企鹅体育",
+  "description": "企鹅体育公开房间、720p 原生播放和只读弹幕",
+  "version": "1.0",
+  "min_app_version": "0.8",
+  "icon": "icon.png",
+  "platforms": ["qie"]
+}

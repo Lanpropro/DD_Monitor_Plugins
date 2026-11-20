@@ -1,0 +1,9 @@
+{
+  "id": "m3u_live",
+  "name": "IPTV Play",
+  "description": "将电视预设、M3U 频道和 HLS 直播加入关注，使用原有画面墙播放",
+  "version": "1.0",
+  "min_app_version": "0.8",
+  "icon": "icon.png",
+  "platforms": ["m3u"]
+}

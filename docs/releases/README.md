@@ -10,6 +10,11 @@
 
 - [0.8 热修复 1 与 B站稍后再看 1.0](DRAFT-bili-watchlater-v1.0.md)
 
+## 待发布草稿
+
+- [IPTV Play 1.0](RELEASE-m3u-live-v1.0.md)，等待支持频道列表接口的宿主发布。
+- [企鹅体育 1.0](RELEASE-qie-live-v1.0.md)，公开直播 720p 播放和只读弹幕。
+
 ## 当前在线发布说明
 
 | 插件 | 仓库说明 | GitHub 来源 |

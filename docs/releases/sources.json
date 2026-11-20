@@ -540,6 +540,24 @@
           "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/chzzk-live-v1.0/chzzk_live-1.0.zip"
         }
       ]
+    },
+    {
+      "tag": "m3u-live-v1.0",
+      "file": "RELEASE-m3u-live-v1.0.md",
+      "status": "prepared",
+      "source_kind": "repository_candidate",
+      "base_commit": "f71f7c5586d072a428d8d5e66ea9dbb6f64dc6f4",
+      "last_edit_verified": false,
+      "sha256": "cb241d3a9988feb14138f236d61d7b879a4eb8580bc176df636325ec499cd6ac"
+    },
+    {
+      "tag": "qie-live-v1.0",
+      "file": "RELEASE-qie-live-v1.0.md",
+      "status": "prepared",
+      "source_kind": "repository_candidate",
+      "base_commit": "f71f7c5586d072a428d8d5e66ea9dbb6f64dc6f4",
+      "last_edit_verified": false,
+      "sha256": "e9a14177aa5a2575284a27d05a092859aa16a48e67053f5d657271a1a00c8678"
     }
   ],
   "tags_without_recoverable_body": [
