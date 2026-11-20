@@ -1,10 +1,11 @@
 """Use the existing match picture, mixer and chat controls inside a race page."""
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QInputDialog
+from PySide6.QtWidgets import QInputDialog, QLabel, QVBoxLayout
 
 from ddm.plugin_types import Platform, RoomInfo
 
 from . import source_control
+from .room_input import parse_room
 from .viewer import Viewer
 
 
@@ -27,17 +28,31 @@ class RaceViewer(Viewer):
     picture_clock_changed = Signal()
     overlay_changed = Signal(bool)
 
-    def __init__(self, context, parent, address, muted):
+    def __init__(self, context, parent, address=None, muted=True, *, onboard=False):
+        self.onboard = onboard
+        self.empty_hint = None
+        self.clock_room = None
         super().__init__(context, {})
         self.setParent(parent, Qt.Widget)
-        self.feed = RaceFeed(address)
-        self.send_console.excluded_rooms.add(self.feed.room_id)
-        source_control.add_room(self, self.feed.room_id,
-                                {'alias': '比赛主画面', 'quality_auto': False, 'show_chat': False},
-                                platform=self.feed)
-        row = self.rows[self.feed.room_id]
-        row.audible.setChecked(not muted)
-        row.remove_button.hide()
+        self.feed = RaceFeed(address) if address is not None else None
+        if self.feed is not None:
+            self.send_console.excluded_rooms.add(self.feed.room_id)
+            source_control.add_room(self, self.feed.room_id,
+                                    {'alias': '比赛主画面', 'quality_auto': False, 'show_chat': False},
+                                    platform=self.feed)
+            row = self.rows[self.feed.room_id]
+            row.audible.setChecked(not muted)
+            row.remove_button.hide()
+        else:
+            self.picture.setProperty('roomDropOnly', True)
+            self.picture.add_room_button.hide()
+            self.empty_hint = QLabel('从左侧拖入车载卡片' if onboard else '从左侧拖入直播卡片开播')
+            self.empty_hint.setAlignment(Qt.AlignCenter)
+            self.empty_hint.setAttribute(Qt.WA_TransparentForMouseEvents)
+            self.empty_hint.setStyleSheet('background: transparent;')
+            QVBoxLayout(self.canvas).addWidget(self.empty_hint)
+        if onboard:
+            self.canvas.setMinimumSize(180, 128)
         self.input.hide()
         self.add_controls[1].setText('添加解说')
         self.add_controls[2].hide()
@@ -52,7 +67,54 @@ class RaceViewer(Viewer):
         self.picture.danmaku_button.toggled.connect(self.overlay_changed.emit)
         if self.context.setting('automatic') is None:
             self.automatic.setChecked(False)
-        self.main.currentIndexChanged.connect(lambda _index: self.picture_clock_changed.emit())
+
+    def _main_changed(self, *_args):
+        super()._main_changed(*_args)
+        room_id = self.main.currentData()
+        if self.empty_hint is not None:
+            self.empty_hint.setVisible(room_id is None)
+        if room_id != self.clock_room:
+            self.clock_room = room_id
+            self.picture_clock_changed.emit()
+
+    def _add_dragged(self, room_id):
+        try:
+            room_id = parse_room(room_id, self.context.manager)
+        except ValueError as error:
+            if self.empty_hint is not None and not self.rows:
+                self.empty_hint.setText(str(error))
+            else:
+                self.notice.setText(str(error))
+            return False
+        if not self.running and room_id in self.rows:
+            self.select_main(room_id)
+            self.start()
+            return True
+        previous = self.main.currentData()
+        if not super()._add_dragged(room_id):
+            return False
+        if self.onboard:
+            self.select_main(room_id)
+            if previous is not None:
+                self.remove_room(previous)
+        self.start()
+        return True
+
+    def add_room(self, text, preferences=None):
+        if self.onboard:
+            preferences = {**(preferences or {}), 'audible': False, 'show_chat': False}
+        return super().add_room(text, preferences)
+
+    def save(self):
+        if not self.onboard:
+            super().save()
+
+    def show_room(self, room_id):
+        if room_id not in self.rows or not self.running:
+            if not self._add_dragged(room_id):
+                return False
+        self.select_main(room_id)
+        return True
 
     def set_settings_visible(self, visible):
         super().set_settings_visible(visible)
@@ -64,7 +126,7 @@ class RaceViewer(Viewer):
     def _add_input(self):
         source, accepted = QInputDialog.getText(self, '添加解说', '直播间号或官方链接')
         if accepted and source.strip():
-            self.add_room(source)
+            self._add_dragged(source)
 
     def set_sender_open(self, opened):
         self.send_console.set_collapsed(not opened)
@@ -94,9 +156,9 @@ class RaceViewer(Viewer):
         self.start()
 
     def remove_room_with_undo(self, room_id):
-        if room_id != self.feed.room_id:
+        if self.feed is None or room_id != self.feed.room_id:
             super().remove_room_with_undo(room_id)
 
     def remove_room(self, room_id):
-        if room_id != self.feed.room_id:
+        if self.feed is None or room_id != self.feed.room_id:
             super().remove_room(room_id)

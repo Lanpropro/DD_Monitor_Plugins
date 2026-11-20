@@ -44,7 +44,7 @@
 | <img src="docs/assets/platforms/bilibili.png" alt="" width="20" height="20"> [B站直播互动](plugins/bili_live/README.md) | 使用本体登录，发送弹幕和表情，浏览礼物目录及背包。 | 作者 [@reon-nynes](https://github.com/reon-nynes)，兼容维护 [@Lanpropro](https://github.com/Lanpropro) | [v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.1) |
 | <img src="docs/assets/platforms/bilibili.png" alt="" width="20" height="20"> [B站稍后再看](plugins/bili_watchlater/README.md) | 浏览稍后再看，将视频放入画面墙。需要本体 **0.8 热修复 1** 或具备相同接口的更新版本。 | 作者[@Mrhaimian](https://github.com/Mrhaimian)，兼容维,UI制作 [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-watchlater-v1.0) |
 | [网络代理](plugins/proxy_control/README.md) | 导入订阅与节点，按需启动代理，查看连接、测速与切换配置。 | 维护 [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/proxy-control-v1.0) |
-| [F1 Play](plugins/f1_play/README.md) | 在赛事页面播放 HLS 主画面。 | 维护 [@Lanpropro](https://github.com/Lanpropro) | 开发候选 |
+| [F1 Play](plugins/f1_play/README.md) | 从关注卡片开播，按需显示排行、车载画面和比赛二路控制台。 | 维护 [@Lanpropro](https://github.com/Lanpropro) | 开发候选 |
 
 ## 安装与更新
 
@@ -84,7 +84,7 @@
 | B站直播互动 | `bili_live` | 1.1 |
 | B站稍后再看 | `bili_watchlater` | 1.0 |
 | 网络代理 | `proxy_control` | 1.0 |
-| F1 Play（开发候选） | `f1_play` | 0.1 |
+| F1 Play（开发候选） | `f1_play` | 0.2 |
 | 国内直播平台（组合包） | `domestic_live` | 2.0 |
 | 海外直播平台（组合包） | `global_live` | 1.2 |
 

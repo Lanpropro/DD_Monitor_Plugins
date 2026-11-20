@@ -14,7 +14,7 @@ from .workspace import F1Workspace
 
 class F1Play(Plugin):
     name = 'F1 Play'
-    version = '0.1'
+    version = '0.2'
 
     def __init__(self):
         super().__init__()
@@ -24,9 +24,9 @@ class F1Play(Plugin):
     def on_load(self, context):
         if context.window is None:
             return
-        required = ('register_workspace_control', 'show_workspace', 'create_workspace_player')
+        required = ('register_workspace_control', 'show_workspace', 'create_plugin_widget', 'workspace_background_mask')
         if not all(callable(getattr(context, name, None)) for name in required):
-            raise RuntimeError('F1 Play 需要包含功能页播放器接口的配套本体')
+            raise RuntimeError('F1 Play 需要含有功能页蒙版接口的配套本体')
         self.context = context
         entry = QToolButton(context.window)
         icon = QIcon(str(Path(__file__).with_name('icon.png')))

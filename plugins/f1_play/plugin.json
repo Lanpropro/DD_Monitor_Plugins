@@ -2,7 +2,7 @@
   "id": "f1_play",
   "name": "F1 Play",
   "icon": "icon.png",
-  "version": "0.1",
-  "description": "在独立赛事页面播放 HLS、查看历史排行，按需启用比赛二路控制台和车载小窗。需要配套本体。",
+  "version": "0.2",
+  "description": "把关注卡片拖入赛事画面，使用比赛二路的播放、解说和弹幕控制，按需查看排行和车载画面。需要配套本体与比赛二路。",
   "min_app_version": "0.8"
 }

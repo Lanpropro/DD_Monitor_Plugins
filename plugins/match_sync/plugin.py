@@ -276,6 +276,9 @@ class MatchSyncPlugin(api.Plugin):
         if capability == 'race_workspace_v1':
             from .race_workspace import RaceViewer
             return RaceViewer(caller, parent, options['address'], options['muted'])
+        if capability == 'race_workspace_v2':
+            from .race_workspace import RaceViewer
+            return RaceViewer(caller, parent, onboard=options.get('onboard', False))
         return None
 
     def on_event(self, event, payload):
