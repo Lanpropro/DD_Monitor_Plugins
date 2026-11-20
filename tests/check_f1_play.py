@@ -1,6 +1,7 @@
 """Check F1 Play sidebar drops and optionally sample an imported live channel."""
 import argparse
-from PySide6.QtCore import Qt
+from copy import deepcopy
+from PySide6.QtCore import QEvent, Qt
 import json
 import os
 from pathlib import Path
@@ -57,6 +58,7 @@ def drag_card(window, room_id, viewer):
 
 
 def check_mask(window, page, directory):
+    from math import isclose
     from PySide6.QtGui import QColor, QImage
 
     skins = Path(directory) / 'utils' / 'skins'
@@ -66,16 +68,16 @@ def check_mask(window, page, directory):
     assert wallpaper.save(str(skins / 'f1-mask.png'))
     window.settings.update(skin_background='utils/skins/f1-mask.png', skin_mask=65, skin_mask_enabled=True)
     window.refresh_skin()
-    assert ', 0.65)' in page.styleSheet()
+    assert page.skin_visible and isclose(page.panel_alpha, .72 + .28 * .65)
     window.settings['skin_mask'] = 83
     window.refresh_skin()
-    assert ', 0.83)' in page.styleSheet()
+    assert isclose(page.panel_alpha, .72 + .28 * .83)
     window.settings['skin_mask_enabled'] = False
     window.refresh_skin()
-    assert ', 0.0)' in page.styleSheet()
+    assert isclose(page.panel_alpha, .72)
     window.settings['skin_mask_enabled'] = True
     window.refresh_skin()
-    assert ', 0.83)' in page.styleSheet()
+    assert isclose(page.panel_alpha, .72 + .28 * .83)
 
 
 def check_entry_icon(window, directory, evidence):
@@ -104,115 +106,124 @@ def check_entry_icon(window, directory, evidence):
     return entry
 
 
-def check_workspace(window, entry, page, directory, evidence, suspended_tile):
-    from PySide6.QtWidgets import QLineEdit
+def layout_signature(page):
+    return (
+        type(page), page.geometry(), page.picture_split.sizes(), page.body_split.sizes(),
+        page.picture.isVisible(), page.settings_panel.isVisible(), page.chat_pane.isVisible(),
+        page.send_console.isVisible(), tuple(widget.isHidden() for widget in page.add_controls),
+    )
 
-    match = page.match
-    assert match.empty_hint.isVisible() and not match.running
-    assert match.picture.add_room_button.isHidden()
-    assert not any(edit.isVisible() for edit in page.findChildren(QLineEdit))
-    if evidence:
-        assert page.grab().save(str(evidence / 'empty.png'))
+
+def check_workspace(window, entry, match, directory, evidence, suspended_tile):
+    from PySide6.QtTest import QTest
+
+    assert not match.running and match.settings_panel.isVisible() and match.chat_pane.isVisible()
+    original_settings = deepcopy(window.plugins.plugin_settings.get('match_sync', {}))
     with (patch.object(type(match), '_start_row', autospec=True) as start_row,
           patch.object(type(match.audio), 'start')):
         drag_card(window, '101', match)
-        assert match.running and match.main.currentData() == '101' and not match.empty_hint.isVisible()
+        assert match.running and match.main.currentData() == '101'
         assert start_row.call_count == 1
         drag_card(window, '102', match)
         assert match.main.currentData() == '101' and set(match.rows) == {'101', '102'}
         assert start_row.call_count == 2
-
-        page.console_button.click()
-        assert match.settings_panel.isVisible() and match.rows['102'].volume.isVisible()
-        page.send_button.click()
+        assert match.rows['102'].volume.isVisible()
         assert match.send_console.isVisible() and set(match.send_console.rows) == {'101', '102'}
-        page.overlay_button.click()
-        assert match.picture.danmaku_button.isChecked()
-        match.picture.danmaku_button.setChecked(False)
-        assert not page.overlay_button.isChecked()
-        if evidence:
-            assert page.grab().save(str(evidence / 'console.png'))
-        page.console_button.click()
-        page.send_button.click()
-        assert match.settings_panel.isHidden() and match.send_console.isHidden() and match.running
 
+        match.picture.danmaku_button.setChecked(True)
+        assert match.picture.danmaku_button.isChecked()
+        match.minimize_settings.click()
+        assert match.settings_panel.isHidden() and match.running
+        match.restore_settings.click()
+        assert match.settings_panel.isVisible()
+        match.minimize_chat.click()
+        assert match.panel.isHidden() and match.running
+        match.restore_chat.click()
+        assert match.panel.isVisible()
+        if evidence:
+            assert match.grab().save(str(evidence / 'f1-with-sources.png'))
+
+        plugin = next(plugin for plugin in window.plugins.plugins if plugin.context.name == 'f1_play')
+        assert plugin.tools is None
+        next(action for action in entry.actions() if action.text() == '赛事工具').trigger()
+        tools = plugin.tools
+        tools.move(180, 45)
+        QTest.qWait(100)
+        assert tools.isVisible() and match.running
         filename = Path(directory) / 'history.json'
         for session, columns in (('Race', 4), ('Practice', 5)):
             filename.write_text(json.dumps(history_data(session)), encoding='utf-8')
-            assert page.standings.load_data(filename)
-            assert page.standings.table.columnCount() == columns
+            assert tools.standings.load_data(filename)
+            assert tools.standings.table.columnCount() == columns
             match.rows['101'].actual_position = 92
-            page.standings.set_anchor(page.picture_position(), 92)
-            page.standings.update_picture()
-            assert page.standings.table.item(0, 1).text() == 'LEC'
+            tools.standings.set_anchor(tools.picture_position(), 92)
+            assert tools.standings.table.item(0, 1).text() == 'LEC'
             match.rows['101'].actual_position = 23
-            page.standings.update_picture()
+            tools.standings.update_picture()
             if session == 'Race':
-                assert page.standings.table.item(0, 1).text() == 'ANT'
+                assert tools.standings.table.item(0, 1).text() == 'ANT'
             else:
-                assert page.standings.table.rowCount() == 0
+                assert tools.standings.table.rowCount() == 0
         match.rows['102'].main_button.click()
-        assert match.main.currentData() == '102' and page.standings.table.rowCount() == 0
+        tools.update_timeline()
+        assert match.main.currentData() == '102' and tools.standings.table.rowCount() == 0
         match.rows['101'].main_button.click()
         assert match.main.currentData() == '101'
 
-        page.rank_toggle.click()
-        assert page.side.isHidden()
-        page.onboard_toggle.click()
-        app = QApplication.instance()
-        app.processEvents()
-        onboard = page.onboard
-        assert onboard.empty_hint.isVisible() and not page.promote.isEnabled()
-        assert onboard.picture.add_room_button.isHidden()
+        tools.rank_toggle.click()
+        assert tools.standings.isHidden()
+        tools.onboard_toggle.click()
+        QTest.qWait(100)
+        onboard = tools.onboard
+        assert onboard.empty_hint.isVisible() and not tools.promote.isEnabled()
         drag_card(window, '103', onboard)
         assert onboard.running and not onboard.rows['103'].audible.isChecked()
-        assert page.promote.isEnabled() and match.main.currentData() == '101'
-        page.promote.click()
+        assert tools.promote.isEnabled() and match.main.currentData() == '101'
+        tools.promote.click()
         assert match.main.currentData() == '103' and onboard.main.currentData() == '101'
         assert set(match.rows) == {'102', '103'} and set(onboard.rows) == {'101'}
-        page.onboard_toggle.click()
-        assert not onboard.running and page.onboard is None and page.side.isHidden()
-        page.rank_toggle.click()
 
-    with patch.object(window.stream_playback, 'start_tile') as start:
-        page.back_button.click()
-        assert not window._match_sync_active
-        assert start.call_count == 1 and start.call_args.args == (suspended_tile,)
-    suspended_tile.set_room(None)
-    assert not match.running and page.match is None and window.wall.isVisible()
-    entry.click()
-    assert page.match is not match and not page.match.rows and page.isVisible()
+        with patch.object(window.stream_playback, 'start_tile') as start:
+            window.sidebar.navigation.follow_button.click()
+            assert not window._match_sync_active
+            assert start.call_count == 1 and start.call_args.args == (suspended_tile,)
+        assert not match.running and not tools.isVisible() and not onboard.running and window.wall.isVisible()
+        assert 'rooms' in window.plugins.plugin_settings['f1_play']
+        assert window.plugins.plugin_settings.get('match_sync', {}) == original_settings
+        suspended_tile.set_room(None)
+        entry.click()
+        assert match.running and match.isVisible()
+        match.close()
 
 
-def check_live(window, page, room_id, evidence, seconds):
+def check_live(window, match, room_id, evidence, seconds):
     from time import monotonic
     from PySide6.QtTest import QTest
 
-    match = page.match
     started = monotonic()
     drag_card(window, room_id, match)
-    while page.picture_position() is None and monotonic() - started < 45:
-        QTest.qWait(100)
-    first = page.picture_position()
     row = match.rows[room_id]
+    while row.actual_position is None and monotonic() - started < 45:
+        QTest.qWait(100)
+    first = row.actual_position
     assert first is not None and not match.canvas.image.isNull(), row.video_text
     ready = monotonic()
     if evidence:
         assert match.canvas.image.save(str(evidence / 'video-frame.png'))
-        assert page.grab().save(str(evidence / 'live-workspace.png'))
+        assert match.grab().save(str(evidence / 'live-workspace.png'))
     samples = []
     while monotonic() - ready < seconds:
         QTest.qWait(250)
-        samples.append({'time': round(monotonic() - ready, 2), 'position': page.picture_position(),
+        samples.append({'time': round(monotonic() - ready, 2), 'position': row.actual_position,
                         'waiting': match.canvas.waiting, 'presented': match.canvas.presented})
-    result = {'startup_seconds': round(ready - started, 2), 'advanced_seconds': round(page.picture_position() - first, 2),
+    result = {'startup_seconds': round(ready - started, 2), 'advanced_seconds': round(row.actual_position - first, 2),
               'duration': samples[-1]['time'], 'waiting_samples': sum(item['waiting'] for item in samples),
               'resolution': list(row.decoder.video_size), 'fps': row.decoder.fps}
     if evidence:
         (evidence / 'samples.json').write_text(json.dumps({'summary': result, 'samples': samples}), encoding='utf-8')
     print(json.dumps(result), flush=True)
     assert result['advanced_seconds'] > 0
-    page.back_button.click()
+    match.close()
     assert not match.running and window.wall.isVisible()
 
 
@@ -282,6 +293,17 @@ def main():
                 QTest.qWait(100)
                 entry = check_entry_icon(window, directory, evidence)
                 if not args.live_source_file:
+                    provider = next(plugin for plugin in window.plugins.plugins
+                                    if plugin.context.name == 'match_sync')
+                    provider.open_viewer({})
+                    QTest.qWait(100)
+                    reference = layout_signature(provider.viewer)
+                    if evidence:
+                        assert provider.viewer.grab().save(str(evidence / 'match-sync.png'))
+                    provider.viewer.close()
+                    provider.viewer.deleteLater()
+                    provider.viewer = None
+                    QTest.qWait(100)
                     suspended_tile = window.wall.tiles[0]
                     suspended_tile.set_room({'room_id': '101', 'uname': '主画面', 'live': True})
                     player = Mock()
@@ -294,6 +316,9 @@ def main():
                     assert window.plugins.platform_for(room_id).room_info(room_id).uname == 'CCTV-5+（验收源）'
                     check_live(window, page, room_id, evidence, args.seconds)
                 else:
+                    assert layout_signature(page) == reference
+                    if evidence:
+                        assert page.grab().save(str(evidence / 'f1-play.png'))
                     assert window._match_sync_active and suspended_tile not in window.players
                     player.release.assert_called_once()
                     check_mask(window, page, directory)
@@ -302,7 +327,8 @@ def main():
                     assert window.wall.isVisible()
             finally:
                 window.close()
-                app.processEvents()
+                window.deleteLater()
+                app.sendPostedEvents(None, QEvent.DeferredDelete)
     print('PASS: F1 Play sidebar drop, wall suspension and host background mask', flush=True)
 
 

@@ -1,129 +1,75 @@
-"""F1 Play's race layout, using the shared Match Sync player and controls."""
-from PySide6.QtCore import QSignalBlocker, Qt, QTimer
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
-
-from ddm import theme
+"""Optional F1 tools outside the shared Match Sync workspace."""
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from .standings import StandingsPane
 
 
-class F1Workspace(QWidget):
-    def __init__(self, context):
-        super().__init__()
+class RaceTools(QDialog):
+    def __init__(self, context, match):
+        super().__init__(match)
         self.context = context
-        self.match = None
+        self.match = match
         self.onboard = None
-        self.setObjectName('F1Workspace')
-        self.setAttribute(Qt.WA_StyledBackground)
-        self.apply_backdrop()
-        theme.signals().changed.connect(self.apply_backdrop)
-        if context.workspace_background_changed is not None:
-            context.workspace_background_changed.connect(self.apply_backdrop)
+        self.clock_room = None
+        self.setWindowTitle('F1 Play · 赛事工具')
+        self.resize(440, 540)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(10)
         header = QHBoxLayout()
-        title = QLabel('F1 Play')
-        title.setObjectName('SettingsTitle')
-        header.addWidget(title)
+        self.rank_toggle = QPushButton('排行')
+        self.rank_toggle.setObjectName('IconButton')
+        self.rank_toggle.setCheckable(True)
+        self.rank_toggle.setChecked(True)
+        header.addWidget(self.rank_toggle)
+        self.onboard_toggle = QPushButton('车载视角')
+        self.onboard_toggle.setObjectName('IconButton')
+        self.onboard_toggle.setCheckable(True)
+        self.onboard_toggle.toggled.connect(self.set_onboard_open)
+        header.addWidget(self.onboard_toggle)
         header.addStretch()
-        self.rank_toggle = self.button(header, '排行', self.update_side, checkable=True)
-        self.onboard_toggle = self.button(header, '车载视角', self.update_side, checkable=True)
-        self.back_button = self.button(header, '返回画面墙', self.close)
         layout.addLayout(header)
 
-        body = QHBoxLayout()
-        self.screen = QVBoxLayout()
-        self.unavailable = QLabel('请启用配套版本的比赛二路同步')
-        self.unavailable.setAlignment(Qt.AlignCenter)
-        self.screen.addWidget(self.unavailable)
-        body.addLayout(self.screen, 3)
-
-        self.side = QWidget()
-        self.side.setMinimumWidth(260)
-        self.side.setMaximumWidth(318)
-        side_layout = QVBoxLayout(self.side)
-        side_layout.setContentsMargins(0, 0, 0, 0)
         self.standings = StandingsPane(self.picture_position)
-        side_layout.addWidget(self.standings, 1)
+        self.rank_toggle.toggled.connect(self.standings.setVisible)
+        layout.addWidget(self.standings, 1)
         self.onboard_panel = QWidget()
         self.onboard_layout = QVBoxLayout(self.onboard_panel)
-        self.onboard_layout.setContentsMargins(0, 0, 0, 0)
-        onboard_header = QHBoxLayout()
-        onboard_header.addWidget(QLabel('车载视角'), 1)
-        self.promote = self.button(onboard_header, '切为主画面', self.swap_feeds)
-        self.button(onboard_header, '关闭', lambda: self.onboard_toggle.setChecked(False))
-        self.onboard_layout.addLayout(onboard_header)
-        side_layout.addWidget(self.onboard_panel, 1)
+        bar = QHBoxLayout()
+        bar.addWidget(QLabel('车载视角'), 1)
+        self.promote = QPushButton('切为主画面')
+        self.promote.setObjectName('IconButton')
+        self.promote.setEnabled(False)
+        self.promote.clicked.connect(self.swap_feeds)
+        bar.addWidget(self.promote)
+        self.onboard_layout.addLayout(bar)
         self.onboard_panel.hide()
-        body.addWidget(self.side, 1)
-        layout.addLayout(body, 1)
+        layout.addWidget(self.onboard_panel, 1)
 
-        tools = QHBoxLayout()
-        self.console_button = self.button(tools, '解说控制台', lambda: self.match.toggle_console())
-        tools.addStretch()
-        self.overlay_button = self.button(tools, '显示弹幕', self.toggle_overlay, checkable=True)
-        self.send_button = self.button(tools, '发弹幕', lambda: self.match.toggle_sender())
-        layout.addLayout(tools)
-
-        self.rank_toggle.setChecked(True)
         self.clock = QTimer(self)
         self.clock.setInterval(250)
-        self.clock.timeout.connect(self.standings.update_picture)
-
-    @staticmethod
-    def button(layout, title, action, *, checkable=False):
-        button = QPushButton(title)
-        button.setObjectName('IconButton')
-        button.setCheckable(checkable)
-        if checkable:
-            button.toggled.connect(action)
-        else:
-            button.clicked.connect(action)
-        layout.addWidget(button)
-        return button
-
-    def apply_backdrop(self):
-        tint = theme.qcolor(theme.BG)
-        opacity = self.context.workspace_background_mask() / 100
-        self.setStyleSheet(f'QWidget#F1Workspace {{background: rgba({tint.red()}, {tint.green()}, {tint.blue()}, {opacity});}}')
-
-    def make_viewer(self, *, onboard=False):
-        return self.context.create_plugin_widget('match_sync', 'race_workspace_v2', self, onboard=onboard)
+        self.clock.timeout.connect(self.update_timeline)
+        match.finished.connect(self.close_for_workspace)
 
     def showEvent(self, event):
         super().showEvent(event)
-        if self.match is None:
-            self.match = self.make_viewer()
-            if self.match is not None:
-                self.match.picture_clock_changed.connect(self.standings.reset_anchor)
-                self.match.overlay_changed.connect(self.reflect_overlay)
-                self.screen.addWidget(self.match)
-        available = self.match is not None
-        self.unavailable.setVisible(not available)
-        for button in (self.console_button, self.overlay_button, self.send_button, self.onboard_toggle):
-            button.setEnabled(available)
+        self.update_timeline()
         self.clock.start()
 
-    def update_side(self, _checked):
-        rank_open = self.rank_toggle.isChecked()
-        onboard_open = self.onboard_toggle.isChecked()
-        self.side.setVisible(rank_open or onboard_open)
-        self.standings.setVisible(rank_open)
-        self.onboard_panel.setVisible(onboard_open)
-        if onboard_open and self.onboard is None:
-            self.onboard = self.make_viewer(onboard=True)
+    def set_onboard_open(self, opened):
+        if opened:
+            self.onboard = self.context.create_plugin_widget(
+                'match_sync', 'race_workspace_v2', self.onboard_panel, onboard=True)
             if self.onboard is not None:
                 self.onboard_layout.addWidget(self.onboard, 1)
                 self.onboard.picture_clock_changed.connect(self.update_promote)
-        elif not onboard_open and self.onboard is not None:
+        elif self.onboard is not None:
             self.onboard.close()
             self.onboard_layout.removeWidget(self.onboard)
             self.onboard.deleteLater()
             self.onboard = None
+        self.onboard_panel.setVisible(self.onboard is not None)
         self.update_promote()
-        self.standings.update_picture()
 
     def update_promote(self):
         self.promote.setEnabled(self.onboard is not None and self.onboard.main.currentData() is not None)
@@ -131,32 +77,35 @@ class F1Workspace(QWidget):
     def swap_feeds(self):
         first = self.match.main.currentData()
         second = self.onboard.main.currentData()
-        if second is None or first == second or not self.match.show_room(second):
+        if second is None or first == second:
             return
+        if second not in self.match.rows and not self.match.add_room(second):
+            return
+        self.match.select_main(second)
+        if not self.match.running:
+            self.match.toggle_running()
         if first is None:
             self.onboard_toggle.setChecked(False)
         elif self.onboard.show_room(first):
             self.match.remove_room(first)
-
-    def toggle_overlay(self, visible):
-        self.match.set_overlay_visible(visible)
-
-    def reflect_overlay(self, visible):
-        with QSignalBlocker(self.overlay_button):
-            self.overlay_button.setChecked(visible)
-        self.overlay_button.setText('隐藏弹幕' if visible else '显示弹幕')
+        self.update_timeline()
 
     def picture_position(self):
-        return self.match.picture_position() if self.match is not None else None
+        row = self.match.rows.get(self.match.main.currentData())
+        return row.actual_position if row is not None else None
 
-    def closeEvent(self, event):
+    def update_timeline(self):
+        room_id = self.match.main.currentData()
+        if room_id != self.clock_room:
+            self.clock_room = room_id
+            self.standings.reset_anchor()
+        self.standings.update_picture()
+
+    def close_for_workspace(self, _result):
+        self.standings.reset_anchor()
+        self.close()
+
+    def hideEvent(self, event):
         self.clock.stop()
         self.onboard_toggle.setChecked(False)
-        if self.match is not None:
-            self.match.close()
-            self.screen.removeWidget(self.match)
-            self.match.deleteLater()
-            self.match = None
-        self.reflect_overlay(False)
-        self.standings.reset_anchor()
-        super().closeEvent(event)
+        super().hideEvent(event)

@@ -273,6 +273,10 @@ class MatchSyncPlugin(api.Plugin):
         context.log("比赛二路同步已就绪；点击关注栏「比赛二路」入口开启")
 
     def create_embedded_widget(self, capability, parent, caller, **options):
+        if capability == 'match_workspace_v1':
+            viewer = Viewer(caller, self.sources)
+            viewer.embed(parent if parent is not None else self.context.window._content)
+            return viewer
         if capability == 'race_workspace_v1':
             from .race_workspace import RaceViewer
             return RaceViewer(caller, parent, options['address'], options['muted'])
