@@ -45,7 +45,7 @@
 | <img src="docs/assets/platforms/bilibili.png" alt="" width="20" height="20"> [B站直播互动](plugins/bili_live/README.md) | 使用本体登录，发送弹幕和表情，浏览礼物目录及背包。 | 作者 [@reon-nynes](https://github.com/reon-nynes)，兼容维护 [@Lanpropro](https://github.com/Lanpropro) | [v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.1) |
 | <img src="docs/assets/platforms/bilibili.png" alt="" width="20" height="20"> [B站稍后再看](plugins/bili_watchlater/README.md) | 浏览稍后再看，将视频放入画面墙。需要本体 **0.8 热修复 1** 或具备相同接口的更新版本。 | 作者[@Mrhaimian](https://github.com/Mrhaimian)，兼容维,UI制作 [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-watchlater-v1.0) |
 | [网络代理](plugins/proxy_control/README.md) | 导入订阅与节点，按需启动代理，查看连接、测速与切换配置。 | 维护 [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/proxy-control-v1.0) |
-| <img src="plugins/m3u_live/icon.png" alt="" width="20" height="20"> [IPTV Play](plugins/m3u_live/README.md) | 电视预设、M3U 播放列表及 HLS 导入。需要配套宿主的通用频道接口。 | [@Lanpropro](https://github.com/Lanpropro) | [1.0 发布说明](docs/releases/RELEASE-m3u-live-v1.0.md) |
+| <img src="plugins/m3u_live/icon.png" alt="" width="20" height="20"> [IPTV Play](plugins/m3u_live/README.md) | 电视预设、M3U 播放列表及 HLS 导入。需要配套宿主的通用频道接口。 | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/m3u-live-v1.0) |
 
 ## 安装与更新
 

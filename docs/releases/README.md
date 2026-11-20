@@ -8,7 +8,6 @@
 
 ## 待发布草稿
 
-- [IPTV Play 1.0](RELEASE-m3u-live-v1.0.md)，等待支持频道列表接口的宿主发布。
 - [虎牙直播1.0](RELEASE-huya-live-v1.0.md)：独立平台首发，保留最新海外及平台拆分修复，待受检发布。
 - [斗鱼直播1.0](RELEASE-douyu-live-v1.0.md)：独立平台首发，保留最新海外及平台拆分修复，待受检发布。
 - [抖音直播1.0](RELEASE-douyin-live-v1.0.md)：独立平台首发，保留最新海外及平台拆分修复，待受检发布。
@@ -28,6 +27,7 @@
 | 海外直播平台 | [1.2](RELEASE-global-live-v1.2.md) | [global-live-v1.2](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2) |
 | 网络代理 | [1.0](RELEASE-proxy-control-v1.0.md) | [proxy-control-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/proxy-control-v1.0) |
 | 企鹅体育 | [1.0](RELEASE-qie-live-v1.0.md) | [qie-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/qie-live-v1.0) |
+| IPTV Play | [1.0](RELEASE-m3u-live-v1.0.md) | [m3u-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/m3u-live-v1.0) |
 
 
 ## 替代版本的核验归档
