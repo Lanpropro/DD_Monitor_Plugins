@@ -20,6 +20,8 @@
 | Twitch 直播 | [twitch_live](twitch_live.md) | [twitch-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/twitch-live-v1.0) |
 | CHZZK 直播 | [chzzk_live](chzzk_live.md) | [chzzk-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/chzzk-live-v1.0) |
 | B站稍后再看 | [bili_watchlater](bili_watchlater.md) | [bili-watchlater-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-watchlater-v1.0) |
+| IPTV Play | [m3u_live](m3u_live.md) | 尚无公开发布 |
+| 企鹅体育 | [qie_live](qie_live.md) | 尚无公开发布 |
 
 六个独立平台的兼容与回滚见[平台独立包迁移](../development/platform-packages.md)。
 
