@@ -1,8 +1,8 @@
 """Register the F1 Play workspace with the host."""
 from pathlib import Path
 
-from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QStyle, QToolButton
+from PySide6.QtGui import QAction, QIcon
+from PySide6.QtWidgets import QToolButton
 
 from ddm.plugins import Plugin
 
@@ -29,7 +29,7 @@ class F1Play(Plugin):
             raise RuntimeError('F1 Play 需要包含功能页播放器接口的配套本体')
         self.context = context
         entry = QToolButton(context.window)
-        icon = entry.style().standardIcon(QStyle.SP_MediaPlay)
+        icon = QIcon(str(Path(__file__).with_name('icon.png')))
         action = QAction(icon, self.name, entry)
         action.triggered.connect(self.open_workspace)
         entry.setDefaultAction(action)

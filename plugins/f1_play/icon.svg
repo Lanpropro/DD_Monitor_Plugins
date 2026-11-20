@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-7 -67 178 178" width="160" height="160">
+  <title>F1 Play</title>
+  <!-- White outline of the mark used by formula1.com, for the local development entry. -->
+  <path fill="none" stroke="#fff" stroke-width="4.5" stroke-linejoin="round"
+        d="M23.955 41.374L42.027 23.84C49.145 16.935 52.036 15.886 65.618 15.886H119.784L135.37 .628H63.563C45.385 .628 40.245 2.359 29.583 12.911L.903 41.374Z
+           M65.944 18.323H117.459L103.172 32.609H66.212C59.438 32.609 57.94 32.928 54.578 36.289L49.493 41.374H28.118L43.92 25.572C50.126 19.371 52.265 18.323 65.944 18.323Z
+           M163.888 .628L123.031 41.374H97.765L138.511 .628Z"/>
+</svg>

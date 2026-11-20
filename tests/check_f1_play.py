@@ -271,6 +271,7 @@ def main():
     os.environ['DDM_NO_SAVE'] = '1'
     os.environ.setdefault('QT_QPA_PLATFORM', 'windows' if args.live_source_file or args.ui_evidence else 'offscreen')
     from PySide6.QtCore import Qt
+    from PySide6.QtGui import QImage
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication
     from ddm import config, images, plugins, theme
@@ -303,6 +304,13 @@ def main():
                 QTest.qWait(100)
                 assert window.wall.isVisible()
                 entry = window.sidebar.workspace_controls.entries['f1_play', 'entry'][1]
+                icon = QImage(str(Path(directory) / 'f1_play/icon.png'))
+                rendered = entry.icon().pixmap(18, 18).toImage()
+                assert not icon.isNull() and not rendered.isNull()
+                assert any(rendered.pixelColor(x, y).alpha() > 64
+                           for y in range(rendered.height()) for x in range(rendered.width()))
+                assert any(icon.pixelColor(x, y).getRgb() == (255, 255, 255, 255)
+                           for y in range(icon.height()) for x in range(icon.width()))
                 entry.click()
                 owner, page, _ = window.plugins._workspace_pages.active
                 assert owner == 'f1_play' and page.isVisible() and window.wall.isHidden()
