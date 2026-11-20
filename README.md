@@ -23,7 +23,7 @@
 | <img src="plugins/twitch_live/icon.png" alt="" width="20" height="20"> [Twitch直播](plugins/twitch_live/README.md) | 公开直播播放、画质选择、账号关注 | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/twitch-live-v1.0) |
 | <img src="plugins/youtube_live/icon.png" alt="" width="20" height="20"> [YouTube直播](plugins/youtube_live/README.md) | 公开直播播放、画质选择、账号关注 | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.0) |
 | <img src="plugins/chzzk_live/icon.png" alt="" width="20" height="20"> [CHZZK直播](plugins/chzzk_live/README.md) | 公开直播播放、画质选择、弹幕观看 | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/chzzk-live-v1.0) |
-| <img src="plugins/qie_live/icon.png" alt="" width="20" height="20"> [企鹅体育](plugins/qie_live/README.md) | 公开直播播放、固定 720p、只读弹幕 | [@Lanpropro](https://github.com/Lanpropro) | [1.0 发布说明](docs/releases/RELEASE-qie-live-v1.0.md) |
+| <img src="plugins/qie_live/icon.png" alt="" width="20" height="20"> [企鹅体育](plugins/qie_live/README.md) | 公开直播播放、固定 720p、只读弹幕 | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/qie-live-v1.0) |
 
 <details>
 <summary>旧版组合包与迁移</summary>

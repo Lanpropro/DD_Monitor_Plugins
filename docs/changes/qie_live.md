@@ -1,10 +1,14 @@
 # 企鹅体育增量记录
 
-> 类型：增量记录 ｜ 状态：发布候选 ｜ 适用版本：`qie_live` 1.0 ｜ 更新：2026-11-20 ｜ 读者：插件作者、维护者
+> 类型：增量记录 ｜ 状态：维护中 ｜ 适用版本：`qie_live` 1.0 ｜ 更新：2026-11-20 ｜ 读者：插件作者、维护者
 
-插件 ID 为 `qie_live`。尚无公开发布，见 [1.0 发布说明](../releases/RELEASE-qie-live-v1.0.md)。
+插件 ID 为 `qie_live`。当前公开基线为 [企鹅体育 v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/qie-live-v1.0)。
 
 ## 待发布
+
+暂无。
+
+## 已发布 v1.0
 
 ### 2026-11-20｜使用公开 v0.8 的通用媒体交接
 

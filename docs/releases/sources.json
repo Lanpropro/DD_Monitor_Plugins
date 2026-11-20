@@ -553,11 +553,29 @@
     {
       "tag": "qie-live-v1.0",
       "file": "RELEASE-qie-live-v1.0.md",
-      "status": "prepared",
-      "source_kind": "repository_candidate",
+      "status": "online",
+      "source_kind": "github_release",
       "base_commit": "f71f7c5586d072a428d8d5e66ea9dbb6f64dc6f4",
-      "last_edit_verified": false,
-      "sha256": "e9a14177aa5a2575284a27d05a092859aa16a48e67053f5d657271a1a00c8678"
+      "last_edit_verified": true,
+      "sha256": "e9a14177aa5a2575284a27d05a092859aa16a48e67053f5d657271a1a00c8678",
+      "release_id": 452348489,
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/qie-live-v1.0",
+      "release_updated_at": "2026-11-20T06:35:14Z",
+      "release_published_at": "2026-11-20T06:35:14Z",
+      "release_created_at": "2026-11-20T06:30:18Z",
+      "release_author": "Lanpropro",
+      "plugin_author": "Lanpropro",
+      "release_name": "企鹅体育 v1.0",
+      "source_commit": "f6a3d6d9c7bb29dae74f0eec11722a7103691ddd",
+      "assets": [
+        {
+          "id": 770750976,
+          "name": "qie_live-1.0.zip",
+          "size": 36182,
+          "sha256": "7af3e6d1c04ec29342905e93719d00bb78a427e36d58ee6c02c6efc59349103d",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/qie-live-v1.0/qie_live-1.0.zip"
+        }
+      ]
     }
   ],
   "tags_without_recoverable_body": [
