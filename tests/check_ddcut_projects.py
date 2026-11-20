@@ -15,7 +15,7 @@ from unittest.mock import patch
 from check_ddcut_ranges_chat import args, remainder, app, ffmpeg, media, run, ui, until
 from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, Qt, QTimer
 from PySide6.QtGui import QColor, QImage
-from PySide6.QtWidgets import QMainWindow
+from PySide6.QtWidgets import QFileDialog, QMainWindow
 from PySide6.QtTest import QTest
 
 project = importlib.import_module('ddcut_ranges_test.project')
@@ -281,8 +281,32 @@ class ProjectTests(unittest.TestCase):
                 if args.screenshots:
                     host.grab().save(str(args.screenshots/'project-editor-ui.png'))
                 output = self.root/'ui-project.mp4'
-                with patch.object(ui.QFileDialog, 'getSaveFileName', return_value=(str(output), '')):
+                get_save_name = QFileDialog.getSaveFileName
+                shown = []
+
+                def pick_output(*dialog_args, **options):
+                    self.assertTrue(options['options'] & QFileDialog.Option.DontUseNativeDialog)
+
+                    def respond():
+                        dialog = app.activeModalWidget()
+                        shown.append(isinstance(dialog, QFileDialog) and
+                                     dialog.testOption(QFileDialog.Option.DontUseNativeDialog))
+                        if isinstance(dialog, QFileDialog) and len(shown) == 2:
+                            dialog.selectFile(str(output))
+                            dialog.accept()
+                        elif dialog is not None:
+                            dialog.reject()
+
+                    QTimer.singleShot(0, respond)
+                    return get_save_name(*dialog_args, **options)
+
+                with patch.object(QFileDialog, 'getSaveFileName', side_effect=pick_output):
+                    count = len(hub.jobs)
                     editor.export_button.click()
+                    self.assertEqual(len(hub.jobs), count)
+                    editor.export_button.click()
+                self.assertEqual(shown, [True, True])
+                self.assertEqual(len(hub.jobs), count + 1)
                 exported = hub.jobs[-1]
                 until(lambda: exported.future.done(), timeout=30)
                 self.assertEqual(exported.state, 'done', exported.message)

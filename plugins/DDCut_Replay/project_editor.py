@@ -672,7 +672,8 @@ class ProjectEditor(QWidget):
     def export(self):
         if not self.document:
             return
-        path, _ = QFileDialog.getSaveFileName(self, '导出剪辑工程', self.document.data['title']+'.mp4', '视频 (*.mp4)')
+        path, _ = QFileDialog.getSaveFileName(self, '导出剪辑工程', self.document.data['title']+'.mp4',
+                                             '视频 (*.mp4)', options=QFileDialog.Option.DontUseNativeDialog)
         if path:
             if Path(path).suffix.lower() != '.mp4':
                 path += '.mp4'
