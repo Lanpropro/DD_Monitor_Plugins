@@ -29,6 +29,8 @@ class SendConsole(SettingsPanel):
         self.selected_room = None
         self.collapsed = False
         self.expanded_without_settings = False
+        self.inline_height = None
+        self.excluded_rooms = set()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(1, 1, 1, 1)
         layout.setSpacing(0)
@@ -340,10 +342,11 @@ class SendConsole(SettingsPanel):
                 actions.setFixedWidth(actions.layout().sizeHint().width())
 
     def sync_rooms(self):
+        available = {key: room for key, room in self.viewer.rows.items() if key not in self.excluded_rooms}
         had_rows = bool(self.rows)
         checked = set(self.checked_rooms())
         for key in tuple(self.rows):
-            if key not in self.viewer.rows:
+            if key not in available:
                 row = self.rows.pop(key)
                 self.stack.removeWidget(row)
                 row.shutdown()
@@ -354,7 +357,7 @@ class SendConsole(SettingsPanel):
                 if timer is not None:
                     timer.stop()
                     timer.deleteLater()
-        for key, room in self.viewer.rows.items():
+        for key, room in available.items():
             if key not in self.rows:
                 self.rows[key] = SendRow(self.viewer, room)
                 self.stack.addWidget(self.rows[key])
@@ -377,7 +380,7 @@ class SendConsole(SettingsPanel):
             for index in range(self.rooms.count() - 1, -1, -1):
                 if self.rooms.item(index).data(Qt.UserRole) not in self.rows:
                     self.rooms.takeItem(index)
-            for index, key in enumerate(self.viewer.rows):
+            for index, key in enumerate(available):
                 current = next((i for i in range(self.rooms.count())
                                 if self.rooms.item(i).data(Qt.UserRole) == key), None)
                 if current is None:
@@ -405,7 +408,7 @@ class SendConsole(SettingsPanel):
 
     def refresh_room(self, key):
         row = self.viewer.rows.get(key)
-        if row is None:
+        if row is None or key not in self.rows:
             return
         controls = self.rows[key].tile._plugin_controls
         editor = controls._repeat_editor()
@@ -518,6 +521,10 @@ class SendConsole(SettingsPanel):
         self.refresh_interactions()
 
     def sync_height(self):
+        if self.inline_height is not None:
+            self.setFixedHeight(self.inline_height)
+            self.setVisible(not self.collapsed)
+            return
         scroll_state = self.viewer.panel._scroll_state()
         settings = self.viewer.settings_panel
         if not settings.isHidden():

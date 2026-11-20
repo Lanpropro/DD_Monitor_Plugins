@@ -52,9 +52,9 @@ def _add_input(viewer):
         viewer.input.clear()
 
 
-def add_room(viewer, text, preferences=None):
+def add_room(viewer, text, preferences=None, *, platform=None):
     try:
-        room_id = parse_room(text, viewer.context.manager)
+        room_id = parse_room(text, viewer.context.manager) if platform is None else platform.normalize(text)
     except ValueError as error:
         viewer.notice.setText(str(error))
         return False
@@ -66,7 +66,7 @@ def add_room(viewer, text, preferences=None):
     options.update(preferences or {})
     used = {number for row in viewer.rows.values() for number in row.record_tracks}
     options.setdefault('record_tracks', next(([number] for number in range(1, 7) if number not in used), []))
-    row = RoomRow(viewer, room_id, options, COLORS[len(viewer.rows) % len(COLORS)])
+    row = RoomRow(viewer, room_id, options, COLORS[len(viewer.rows) % len(COLORS)], platform=platform)
     viewer.rows[room_id] = row
     viewer.rows_layout.addWidget(row)
     viewer.update_main_choices()

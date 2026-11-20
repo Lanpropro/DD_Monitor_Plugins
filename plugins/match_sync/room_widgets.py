@@ -108,14 +108,14 @@ class CompactStatus(QLabel):
 
 
 class RoomRow(QFrame):
-    def __init__(self, viewer, room_id, preferences, color):
+    def __init__(self, viewer, room_id, preferences, color, *, platform=None):
         super().__init__(viewer)
         self.viewer = viewer
         self.room_id = room_id
         self.setObjectName("MatchSyncRoomRow")
         self.anchor = None
         self.setAcceptDrops(True)
-        self.platform = viewer.context.manager.platform_for(room_id)
+        self.platform = platform if platform is not None else viewer.context.manager.platform_for(room_id)
         self.decoder = None
         self.chat = None
         self.paused = False

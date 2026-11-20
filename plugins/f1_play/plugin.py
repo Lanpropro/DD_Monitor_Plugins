@@ -38,7 +38,7 @@ class F1Play(Plugin):
 
     def open_workspace(self):
         if self.workspace is None:
-            self.workspace = F1Workspace(self.context.create_workspace_player)
+            self.workspace = F1Workspace(self.context)
         self.context.show_workspace(self.workspace)
 
     def on_unload(self):

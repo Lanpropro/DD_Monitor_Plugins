@@ -272,6 +272,12 @@ class MatchSyncPlugin(api.Plugin):
             self.entry.transition_finished.connect(self.switch_probe.animation_finished)
         context.log("比赛二路同步已就绪；点击关注栏「比赛二路」入口开启")
 
+    def create_embedded_widget(self, capability, parent, caller, **options):
+        if capability == 'race_workspace_v1':
+            from .race_workspace import RaceViewer
+            return RaceViewer(caller, parent, options['address'], options['muted'])
+        return None
+
     def on_event(self, event, payload):
         if event == api.EVENT_STREAM_RESOLVED:
             source = payload["source"]

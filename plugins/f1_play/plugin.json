@@ -2,6 +2,6 @@
   "id": "f1_play",
   "name": "F1 Play",
   "version": "0.1",
-  "description": "在独立赛事页面播放 HLS 主画面，预留排行和二路解说位置。需要配套功能页播放器接口。",
+  "description": "在独立赛事页面播放 HLS、查看历史排行，按需启用比赛二路控制台和车载小窗。需要配套本体。",
   "min_app_version": "0.8"
 }
