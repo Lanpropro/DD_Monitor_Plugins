@@ -78,6 +78,32 @@ def check_mask(window, page, directory):
     assert ', 0.83)' in page.styleSheet()
 
 
+def check_entry_icon(window, directory, evidence):
+    from PySide6.QtGui import QImage
+
+    key = ('f1_play', 'entry')
+    controls = window.sidebar.workspace_controls
+    entry = controls.entries[key][1]
+    launch = controls._rows[key][1]
+    for button, size in ((entry, 18), (launch, 20)):
+        assert button.iconSize().width() == size
+        for scale in (1, 2):
+            image = button.icon().pixmap(button.iconSize(), float(scale)).toImage()
+            ink = [(x, y) for y in range(image.height()) for x in range(image.width())
+                   if image.pixelColor(x, y).alpha() >= 160]
+            xs, ys = zip(*ink)
+            assert max(xs) - min(xs) + 1 >= 14 * scale
+            assert max(ys) - min(ys) + 1 >= 7 * scale
+
+    catalog_icon = QImage(str(Path(directory) / 'f1_play/icon.png'))
+    assert not catalog_icon.isNull()
+    assert any(catalog_icon.pixelColor(x, y).getRgb() == (255, 255, 255, 255)
+               for y in range(catalog_icon.height()) for x in range(catalog_icon.width()))
+    if evidence:
+        assert entry.grab().save(str(evidence / 'rail-icon.png'))
+    return entry
+
+
 def check_workspace(window, entry, page, directory, evidence, suspended_tile):
     from PySide6.QtWidgets import QLineEdit
 
@@ -206,7 +232,6 @@ def main():
     os.environ['DDM_NO_SAVE'] = '1'
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     from shutil import copytree
-    from PySide6.QtGui import QImage
     from PySide6.QtTest import QTest
     from ddm import config, images, plugins, theme
     from ddm.app import MainWindow
@@ -255,14 +280,7 @@ def main():
                     # Keep both video drop targets inside the 800×800 virtual screen.
                     window.move(-550, 0)
                 QTest.qWait(100)
-                entry = window.sidebar.workspace_controls.entries['f1_play', 'entry'][1]
-                rendered = entry.icon().pixmap(18, 18).toImage()
-                icon = QImage(str(Path(directory) / 'f1_play/icon.png'))
-                assert not rendered.isNull() and not icon.isNull()
-                assert any(rendered.pixelColor(x, y).alpha() > 64
-                           for y in range(rendered.height()) for x in range(rendered.width()))
-                assert any(icon.pixelColor(x, y).getRgb() == (255, 255, 255, 255)
-                           for y in range(icon.height()) for x in range(icon.width()))
+                entry = check_entry_icon(window, directory, evidence)
                 if not args.live_source_file:
                     suspended_tile = window.wall.tiles[0]
                     suspended_tile.set_room({'room_id': '101', 'uname': '主画面', 'live': True})
