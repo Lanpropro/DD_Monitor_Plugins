@@ -9,7 +9,7 @@ from unittest.mock import patch
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 os.environ['DDM_NO_SAVE'] = '1'
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from bili_live_support import session
+from bili_live_support import package_tab, session
 from PySide6.QtCore import QEvent, QTimer, Qt, QPoint, QPointF
 from PySide6.QtGui import QColor, QImage, QMouseEvent
 from PySide6.QtTest import QTest
@@ -35,6 +35,12 @@ def buttons(popup):
 
 class EmoticonTabTests(unittest.TestCase):
 
+    def tab_index(self, key):
+        return package_tab(self.popup, key)
+
+    def select_package(self, key):
+        self.popup.tabs.setCurrentIndex(self.tab_index(key))
+
     def test_refresh_keeps_keyboard_activation_without_mouse_focus_frame(self):
         from ddm import theme, continuous_corners
         button = self.popup.retry_button
@@ -59,23 +65,26 @@ class EmoticonTabTests(unittest.TestCase):
     def test_standard_category_uses_local_icon_in_both_themes(self):
         from ddm import theme
         self.popup.set_packages([package('emoji',0),package('主播表情',0,2)])
+        emoji = self.tab_index('3:emoji')
+        room = self.tab_index('2:主播表情')
         images=[]
         try:
             for mode in ('dark','light'):
                 theme.apply(mode);APP.processEvents()
-                self.assertFalse(self.popup.tabs.tabIcon(0).isNull())
-                self.assertEqual(self.popup.tabs.tabText(0),'')
-                self.assertEqual(self.popup.tabs.tabToolTip(0),'表情')
-                self.assertEqual(self.popup.tabs.accessibleTabName(0),'表情')
-                self.assertEqual(self.popup.tabs.tabText(1),'主播表情')
-                images.append(self.popup.tabs.tabIcon(0).pixmap(24,24).toImage())
+                self.assertFalse(self.popup.tabs.tabIcon(emoji).isNull())
+                self.assertEqual(self.popup.tabs.tabText(emoji),'')
+                self.assertEqual(self.popup.tabs.tabToolTip(emoji),'表情')
+                self.assertEqual(self.popup.tabs.accessibleTabName(emoji),'表情')
+                self.assertEqual(self.popup.tabs.tabText(room),'主播表情')
+                images.append(self.popup.tabs.tabIcon(emoji).pixmap(24,24).toImage())
             self.assertNotEqual(images[0],images[1],'local category icon must follow the theme')
         finally:theme.apply('dark')
 
     def test_refresh_retains_loaded_icons_selection_and_scroll_until_result(self):
         with patch.object(image_api,'_load_image',side_effect=self.load):
             packs=[package('第一包'),package('保留',80)]
-            self.popup.set_packages(packs);self.popup.tabs.setCurrentIndex(1)
+            self.popup.set_packages(packs)
+            self.select_package('3:保留')
             settle(lambda:len(buttons(self.popup))==80 and all(not b.icon().isNull() for b in buttons(self.popup)))
             settle(lambda:not _active_requests)
             bar=self.popup.scroll.verticalScrollBar();bar.setValue(150)
@@ -84,7 +93,7 @@ class EmoticonTabTests(unittest.TestCase):
             self.assertIs(self.popup.scroll.widget(),body)
             self.assertIs(buttons(self.popup)[0],first)
             self.assertFalse(first.icon().isNull())
-            self.assertEqual(self.popup.tabs.currentIndex(),1)
+            self.assertEqual(self.popup.tabs.tabData(self.popup.tabs.currentIndex()),'3:保留')
             self.assertEqual(bar.value(),before)
             self.assertTrue(self.popup.refresh_spinner.isVisible())
             self.assertNotIn('正在加载',self.popup.status.text())
@@ -95,7 +104,7 @@ class EmoticonTabTests(unittest.TestCase):
             self.popup.set_loading();self.popup.set_packages(packs);APP.processEvents()
             self.assertFalse(self.popup.refresh_spinner.isVisible())
             self.assertIs(self.popup.scroll.widget(),body,'unchanged refresh must not rebuild retrieved icons')
-            self.assertEqual(self.popup.tabs.currentIndex(),1)
+            self.assertEqual(self.popup.tabs.tabData(self.popup.tabs.currentIndex()),'3:保留')
             self.assertEqual(bar.value(),before)
 
 
@@ -129,14 +138,16 @@ class EmoticonTabTests(unittest.TestCase):
             self.popup.set_packages([package('小表情'), package('主播表情', kind=2), package('未知', kind=8)])
             tabs = self.popup.findChild(QTabBar)
             self.assertIsNotNone(tabs, '每个支持的表情包应有独立 Tab')
-            self.assertEqual([tabs.tabToolTip(i) for i in range(tabs.count())], ['小表情', '主播表情'])
+            self.assertEqual([tabs.tabToolTip(i) for i in range(tabs.count())], ['最近发送', '小表情', '主播表情'])
+            self.assertEqual(tabs.currentIndex(), 0)
+            self.select_package('3:小表情')
             settle(lambda: len(buttons(self.popup)) == 2 and all((not b.icon().isNull() for b in buttons(self.popup))))
             self.assertEqual({b.text() for b in buttons(self.popup)}, {'[小表情-0]', '[小表情-1]'})
             self.assertEqual({url for url, _ in self.calls}, {'https://example.invalid/小表情-0.png', 'https://example.invalid/小表情-1.png'})
             QTest.keyClick(tabs, Qt.Key_Right)
             settle(lambda: {b.text() for b in buttons(self.popup)} == {'[主播表情-0]', '[主播表情-1]'})
             settle(lambda: all((not b.icon().isNull() for b in buttons(self.popup))))
-            tabs.setCurrentIndex(0)
+            self.select_package('3:小表情')
             settle(lambda: {b.text() for b in buttons(self.popup)} == {'[小表情-0]', '[小表情-1]'})
             self.assertEqual(len(self.calls), 4, '访问过的 Tab 应复用已加载图标')
             self.assertTrue(all((subdir == 'bili_live/emoticons' for _, subdir in self.calls)))
@@ -149,6 +160,7 @@ class EmoticonTabTests(unittest.TestCase):
             return self.pixmap
         with patch.object(image_api, '_load_image', side_effect=load):
             self.popup.set_packages([package('并发', 8)])
+            self.select_package('3:并发')
             settle(started.is_set)
             try:
                 settle(lambda: len(buttons(self.popup)) == 8 and
@@ -162,6 +174,7 @@ class EmoticonTabTests(unittest.TestCase):
         for item in pack['emoticons']:
             item.pop('url')
         self.popup.set_packages([pack, package('未打开', 600)])
+        self.select_package('3:大表情包')
         self.assertLess(len(buttons(self.popup)), 600, '不能同步创建整个长表情包')
         observed = []
         timer = QTimer()
@@ -192,11 +205,12 @@ class EmoticonTabTests(unittest.TestCase):
             before = sizes()
             self.assertEqual(len(set(before)), 1, '包名长度不应改变分类按钮的尺寸')
             self.assertTrue(all((width == height for width, height in before)), '分类入口应是方形')
-            self.assertEqual(self.popup.tabs.tabText(0), '')
-            self.assertEqual(self.popup.tabs.tabToolTip(0), '表情')
+            emoji = self.tab_index('3:emoji')
+            self.assertEqual(self.popup.tabs.tabText(emoji), '')
+            self.assertEqual(self.popup.tabs.tabToolTip(emoji), '表情')
             self.release.set()
             settle(lambda: not _active_requests)
-            self.assertFalse(self.popup.tabs.tabIcon(1).isNull())
+            self.assertFalse(self.popup.tabs.tabIcon(self.tab_index('2:主播表情')).isNull())
             self.assertEqual(sizes(), before, '封面逐张加载时不能改变按钮尺寸')
 
     def test_emoticon_grid_is_centered_as_a_block(self):
@@ -204,6 +218,7 @@ class EmoticonTabTests(unittest.TestCase):
         for emote in pack['emoticons']:
             emote.pop('url')
         self.popup.set_packages([pack])
+        self.select_package('3:emoji')
         settle(lambda: len(buttons(self.popup)) == 12)
         for width in (340, 380):
             self.popup._holder.setFixedWidth(width)
@@ -227,7 +242,8 @@ class EmoticonTabTests(unittest.TestCase):
             return result
         with patch.object(image_api,'_load_image',side_effect=image):
             self.popup.set_packages(packs)
-            settle(lambda:all(not self.popup.tabs.tabIcon(i).isNull() for i in range(2)))
+            dragged, neighbor = self.tab_index('2:dragged'), self.tab_index('2:neighbor')
+            settle(lambda:all(not self.popup.tabs.tabIcon(i).isNull() for i in (dragged, neighbor)))
             tabs=self.popup.tabs
             def bounds(color=marker):
                 shot=tabs.grab().toImage();dpr=shot.devicePixelRatioF()
@@ -236,7 +252,7 @@ class EmoticonTabTests(unittest.TestCase):
                 self.assertTrue(xs)
                 return min(xs),max(xs)
             before=bounds();neighbor_before=bounds(QColor('#00ff00'))
-            start=tabs.tabRect(0).center();target=start+QPoint(12,0)
+            start=tabs.tabRect(dragged).center();target=start+QPoint(12,0)
             QTest.mousePress(tabs,Qt.LeftButton,pos=start)
             try:
                 APP.sendEvent(tabs,QMouseEvent(QEvent.MouseMove,QPointF(target),
@@ -266,11 +282,12 @@ class EmoticonTabTests(unittest.TestCase):
             packs.append(pack)
         with patch.object(image_api, '_load_image', side_effect=lambda url, subdir: covers[url]):
             self.popup.set_packages(packs)
-            settle(lambda: all((not self.popup.tabs.tabIcon(i).isNull() for i in range(3))))
-            for selected in (0, 2):
+            indices = [self.tab_index(f"2:{pack['pkg_name']}") for pack in packs]
+            settle(lambda: all(not self.popup.tabs.tabIcon(i).isNull() for i in indices))
+            for selected in (indices[0], indices[-1]):
                 self.popup.tabs.setCurrentIndex(selected)
                 APP.processEvents()
-                for index in range(3):
+                for index in indices:
                     rendered = self.popup.tabs.grab(self.popup.tabs.tabRect(index)).toImage()
                     points = [(x, y) for x in range(rendered.width()) for y in range(rendered.height()) if rendered.pixelColor(x, y) == marker]
                     self.assertTrue(points, '封面必须实际绘制在按钮内')
@@ -287,8 +304,9 @@ class EmoticonTabTests(unittest.TestCase):
             pack['current_cover'] = 'https://example.invalid/overflow-cover.png'
         with patch.object(image_api, '_load_image', return_value=self.pixmap):
             self.popup.set_packages(packs)
-            settle(lambda: all((not self.popup.tabs.tabIcon(i).isNull() for i in range(20))))
-            for selected in (0, 19):
+            indices = [self.tab_index(f"2:{pack['pkg_name']}") for pack in packs]
+            settle(lambda: all(not self.popup.tabs.tabIcon(i).isNull() for i in indices))
+            for selected in (indices[0], indices[-1]):
                 self.popup.tabs.setCurrentIndex(selected)
                 APP.processEvents()
                 rendered = self.popup.tabs.grab().toImage()
@@ -311,22 +329,24 @@ class EmoticonTabTests(unittest.TestCase):
             return self.load(url, subdir)
         with patch.object(image_api, '_load_image', side_effect=load):
             self.popup.set_packages(packs)
-            self.assertEqual([self.popup.tabs.tabText(i) for i in range(4)], ['', '通用表情', '主播表情', '装扮表情'], '普通表情使用本地图标，其他包先显示名称再替换封面')
-            self.assertFalse(self.popup.tabs.tabIcon(0).isNull())
-            self.assertTrue(all((self.popup.tabs.tabIcon(i).isNull() for i in range(1,4))))
+            indices = [self.tab_index(f"{pack['pkg_type']}:{pack['pkg_name']}") for pack in packs]
+            emoji = indices[0]
+            self.assertEqual([self.popup.tabs.tabText(i) for i in indices], ['', '通用表情', '主播表情', '装扮表情'], '普通表情使用本地图标，其他包先显示名称再替换封面')
+            self.assertFalse(self.popup.tabs.tabIcon(emoji).isNull())
+            self.assertTrue(all(self.popup.tabs.tabIcon(i).isNull() for i in indices[1:]))
             self.release.set()
             settle(lambda: not _active_requests)
-            self.assertEqual(self.popup.tabs.tabText(0), '')
-            self.assertEqual(self.popup.tabs.tabToolTip(0), '表情')
-            self.assertFalse(self.popup.tabs.tabIcon(0).isNull())
-            for index, name in ((1, '通用表情'), (2, '主播表情'), (3, '装扮表情')):
+            self.assertEqual(self.popup.tabs.tabText(emoji), '')
+            self.assertEqual(self.popup.tabs.tabToolTip(emoji), '表情')
+            self.assertFalse(self.popup.tabs.tabIcon(emoji).isNull())
+            for index, name in zip(indices[1:], ('通用表情', '主播表情', '装扮表情')):
                 self.assertFalse(self.popup.tabs.tabIcon(index).isNull(), '未选中的表情包也需要封面导航')
                 self.assertEqual(self.popup.tabs.tabText(index), '')
                 self.assertEqual(self.popup.tabs.tabToolTip(index), name)
                 self.assertEqual(self.popup.tabs.accessibleTabName(index), name)
             self.assertEqual({url for url, _ in self.calls}, {'https://example.invalid/cover-1.png', 'https://example.invalid/cover-2.png', 'https://example.invalid/cover-3.png'})
-            self.popup.tabs.setCurrentIndex(3)
-            self.popup.tabs.setCurrentIndex(0)
+            self.select_package('5:装扮表情')
+            self.select_package('3:emoji')
             self.popup.hide()
             self.popup.show()
             APP.processEvents()
@@ -339,17 +359,22 @@ class EmoticonTabTests(unittest.TestCase):
         with patch.object(image_api, '_load_image', return_value=None):
             self.popup.set_packages(packs)
             settle(lambda: not _active_requests)
-            self.assertEqual([self.popup.tabs.tabText(i) for i in range(3)], ['缺失', '非法', '失败'])
-            self.assertTrue(all((self.popup.tabs.tabIcon(i).isNull() for i in range(3))))
+            indices = range(1, self.popup.tabs.count())
+            self.assertEqual([self.popup.tabs.tabText(i) for i in indices], ['缺失', '非法', '失败'])
+            self.assertTrue(all(self.popup.tabs.tabIcon(i).isNull() for i in indices))
 
     def test_shared_cover_is_downloaded_once_and_does_not_load_package_contents(self):
         first, second = (package('第一包', 2, 2), package('第二包', 2, 5))
         for pack in (first, second):
             pack['current_cover'] = 'https://example.invalid/shared-cover.png'
         with patch.object(image_api, '_load_image', side_effect=self.load):
-            self.popup.set_packages([package('emoji', 0), first, second])
+            emoji = package('emoji', 0)
+            self.popup.set_packages([emoji])
+            self.select_package('3:emoji')
+            self.popup.set_packages([emoji, first, second])
             settle(lambda: not _active_requests)
-            self.assertTrue(all((not self.popup.tabs.tabIcon(i).isNull() for i in (1, 2))))
+            indices = (self.tab_index('2:第一包'), self.tab_index('5:第二包'))
+            self.assertTrue(all(not self.popup.tabs.tabIcon(i).isNull() for i in indices))
             self.assertEqual(buttons(self.popup), [])
             self.assertEqual(self.calls, [('https://example.invalid/shared-cover.png', 'bili_live/emoticons')])
 
@@ -362,8 +387,9 @@ class EmoticonTabTests(unittest.TestCase):
             QTest.qWait(30)
             self.assertEqual(self.calls, [])
             self.popup.show()
-            settle(lambda: not self.popup.tabs.tabIcon(0).isNull())
-            self.assertEqual(self.popup.tabs.tabText(0), '')
+            index = self.tab_index('2:后台目录')
+            settle(lambda: not self.popup.tabs.tabIcon(index).isNull())
+            self.assertEqual(self.popup.tabs.tabText(index), '')
 
     def test_refresh_cannot_apply_old_cover_to_a_new_catalog(self):
         first = package('旧目录', 0, 2)
@@ -385,9 +411,10 @@ class EmoticonTabTests(unittest.TestCase):
             self.release.set()
             settle(lambda: not _active_requests)
             self.assertEqual(len(self.calls), 2)
-            self.assertTrue(self.popup.tabs.tabIcon(0).isNull())
-            self.assertEqual(self.popup.tabs.tabText(0), '新目录')
-            self.assertEqual(self.popup.tabs.tabToolTip(0), '新目录')
+            index = self.tab_index('2:新目录')
+            self.assertTrue(self.popup.tabs.tabIcon(index).isNull())
+            self.assertEqual(self.popup.tabs.tabText(index), '新目录')
+            self.assertEqual(self.popup.tabs.tabToolTip(index), '新目录')
 
     def test_current_icons_load_before_slow_unselected_package_covers(self):
         first = package('emoji', 1)
@@ -401,6 +428,8 @@ class EmoticonTabTests(unittest.TestCase):
                 self.release.wait(2)
             return self.pixmap
         with patch.object(image_api, '_load_image', side_effect=load):
+            self.popup.set_packages([package('emoji', 0)])
+            self.select_package('3:emoji')
             self.popup.set_packages([first, second, third])
             settle(lambda: bool(self.calls))
             self.assertEqual(self.calls[0][0], 'https://example.invalid/emoji-0.png', '未选中包的封面不能挡住当前包的图片')
@@ -423,10 +452,11 @@ class EmoticonTabTests(unittest.TestCase):
             return self.pixmap
         with patch.object(image_api, '_load_image', side_effect=slow_load):
             self.popup.set_packages([package('旧包', 20), package('新包', 3)])
+            self.select_package('3:旧包')
             settle(lambda: bool(self.calls))
             tabs = self.popup.findChild(QTabBar)
             self.assertIsNotNone(tabs, '切换包需要 Tab')
-            tabs.setCurrentIndex(1)
+            self.select_package('3:新包')
             settle(lambda: len(buttons(self.popup)) == 3)
             self.release.set()
             settle(lambda: all((not b.icon().isNull() for b in buttons(self.popup))))
@@ -437,6 +467,7 @@ class EmoticonTabTests(unittest.TestCase):
     def test_hiding_pauses_build_and_images_until_reopen(self):
         with patch.object(image_api, '_load_image', side_effect=self.load):
             self.popup.set_packages([package('暂停', 70)])
+            self.select_package('3:暂停')
             self.popup.hide()
             QTest.qWait(80)
             self.assertFalse(self.calls, '已关闭的窗口不能启动图片下载')
@@ -455,19 +486,19 @@ class EmoticonTabTests(unittest.TestCase):
             self.popup.set_packages([small, locked, package('空包', 0)])
             tabs = self.popup.findChild(QTabBar)
             self.assertIsNotNone(tabs, '表情包应按 Tab 呈现')
-            tabs.setCurrentIndex(1)
+            self.select_package('2:主播表情')
             settle(lambda: len(buttons(self.popup)) == 1)
             self.assertFalse(buttons(self.popup)[0].isEnabled())
             self.assertIn('粉丝团', buttons(self.popup)[0].toolTip())
-            tabs.setCurrentIndex(2)
+            self.select_package('3:空包')
             APP.processEvents()
             self.assertEqual(buttons(self.popup), [])
             self.assertIn('暂无', self.popup.status.text())
-            tabs.setCurrentIndex(0)
+            self.select_package('3:小表情')
             settle(lambda: len(buttons(self.popup)) == 1)
             buttons(self.popup)[0].click()
             self.assertEqual(selected, [(3, '[小表情-0]')])
-            self.assertFalse(self.popup.isVisible())
+            self.assertTrue(self.popup.isVisible())
 
     def test_active_download_stops_on_hide_and_resumes_after_reopen(self):
 
@@ -478,6 +509,7 @@ class EmoticonTabTests(unittest.TestCase):
             return self.pixmap
         with patch.object(image_api, '_load_image', side_effect=slow_load):
             self.popup.set_packages([package('重开', 3)])
+            self.select_package('3:重开')
             settle(lambda: bool(self.calls))
             self.popup.hide()
             self.release.set()
@@ -498,10 +530,12 @@ class EmoticonTabTests(unittest.TestCase):
             return self.pixmap
         with patch.object(image_api, '_load_image', side_effect=slow_load):
             self.popup.set_packages([package('旧目录', 10)])
+            self.select_package('3:旧目录')
             settle(started.is_set)
             self.popup.set_loading()
             self.popup.hide()
             self.popup.set_packages([package('新目录', 1)])
+            self.select_package('3:新目录')
             self.release.set()
             settle(lambda: not _active_requests)
             self.assertEqual(buttons(self.popup), [], '窗口隐藏时返回的目录应延迟构建')

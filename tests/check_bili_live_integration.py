@@ -11,7 +11,7 @@ import time
 import unittest
 import zipfile
 from unittest.mock import patch
-from bili_live_support import HOST,ROOT,session,bili
+from bili_live_support import HOST,ROOT,session,bili,args,plugin_test_archive
 from bili_live_fixtures import room_payload,upgrade_payload,blind_payload
 import shiboken6
 from PySide6.QtCore import QEvent,QPoint,QObject,Qt,qInstallMessageHandler
@@ -37,9 +37,9 @@ class IntegrationTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory()
         self.directory=Path(self.temp.name)/'plugins';self.directory.mkdir()
         installer=host_api.PluginManager(plugins_dir=str(self.directory),enabled=[])
-        archive=ROOT/'dist/bili_live-1.1.zip'
-        self.assertTrue(archive.is_file())
-        installer.install_zip(str(archive));self.assertEqual(installer.plugins,[])
+        self.archive=plugin_test_archive(self.temp.name)
+        self.assertTrue(self.archive.is_file(),str(self.archive))
+        installer.install_zip(str(self.archive));self.assertEqual(installer.plugins,[])
         self.patches=[patch.object(host_api,'DEFAULT_PLUGINS_DIR',str(self.directory)),
             patch('ddm.config.save'),patch.object(MainWindow,'refresh_account'),
             patch.object(MainWindow,'refresh_status'),patch.object(MainWindow,'refresh_stats'),
@@ -200,8 +200,9 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(login.call_args.args,('bilibili',))
             self.assertTrue(login.call_args.kwargs['reauthenticate'])
 
+    @unittest.skipIf(args.source_fixture, '源码临时 ZIP 模式，发行归档一致性需用默认 dist 模式验收')
     def test_zip_integrity_and_tracked_source_bytes(self):
-        with zipfile.ZipFile(ROOT/'dist/bili_live-1.1.zip') as archive:
+        with zipfile.ZipFile(self.archive) as archive:
             self.assertIsNone(archive.testzip())
             names=archive.namelist()
             self.assertEqual(len(names),len(set(names)))
@@ -215,7 +216,7 @@ class IntegrationTests(unittest.TestCase):
     def test_zip_upgrade_preserves_local_data(self):
         from ddm.plugin_updates import stage,apply_pending,pending_versions
         old_zip=Path(self.temp.name)/'bili-live-old.zip'
-        current=ROOT/'dist/bili_live-1.1.zip'
+        current=self.archive
         with zipfile.ZipFile(current) as source,zipfile.ZipFile(old_zip,'w') as target:
             for name in source.namelist():
                 data=source.read(name)
@@ -311,10 +312,15 @@ class IntegrationTests(unittest.TestCase):
                          for c in composer.gift_popup._cards))
         self.assertEqual(len(composer.gift_popup._cards),80)
         composer.gift_popup.hide()
-        composer.open_emoticons()
-        settle(lambda:composer.popup is not None and
-               len(composer.popup.scroll.findChildren(QToolButton))==80)
-        settle(lambda:any(not b.icon().isNull() for b in composer.popup.scroll.findChildren(QToolButton)))
+        def select_populated_package():
+            tabs=composer.popup.tabs
+            self.assertEqual(tabs.tabData(1),'3:跟随回归')
+            tabs.setCurrentIndex(1)
+            settle(lambda:len(composer.popup.scroll.findChildren(QToolButton))==80)
+            settle(lambda:any(not b.icon().isNull() for b in composer.popup.scroll.findChildren(QToolButton)))
+
+        composer.open_emoticons();settle(lambda:composer._catalog_pending is None)
+        select_populated_package()
         composer.popup.hide()
         self.window.move(100,250);APP.processEvents()
         class OwnerFrames(QObject):
@@ -331,6 +337,7 @@ class IntegrationTests(unittest.TestCase):
         for popup,button in ((composer.popup,composer.emote_button),(composer.gift_popup,composer.gift_button)):
             with self.subTest(popup=type(popup).__name__):
                 popup.open_at(button);APP.processEvents()
+                if popup is composer.popup:select_populated_package()
                 observer=OwnerFrames(button,popup);self.window.installEventFilter(observer)
                 before=self.window.pos()
                 try:
@@ -364,6 +371,7 @@ class IntegrationTests(unittest.TestCase):
             for popup,button in ((composer.popup,composer.emote_button),(composer.gift_popup,composer.gift_button)):
                 with self.subTest(native_picker=type(popup).__name__):
                     popup.open_at(button);APP.processEvents()
+                    if popup is composer.popup:select_populated_package()
                     followers=[popup]
                     if popup is composer.gift_popup:
                         popup._quantity(popup._cards[0])
@@ -405,12 +413,16 @@ class IntegrationTests(unittest.TestCase):
     def test_centered_bounded_group_and_narrow_host_actions(self):
         tile=self.window.wall.tiles[0];composer=self.composer()
         self.assertEqual(tile.bottom.findChildren(QLineEdit),[composer.edit])
-        # Fix the tile size without reparenting its native video surface.
-        # The wall may otherwise override requested test widths.
+        # Equal-cell layouts choose the volume controls from the wall's width.
+        wall=self.window.wall
+        minimum,maximum=wall.minimumSize(),wall.maximumSize()
+        margins=wall.grid.contentsMargins()
         composer.edit.setText('draft survives resize')
         try:
             for width in (900,360,200,1600,900):
-                tile.setFixedSize(width,300);APP.processEvents()
+                tile.setFixedSize(width,300)
+                wall.setFixedSize(width+margins.left()+margins.right(),300+margins.top()+margins.bottom())
+                APP.processEvents()
                 region=tile._plugin_controls.widget
                 # Hosts with the newer compact volume layout can fit the
                 # input at 360px; older hosts keep only their player actions.
@@ -435,8 +447,9 @@ class IntegrationTests(unittest.TestCase):
                     self.assertTrue(tile.volume_button.compact_popup)
                 self.assertEqual(composer.edit.text(),'draft survives resize')
         finally:
+            wall.setMinimumSize(minimum);wall.setMaximumSize(maximum)
             tile.setMinimumSize(0,0);tile.setMaximumSize(16777215,16777215)
-            self.window.wall.relayout(force=True)
+            wall.relayout(force=True)
     def test_composer_border_fits_real_bottom_bar_in_normal_and_fullscreen_tiles(self):
         # The normal bar leaves 27px after its margins. A 28px editor loses
         # its bottom border even though a standalone composer looks correct.

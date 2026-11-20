@@ -9,7 +9,7 @@ import tempfile
 import threading
 import time
 from unittest.mock import patch
-from bili_live_support import HOST,ROOT
+from bili_live_support import plugin_test_archive
 from bili_live_fixtures import room_payload
 from PySide6.QtCore import QPoint,Qt,QEvent,QTimer,QEventLoop,QObject,QAbstractNativeEventFilter
 from PySide6.QtGui import QCursor,QInputMethodEvent,QMouseEvent,QMovie,QRegion
@@ -129,7 +129,7 @@ def check_native_move_loop(owner,popup,anchor):
 def main():
     with tempfile.TemporaryDirectory() as root:
         root=Path(root);manager=host_api.PluginManager(plugins_dir=str(root/'plugins'),enabled=[])
-        manager.install_zip(str(ROOT/'dist/bili_live-1.1.zip'))
+        manager.install_zip(str(plugin_test_archive(root)))
         values={'SESSDATA':'synthetic','bili_jct':'synthetic','buvid3':'synthetic'}
         manager.register_credentials('bilibili',lambda:values,identity_keys=('SESSDATA','bili_jct'))
         for name in tuple(sys.modules):

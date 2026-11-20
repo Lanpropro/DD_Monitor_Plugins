@@ -4,10 +4,15 @@ import importlib
 import os
 from pathlib import Path
 import sys
+import zipfile
 
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument('--host', type=Path, required=True)
+parser.add_argument('--source-fixture', action='store_true',
+                    help='test installation from a temporary source ZIP; skips release archive validation')
 args, rest = parser.parse_known_args()
+if args.source_fixture:
+    print('[测试] 本次安装使用源码临时 ZIP，发行归档另行验收。', flush=True)
 sys.argv = [sys.argv[0], *rest]
 HOST = args.host.resolve()
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +28,26 @@ entry = manager._load_module('bili_live', str(ROOT / 'plugins/bili_live/plugin.p
 module_name = 'ddm_plugin_bili_live'
 bili = importlib.import_module(module_name + '.bili_api')
 bili._device = 'device-test'  # Never discover a real device during offline tests.
+
+
+def package_tab(popup, key):
+    tabs = popup.tabs
+    return [tabs.tabData(i) for i in range(tabs.count())].index(key)
+
+
+def plugin_test_archive(directory):
+    if not args.source_fixture:
+        return ROOT / 'dist' / 'bili_live-1.1.zip'
+    archive = Path(directory) / 'bili-live-fixture.zip'
+    source = ROOT / 'plugins' / 'bili_live'
+    with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as fixture:
+        for path in sorted(source.rglob('*')):
+            if path.is_file() and '__pycache__' not in path.parts and path.suffix not in ('.pyc', '.pyo'):
+                fixture.write(path, path.relative_to(source.parent))
+        for name in ('LICENSE', 'NOTICE.md'):
+            fixture.write(ROOT / name, f'bili_live/{name}')
+    return archive
+
 
 class TestSession(QObject):
     changed = Signal(object)
