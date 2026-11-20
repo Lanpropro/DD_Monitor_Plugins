@@ -144,12 +144,15 @@ def check_workspace(window, entry, match, directory, evidence, suspended_tile):
             assert match.grab().save(str(evidence / 'f1-with-sources.png'))
 
         plugin = next(plugin for plugin in window.plugins.plugins if plugin.context.name == 'f1_play')
-        assert plugin.tools is None
-        next(action for action in entry.actions() if action.text() == '赛事工具').trigger()
         tools = plugin.tools
-        tools.move(180, 45)
+        assert tools.isHidden() and not tools.isWindow()
+        assert tools.parentWidget() is match.chat_pane
+        assert not any(action.text() == '赛事工具' for action in entry.actions())
+        tools.toggle.click()
         QTest.qWait(100)
         assert tools.isVisible() and match.running
+        if evidence:
+            assert match.grab().save(str(evidence / 'f1-inline-tools.png'))
         filename = Path(directory) / 'history.json'
         for session, columns in (('Race', 4), ('Practice', 5)):
             filename.write_text(json.dumps(history_data(session)), encoding='utf-8')
@@ -183,11 +186,15 @@ def check_workspace(window, entry, match, directory, evidence, suspended_tile):
         assert match.main.currentData() == '103' and onboard.main.currentData() == '101'
         assert set(match.rows) == {'102', '103'} and set(onboard.rows) == {'101'}
 
+        tools.toggle.click()
+        assert tools.isHidden() and not onboard.running and match.running
+        tools.toggle.click()
+        assert tools.isVisible() and not tools.onboard_toggle.isChecked()
         with patch.object(window.stream_playback, 'start_tile') as start:
-            window.sidebar.navigation.follow_button.click()
+            QTest.mouseClick(entry, Qt.LeftButton)
             assert not window._match_sync_active
             assert start.call_count == 1 and start.call_args.args == (suspended_tile,)
-        assert not match.running and not tools.isVisible() and not onboard.running and window.wall.isVisible()
+        assert not match.running and tools.isHidden() and window.wall.isVisible()
         assert 'rooms' in window.plugins.plugin_settings['f1_play']
         assert window.plugins.plugin_settings.get('match_sync', {}) == original_settings
         suspended_tile.set_room(None)

@@ -1,7 +1,6 @@
 """Register the F1 Play workspace with the host."""
 from pathlib import Path
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QToolButton
 
@@ -35,11 +34,6 @@ class F1Play(Plugin):
         action = QAction(icon, self.name, entry)
         action.triggered.connect(self.open_workspace)
         entry.setDefaultAction(action)
-        entry.setToolTip('F1 Play · 右键打开赛事工具')
-        tools = QAction('赛事工具', entry)
-        tools.triggered.connect(self.open_tools)
-        entry.addAction(tools)
-        entry.setContextMenuPolicy(Qt.ActionsContextMenu)
         if not context.register_workspace_control('entry', entry, priority=25):
             entry.deleteLater()
 
@@ -49,30 +43,19 @@ class F1Play(Plugin):
             if self.workspace is None:
                 self.context.notify('请安装并启用配套版本的比赛二路同步')
                 return False
+            self.tools = RaceTools(self.context, self.workspace)
         if not self.context.show_workspace(self.workspace, manages_content=True):
             return False
         if self.workspace.rows and not self.workspace.running:
             self.workspace.toggle_running()
         return True
 
-    def open_tools(self):
-        if (self.workspace is None or not self.workspace.isVisible()) and not self.open_workspace():
-            return
-        if self.tools is None:
-            self.tools = RaceTools(self.context, self.workspace)
-            self.workspace.finished.connect(self.tools.close)
-        self.tools.show()
-        self.tools.raise_()
-
     def on_unload(self):
-        if self.tools is not None:
-            self.tools.close()
-            self.tools.deleteLater()
-            self.tools = None
         if self.workspace is not None:
             self.workspace.close()
             self.workspace.deleteLater()
             self.workspace = None
+            self.tools = None
         if self.context is not None:
             self.context.unregister_workspace_control('entry')
             self.context = None

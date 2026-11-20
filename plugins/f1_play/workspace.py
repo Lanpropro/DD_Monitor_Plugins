@@ -1,19 +1,27 @@
-"""Optional F1 tools outside the shared Match Sync workspace."""
+"""Optional F1 tools embedded in the shared Match Sync workspace."""
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from .standings import StandingsPane
 
 
-class RaceTools(QDialog):
+class RaceTools(QFrame):
     def __init__(self, context, match):
-        super().__init__(match)
+        super().__init__(match.chat_pane)
         self.context = context
         self.match = match
         self.onboard = None
         self.clock_room = None
-        self.setWindowTitle('F1 Play · 赛事工具')
-        self.resize(440, 540)
+        self.setObjectName('F1RaceTools')
+        self.setStyleSheet('QFrame#F1RaceTools { background: palette(base); border-radius: 8px; }')
+
+        gear = match.match_settings_button
+        toolbar = gear.parentWidget().layout()
+        self.toggle = QPushButton('赛事工具')
+        self.toggle.setObjectName('IconButton')
+        self.toggle.setCheckable(True)
+        self.toggle.toggled.connect(self.setVisible)
+        toolbar.insertWidget(toolbar.indexOf(gear), self.toggle)
 
         layout = QVBoxLayout(self)
         header = QHBoxLayout()
@@ -28,6 +36,10 @@ class RaceTools(QDialog):
         self.onboard_toggle.toggled.connect(self.set_onboard_open)
         header.addWidget(self.onboard_toggle)
         header.addStretch()
+        collapse = QPushButton('收起')
+        collapse.setObjectName('IconButton')
+        collapse.clicked.connect(lambda: self.toggle.setChecked(False))
+        header.addWidget(collapse)
         layout.addLayout(header)
 
         self.standings = StandingsPane(self.picture_position)
@@ -50,6 +62,8 @@ class RaceTools(QDialog):
         self.clock.setInterval(250)
         self.clock.timeout.connect(self.update_timeline)
         match.finished.connect(self.close_for_workspace)
+        self.hide()
+        match.chat_pane.layout().insertWidget(0, self, 1)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -103,7 +117,7 @@ class RaceTools(QDialog):
 
     def close_for_workspace(self, _result):
         self.standings.reset_anchor()
-        self.close()
+        self.toggle.setChecked(False)
 
     def hideEvent(self, event):
         self.clock.stop()
