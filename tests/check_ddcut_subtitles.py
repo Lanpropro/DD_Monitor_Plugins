@@ -10,9 +10,9 @@ from unittest.mock import patch
 import check_ddcut_projects as fixtures
 from check_ddcut_projects import app, args, remainder, engine, media, project, run, ffmpeg, ui, until
 from PySide6.QtCore import QCoreApplication, QEvent, QPoint, Qt, QTimer
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QImage, QInputMethodEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QMainWindow
+from PySide6.QtWidgets import QMainWindow, QPushButton
 
 captions = importlib.import_module('ddcut_ranges_test.subtitles')
 srt = importlib.import_module('ddcut_ranges_test.subtitle_srt')
@@ -94,7 +94,7 @@ class SubtitleTests(unittest.TestCase):
             frame(target, .5).save(str(args.screenshots/'manual-caption-frame.png'))
 
     def test_h265_project_precise_burn_and_merge_encoding(self):
-        settings = dict(codec='h265', priority='quality', bitrate=1200)
+        settings = dict(codec='h265', priority='quality', bitrate=1200, backend='software')
         source = dict(self.media_info[str(self.red)])
         commands = []
         original = engine.run_process
@@ -174,9 +174,30 @@ assert not any(name.startswith('PySide6') for name in sys.modules)
             editor.position = .5
             panel.add()
             self.assertIs(editor.right_tabs.currentWidget(), panel)
+            self.assertIs(host.focusWidget(), panel.text)
+            self.assertEqual(panel.text.textCursor().selectedText(), '字幕')
+            app.sendEvent(panel.text, QInputMethodEvent('shou', []))
+            commit = QInputMethodEvent()
+            commit.setCommitString('手动打轴\n第二行')
+            app.sendEvent(panel.text, commit)
+            self.assertEqual(panel.text.toPlainText(), '手动打轴\n第二行')
+            panel.end.setValue(1.5)
+            panel.apply()
+            stamp = {button.text(): button for button in panel.findChildren(QPushButton)}
+            editor.position = .75
+            stamp['当前时间作入点'].click()
+            self.assertAlmostEqual(captions.placed_cues(doc.data)[0][1], .75)
+            self.assertIn('0.750', panel.rows.topLevelItem(0).text(0))
+            editor.position = 2
+            stamp['当前时间作入点'].click()
+            self.assertIn('出点必须晚于入点', editor.status.text())
+            self.assertEqual(panel.start.value(), 2)
+            self.assertAlmostEqual(captions.placed_cues(doc.data)[0][1], .75)
+            editor.position = 2.5
+            stamp['当前时间作出点'].click()
+            self.assertEqual(captions.placed_cues(doc.data)[0][1:], (2, 2.5))
             panel.start.setValue(.5)
             panel.end.setValue(1.5)
-            panel.text.setPlainText('手动打轴\n第二行')
             panel.apply()
             self.assertEqual(panel.rows.topLevelItemCount(), 1)
             panel.fields['size'].setValue(80)

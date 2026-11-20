@@ -47,8 +47,8 @@ class SubtitlePanel(QWidget):
             field.setAccessibleName(title)
             form.addRow(title+' 秒', field)
         row = QHBoxLayout()
-        self.action('当前时间作入点', lambda: self.start.setValue(editor.position), row)
-        self.action('当前时间作出点', lambda: self.end.setValue(editor.position), row)
+        self.action('当前时间作入点', lambda: self.mark_time(self.start), row)
+        self.action('当前时间作出点', lambda: self.mark_time(self.end), row)
         form.addRow(row)
         self.text = QPlainTextEdit()
         self.text.setMaximumHeight(90)
@@ -143,6 +143,12 @@ class SubtitlePanel(QWidget):
         identity = self.editor.change(lambda data: set_cue(data, '', self.editor.position, min(end, self.editor.position+2), '字幕'))
         if identity:
             self.editor.select_item(identity)
+            self.text.setFocus(Qt.OtherFocusReason)
+            self.text.selectAll()
+
+    def mark_time(self, field):
+        field.setValue(self.editor.position)
+        self.apply()
 
     def apply(self):
         identity = self.editor.selected_id
@@ -150,7 +156,6 @@ class SubtitlePanel(QWidget):
             self.editor.status.setText('请先选择一条字幕')
             return
         self.editor.change(lambda data: set_cue(data, identity, self.start.value(), self.end.value(), self.text.toPlainText()))
-        self.editor.select_item(identity)
 
     def remove(self):
         identity = self.editor.selected_id

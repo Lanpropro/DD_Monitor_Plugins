@@ -205,7 +205,8 @@ def render_project(job, ffmpeg, project, target, work, *, begin=0, length=None, 
                 source_end = min(clip['end'], source_start + (stop - start) * speed)
                 child = Job(job.title, 'export', cancel=job.cancel)
                 burn = project.get('danmaku', False) and info.get('danmaku_path') and not info.get('chat_burned')
-                result = export_clip(child, ffmpeg, info, source_start, source_end, 'precise', folder / f'cut-{index}.mp4', folder, bool(burn))
+                result = export_clip(child, ffmpeg, info, source_start, source_end, 'precise',
+                                     folder / f'cut-{index}.mp4', folder, bool(burn), encoding={'backend': 'software'})
                 stream = input_count
                 inputs += ['-i', result['output']]
                 input_count += 1
@@ -264,7 +265,7 @@ def render_project(job, ffmpeg, project, target, work, *, begin=0, length=None, 
                 if item['kind'] == 'video':
                     child = Job(job.title, 'export', cancel=job.cancel)
                     result = export_clip(child, ffmpeg, info, source_in, source_in + segment_length * item['speed'],
-                                         'precise', folder / (item['id'] + '.mp4'), folder)
+                                         'precise', folder / (item['id'] + '.mp4'), folder, encoding={'backend': 'software'})
                     inputs += ['-i', result['output']]
                 else:
                     inputs += ['-ss', f'{source_in:.6f}', '-t', f'{segment_length * item["speed"]:.6f}', '-i', info['path']]
@@ -303,7 +304,7 @@ def render_project(job, ffmpeg, project, target, work, *, begin=0, length=None, 
                 filters.append(f'[{video}][{input_count}:v]overlay=eof_action=pass:repeatlast=0:format=rgb:alpha=premultiplied[captions]')
                 video = 'captions'
             from .hardware_encoding import select_video_args
-            encoding_args = select_video_args(job, ffmpeg, None if preview else project.get('encoding'), work, width, height)
+            encoding_args = select_video_args(job, ffmpeg, {'backend': 'software'} if preview else project.get('encoding'), work, width, height)
             command = [ffmpeg, '-y', '-v', 'error', *inputs, '-filter_complex', ';'.join(filters),
                        '-map', f'[{video}]', '-map', '[audio]', '-t', f'{span:.6f}', *encoding_args,
                        '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-movflags', '+faststart', str(partial)]

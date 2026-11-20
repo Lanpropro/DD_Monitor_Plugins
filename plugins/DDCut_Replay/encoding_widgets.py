@@ -13,7 +13,7 @@ class EncodingOptions(QWidget):
         form.setContentsMargins(0, 0, 0, 0)
         form.setRowWrapPolicy(QFormLayout.WrapLongRows)
         self.codec, self.priority, self.backend = QComboBox(), QComboBox(), QComboBox()
-        for label, value in [('软件（CPU）', 'software'), ('自动（优先硬件）', 'auto')]:
+        for label, value in [('自动（优先硬件）', 'auto'), ('软件（CPU）', 'software')]:
             self.backend.addItem(label, value)
         self.backend.setToolTip('自动方式先做实际试编码，硬件不可用时回退软件；任务记录实际编码器。')
         for label, value in [('H.264', 'h264'), ('H.265', 'h265')]:

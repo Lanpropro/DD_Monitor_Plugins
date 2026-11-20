@@ -21,7 +21,8 @@ class HardwareTests(unittest.TestCase):
     editor = RealtimeTests.editor
 
     def test_profiles_old_settings_and_bitrate_overrides_quality(self):
-        self.assertEqual(encoding.normalize({'codec':'h265'})['backend'],'software')
+        self.assertEqual(encoding.normalize({'codec':'h265'})['backend'],'auto')
+        self.assertEqual(encoding.normalize({'backend':'software'})['backend'],'software')
         with self.assertRaises(ValueError):
             encoding.normalize({'backend':'invalid'})
         for codec,prefix in [('h264','h264'),('h265','hevc')]:
@@ -67,7 +68,7 @@ class HardwareTests(unittest.TestCase):
         source['danmaku_path']=str(log)
         selected={}
         for codec,expected in [('h264','h264'),('h265','hevc')]:
-            settings=dict(codec=codec,backend='auto',priority='speed',bitrate=900)
+            settings=dict(codec=codec,priority='speed',bitrate=900)
             options=hardware.select_video_args(media.Job('actual probe','test'),ffmpeg,settings,self.root/'work',320,180)
             selected[codec]=options[1]
             for burn in (False,True):
@@ -96,15 +97,15 @@ class HardwareTests(unittest.TestCase):
     def test_qt_controls_persistence_history_and_task_encoder_details(self):
         data,_,_=self.document()
         with self.editor(data,'hardware-ui') as (editor,view,host,hub):
-            self.assertEqual(editor.encoding.value()['backend'],'software')
-            revision=editor.document.revision
-            editor.encoding.backend.setCurrentIndex(editor.encoding.backend.findData('auto'))
-            self.assertEqual(editor.document.revision,revision+1)
-            self.assertEqual(project.read_project(editor.document.path)['encoding']['backend'],'auto')
-            editor.history(False)
-            self.assertEqual(editor.encoding.value()['backend'],'software')
-            editor.history(True)
             self.assertEqual(editor.encoding.value()['backend'],'auto')
+            revision=editor.document.revision
+            editor.encoding.backend.setCurrentIndex(editor.encoding.backend.findData('software'))
+            self.assertEqual(editor.document.revision,revision+1)
+            self.assertEqual(project.read_project(editor.document.path)['encoding']['backend'],'software')
+            editor.history(False)
+            self.assertEqual(editor.encoding.value()['backend'],'auto')
+            editor.history(True)
+            self.assertEqual(editor.encoding.value()['backend'],'software')
             host.resize(920,600)
             app.processEvents()
             self.assertTrue(editor.encoding.backend.isVisible())

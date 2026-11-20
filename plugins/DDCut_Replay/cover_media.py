@@ -29,7 +29,7 @@ def capture_frame(job, ffmpeg, source, stamp, target, work):
             data['encoding'] = {'codec': 'h264', 'priority': 'speed', 'bitrate': 0}
             render_project(child, ffmpeg, data, clip, folder, begin=start, length=span)
         else:
-            export_clip(child, ffmpeg, source, start, start+span, 'precise', clip, folder)
+            export_clip(child, ffmpeg, source, start, start+span, 'precise', clip, folder, encoding={'backend': 'software'})
         info = probe(job, ffmpeg, clip, folder)
         rate = float(Fraction(info['frame_rate']))
         local = min(max(0, math.floor((stamp-start)*rate)/rate), max(0, (math.ceil(info['duration']*rate-1e-6)-1)/rate))
