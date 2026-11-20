@@ -446,11 +446,30 @@
     {
       "tag": "m3u-live-v1.0",
       "file": "RELEASE-m3u-live-v1.0.md",
-      "status": "prepared",
-      "source_kind": "repository_candidate",
+      "status": "online",
+      "source_kind": "github_release",
       "base_commit": "f71f7c5586d072a428d8d5e66ea9dbb6f64dc6f4",
-      "last_edit_verified": false,
-      "sha256": "cb241d3a9988feb14138f236d61d7b879a4eb8580bc176df636325ec499cd6ac"
+      "last_edit_verified": true,
+      "sha256": "cb241d3a9988feb14138f236d61d7b879a4eb8580bc176df636325ec499cd6ac",
+      "raw_body_sha256": "3cd382b112426a808f8c4663c91604f03ac3db5f6237c526fd2082c134dab77e",
+      "release_id": 452348556,
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/m3u-live-v1.0",
+      "release_updated_at": "2026-11-20T16:51:40Z",
+      "release_published_at": "2026-11-20T16:51:40Z",
+      "release_created_at": "2026-11-20T06:30:18Z",
+      "release_author": "Lanpropro",
+      "plugin_author": "Lanpropro",
+      "release_name": "IPTV Play v1.0",
+      "source_commit": "f6a3d6d9c7bb29dae74f0eec11722a7103691ddd",
+      "assets": [
+        {
+          "id": 770751227,
+          "name": "m3u_live-1.0.zip",
+          "size": 73591,
+          "sha256": "3a974893b5ec032cf34bd31e182721361b2018ebbeba49b5b6588eaef2892381",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/m3u-live-v1.0/m3u_live-1.0.zip"
+        }
+      ]
     },
     {
       "tag": "qie-live-v1.0",
