@@ -7,7 +7,7 @@ from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
 from PySide6.QtWidgets import QApplication
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -78,7 +78,7 @@ def check_mask(window, page, directory):
     assert ', 0.83)' in page.styleSheet()
 
 
-def check_workspace(window, entry, page, directory, evidence):
+def check_workspace(window, entry, page, directory, evidence, suspended_tile):
     from PySide6.QtWidgets import QLineEdit
 
     match = page.match
@@ -148,7 +148,11 @@ def check_workspace(window, entry, page, directory, evidence):
         assert not onboard.running and page.onboard is None and page.side.isHidden()
         page.rank_toggle.click()
 
-    page.back_button.click()
+    with patch.object(window.stream_playback, 'start_tile') as start:
+        page.back_button.click()
+        assert not window._match_sync_active
+        assert start.call_count == 1 and start.call_args.args == (suspended_tile,)
+    suspended_tile.set_room(None)
     assert not match.running and page.match is None and window.wall.isVisible()
     entry.click()
     assert page.match is not match and not page.match.rows and page.isVisible()
@@ -259,6 +263,11 @@ def main():
                            for y in range(rendered.height()) for x in range(rendered.width()))
                 assert any(icon.pixelColor(x, y).getRgb() == (255, 255, 255, 255)
                            for y in range(icon.height()) for x in range(icon.width()))
+                if not args.live_source_file:
+                    suspended_tile = window.wall.tiles[0]
+                    suspended_tile.set_room({'room_id': '101', 'uname': '主画面', 'live': True})
+                    player = Mock()
+                    window.players[suspended_tile] = player
                 entry.click()
                 owner, page, _ = window.plugins._workspace_pages.active
                 assert owner == 'f1_play' and page.isVisible() and window.wall.isHidden()
@@ -267,14 +276,16 @@ def main():
                     assert window.plugins.platform_for(room_id).room_info(room_id).uname == 'CCTV-5+（验收源）'
                     check_live(window, page, room_id, evidence, args.seconds)
                 else:
+                    assert window._match_sync_active and suspended_tile not in window.players
+                    player.release.assert_called_once()
                     check_mask(window, page, directory)
-                    check_workspace(window, entry, page, directory, evidence)
+                    check_workspace(window, entry, page, directory, evidence, suspended_tile)
                     window.plugins.unload()
                     assert window.wall.isVisible()
             finally:
                 window.close()
                 app.processEvents()
-    print('PASS: F1 Play sidebar drop, shared playback workspace and host background mask', flush=True)
+    print('PASS: F1 Play sidebar drop, wall suspension and host background mask', flush=True)
 
 
 if __name__ == '__main__':

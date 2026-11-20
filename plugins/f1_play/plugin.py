@@ -39,7 +39,7 @@ class F1Play(Plugin):
     def open_workspace(self):
         if self.workspace is None:
             self.workspace = F1Workspace(self.context)
-        self.context.show_workspace(self.workspace)
+        self.context.show_workspace(self.workspace, pause_wall_playback=True)
 
     def on_unload(self):
         if self.workspace is not None:
