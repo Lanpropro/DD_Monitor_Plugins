@@ -160,6 +160,8 @@ class ContributionGuideTests(unittest.TestCase):
         release_sources = json.loads((ROOT / 'docs/releases/sources.json').read_text(encoding='utf-8'))
         release_tags = {entry['tag'] for entry in release_sources['entries']
                         if entry['status'] != 'archived_verified'}
+        prepared = {entry['tag']: entry['file'] for entry in release_sources['entries']
+                    if entry['status'] == 'prepared'}
         platforms = {
             'domestic_live': {'huya', 'douyu', 'douyin'},
             'global_live': {'twitch', 'youtube'},
@@ -180,15 +182,19 @@ class ContributionGuideTests(unittest.TestCase):
                     self.assertIn('0.8 热修复 1', row)
                 download = re.search(
                     r'\[v([\d.]+)\]\(https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/([^/)]+)\)', row)
-                self.assertIsNotNone(download)
-                self.assertEqual(download[2], f'{plugin_id.replace("_", "-")}-v{download[1]}')
-                self.assertIn(download[2], release_tags)
+                if download:
+                    self.assertEqual(download[2], f'{plugin_id.replace("_", "-")}-v{download[1]}')
+                    self.assertIn(download[2], release_tags)
+                else:
+                    candidate = f'{plugin_id.replace("_", "-")}-v{manifest["version"]}'
+                    self.assertIn(candidate, prepared)
+                    self.assertIn(f'(docs/releases/{prepared[candidate]})', row)
                 icons = re.findall(r'<img src="docs/assets/platforms/([^"/]+)\.png"', row)
                 self.assertEqual(set(icons), platforms.get(plugin_id, set()))
                 if 'icon' in manifest:
                     self.assertIn(f'<img src="plugins/{plugin_id}/{manifest["icon"]}"', row)
                 if row in platform_table:
-                    self.assertRegex(row.split(' | ')[1], r'^(公开)?直播播放、画质选择(?:、|$)')
+                    self.assertRegex(row.split(' | ')[1], r'^(公开)?直播播放、(?:画质选择|固定 720p)(?:、|$)')
 
     def test_release_notes_are_indexed_in_one_directory(self):
         self.assertFalse(list(ROOT.glob('RELEASE-*.md')))
@@ -258,6 +264,8 @@ class ContributionGuideTests(unittest.TestCase):
                     self.assertIn('验收通过', source)
                     self.assertIn('等待配套本体', source)
                     self.assertIn('尚未公开发布', source)
+                elif '尚无公开发布' in source:
+                    self.assertIn(f'](../releases/RELEASE-{plugin_id.replace("_", "-")}-v', source)
                 else:
                     self.assertRegex(source, r'https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/')
         self.assertIn('(docs/changes/README.md)', (ROOT / 'README.md').read_text(encoding='utf-8'))
