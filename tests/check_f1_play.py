@@ -86,6 +86,7 @@ def check_entry_icon(window, directory, evidence):
     key = ('f1_play', 'entry')
     controls = window.sidebar.workspace_controls
     entry = controls.entries[key][1]
+    assert entry.property('dockMotion') == 'slide-in-left'
     launch = controls._rows[key][1]
     for button, size in ((entry, 18), (launch, 20)):
         assert button.iconSize().width() == size

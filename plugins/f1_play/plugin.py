@@ -30,6 +30,7 @@ class F1Play(Plugin):
             raise RuntimeError('F1 Play 需要支持插件功能页的配套本体')
         self.context = context
         entry = QToolButton(context.window)
+        entry.setProperty('dockMotion', 'slide-in-left')
         icon = QIcon(str(Path(__file__).with_name('icon-rail.svg')))
         action = QAction(icon, self.name, entry)
         action.triggered.connect(self.open_workspace)
