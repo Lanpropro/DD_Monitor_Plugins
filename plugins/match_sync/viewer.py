@@ -32,7 +32,7 @@ from . import source_control, chat_control, alignment_control, playback_timing, 
 
 
 class Viewer(QDialog):
-    def __init__(self, context, sources, initial_room=None):
+    def __init__(self, context, sources, initial_room=None, *, workspace_crops=False):
         super().__init__(context.window)
         self.context = context
         self.sources = sources
@@ -82,6 +82,7 @@ class Viewer(QDialog):
         self.offset_target = None
         self.suppressed = {}
         self.embedded = False
+        self.workspace_crops = workspace_crops
         self.floating_crops = {}
         self.stream_info_dialog = None
         viewer_ui.build_ui(self)

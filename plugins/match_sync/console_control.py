@@ -207,5 +207,6 @@ def set_chat_visible(viewer, visible):
 
 
 def position_removal_notice(viewer):
+    footer_height = 0 if viewer.console_footer.isHidden() else viewer.console_footer.height()
     viewer.removal_notice.move(max(0, (viewer.settings_panel.width() - viewer.removal_notice.width()) // 2),
-        max(0, viewer.settings_panel.height() - viewer.console_footer.height() - viewer.removal_notice.height() - 8))
+        max(0, viewer.settings_panel.height() - footer_height - viewer.removal_notice.height() - 8))

@@ -53,6 +53,8 @@ def _close_floating_crop(viewer, key):
 def floating_surface(viewer):
     if viewer.fullscreen_dialog is not None:
         return viewer.fullscreen_dialog
+    if viewer.workspace_crops:
+        return viewer
     host = viewer.context.window if viewer.embedded else viewer
     central = getattr(host, 'centralWidget', None)
     return (central() if callable(central) else None) or host
@@ -101,7 +103,7 @@ def flush_crop_background(viewer):
 def show_floating_crop(viewer, row, crop, frame):
     floating = viewer.floating_crops.get(row.room_id)
     if floating is None:
-        floating = FloatingCrop(viewer.floating_surface(), row.label(), crop)
+        floating = FloatingCrop(viewer.floating_surface(), row.label(), crop, native=viewer.workspace_crops)
         viewer.floating_crops[row.room_id] = floating
         floating.closed.connect(lambda key=row.room_id: viewer._close_floating_crop(key))
         floating.background_exposed.connect(lambda rect, item=floating: viewer.restore_crop_background(item, rect))

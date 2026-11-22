@@ -2,7 +2,7 @@
 import time
 import logging
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen, QTransform
+from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPainterPath, QPen, QRegion, QTransform
 from PySide6.QtWidgets import QWidget
 
 from ddm import theme
@@ -15,8 +15,9 @@ class FloatingCrop(QWidget):
     background_exposed = Signal(QRect)
     gesture_finished = Signal()
 
-    def __init__(self, parent, label, crop):
+    def __init__(self, parent, label, crop, *, native=False):
         super().__init__(parent)
+        self._native_overlay = native
         self.label, self.crop = label, QRectF(*crop)
         self.image = QImage()
         self.avatar = QImage()
@@ -48,10 +49,20 @@ class FloatingCrop(QWidget):
         self.setMouseTracking(True)
         # Ordinary child transparency restores the backing store behind moved crops.
         self.setAutoFillBackground(False)
+        if native:
+            # Native panels can otherwise receive Windows input through this crop.
+            self.setAttribute(Qt.WA_NativeWindow)
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.setToolTip(label + '\n拖动移动；滚轮或四角缩放；微调按钮或双击调整选区；定位图标切换锁定；右上角关闭。')
         self.setAccessibleName(label + '：悬浮画面')
         parent.installEventFilter(self)
+
+    def resizeEvent(self, event):
+        if self._native_overlay:
+            outline = QPainterPath()
+            outline.addRoundedRect(QRectF(self.rect()), 10, 10)
+            self.setMask(QRegion(outline.toFillPolygon().toPolygon()))
+        super().resizeEvent(event)
 
     def set_avatar(self, pixmap):
         if pixmap is not None and not pixmap.isNull() and pixmap.cacheKey() != self.avatar_key:

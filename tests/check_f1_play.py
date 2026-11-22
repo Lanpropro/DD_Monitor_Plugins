@@ -115,10 +115,78 @@ def layout_signature(page):
     )
 
 
+def check_floating_over_standings(window, match, tools, evidence):
+    from PySide6.QtCore import QPoint, QPointF
+    from PySide6.QtGui import QImage, QWheelEvent
+    from PySide6.QtTest import QTest
+
+    frame = QImage(320, 180, QImage.Format_RGB32)
+    frame.fill(Qt.red)
+    floating = match.show_floating_crop(match.rows['102'], (0, 0, 1, 1), (1, frame))
+    tools.onboard_toggle.click()
+    QTest.qWait(50)
+    assert tools.onboard.isVisible()
+    parent = floating.parentWidget()
+    target = parent.mapFromGlobal(tools.standings.mapToGlobal(QPoint()))
+    floating.fit_geometry(target.x() + 12, target.y() + 42, 180)
+    # The host raises the active plugin page independently of its siblings.
+    assert tools.context.show_workspace(match, manages_content=True)
+    QTest.qWait(50)
+    for point in (floating.rect().center(), floating.adjust_rect().center(),
+                  floating.lock_rect().center(), floating.close_rect().center()):
+        assert window.childAt(window.mapFromGlobal(floating.mapToGlobal(point))) is floating
+        if QApplication.platformName() == 'windows':
+            from ctypes import POINTER, WinDLL, byref
+            from ctypes.wintypes import BOOL, HWND, POINT, UINT
+
+            user32 = WinDLL('user32')
+            user32.ChildWindowFromPointEx.argtypes = HWND, POINT, UINT
+            user32.ChildWindowFromPointEx.restype = HWND
+            user32.ScreenToClient.argtypes = HWND, POINTER(POINT)
+            user32.ScreenToClient.restype = BOOL
+            user32.ClientToScreen.argtypes = HWND, POINTER(POINT)
+            user32.ClientToScreen.restype = BOOL
+            window_point = floating.mapTo(window, point)
+            pixel = window.devicePixelRatioF()
+            hwnd = int(window.winId())
+            screen = POINT(round(window_point.x() * pixel), round(window_point.y() * pixel))
+            assert user32.ClientToScreen(hwnd, byref(screen))
+            while True:
+                local = POINT(screen.x, screen.y)
+                assert user32.ScreenToClient(hwnd, byref(local))
+                child = user32.ChildWindowFromPointEx(hwnd, local, 7)
+                if not child or child == hwnd:
+                    break
+                hwnd = child
+            assert hwnd == int(floating.effectiveWinId()), (hwnd, floating.effectiveWinId())
+
+    if evidence:
+        assert match.grab().save(str(evidence / 'floating-over-standings.png'))
+    start = floating.mapTo(window, floating.rect().center())
+    x = floating.x()
+    QTest.mousePress(window.windowHandle(), Qt.LeftButton, pos=start)
+    assert floating.drag is not None
+    QTest.mouseMove(window.windowHandle(), start - QPoint(22, 0))
+    QTest.mouseRelease(window.windowHandle(), Qt.LeftButton, pos=start - QPoint(22, 0))
+    assert floating.x() < x and floating.drag is None
+    width = floating.width()
+    center = floating.rect().center()
+    wheel = QWheelEvent(QPointF(center), QPointF(floating.mapToGlobal(center)), QPoint(), QPoint(0, 120),
+                        Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
+    QApplication.sendEvent(floating, wheel)
+    assert wheel.isAccepted() and floating.width() > width
+    QTest.mouseClick(floating, Qt.LeftButton, pos=floating.lock_rect().center())
+    assert floating.lock_mode == 1
+    QTest.mouseClick(floating, Qt.LeftButton, pos=floating.close_rect().center())
+    assert '102' not in match.floating_crops
+    tools.onboard_toggle.click()
+
+
 def check_workspace(window, entry, match, directory, evidence, suspended_tile):
     from PySide6.QtTest import QTest
 
     assert not match.running and match.settings_panel.isVisible() and match.chat_pane.isVisible()
+    assert match.console_footer.isHidden()
     original_settings = deepcopy(window.plugins.plugin_settings.get('match_sync', {}))
     with (patch.object(type(match), '_start_row', autospec=True) as start_row,
           patch.object(type(match.audio), 'start')):
@@ -152,6 +220,7 @@ def check_workspace(window, entry, match, directory, evidence, suspended_tile):
         tools.toggle.click()
         QTest.qWait(100)
         assert tools.isVisible() and match.running
+        check_floating_over_standings(window, match, tools, evidence)
         if evidence:
             assert match.grab().save(str(evidence / 'f1-inline-tools.png'))
         filename = Path(directory) / 'history.json'
@@ -305,6 +374,7 @@ def main():
                                     if plugin.context.name == 'match_sync')
                     provider.open_viewer({})
                     QTest.qWait(100)
+                    assert provider.viewer.console_footer.isVisible()
                     reference = layout_signature(provider.viewer)
                     if evidence:
                         assert provider.viewer.grab().save(str(evidence / 'match-sync.png'))
@@ -337,7 +407,7 @@ def main():
                 window.close()
                 window.deleteLater()
                 app.sendPostedEvents(None, QEvent.DeferredDelete)
-    print('PASS: F1 Play sidebar drop, wall suspension and host background mask', flush=True)
+    print('PASS: F1 Play sidebar drop, wall suspension, background mask and floating crop input', flush=True)
 
 
 if __name__ == '__main__':
