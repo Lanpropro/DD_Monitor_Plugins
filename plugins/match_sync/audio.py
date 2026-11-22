@@ -59,6 +59,7 @@ class AudioFeed(QObject):
             pump.clock_snapshot = clock
             pump.clock_observation = pump.clock_floor = None
             pump.replay_cursors.clear()
+            pump.independent_cursors.clear()
             pump.read_metrics.reset()
 
     @Slot()
@@ -104,9 +105,9 @@ class AudioPump(QObject):
         self.flush_clock = None
         self.replay_offset = None
         self.replay_cursors = {}
+        self.independent_cursors = {}
         self.read_metrics = AudioReadMetrics()
         self.timings = StageTimings()
-        self.independent_histories = frozenset()
         self.timer = QTimer(self)
         self.timer.setInterval(10)
         self.timer.setTimerType(Qt.PreciseTimer)
@@ -159,6 +160,7 @@ class AudioPump(QObject):
         self.clock_snapshot = None
         self.clock_observation = self.clock_floor = None
         self.snapshot = (1.0, ())
+        self.independent_cursors.clear()
         self.read_metrics.reset()
         self.timings.samples.clear()
 
@@ -225,22 +227,23 @@ class AudioPump(QObject):
         inputs = []
         for room_id, row in self.viewer.rows.items():
             audible, channel, volume = row.audio_controls
+            independent = self.viewer.independent_playback.get(room_id)
             if (row.decoder is not None and audible and not row.paused
                     and room_id in shown_shifts
-                    and (replaying or room_id in self.viewer.independent_playback or not self.viewer.sync_waiting and row.sync_state == "已同步")):
+                    and (replaying or independent is not None or not self.viewer.sync_waiting and row.sync_state == "已同步")):
                 if replaying:
                     change = following.get(room_id, shown_shifts[room_id]) - shown_shifts[room_id]
                     local_rate = 1 + change / .05 if abs(change) < .1 else 1.0
+                    position = shown_shifts[room_id] + self.replay_offset
+                elif independent is not None:
+                    local_rate = 1.0
+                    position = independent
                 else:
-                    local_rate = 1.0 if room_id in self.viewer.independent_playback else rate + self.viewer.relative_rates.get(room_id, 1.0) - 1.0
-                shift = shown_shifts[room_id] + (self.replay_offset if replaying else 0.)
-                inputs.append((row.decoder.history, shift,
+                    local_rate = rate + self.viewer.relative_rates.get(room_id, 1.0) - 1.0
+                    position = shown_shifts[room_id]
+                inputs.append((row.decoder.history, position,
                                local_rate,
                                channel, volume * (1.0 if replaying else row.mix_gain)))
-        independent = frozenset(row.decoder.history for key, row in self.viewer.rows.items()
-                                if key in self.viewer.independent_playback and row.decoder is not None)
-        if independent != self.independent_histories:
-            self.independent_histories = independent
         snapshot = (rate, tuple(inputs))
         if snapshot != self.snapshot:
             self.snapshot = snapshot
@@ -262,6 +265,7 @@ class AudioPump(QObject):
         self.last_fill = now
         self.played = self.sink.processedUSecs() * RATE / 1_000_000
         self.clock_snapshot = self._clock()
+        output_time = time.monotonic()
         rate, sources = self.snapshot
         for _ in range(3):
             if self.sink is None or self.device is None:
@@ -275,10 +279,22 @@ class AudioPump(QObject):
             positions = []
             started = time.perf_counter()
             for history, shift, local_rate, channel, volume in sources:
-                target = clock + shift
-                cursor = self.replay_cursors.get(history) if self.replay_offset is not None or history in self.independent_histories else None
-                if cursor is not None and abs(clock - cursor[0]) < .01 and abs(target - cursor[1]) < .05:
-                    target = cursor[1]
+                if isinstance(shift, tuple):
+                    # Map to this room's monotonic timeline, including queued
+                    # output. The main picture can hold or jump its clock.
+                    anchor, position = shift
+                    queued = max(0, self.written - self.played)
+                    sample = round((output_time - anchor + position) * RATE + queued)
+                    cursor = self.independent_cursors.get(history)
+                    if cursor is not None and cursor[0] == shift:
+                        if queued or abs(sample - cursor[1]) <= RATE // 4:
+                            sample = cursor[1]
+                    target = sample / RATE
+                else:
+                    target = clock + shift
+                    cursor = self.replay_cursors.get(history) if self.replay_offset is not None else None
+                    if cursor is not None and abs(clock - cursor[0]) < .01 and abs(target - cursor[1]) < .05:
+                        target = cursor[1]
                 source_frames = max(1, round(frames * local_rate))
                 pcm = history.pcm_at(target, source_frames)
                 positions.append((history, target, source_frames))
@@ -297,12 +313,16 @@ class AudioPump(QObject):
             actual_rate = media_frames / frames
             self.clock_segments.append((self.written, self.written + written, self.media_written, actual_rate))
             self.media_written += written / RATE * actual_rate
+            independent_cursors = {}
             for (history, target, source_frames), source in zip(positions, sources):
                 self.read_metrics.record(id(history), target,
                     source_frames / RATE * written / frames, source[2], source[3], source[4])
-                if self.replay_offset is not None or history in self.independent_histories:
+                if isinstance(source[1], tuple):
+                    independent_cursors[history] = (source[1], round(target * RATE) + written)
+                elif self.replay_offset is not None:
                     self.replay_cursors[history] = (clock + written / RATE * actual_rate,
                         target + source_frames / RATE * written / frames)
+            self.independent_cursors = independent_cursors
             self.written += written
         self.clock_snapshot = self._clock()
         self.clock_observation = (now, self.played, self.written, self.anchor, tuple(self.clock_segments))

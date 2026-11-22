@@ -91,25 +91,45 @@ def check(app, host, module):
                     return np.column_stack((wave, wave)).tobytes()
             class Sink:
                 def processedUSecs(self):
-                    return 0
+                    return round(max(0, pump.written - 2400) / module.RATE * 1_000_000)
                 def bytesFree(self):
                     return 2048 * 4
             class Device:
+                def __init__(self):
+                    self.writes = []
                 def write(self, data):
-                    return len(data)
+                    frames = len(data) // 4
+                    accepted = frames // 2 if len(self.writes) % 5 == 0 else frames
+                    self.writes.append(accepted)
+                    return accepted * 4
             wave = WaveHistory()
             pump = module.AudioPump(viewer)
             pump.sink, pump.device = Sink(), Device()
             pump.anchor = 100.
-            pump.independent_histories = frozenset((wave,))
+            row.decoder.history = wave
+            viewer.independent_playback['2'] = (1000., 20.)
+            viewer.sync_waiting = True
+            viewer.playback_rate = .98
             try:
-                for index in range(30):
-                    jitter = (0, .004, -.003, .001)[index % 4]
-                    shift = -pump.anchor + pump.written / module.RATE - pump.media_written + jitter
-                    pump.snapshot = (.98, ((wave, shift, 1., 0, 100),))
-                    pump._fill()
-                for previous, current in zip(wave.reads, wave.reads[1:]):
-                    assert current[0] == previous[0] + previous[1], 'Independent PCM must stay sample-contiguous during main slowdown and GUI jitter'
+                with patch.object(viewer, 'live_clock', side_effect=pump.clock):
+                    for index in range(30):
+                        now = 1000 + max(0, pump.written - 2400) / module.RATE
+                        pump.correction = (0., -.045, -.095, .052)[index % 4]
+                        with patch.object(time, 'monotonic', return_value=now):
+                            pump.update_snapshot()
+                            pump._fill()
+                    assert wave.reads[0][0] == 20 * module.RATE
+                    for previous, accepted, current in zip(wave.reads, pump.device.writes, wave.reads[1:]):
+                        assert current[0] == previous[0] + accepted, (
+                            'Independent PCM must remain contiguous during main clock corrections and partial output writes')
+                    # A new independently selected position must reacquire the clock.
+                    viewer.independent_playback['2'] = (1010., 40.)
+                    with patch.object(time, 'monotonic', return_value=1010.):
+                        pump.update_snapshot()
+                        previous_count = len(wave.reads)
+                        pump._fill()
+                    first_new = wave.reads[previous_count][0]
+                    assert 40 * module.RATE <= first_new <= 40 * module.RATE + 2401
             finally:
                 pump.sink = pump.device = None
                 pump.deleteLater()
