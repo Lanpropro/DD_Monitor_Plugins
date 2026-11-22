@@ -68,7 +68,6 @@ def check(app, host, module, output=None):
                 app.processEvents()
                 assert viewer.console_toolbar.isAncestorOf(viewer.buffer_notice)
                 assert viewer.console_toolbar.isAncestorOf(viewer.notice)
-                assert not viewer.console_footer.isAncestorOf(viewer.buffer_notice)
                 assert viewer.buffer_notice.alignment() == Qt.AlignCenter
                 center = viewer.console_notices.mapTo(viewer.console_toolbar, viewer.console_notices.rect().center()).x()
                 assert abs(center - viewer.console_toolbar.rect().center().x()) <= 1

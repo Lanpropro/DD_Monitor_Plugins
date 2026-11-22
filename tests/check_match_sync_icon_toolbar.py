@@ -168,7 +168,6 @@ def check(app, host, module, output=None):
                 viewer.console_content_height = None
                 viewer.align_room_controls()
                 viewer.notice.setText('主画面：Machine · 自动对齐已开启')
-                viewer.audio_status.setText('声音已接管')
                 second.join.show()
                 QTest.qWait(30)
                 viewer.settings_panel.grab().save(str(output))

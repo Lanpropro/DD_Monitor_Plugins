@@ -12,7 +12,6 @@ class RaceTools(QFrame):
         self.match = match
         self.onboard = None
         self.clock_room = None
-        match.console_footer.hide()
         match.race_event_alignment = True
         self.setObjectName('F1RaceTools')
         self.setStyleSheet('QFrame#F1RaceTools { background: palette(base); border-radius: 8px; }')

@@ -37,7 +37,6 @@ class AudioFeed(QObject):
         self.timer.timeout.connect(self.fill)
         self.timer.start()
         self.fill()
-        pump.status.emit("声音已接管，结束观看后恢复原程序的静音设定")
 
     @Slot()
     def fill(self):

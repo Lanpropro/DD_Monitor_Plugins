@@ -87,7 +87,7 @@ class Viewer(QDialog):
         self.stream_info_dialog = None
         viewer_ui.build_ui(self)
         self.audio = AudioPump(self)
-        self.audio.status.connect(self.audio_status.setText)
+        self.audio.status.connect(self.context.notify)
         self.host_audio_timer = QTimer(self)
         self.host_audio_timer.setInterval(100)
         self.host_audio_timer.timeout.connect(self._suppress_host_audio)

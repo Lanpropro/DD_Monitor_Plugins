@@ -53,10 +53,13 @@ def check(app, host, module, output=None):
                     image.fill(('#265776', '#464477', '#225d52')[index])
                     canvas.set_frame((100., image))
                     app.processEvents()
-                    assert name.geometry().left() == state.geometry().left()
+                    assert state.parentWidget() is card and not state.wordWrap()
+                    assert state.geometry().right() > name.geometry().right()
                     assert name.geometry().top() < canvas.geometry().top()
-                    assert state.geometry().bottom() >= state.parentWidget().height() - 4
-                    assert canvas.height() >= card.height() - 24
+                    assert state.geometry().bottom() < canvas.geometry().top()
+                    assert canvas.width() == card.contentsRect().width() - 24
+                    assert state.fontMetrics().horizontalAdvance(state.text()) < 68
+                    assert state.toolTip()
                     assert abs(canvas.image_rect.width() / canvas.image_rect.height() - 16 / 9) < .02
                     if canvas.width() / canvas.height() >= 16 / 9:
                         assert abs(canvas.image_rect.top()) <= 1
@@ -68,6 +71,15 @@ def check(app, host, module, output=None):
                     output = Path(output)
                     output.parent.mkdir(parents=True, exist_ok=True)
                     panel.grab().save(str(output.with_name(output.stem + '-' + mode + '.png')))
+            original_sizes = {key: items[2].size() for key, items in panel.cards.items()}
+            viewer.automatic.setChecked(True)
+            viewer.independent_shifts['2'] = -.5
+            with patch.object(panel.cards['2'][2], 'playback_waiting', return_value=False):
+                panel.render(100., viewer.shifts())
+            app.processEvents()
+            assert panel.cards['2'][3].text() == '未对齐'
+            assert '画面时间差尚未确认' in panel.cards['2'][3].toolTip()
+            assert {key: items[2].size() for key, items in panel.cards.items()} == original_sizes
             panel.zoom.setChecked(False)
             panel.render(100., viewer.shifts())
             assert all(not canvas.zoom_crop for _card, _name, canvas, _state in panel.cards.values())

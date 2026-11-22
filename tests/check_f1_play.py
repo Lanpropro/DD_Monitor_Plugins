@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 from unittest.mock import Mock, patch
 
 
@@ -186,7 +186,7 @@ def check_workspace(window, entry, match, directory, evidence, suspended_tile):
     from PySide6.QtTest import QTest
 
     assert not match.running and match.settings_panel.isVisible() and match.chat_pane.isVisible()
-    assert match.console_footer.isHidden()
+    assert match.settings_panel.findChild(QWidget, 'MatchSyncFooter') is None
     original_settings = deepcopy(window.plugins.plugin_settings.get('match_sync', {}))
     with (patch.object(type(match), '_start_row', autospec=True) as start_row,
           patch.object(type(match.audio), 'start')):
@@ -374,7 +374,7 @@ def main():
                                     if plugin.context.name == 'match_sync')
                     provider.open_viewer({})
                     QTest.qWait(100)
-                    assert provider.viewer.console_footer.isVisible()
+                    assert provider.viewer.settings_panel.findChild(QWidget, 'MatchSyncFooter') is None
                     reference = layout_signature(provider.viewer)
                     if evidence:
                         assert provider.viewer.grab().save(str(evidence / 'match-sync.png'))
