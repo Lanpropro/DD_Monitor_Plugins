@@ -46,6 +46,7 @@ class FloatingCrop(QWidget):
         self.hover_point = QPoint(-1, -1)
         self.aspect = 16 / 9
         self.placement = None
+        self.minimum_crop_width = 120
         self.setMouseTracking(True)
         # Ordinary child transparency restores the backing store behind moved crops.
         self.setAutoFillBackground(False)
@@ -193,7 +194,7 @@ class FloatingCrop(QWidget):
         previous = self.geometry()
         bounds = self.movement_bounds()
         maximum = min(bounds.width(), bounds.height() * self.aspect)
-        width = max(1, min(maximum, max(120, width)))
+        width = max(1, min(maximum, max(self.minimum_crop_width, width)))
         height = min(bounds.height(), round(width / self.aspect))
         self.setGeometry(round(max(bounds.x(), min(bounds.right() + 1 - width, x))),
                          round(max(bounds.y(), min(bounds.bottom() + 1 - height, y))), round(width), height)
@@ -374,7 +375,7 @@ class FloatingCrop(QWidget):
                 bounds = self.movement_bounds()
                 room_x = bounds.right() + 1 - anchor_x if dx > 0 else anchor_x - bounds.left()
                 room_y = bounds.bottom() + 1 - anchor_y if dy > 0 else anchor_y - bounds.top()
-                width = max(1, min(room_x, room_y * self.aspect, max(120, geometry.width() + change)))
+                width = max(1, min(room_x, room_y * self.aspect, max(self.minimum_crop_width, geometry.width() + change)))
                 self.fit_geometry(anchor_x if dx > 0 else anchor_x - width,
                                   anchor_y if dy > 0 else anchor_y - round(width / self.aspect), width)
             else:

@@ -95,7 +95,7 @@ def check(app, host, module, output=None):
     from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt
     from PySide6.QtGui import QColor, QEnterEvent, QImage, QPainter, QPixmap, QWheelEvent
     from PySide6.QtTest import QTest
-    from PySide6.QtWidgets import QComboBox, QDialog, QDialogButtonBox, QPushButton, QWidget
+    from PySide6.QtWidgets import QDialog, QDialogButtonBox, QPushButton, QWidget
     from ddm import plugins
     host.settings, host.rooms = {}, []
     host.resize(1400, 900)
@@ -373,20 +373,76 @@ def check(app, host, module, output=None):
             viewer.canvas.set_frame((1, source))
             first_crop = viewer.show_floating_crop(main, (0, 0, .3, .3), (1, source))
             def add_second(dialog):
-                picker = dialog.findChild(QComboBox)
+                picker = dialog.findChild(module.floating_control.CropSelections)
                 canvas = dialog.findChild(module.Canvas)
+                dialog.setAttribute(Qt.WA_DontShowOnScreen)
+                dialog.show()
+                app.processEvents()
                 first_color = canvas.selection_color
-                picker.setCurrentIndex(picker.count() - 1)
-                assert picker.currentText() == '新增画中画'
+                picker.add_button.click()
+                assert picker.active == 1 and not canvas.selection_ready
                 assert canvas.selection_color != first_color
                 assert canvas.other_selections == ((first_crop.crop, first_color),)
+                app.processEvents()
+                picker.bar.activate()
+                assert picker.buttons[0].x() < picker.buttons[1].x()
                 canvas.crop = QRectF(.5, .5, .4, .4)
+                canvas.selection_ready = True
+                canvas.selection_finished.emit()
+                picker.buttons[0].click()
+                canvas.crop = QRectF(.1, 0, .3, .3)
+                picker.buttons[1].click()
+                assert canvas.crop == QRectF(.5, .5, .4, .4)
+                assert canvas.other_selections[0][0] == QRectF(.1, 0, .3, .3)
+                picker.add_button.click()
+                picker.use_full_frame()
+                assert len(picker.rects) == 3
+                picker.remove_button.click()
+                assert len(picker.rects) == 2 and picker.active == 1
+                assert picker.arrangements and picker.arrangements.isHidden()
+                assert not picker.arrangement_toggle.isChecked()
+                picker.arrangement_toggle.click()
+                assert not picker.arrangements.isHidden()
+                picker.arrangements.buttons[16].click()
+                if output:
+                    app.processEvents()
+                    dialog.grab().save(str(output.with_name('selection-composition.png')))
+                dialog.hide()
                 return QDialog.Accepted
             with patch.object(QDialog, 'exec', add_second):
                 viewer.choose_crop(main, floating=True)
             first, second = viewer.floating_crops['1'].values()
             assert first is first_crop and second.crop == QRectF(.5, .5, .4, .4)
-            assert first.crop == QRectF(0, 0, .3, .3)
+            assert first.crop == QRectF(.1, 0, .3, .3)
+            assert first.geometry().right() < second.geometry().left()
+            assert abs(first.y() - second.y()) <= 1
+            original_geometry = first.geometry(), second.geometry()
+            def add_without_layout(dialog):
+                picker = dialog.findChild(module.floating_control.CropSelections)
+                assert picker.arrangements.isHidden() and not picker.arrangement_toggle.isChecked()
+                picker.add_button.click()
+                picker.use_full_frame()
+                return QDialog.Accepted
+            with patch.object(QDialog, 'exec', add_without_layout):
+                viewer.choose_crop(main, floating=True)
+            assert (first.geometry(), second.geometry()) == original_geometry
+            third = viewer.floating_crops['1'][2]
+            assert third.crop == QRectF(0, 0, 1, 1)
+            def delete_new(dialog):
+                picker = dialog.findChild(module.floating_control.CropSelections)
+                picker.buttons[2].click()
+                picker.remove_button.click()
+                return QDialog.Accepted
+            with patch.object(QDialog, 'exec', delete_new):
+                viewer.choose_crop(main, floating=True)
+            assert list(viewer.all_floating_crops()) == [first, second]
+            def remove_first(dialog):
+                picker = dialog.findChild(module.floating_control.CropSelections)
+                picker.remove_button.click()
+                return QDialog.Rejected
+            with patch.object(QDialog, 'exec', remove_first):
+                viewer.choose_crop(main, floating=True)
+            assert list(viewer.all_floating_crops()) == [first, second], 'Cancel keeps saved crops'
             first.close()
             assert list(viewer.all_floating_crops()) == [second]
             viewer.stop()

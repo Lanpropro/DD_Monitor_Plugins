@@ -3,9 +3,11 @@ from __future__ import annotations
 
 from .canvas import Canvas
 from .floating import FloatingCrop
-from PySide6.QtWidgets import QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
-from PySide6.QtCore import QPoint, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QIcon, QPixmap, QRegion
+from .panels import console_button_style
+from PySide6.QtWidgets import (QButtonGroup, QDialog, QDialogButtonBox, QHBoxLayout, QLabel,
+                               QPushButton, QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtCore import QPoint, QRect, QRectF, Qt, QTimer
+from PySide6.QtGui import QColor, QIcon, QKeySequence, QPixmap, QRegion, QShortcut
 from ddm import theme
 
 def _crop_source_policy(viewer, row):
@@ -145,47 +147,174 @@ def render_floating_crops(viewer, clock, shifts):
                 floating.set_frame(None)
 
 
-def _selection_picker(canvas, group, current):
-    picker = QComboBox()
-    picker.setAccessibleName('画中画选区')
-    new_slot = next(slot for slot in range(len(group) + 1) if slot not in group)
-    colors = {slot: QColor.fromHsv((198 + slot * 137) % 360, 190, 250)
-              for slot in (*group, new_slot)}
-    for slot in (*sorted(group), new_slot):
+def selection_color(slot):
+    return QColor.fromHsv((198 + slot * 137) % 360, 190, 250)
+
+
+class CropSelections(QWidget):
+    """Keep all edits as drafts until the picker is confirmed."""
+
+    def __init__(self, canvas, group, current, parent):
+        super().__init__(parent)
+        self.setStyleSheet(console_button_style('QToolButton'))
+        self.canvas = canvas
+        self.rects = {slot: QRectF(item.crop) for slot, item in group.items()}
+        self.active = None
+        self.buttons = {}
+        self.bar = QHBoxLayout(self)
+        self.bar.setContentsMargins(0, 0, 0, 0)
+        self.group = QButtonGroup(self)
+        self.add_button = QToolButton()
+        self.add_button.setText('＋')
+        self.add_button.setAccessibleName('新增画中画')
+        self.add_button.setToolTip('新增画中画选区')
+        self.add_button.clicked.connect(self.add_selection)
+        self.bar.addWidget(self.add_button)
+        self.remove_button = QToolButton()
+        self.remove_button.setText('×')
+        self.remove_button.setAccessibleName('删除当前选区')
+        self.remove_button.setToolTip('删除当前选区（Delete）')
+        self.remove_button.clicked.connect(self.remove_selection)
+        self.bar.addWidget(self.remove_button)
+        self.bar.addStretch()
+        QShortcut(QKeySequence(Qt.Key_Delete), parent, activated=self.remove_selection)
+        self.arrangement_toggle = QToolButton(parent)
+        self.arrangement_toggle.setText('排列预设')
+        self.arrangement_toggle.setCheckable(True)
+        self.arrangement_toggle.setToolTip('展开画中画排列预设')
+        self.arrangement_toggle.hide()
+        self.arrangement_toggle.toggled.connect(self.refresh_arrangements)
+        try:
+            from ddm.pip_arrangements import PipArrangements, FREE_LAYOUT
+        except ImportError:
+            self.arrangements = None
+        else:
+            self.arrangements = PipArrangements(FREE_LAYOUT, parent, compact=True)
+            self.arrangements.changed.connect(self.refresh_arrangements)
+        canvas.selection_finished.connect(self.save_active)
+        for slot in self.rects:
+            self.insert_button(slot)
+        if self.rects:
+            self.select(current if current in self.rects else next(iter(self.rects)))
+        else:
+            self.add_selection()
+
+    def insert_button(self, slot):
+        button = QToolButton()
+        label = f'选区 {slot + 1}'
         swatch = QPixmap(12, 12)
-        swatch.fill(colors[slot])
-        label = f'选区 {slot + 1}' if slot in group else '新增画中画'
-        picker.addItem(QIcon(swatch), label, slot)
+        swatch.fill(selection_color(slot))
+        button.setIcon(QIcon(swatch))
+        button.setText(str(slot + 1))
+        button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        button.setCheckable(True)
+        button.setAccessibleName(label)
+        button.setToolTip(label)
+        button.clicked.connect(lambda: self.select(slot))
+        self.group.addButton(button)
+        self.bar.insertWidget(self.bar.indexOf(self.remove_button), button)
+        self.buttons[slot] = button
 
-    def load_selection():
-        active = picker.currentData()
-        canvas.reset_selection()
-        if active in group:
-            canvas.crop = QRectF(group[active].crop)
-            canvas.selection_ready = True
-        canvas.selection_color = colors[active]
-        canvas.other_selections = tuple((item.crop, colors[slot])
-                                        for slot, item in group.items() if slot != active)
-        canvas.update()
+    def save_active(self):
+        if self.active is not None:
+            self.rects[self.active] = QRectF(self.canvas.crop) if self.canvas.selection_ready else None
+        self.refresh_arrangements()
 
-    if current in group:
-        picker.setCurrentIndex(picker.findData(current))
-    picker.currentIndexChanged.connect(load_selection)
-    load_selection()
-    return picker
+    def refresh_arrangements(self):
+        if self.arrangements is not None:
+            count = sum(rect is not None for rect in self.rects.values())
+            self.arrangement_toggle.setVisible(count >= 2)
+            self.arrangements.update_context(count)
+            self.arrangements.setVisible(count >= 2 and self.arrangement_toggle.isChecked())
+
+    def select(self, slot):
+        self.save_active()
+        self.active = slot
+        rect = self.rects.get(slot)
+        self.canvas.crop = QRectF(rect) if rect is not None else QRectF()
+        self.canvas.selection_ready = rect is not None
+        self.canvas.anchor = None
+        self.canvas.setEnabled(slot is not None)
+        self.remove_button.setEnabled(slot is not None)
+        if slot is not None:
+            self.buttons[slot].setChecked(True)
+            self.canvas.selection_color = selection_color(slot)
+        self.canvas.other_selections = tuple((other, selection_color(key)) for key, other in self.rects.items()
+                                             if key != slot and other is not None)
+        self.canvas.update()
+
+    def add_selection(self):
+        slot = next(index for index in range(len(self.rects) + 1) if index not in self.rects)
+        self.rects[slot] = None
+        self.insert_button(slot)
+        self.select(slot)
+
+    def remove_selection(self):
+        if self.active is None:
+            return
+        slot, self.active = self.active, None
+        self.rects.pop(slot)
+        button = self.buttons.pop(slot)
+        button.hide()
+        button.deleteLater()
+        self.select(next(reversed(self.rects), None))
+
+    def use_full_frame(self):
+        if self.active is not None:
+            self.canvas.reset_selection()
+            self.canvas.selection_ready = True
+            self.save_active()
+
+
+def arrange_crops(crops, arrangements, primary):
+    if arrangements is None or len(crops) < 2:
+        return
+    from ddm.pip_composition import FREE_LAYOUT
+    from ddm.pip_geometry import pane_rectangles
+    if arrangements.mode == FREE_LAYOUT:
+        return
+    first = crops[0]
+    bounds = first.movement_bounds()
+    for crop in crops[1:]:
+        bounds = bounds.intersected(crop.movement_bounds())
+    if bounds.isEmpty():
+        return
+    width = min(bounds.width(), 2 * max(crop.width() for crop in crops))
+    height = min(bounds.height(), 2 * max(crop.height() for crop in crops))
+    area = QRect(bounds)
+    area.setWidth(width)
+    area.setHeight(height)
+    area.moveTo(max(bounds.x(), min(first.x(), bounds.right() + 1 - width)),
+                max(bounds.y(), min(first.y(), bounds.bottom() + 1 - height)))
+    primary = next((index for index, item in enumerate(crops) if item is primary), 0)
+    for crop, rect in zip(crops, pane_rectangles(len(crops), area, arrangements.mode,
+                                                [item.aspect for item in crops], primary)):
+        gap = min(4, rect.width() // 4, rect.height() // 4)
+        rect.adjust(gap, gap, -gap, -gap)
+        width = min(rect.width(), round(rect.height() * crop.aspect))
+        height = round(width / crop.aspect)
+        crop.minimum_crop_width = min(120, max(1, width))
+        crop.fit_geometry(rect.center().x() - width / 2, rect.center().y() - height / 2,
+                          width)
 
 
 def choose_crop(viewer, row, floating=False, *, current=None):
+    group = viewer.floating_crops.get(row.room_id, {})
     frozen = None
+    frame = None
     if row.room_id == viewer.alignment.reference:
         frame = viewer.canvas.frame
     elif viewer.compare.isChecked() and row.room_id in viewer.comparison_panel.shown_rooms:
         frame = viewer.comparison_panel.cards[row.room_id][2].frame
-    else:
-        frame = (row.decoder.history.frame_at(viewer.live_clock() + viewer.shifts()[row.room_id])
-                 if row.decoder is not None else None)
+    if frame is None and floating and group:
+        crop = group.get(current) or next(iter(group.values()))
+        frame = crop.input_frame
+    if frame is None and row.decoder is not None:
+        history = row.decoder.history
+        frame = history.frame_at(viewer.live_clock() + viewer.shifts()[row.room_id])
+        if frame is None and floating:
+            frame = history.latest()
         if frame is not None and hasattr(row.decoder, "picture_at"):
-            history = row.decoder.history
             frozen = (history.segment_at(frame[0]) if hasattr(history, 'segment_at') else history, frame)
             frame = row.decoder.picture_at(frame[0], exact=True)
     if frame is None and frozen is None:
@@ -199,12 +328,12 @@ def choose_crop(viewer, row, floating=False, *, current=None):
     canvas.waiting = frame is None
     picker = None
     if floating:
-        picker = _selection_picker(canvas, viewer.floating_crops.get(row.room_id, {}), current)
+        picker = CropSelections(canvas, group, current, dialog)
     else:
         canvas.crop = QRectF(*row.crop)
         canvas.selection_ready = canvas.crop != QRectF(0, 0, 1, 1)
     reset = QPushButton("使用整个画面")
-    reset.clicked.connect(canvas.reset_selection)
+    reset.clicked.connect(picker.use_full_frame if picker is not None else canvas.reset_selection)
     buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
     buttons.button(QDialogButtonBox.Ok).setObjectName("MatchSyncCropConfirm")
     dialog.setStyleSheet(f"""
@@ -249,16 +378,34 @@ def choose_crop(viewer, row, floating=False, *, current=None):
     if picker is not None:
         layout.addWidget(picker, 0, Qt.AlignLeft)
     layout.addWidget(canvas, 1)
+    if picker is not None and picker.arrangements is not None:
+        layout.addWidget(picker.arrangement_toggle, 0, Qt.AlignLeft)
+        layout.addWidget(picker.arrangements, 0, Qt.AlignLeft)
     actions = QHBoxLayout()
     actions.addStretch(1)
     actions.addWidget(reset)
     actions.addWidget(buttons)
     layout.addLayout(actions)
-    if dialog.exec() == QDialog.Accepted and canvas.crop.width() > 0 and canvas.crop.height() > 0:
+    if dialog.exec() == QDialog.Accepted:
+        if viewer.rows.get(row.room_id) is not row:
+            return
+        if picker is not None:
+            picker.save_active()
+            selected = {slot: rect for slot, rect in picker.rects.items() if rect is not None}
+            for slot, item in tuple(group.items()):
+                if slot not in selected:
+                    item.close()
+            crops = {}
+            for slot, rect in selected.items():
+                item = group.get(slot)
+                if item is None or rect != item.crop:
+                    item = viewer.show_floating_crop(row, rect.getRect(), canvas.frame, slot=slot)
+                crops[slot] = item
+            if picker.arrangement_toggle.isChecked():
+                arrange_crops(list(crops.values()), picker.arrangements, crops.get(picker.active))
+            return
         rect = canvas.crop
-        if floating:
-            viewer.show_floating_crop(row, (rect.x(), rect.y(), rect.width(), rect.height()), canvas.frame,
-                                      slot=picker.currentData())
+        if rect.isEmpty():
             return
         row.crop = (rect.x(), rect.y(), rect.width(), rect.height())
         viewer.comparison_panel.zoom.setChecked(True)

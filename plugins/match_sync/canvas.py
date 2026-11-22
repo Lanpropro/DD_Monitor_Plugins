@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import QPointF, QRect, QRectF, Qt
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPen
 from PySide6.QtWidgets import QFrame
 
@@ -11,6 +11,8 @@ from ddm import theme
 
 
 class Canvas(QFrame):
+    selection_finished = Signal()
+
     def __init__(self, parent=None, selecting=False):
         super().__init__(parent)
         self.image = QImage()
@@ -240,6 +242,7 @@ class Canvas(QFrame):
     def mouseReleaseEvent(self, event):
         if self.anchor is not None:
             self.selection_ready = self.crop.width() > 0 and self.crop.height() > 0
+            self.selection_finished.emit()
         self.anchor = None
         if self.selecting:
             self.update()
