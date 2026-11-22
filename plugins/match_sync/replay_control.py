@@ -30,7 +30,7 @@ def seek_replay(viewer, stamp):
         viewer.canvas.set_frame(None)
         viewer._rebuild_replay_chat(now - viewer.replay.delay)
         viewer.audio.flush()
-        for floating in viewer.floating_crops.values():
+        for floating in viewer.all_floating_crops():
             floating.set_frame(None)
         viewer.replay_bar.refresh(force=True)
 
@@ -43,6 +43,6 @@ def return_live(viewer):
     viewer.canvas.set_frame(None)
     viewer._rebuild_replay_chat(time.monotonic(), live=True)
     viewer.audio.flush(clock)
-    for floating in viewer.floating_crops.values():
+    for floating in viewer.all_floating_crops():
         floating.set_frame(None)
     viewer.replay_bar.refresh(force=True)

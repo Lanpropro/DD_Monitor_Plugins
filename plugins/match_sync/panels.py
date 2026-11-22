@@ -430,7 +430,7 @@ class MatchSettingsDialog(QDialog):
         self.viewer.changed()
 
     def refresh_quality_status(self):
-        crops = list(self.viewer.floating_crops.values())
+        crops = list(self.viewer.all_floating_crops())
         if self.viewer.crop_quality.currentData() != 'light':
             self.quality_status.setText('')
         elif not crops:

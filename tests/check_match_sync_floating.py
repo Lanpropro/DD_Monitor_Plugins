@@ -95,7 +95,7 @@ def check(app, host, module, output=None):
     from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt
     from PySide6.QtGui import QColor, QEnterEvent, QImage, QPainter, QPixmap, QWheelEvent
     from PySide6.QtTest import QTest
-    from PySide6.QtWidgets import QDialog, QDialogButtonBox, QPushButton, QWidget
+    from PySide6.QtWidgets import QComboBox, QDialog, QDialogButtonBox, QPushButton, QWidget
     from ddm import plugins
     host.settings, host.rooms = {}, []
     host.resize(1400, 900)
@@ -369,10 +369,30 @@ def check(app, host, module, output=None):
             assert host.childAt(position) is other
             QTest.mouseClick(host.windowHandle(), Qt.LeftButton, pos=position)
             assert not viewer.floating_crops
-            viewer.show_floating_crop(viewer.rows['1'], (0, 0, 1, 1), (1, source))
+            main = viewer.rows['1']
+            viewer.canvas.set_frame((1, source))
+            first_crop = viewer.show_floating_crop(main, (0, 0, .3, .3), (1, source))
+            def add_second(dialog):
+                picker = dialog.findChild(QComboBox)
+                canvas = dialog.findChild(module.Canvas)
+                first_color = canvas.selection_color
+                picker.setCurrentIndex(picker.count() - 1)
+                assert picker.currentText() == '新增画中画'
+                assert canvas.selection_color != first_color
+                assert canvas.other_selections == ((first_crop.crop, first_color),)
+                canvas.crop = QRectF(.5, .5, .4, .4)
+                return QDialog.Accepted
+            with patch.object(QDialog, 'exec', add_second):
+                viewer.choose_crop(main, floating=True)
+            first, second = viewer.floating_crops['1'].values()
+            assert first is first_crop and second.crop == QRectF(.5, .5, .4, .4)
+            assert first.crop == QRectF(0, 0, .3, .3)
+            first.close()
+            assert list(viewer.all_floating_crops()) == [second]
             viewer.stop()
             assert not viewer.floating_crops
             return {'passed': True, 'source_resolution': '1920x1080', 'app_wide_drag': True,
+                    'multiple_crops_per_room': True, 'independent_close': True,
                     'wheel_corner_resize': True, 'four_corner_resize': True, 'editable_selection': True,
                     'inline_actions': True, 'fine_tune_button': True, 'replay_source_time': True,
                     'resize_placement_restored': True, 'cursor_zoom': True, 'burst_repaints_100_to_1': True, 'network_requests': 0}

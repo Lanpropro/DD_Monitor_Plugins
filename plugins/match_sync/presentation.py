@@ -27,7 +27,7 @@ def render(viewer):
 def _render(viewer, probe):
     if not viewer.embedded:
         viewer._suppress_host_audio()
-    dragging_crop = any(crop.drag is not None for crop in viewer.floating_crops.values())
+    dragging_crop = any(crop.drag is not None for crop in viewer.all_floating_crops())
     status_now = time.monotonic()
     refresh_status_ui = not dragging_crop and status_now >= viewer.status_ui_due
     if refresh_status_ui:
@@ -95,7 +95,7 @@ def _render(viewer, probe):
                                  playback_rate=viewer.playback_rate, replay=viewer.replay.active,
                                  audio_clock_interpolated=viewer.audio.clock_observation is not None,
                                  native_clip_retry_blocks=viewer.native_clip_retry_blocks,
-                                 floating=[crop.diagnostics() for crop in viewer.floating_crops.values()],
+                                 floating=[crop.diagnostics() for crop in viewer.all_floating_crops()],
                                  render_interval_ms=viewer.render_timer.interval())
         target = shown_clock + shown_shifts[row.room_id]
         requested = time.perf_counter()

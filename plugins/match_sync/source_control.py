@@ -102,8 +102,8 @@ def update_main_choices(viewer):
 
 def remove_room(viewer, room_id):
     viewer._stop_recording()
-    if room_id in viewer.floating_crops:
-        viewer.floating_crops[room_id].close()
+    for floating in tuple(viewer.floating_crops.get(room_id, {}).values()):
+        floating.close()
     viewer.independent_playback.pop(room_id, None)
     row = viewer.rows.pop(room_id)
     viewer.rematch_rooms.discard(room_id)

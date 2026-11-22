@@ -292,9 +292,6 @@ class Viewer(QDialog):
     def _apply_crop_quality(self):
         return floating_control._apply_crop_quality(self)
 
-    def _close_floating_crop(self, key):
-        return floating_control._close_floating_crop(self, key)
-
     def _buffer_reserve_changed(self):
         return playback_timing._buffer_reserve_changed(self)
 
@@ -501,14 +498,17 @@ class Viewer(QDialog):
     def flush_crop_background(self):
         return floating_control.flush_crop_background(self)
 
-    def show_floating_crop(self, row, crop, frame):
-        return floating_control.show_floating_crop(self, row, crop, frame)
+    def all_floating_crops(self):
+        return (crop for crops in self.floating_crops.values() for crop in crops.values())
+
+    def show_floating_crop(self, row, crop, frame, *, slot=0):
+        return floating_control.show_floating_crop(self, row, crop, frame, slot=slot)
 
     def render_floating_crops(self, clock, shifts):
         return floating_control.render_floating_crops(self, clock, shifts)
 
-    def choose_crop(self, row, floating=False):
-        return floating_control.choose_crop(self, row, floating)
+    def choose_crop(self, row, floating=False, *, current=None):
+        return floating_control.choose_crop(self, row, floating, current=current)
 
     def _suppress_host_audio(self):
         return host_integration._suppress_host_audio(self)

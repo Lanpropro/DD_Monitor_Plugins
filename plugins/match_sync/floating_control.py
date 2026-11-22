@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from .canvas import Canvas
 from .floating import FloatingCrop
-from PySide6.QtWidgets import QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
-from PySide6.QtCore import QPoint, QRectF, QTimer
-from PySide6.QtGui import QRegion
+from PySide6.QtWidgets import QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtCore import QPoint, QRectF, Qt, QTimer
+from PySide6.QtGui import QColor, QIcon, QPixmap, QRegion
 from ddm import theme
 
 def _crop_source_policy(viewer, row):
@@ -17,7 +17,7 @@ def _crop_source_policy(viewer, row):
 
 
 def _crop_quality_changed(viewer):
-    for floating in viewer.floating_crops.values():
+    for floating in viewer.all_floating_crops():
         floating.set_quality_mode(viewer.crop_quality.currentData())
     viewer._apply_crop_quality()
     viewer.changed()
@@ -30,8 +30,7 @@ def _apply_crop_quality(viewer):
         seed = getattr(row.decoder, 'seed', {})
         if row.decoder is None or seed.get('crop_quality_policy', 'source') == viewer._crop_source_policy(row):
             continue
-        floating = viewer.floating_crops.get(key)
-        if floating is not None:
+        for floating in viewer.floating_crops.get(key, {}).values():
             floating.set_frame(None)
         if key == viewer.alignment.reference:
             viewer._reload_picture()
@@ -45,8 +44,11 @@ def _apply_crop_quality(viewer):
             viewer.generation += 1
 
 
-def _close_floating_crop(viewer, key):
-    viewer.floating_crops.pop(key, None)
+def _close_floating_crop(viewer, key, slot):
+    group = viewer.floating_crops[key]
+    group.pop(slot)
+    if not group:
+        viewer.floating_crops.pop(key)
     viewer._apply_crop_quality()
 
 
@@ -61,7 +63,7 @@ def floating_surface(viewer):
 
 
 def reparent_floating_crops(viewer, parent):
-    for floating in viewer.floating_crops.values():
+    for floating in viewer.all_floating_crops():
         geometry = floating.geometry()
         floating.parentWidget().removeEventFilter(floating)
         floating.setParent(parent)
@@ -100,16 +102,18 @@ def flush_crop_background(viewer):
             surface.repaint(region)
 
 
-def show_floating_crop(viewer, row, crop, frame):
-    floating = viewer.floating_crops.get(row.room_id)
+def show_floating_crop(viewer, row, crop, frame, *, slot=0):
+    group = viewer.floating_crops.setdefault(row.room_id, {})
+    floating = group.get(slot)
     if floating is None:
         floating = FloatingCrop(viewer.floating_surface(), row.label(), crop, native=viewer.workspace_crops)
-        viewer.floating_crops[row.room_id] = floating
-        floating.closed.connect(lambda key=row.room_id: viewer._close_floating_crop(key))
+        group[slot] = floating
+        floating.closed.connect(lambda: _close_floating_crop(viewer, row.room_id, slot))
         floating.background_exposed.connect(lambda rect, item=floating: viewer.restore_crop_background(item, rect))
         floating.gesture_finished.connect(viewer.flush_crop_background)
-        floating.recrop.connect(lambda: viewer.choose_crop(row, floating=True))
-        floating.move(40 + len(viewer.floating_crops) * 24, 40 + len(viewer.floating_crops) * 24)
+        floating.recrop.connect(lambda: viewer.choose_crop(row, floating=True, current=slot))
+        offset = 40 + sum(len(crops) for crops in viewer.floating_crops.values()) * 24
+        floating.move(offset, offset)
     floating.picture_widget = viewer.picture
     viewer.picture.installEventFilter(floating)
     floating.crop = QRectF(*crop)
@@ -127,19 +131,51 @@ def show_floating_crop(viewer, row, crop, frame):
 
 
 def render_floating_crops(viewer, clock, shifts):
-    for key, floating in viewer.floating_crops.items():
+    for key, group in viewer.floating_crops.items():
         row = viewer.rows.get(key)
         if row is not None and row.decoder is not None and not row.paused and key in shifts:
-            floating.label = row.label()
-            floating.set_avatar(row.avatar.pixmap())
             frame = row.decoder.picture_at(clock + shifts[key])
-            if frame is not None:
-                floating.set_frame(frame)
+            for floating in group.values():
+                floating.label = row.label()
+                floating.set_avatar(row.avatar.pixmap())
+                if frame is not None:
+                    floating.set_frame(frame)
         elif key not in shifts:
-            floating.set_frame(None)
+            for floating in group.values():
+                floating.set_frame(None)
 
 
-def choose_crop(viewer, row, floating=False):
+def _selection_picker(canvas, group, current):
+    picker = QComboBox()
+    picker.setAccessibleName('画中画选区')
+    new_slot = next(slot for slot in range(len(group) + 1) if slot not in group)
+    colors = {slot: QColor.fromHsv((198 + slot * 137) % 360, 190, 250)
+              for slot in (*group, new_slot)}
+    for slot in (*sorted(group), new_slot):
+        swatch = QPixmap(12, 12)
+        swatch.fill(colors[slot])
+        label = f'选区 {slot + 1}' if slot in group else '新增画中画'
+        picker.addItem(QIcon(swatch), label, slot)
+
+    def load_selection():
+        active = picker.currentData()
+        canvas.reset_selection()
+        if active in group:
+            canvas.crop = QRectF(group[active].crop)
+            canvas.selection_ready = True
+        canvas.selection_color = colors[active]
+        canvas.other_selections = tuple((item.crop, colors[slot])
+                                        for slot, item in group.items() if slot != active)
+        canvas.update()
+
+    if current in group:
+        picker.setCurrentIndex(picker.findData(current))
+    picker.currentIndexChanged.connect(load_selection)
+    load_selection()
+    return picker
+
+
+def choose_crop(viewer, row, floating=False, *, current=None):
     frozen = None
     if row.room_id == viewer.alignment.reference:
         frame = viewer.canvas.frame
@@ -161,9 +197,12 @@ def choose_crop(viewer, row, floating=False):
     canvas = Canvas(selecting=True)
     canvas.set_frame(frame)
     canvas.waiting = frame is None
-    canvas.crop = (QRectF(viewer.floating_crops[row.room_id].crop) if floating and row.room_id in viewer.floating_crops
-                   else QRectF(0, 0, 1, 1) if floating else QRectF(*row.crop))
-    canvas.selection_ready = (floating and row.room_id in viewer.floating_crops) or canvas.crop != QRectF(0, 0, 1, 1)
+    picker = None
+    if floating:
+        picker = _selection_picker(canvas, viewer.floating_crops.get(row.room_id, {}), current)
+    else:
+        canvas.crop = QRectF(*row.crop)
+        canvas.selection_ready = canvas.crop != QRectF(0, 0, 1, 1)
     reset = QPushButton("使用整个画面")
     reset.clicked.connect(canvas.reset_selection)
     buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -207,6 +246,8 @@ def choose_crop(viewer, row, floating=False):
                   "两路请选择相同计时器，框选不会改变自动匹配或读取计时器数字。")
     hint.setWordWrap(True)
     layout.addWidget(hint)
+    if picker is not None:
+        layout.addWidget(picker, 0, Qt.AlignLeft)
     layout.addWidget(canvas, 1)
     actions = QHBoxLayout()
     actions.addStretch(1)
@@ -216,7 +257,8 @@ def choose_crop(viewer, row, floating=False):
     if dialog.exec() == QDialog.Accepted and canvas.crop.width() > 0 and canvas.crop.height() > 0:
         rect = canvas.crop
         if floating:
-            viewer.show_floating_crop(row, (rect.x(), rect.y(), rect.width(), rect.height()), canvas.frame)
+            viewer.show_floating_crop(row, (rect.x(), rect.y(), rect.width(), rect.height()), canvas.frame,
+                                      slot=picker.currentData())
             return
         row.crop = (rect.x(), rect.y(), rect.width(), rect.height())
         viewer.comparison_panel.zoom.setChecked(True)

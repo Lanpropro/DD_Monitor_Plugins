@@ -60,7 +60,7 @@ def stop(viewer):
     with viewer._switch_stage('stop_playback_probe'):
         viewer.playback_probe.stop()
     viewer.independent_playback.clear()
-    for floating in list(viewer.floating_crops.values()):
+    for floating in list(viewer.all_floating_crops()):
         floating.close()
     viewer.analysis_serial += 1
     viewer.late_buffer = LateBuffer(viewer.reserve_seconds)

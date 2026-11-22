@@ -28,6 +28,8 @@ class Canvas(QFrame):
         self.paint_probe = None
         self.selecting = selecting
         self.crop = QRectF(0, 0, 1, 1)
+        self.selection_color = QColor('#38bdf8')
+        self.other_selections = ()
         self.anchor = None
         self.selection_ready = False
         self.selection_zoom = 1.
@@ -128,18 +130,21 @@ class Canvas(QFrame):
         if self.paint_probe is not None and self.paint_probe.thread is not None:
             self.paint_probe.timings.record('main_draw_image', time.perf_counter() - started)
         if self.selecting:
-            painter.setPen(QPen(QColor("#38bdf8"), 2))
+            for bounds, color in self.other_selections:
+                painter.setPen(QPen(color, 2))
+                painter.drawRect(self.selection_rect(bounds))
+            painter.setPen(QPen(self.selection_color, 2))
             rect = self.selection_rect()
             painter.drawRect(rect)
             if self.selection_ready:
-                painter.setBrush(QColor('#38bdf8'))
+                painter.setBrush(self.selection_color)
                 for point in (rect.topLeft(), rect.topRight(), rect.bottomLeft(), rect.bottomRight(),
                               QPointF(rect.center().x(), rect.top()), QPointF(rect.center().x(), rect.bottom()),
                               QPointF(rect.left(), rect.center().y()), QPointF(rect.right(), rect.center().y())):
                     painter.drawRect(QRectF(point.x() - 3, point.y() - 3, 6, 6))
 
-    def selection_rect(self):
-        rect, image = self.crop, self.image_rect
+    def selection_rect(self, rect=None):
+        rect, image = self.crop if rect is None else rect, self.image_rect
         return QRectF(image.x() + rect.x() * image.width(), image.y() + rect.y() * image.height(),
                       rect.width() * image.width(), rect.height() * image.height())
 
