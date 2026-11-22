@@ -338,14 +338,27 @@ def check(app, host, module, output=None):
                     app.processEvents()
                     time.sleep(.01)
                 assert event_dialog.sample_token is not None, event_dialog.status.text()
+                QTest.qWait(30)
                 boundaries = {}
                 for key, selected in (('1', 100), ('2', 125)):
                     lane = event_dialog.lanes[key]
                     assert lane.frames[0][0] < event_dialog.anchors[key] - 14.8
                     assert lane.frames[-1][0] > event_dialog.anchors[key] + 9.8
+                    marker = lane.strip.item(lane.click_frame_index)
+                    assert lane.frames[lane.click_frame_index][0] == event_dialog.anchors[key]
+                    assert marker.data(ui.CLICK_FRAME_ROLE) == '点击帧' and marker.text() == '0.00s'
+                    assert lane.strip.currentRow() < 0 and lane.strip.viewport().rect().contains(lane.strip.visualItemRect(marker).center())
                     lane.strip.setCurrentRow(selected)
                     boundaries[key] = sum(lane.frames[index][0] for index in (selected - 1, selected)) / 2
                     assert '变化边界' in lane.status.text()
+                    lane.strip.horizontalScrollBar().setValue(lane.strip.horizontalScrollBar().maximum())
+                    assert not lane.strip.viewport().rect().contains(lane.strip.visualItemRect(marker).center())
+                event_dialog.jump.click()
+                for key, selected in (('1', 100), ('2', 125)):
+                    lane = event_dialog.lanes[key]
+                    marker = lane.strip.item(lane.click_frame_index)
+                    assert lane.strip.currentRow() == selected
+                    assert lane.strip.viewport().rect().contains(lane.strip.visualItemRect(marker).center())
                 event_dialog.calculate_proposal()
                 assert event_dialog.apply.isEnabled()
                 offset = boundaries['2'] - boundaries['1']

@@ -72,7 +72,8 @@ def capture_band(history, anchor, crop, cancelled, *, preview=False, event_windo
                     return [(stamp, image_from_frame(frame, width=640))]
                 if stamp > end + .001:
                     return checked_frames(frames, event_window)
-                if stamp - last < (EVENT_INTERVAL if event_window else .065):
+                exact_event = event_window and abs(stamp - anchor) <= .001
+                if not exact_event and stamp - last < (EVENT_INTERVAL if event_window else .065):
                     continue
                 # Limit the full-frame conversion before applying the normalized
                 # crop; a 4K source must not become a 4K QImage on the worker.

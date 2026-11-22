@@ -16,6 +16,9 @@ from .clock_capture import EVENT_AFTER, EVENT_BEFORE, capture_band, capture_even
 from .panels import ConsoleIconButton, console_button_style, use_link_cursor
 
 
+CLICK_FRAME_ROLE = Qt.UserRole
+
+
 def settings_button(text, tooltip):
     button = QPushButton(text)
     button.setAutoDefault(False)
@@ -87,11 +90,24 @@ class ClockFrameDelegate(QStyledItemDelegate):
     def paint(self, painter, option, index):
         super().paint(painter, option, index)
         selected = bool(option.state & QStyle.State_Selected)
-        if selected or index.row() == 0 and not self.parent().property('eventFrames'):
+        marker = index.data(CLICK_FRAME_ROLE)
+        marked = marker or index.row() == 0 and not self.parent().property('eventFrames')
+        if selected or marked:
             painter.save()
             painter.setPen(QPen(theme.qcolor(theme.PINK if selected else theme.ACCENT), 2))
             painter.setBrush(Qt.NoBrush)
             painter.drawRoundedRect(option.rect.adjusted(2, 2, -2, -2), 5, 5)
+            if selected and marked:
+                painter.setPen(QPen(theme.qcolor(theme.ACCENT), 2))
+                painter.drawRoundedRect(option.rect.adjusted(5, 5, -5, -5), 4, 4)
+            if marker:
+                badge = QRectF(option.rect.left() + 8, option.rect.top() + 8,
+                               option.fontMetrics.horizontalAdvance(marker) + 12, option.fontMetrics.height() + 4)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(theme.qcolor(theme.BG))
+                painter.drawRoundedRect(badge, 4, 4)
+                painter.setPen(theme.qcolor(theme.ACCENT))
+                painter.drawText(badge, Qt.AlignCenter, marker)
             painter.restore()
 
 
@@ -142,6 +158,7 @@ class ClockLane(QWidget):
         super().__init__()
         self.dialog, self.key = dialog, key
         self.frames = []
+        self.click_frame_index = None
         self.preview = None
         self.region = None
         self.load_region()
@@ -221,6 +238,7 @@ class ClockLane(QWidget):
                 self.status.setText(f'已选第 {index + 1} 帧为首次翻秒后的画面；请核对数字刚刚变化')
 
     def show_preview(self):
+        self.click_frame_index = None
         self.strip.clear()
         if self.preview is None:
             return
@@ -289,13 +307,23 @@ class ClockLane(QWidget):
 
     def set_band(self, frames, readings, direction):
         self.frames = frames
+        self.click_frame_index = None
         self.strip.clear()
         if direction == 0:
             anchor = self.dialog.anchors[self.key]
-            for stamp, image in frames:
-                self.strip.addItem(QListWidgetItem(QIcon(QPixmap.fromImage(image)), f'{stamp - anchor:+.2f}s'))
-            nearest = min(range(len(frames)), key=lambda index: abs(frames[index][0] - anchor))
-            self.strip.scrollToItem(self.strip.item(nearest), QAbstractItemView.PositionAtCenter)
+            self.click_frame_index = min(range(len(frames)), key=lambda index: abs(frames[index][0] - anchor))
+            for index, (stamp, image) in enumerate(frames):
+                delta = stamp - anchor
+                exact = abs(delta) <= .001
+                text = '0.00s' if exact else f'{delta:+.2f}s'
+                item = QListWidgetItem(QIcon(QPixmap.fromImage(image)), text)
+                if index == self.click_frame_index:
+                    marker = '点击帧' if exact else '距点击最近'
+                    item.setData(CLICK_FRAME_ROLE, marker)
+                    item.setData(Qt.AccessibleTextRole, f'{marker} · {text}')
+                    item.setToolTip(f'{marker} · {text}')
+                self.strip.addItem(item)
+            QTimer.singleShot(0, self, self.center_on_click)
             first, last = frames[0][0] - anchor, frames[-1][0] - anchor
             self.status.setText(f'{self.display_name} · 已取帧 {first:+.2f}s 至 {last:+.2f}s · 选择变化刚出现的画面')
             return
@@ -311,6 +339,12 @@ class ClockLane(QWidget):
         found = suggest_transition([stamp for stamp, _image in frames], readings, direction)
         self.strip.setCurrentRow(found if found is not None else -1)
         self.status.setText('已建议翻秒帧，请核对计时器数字后计算' if found is not None else '请填写首帧时间，并点击第一次翻秒后的画面')
+
+    def center_on_click(self):
+        if self.click_frame_index is not None:
+            # Flush pending IconMode layout; insertion can otherwise scroll back to its end.
+            self.strip.doItemsLayout()
+            self.strip.scrollToItem(self.strip.item(self.click_frame_index), QAbstractItemView.PositionAtCenter)
 
 
 class ClockDialog(QDialog):
@@ -367,6 +401,8 @@ class ClockDialog(QDialog):
         self.sample = settings_button('采样并识别', '采样计时器并本地识别')
         self.sample.setFixedWidth(max(104, self.sample.fontMetrics().horizontalAdvance(self.sample.text()) + 20))
         self.sample.clicked.connect(lambda: self.start_job(preview=False))
+        self.jump = settings_button('回到点击帧', '定位到各路标记的点击帧')
+        self.jump.clicked.connect(self.center_on_click)
         header = QFrame()
         header.setObjectName('ClockDialogToolbar')
         heading = QHBoxLayout(header)
@@ -374,6 +410,7 @@ class ClockDialog(QDialog):
         heading.setSpacing(10)
         heading.addWidget(self.mode)
         heading.addStretch()
+        heading.addWidget(self.jump)
         heading.addWidget(self.refresh)
         heading.addWidget(self.sample)
         body = QWidget()
@@ -507,6 +544,10 @@ class ClockDialog(QDialog):
         self.pin_event()
         self.start_job(preview=True)
 
+    def center_on_click(self):
+        for lane in self.lanes.values():
+            lane.center_on_click()
+
     def mode_changed(self, *_args):
         event_mode = self.is_event_mode()
         for lane in self.lanes.values():
@@ -516,6 +557,7 @@ class ClockDialog(QDialog):
             lane.pick.setToolTip('框选圈数、排名或圈速区域' if event_mode else '框选游戏计时器区域')
             lane.strip.setAccessibleName(lane.display_name + ('：选择事件变化后第一帧' if event_mode else '：选择首次翻秒帧'))
         self.sample.setText('赛事取帧' if event_mode else '采样并识别')
+        self.jump.setVisible(event_mode)
         self.sample.setToolTip(f'取点击前 {EVENT_BEFORE:g} 秒、后 {EVENT_AFTER:g} 秒的画面' if event_mode else '采样计时器并本地识别')
         self.clear_bands()
         if event_mode:
@@ -534,6 +576,7 @@ class ClockDialog(QDialog):
             lane.first.clear()
             lane.show_preview()
         self.sample_token = None
+        self.jump.setEnabled(False)
         self.invalidate()
 
     def check_session(self):
@@ -566,6 +609,7 @@ class ClockDialog(QDialog):
             widget.setEnabled(not busy)
         for lane in self.lanes.values():
             lane.pick.setEnabled(not busy and lane.preview is not None)
+        self.jump.setEnabled(not busy and any(lane.click_frame_index is not None for lane in self.lanes.values()))
 
     def start_job(self, *, preview, sample_event=False):
         if self.busy or self.cancelled.is_set():
@@ -642,6 +686,7 @@ class ClockDialog(QDialog):
                     self.anchors = {key: anchor for key, _history, anchor, _region in requests}
                     for key, frames in bands.items():
                         self.lanes[key].set_band(frames, readings.get(key, [None] * len(frames)), self.mode.currentData())
+                    self.jump.setEnabled(event_mode)
                     self.status.setText('请选择两路同一变化刚出现的帧，再计算偏移。可用方向键逐帧核对。'
                                         if event_mode else note or '请核对第一帧时间与首次翻秒帧，再计算偏移；建议不等于自动确认。')
             except ValueError as error:
