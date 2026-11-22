@@ -216,7 +216,7 @@ def _configure_picture_budget(viewer):
     reference = viewer.alignment.reference
     shown = set(viewer.comparison_panel.rooms_to_show() if viewer.compare.isChecked() else (reference,))
     shown.update(viewer.floating_crops)
-    comparisons = max(0, len(shown) - 1)
+    comparisons = len(shown - {reference})
     inactive = max(1, len(viewer.rows) - len(shown))
     for key, row in viewer.rows.items():
         visible = key in shown

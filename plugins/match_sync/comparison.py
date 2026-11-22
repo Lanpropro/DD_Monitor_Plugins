@@ -63,6 +63,9 @@ class ComparisonPanel(SettingsPanel):
             state.setStyleSheet(f'font-size: 12px; color: {theme.TEXT2};')
 
     def open_clock(self):
+        if getattr(self.viewer, 'native_main', None) is not None:
+            self.viewer.context.notify('原生主画面请使用手动偏移')
+            return
         from .clock_dialog import open_clock_dialog
         open_clock_dialog(self.viewer)
 
@@ -71,7 +74,8 @@ class ComparisonPanel(SettingsPanel):
         others = tuple(key for key in rows if key != reference)
         selected = self.target.currentData()
         secondary = others if len(rows) <= 4 else ((selected,) if selected in others else others[:1])
-        return tuple(key for key in (reference, *secondary) if key in rows)
+        primary = () if getattr(self.viewer, 'native_main', None) is not None else (reference,)
+        return tuple(key for key in (*primary, *secondary) if key in rows)
 
     def render(self, clock, shifts):
         rows = self.viewer.rows
@@ -118,7 +122,9 @@ class ComparisonPanel(SettingsPanel):
             self.target.setCurrentIndex(max(0, self.target.findData(selected)))
             self.target.blockSignals(False)
         self.target.setVisible(len(rows) > 4)
-        self.heading_label.setText("偏移对照 · 全部直播间" if len(rows) <= 4 else "偏移对照 · 主画面与选中直播间")
+        native_main = getattr(self.viewer, 'native_main', None) is not None
+        self.heading_label.setText("偏移对照 · 解说画面" if native_main else
+                                   "偏移对照 · 全部直播间" if len(rows) <= 4 else "偏移对照 · 主画面与选中直播间")
         shown = self.rooms_to_show()
         if shown != self.shown_rooms:
             for card, *_ in self.cards.values():

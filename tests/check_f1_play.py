@@ -52,8 +52,12 @@ def drag_card(window, room_id, viewer):
     ghost = QPixmap(32, 32)
     ghost.fill(Qt.transparent)
     position = viewer.picture.mapToGlobal(viewer.picture.rect().center())
-    assert session.start(item, mime, ghost, QPoint(), position)
-    assert session.finish()
+    # The isolated window does not take focus. Test the real sidebar drag
+    # dispatch within this window even if another application covers it.
+    with patch('ddm.sidebar_drag.widget_at', side_effect=lambda point:
+               viewer.picture.childAt(viewer.picture.mapFromGlobal(point)) or viewer.picture):
+        assert session.start(item, mime, ghost, QPoint(), position)
+        assert session.finish()
     QTest.qWait(DURATION_MS + 30)
 
 
@@ -109,7 +113,7 @@ def check_entry_icon(window, directory, evidence):
 
 def layout_signature(page):
     return (
-        type(page), page.geometry(), page.picture_split.sizes(), page.body_split.sizes(),
+        page.geometry(), page.picture_split.sizes(), page.body_split.sizes(),
         page.picture.isVisible(), page.settings_panel.isVisible(), page.chat_pane.isVisible(),
         page.send_console.isVisible(), tuple(widget.isHidden() for widget in page.add_controls),
     )
@@ -273,35 +277,125 @@ def check_workspace(window, entry, match, directory, evidence, suspended_tile):
         match.close()
 
 
-def check_live(window, match, room_id, evidence, seconds):
+def wait_for(predicate, seconds):
+    from time import monotonic
+    from PySide6.QtTest import QTest
+
+    deadline = monotonic() + seconds
+    while monotonic() < deadline:
+        if result := predicate():
+            return result
+        QTest.qWait(100)
+    return None
+
+
+def check_peer_outage(match, peer_id, player):
+    from time import monotonic
+    from threading import Event
+    from PySide6.QtTest import QTest
+
+    match.saved_rooms[peer_id] = {'audible': False}
+    assert match._add_dragged(peer_id)
+    row = match.rows[peer_id]
+    decoder = row.decoder
+    assert decoder is not None and wait_for(lambda: decoder.history.bounds(), 40), row.video_text
+    def relative():
+        shifts = match.target_shifts()
+        return shifts[peer_id] - shifts[match.main.currentData()]
+    before_shift = relative()
+    row.delay.setValue(1.5)
+    assert abs(relative() - before_shift + 1.5) < .1
+    reconnect = Event()
+    original = type(decoder)._resolve
+
+    def interrupt(worker, attempt):
+        if worker is decoder and not reconnect.is_set():
+            raise OSError('Acceptance test: this peer connection is interrupted')
+        return original(worker, attempt)
+
+    first, _ = player.playback_timing()
+    session = player.play_session
+    started = monotonic()
+    assert decoder.process is not None
+    with patch.object(type(decoder), '_resolve', interrupt):
+        decoder.process.terminate()
+        positions = []
+        while monotonic() - started < 15:
+            QTest.qWait(250)
+            position, _ = player.playback_timing()
+            positions.append((round(monotonic() - started, 2), position))
+        restored = monotonic()
+        reconnect.set()
+        assert wait_for(lambda: decoder.last_frame_received > restored, 35), row.video_text
+    last = next(value for _, value in reversed(positions) if value is not None)
+    gaps = []
+    last_progress = 0
+    previous = first
+    for instant, position in positions:
+        if position is not None and position > previous:
+            gaps.append(instant - last_progress)
+            last_progress, previous = instant, position
+    gaps.append(positions[-1][0] - last_progress)
+    advanced = last - first
+    result = {'peer_offset_seconds': row.delay.value(), 'peer_shift_delta': round(relative() - before_shift, 2),
+              'peer_resume_seconds': round(decoder.last_frame_received - restored, 2),
+              'main_advanced_seconds_during_cut': round(advanced, 2),
+              'main_longest_progress_gap': round(max(gaps), 2),
+              'same_main_connection': player.play_session == session,
+              'main_samples': positions}
+    assert match.native_picture.player is player and row.delay.value() == 1.5
+    assert result['same_main_connection'] and advanced >= 14 and max(gaps) < 1, result
+    return result
+
+
+def check_live(window, match, room_id, evidence, seconds, peer_id=None):
     from time import monotonic
     from PySide6.QtTest import QTest
 
     started = monotonic()
+    match.saved_rooms[room_id] = {'audible': False}
     drag_card(window, room_id, match)
     row = match.rows[room_id]
-    while row.actual_position is None and monotonic() - started < 45:
-        QTest.qWait(100)
+    player = match.native_picture.player
+    assert player is not None and row.decoder is None
+    assert wait_for(lambda: row.actual_position is not None and player.state == 'playing', 45), row.video_text
     first = row.actual_position
-    assert first is not None and not match.canvas.image.isNull(), row.video_text
     ready = monotonic()
     if evidence:
-        assert match.canvas.image.save(str(evidence / 'video-frame.png'))
+        player.player.screenshot_to_file(str(evidence / 'video-frame.png'), includes='video')
         assert match.grab().save(str(evidence / 'live-workspace.png'))
     samples = []
     while monotonic() - ready < seconds:
         QTest.qWait(250)
         samples.append({'time': round(monotonic() - ready, 2), 'position': row.actual_position,
-                        'waiting': match.canvas.waiting, 'presented': match.canvas.presented})
+                        'state': player.state, 'waiting': match.canvas.waiting})
+    info = player.stream_info()
     result = {'startup_seconds': round(ready - started, 2), 'advanced_seconds': round(row.actual_position - first, 2),
               'duration': samples[-1]['time'], 'waiting_samples': sum(item['waiting'] for item in samples),
-              'resolution': list(row.decoder.video_size), 'fps': row.decoder.fps}
+              'resolution': [info.get('video', {}).get(key) for key in ('w', 'h')], 'fps': info['fps'],
+              'decoder': info['decoder']}
+    assert result['advanced_seconds'] > 0
+    match._pause_picture()
+    assert player.paused
+    ranges = player.cached_seek_ranges()
+    position, _ = player.playback_timing()
+    interval = next((span for span in ranges if span[0] <= position <= span[1]), None)
+    result['seek_range'] = list(interval) if interval else None
+    if interval and position - interval[0] >= 1:
+        row.delay.setValue(1.)
+        assert row.delay.value() == 1. and wait_for(lambda: abs(player.playback_timing()[0] - (position - 1.)) < .2, 5)
+        result['main_offset_verified'] = True
+    match._pause_picture()
+    assert not player.paused
+    if peer_id:
+        result['peer'] = check_peer_outage(match, peer_id, player)
+    match._reload_picture()
+    assert match.native_picture.player is not None and match.native_picture.player is not player
     if evidence:
         (evidence / 'samples.json').write_text(json.dumps({'summary': result, 'samples': samples}), encoding='utf-8')
     print(json.dumps(result), flush=True)
-    assert result['advanced_seconds'] > 0
     match.close()
-    assert not match.running and window.wall.isVisible()
+    assert not match.running and window.wall.isVisible() and match.native_picture.player is None
 
 
 def main():
@@ -311,14 +405,22 @@ def main():
     parser.add_argument('--m3u-plugin', type=Path)
     parser.add_argument('--source-index', type=int, default=0)
     parser.add_argument('--seconds', type=int, default=30)
+    parser.add_argument('--peer', help='Public Bilibili room ID for the live offset and outage check')
     parser.add_argument('--ui-evidence', type=Path)
     args = parser.parse_args()
     if args.live_source_file and (not args.m3u_plugin or args.seconds < 1):
         parser.error('Live sampling needs --m3u-plugin and a positive duration')
 
     sys.path.insert(0, str(args.host.resolve()))
+    qt_errors = []
+    previous_hook = sys.excepthook
+    def record_error(error_type, error, traceback):
+        qt_errors.append(error)
+        if len(qt_errors) == 1:
+            previous_hook(error_type, error, traceback)
+    sys.excepthook = record_error
     os.environ['DDM_NO_SAVE'] = '1'
-    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    os.environ.setdefault('QT_QPA_PLATFORM', 'windows' if args.live_source_file else 'offscreen')
     from shutil import copytree
     from PySide6.QtTest import QTest
     from ddm import config, images, plugins, theme
@@ -392,7 +494,7 @@ def main():
                 QTest.qWait(100)
                 if args.live_source_file:
                     assert window.plugins.platform_for(room_id).room_info(room_id).uname == 'CCTV-5+（验收源）'
-                    check_live(window, page, room_id, evidence, args.seconds)
+                    check_live(window, page, room_id, evidence, args.seconds, args.peer)
                 else:
                     assert layout_signature(page) == reference
                     if evidence:
@@ -407,7 +509,9 @@ def main():
                 window.close()
                 window.deleteLater()
                 app.sendPostedEvents(None, QEvent.DeferredDelete)
-    print('PASS: F1 Play sidebar drop, wall suspension, background mask and floating crop input', flush=True)
+    sys.excepthook = previous_hook
+    assert not qt_errors, (len(qt_errors), qt_errors[0])
+    print('PASS: F1 Play workspace and selected live playback checks', flush=True)
 
 
 if __name__ == '__main__':

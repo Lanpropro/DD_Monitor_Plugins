@@ -1,4 +1,5 @@
 """Register the F1 Play workspace with the host."""
+from inspect import signature
 from pathlib import Path
 
 from PySide6.QtGui import QAction, QIcon
@@ -25,8 +26,9 @@ class F1Play(Plugin):
     def on_load(self, context):
         if context.window is None:
             return
-        required = ('register_workspace_control', 'show_workspace', 'create_plugin_widget')
-        if not all(callable(getattr(context, name, None)) for name in required):
+        required = ('register_workspace_control', 'show_workspace', 'create_plugin_widget', 'create_workspace_player')
+        if (not all(callable(getattr(context, name, None)) for name in required)
+                or 'live_rewind' not in signature(context.create_workspace_player).parameters):
             raise RuntimeError('F1 Play 需要支持插件功能页的配套本体')
         self.context = context
         entry = QToolButton(context.window)
@@ -40,7 +42,7 @@ class F1Play(Plugin):
 
     def open_workspace(self):
         if self.workspace is None:
-            self.workspace = self.context.create_plugin_widget('match_sync', 'match_workspace_v1', None)
+            self.workspace = self.context.create_plugin_widget('match_sync', 'match_workspace_native_iptv_v1', None)
             if self.workspace is None:
                 self.context.notify('请安装并启用配套版本的比赛二路同步')
                 return False

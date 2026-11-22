@@ -111,8 +111,10 @@ class RaceTools(QFrame):
 
     def update_timeline(self):
         room_id = self.match.main.currentData()
-        if room_id != self.clock_room:
-            self.clock_room = room_id
+        native = self.match.native_picture
+        clock_source = (room_id, native.epoch if native.row is not None else None)
+        if clock_source != self.clock_room:
+            self.clock_room = clock_source
             self.standings.reset_anchor()
         self.standings.update_picture()
 

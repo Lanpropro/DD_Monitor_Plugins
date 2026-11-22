@@ -273,6 +273,11 @@ class MatchSyncPlugin(api.Plugin):
         context.log("比赛二路同步已就绪；点击关注栏「比赛二路」入口开启")
 
     def create_embedded_widget(self, capability, parent, caller, **options):
+        if capability == 'match_workspace_native_iptv_v1':
+            from .hybrid_workspace import HybridRaceWorkspace
+            viewer = HybridRaceWorkspace(caller, self.sources)
+            viewer.embed(parent if parent is not None else self.context.window._content)
+            return viewer
         if capability == 'match_workspace_v1':
             viewer = Viewer(caller, self.sources, workspace_crops=True)
             viewer.embed(parent if parent is not None else self.context.window._content)
