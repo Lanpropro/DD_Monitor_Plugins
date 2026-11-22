@@ -55,6 +55,13 @@ def check_platform_controls(app, host, module, source):
         legacy.deleteLater()
         viewer = module.Viewer(plugins.PluginContext(manager, 'platform_check'), {})
         try:
+            context.register_platform(Platform('m3u'))
+            assert viewer.add_room('m3u:cctv5plus', {'alias': 'CCTV-5+'})
+            console = viewer.send_console
+            channel = console.rooms.item(0)
+            assert '无法发送弹幕' in channel.text()
+            assert not channel.flags() & (Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable)
+            assert not console.checked_rooms() and not console.batch_panel.send.isEnabled()
             for kind in ('douyu', 'huya', 'douyin'):
                 key = kind + ':12345'
                 viewer.add_room(key)
@@ -83,7 +90,12 @@ def check_platform_controls(app, host, module, source):
             viewer.resize(1600, 950)
             viewer.picture_split.setSizes([viewer.width() - 260, 260])
             QTest.qWait(60)
-            for key in console.rows:
+            assert console.checked_rooms() == ['douyu:12345']
+            QTest.mouseClick(console.rooms.viewport(), Qt.LeftButton, pos=console.rooms.visualItemRect(channel).center())
+            assert console.checked_rooms() == ['douyu:12345']
+            channel.setCheckState(Qt.Checked)  # Cannot join batch send even through a programmatic check.
+            assert 'm3u:cctv5plus' not in console.checked_rooms()
+            for key in console.sendable_rooms:
                 console.batch_targets = {key}
                 console._update_selection()
                 QTest.qWait(30)
@@ -110,6 +122,7 @@ def check_platform_controls(app, host, module, source):
             assert console.interaction_target('emote')[0] is None
             console.batch_targets = set(console.rows)
             console._update_selection()
+            assert 'm3u:cctv5plus' not in console.checked_rooms()
             assert not anchor.isEnabled() and '请选择一位主播' in anchor.toolTip()
             return {'domestic_controls': ['douyu', 'huya', 'douyin'], 'credentials_read': False}
         finally:
