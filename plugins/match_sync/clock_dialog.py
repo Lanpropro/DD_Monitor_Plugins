@@ -1,17 +1,18 @@
 """Timer sampling, human review and explicit application of playback offsets."""
 import threading
+import time
 
 from PySide6.QtCore import QObject, QPoint, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox,
+from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogButtonBox,
     QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListView, QListWidget, QListWidgetItem,
     QPushButton, QScrollArea, QSizePolicy, QStyledItemDelegate, QStyle, QVBoxLayout, QWidget)
 
 from ddm import theme
 from .canvas import Canvas
-from .clock_sync import (ClockReading, calculate_offsets, format_clock, parse_clock,
+from .clock_sync import (ClockReading, calculate_event_offsets, calculate_offsets, format_clock, parse_clock,
                          suggest_transition, valid_region)
-from .clock_capture import capture_band, recognize_bands
+from .clock_capture import EVENT_AFTER, EVENT_BEFORE, capture_band, capture_event_band, recognize_bands
 from .panels import ConsoleIconButton, console_button_style, use_link_cursor
 
 
@@ -86,7 +87,7 @@ class ClockFrameDelegate(QStyledItemDelegate):
     def paint(self, painter, option, index):
         super().paint(painter, option, index)
         selected = bool(option.state & QStyle.State_Selected)
-        if selected or index.row() == 0:
+        if selected or index.row() == 0 and not self.parent().property('eventFrames'):
             painter.save()
             painter.setPen(QPen(theme.qcolor(theme.PINK if selected else theme.ACCENT), 2))
             painter.setBrush(Qt.NoBrush)
@@ -107,7 +108,7 @@ def session_token(viewer, keys):
     return tuple(token)
 
 
-def apply_offsets(viewer, desired, keys):
+def apply_offsets(viewer, desired, keys, *, event=False):
     """Reuse the viewer's manual offset state rather than create another clock."""
     current = dict(viewer.shifts())
     current.update({key: desired[key] for key in keys})
@@ -130,7 +131,7 @@ def apply_offsets(viewer, desired, keys):
         row.review_alignment = False
         row.awaiting_confirmation = False
         row.user_confirmed = True
-        row.match_text = '计时器偏移已确认；手动锁定'
+        row.match_text = ('赛事事件' if event else '计时器') + '偏移已确认；手动锁定'
         row.refresh_status()
     viewer.changed()
     viewer.render()
@@ -142,8 +143,8 @@ class ClockLane(QWidget):
         self.dialog, self.key = dialog, key
         self.frames = []
         self.preview = None
-        saved = dialog.viewer.context.setting('clock_regions', {}).get(key, ())
-        self.region = tuple(saved) if valid_region(saved) else None
+        self.region = None
+        self.load_region()
         self.display_name = row.label() + ('（主画面）' if key == dialog.reference else '')
         avatar = QLabel()
         avatar.setFixedSize(48, 48)
@@ -196,6 +197,7 @@ class ClockLane(QWidget):
         first_label.setObjectName('ClockTimeLabel')
         first_layout.addWidget(first_label)
         first_layout.addWidget(self.first)
+        self.first_group = first_group
         layout.addWidget(first_group, 0, 3, Qt.AlignTop)
         layout.addWidget(self.status, 1, 0, 1, 4)
         layout.setColumnStretch(1, 1)
@@ -208,7 +210,15 @@ class ClockLane(QWidget):
     def select_transition(self, index):
         self.dialog.invalidate()
         if index >= 0 and self.frames:
-            self.status.setText(f'已选第 {index + 1} 帧为首次翻秒后的画面；请核对数字刚刚变化')
+            if self.dialog.is_event_mode():
+                if index == 0:
+                    self.status.setText('需要一帧变化前的画面，请选稍后的事件或重新取帧')
+                else:
+                    anchor = self.dialog.anchors[self.key]
+                    before, after = self.frames[index - 1][0] - anchor, self.frames[index][0] - anchor
+                    self.status.setText(f'{self.display_name} · 变化边界 {before:+.2f}s 至 {after:+.2f}s · 请核对相邻两帧')
+            else:
+                self.status.setText(f'已选第 {index + 1} 帧为首次翻秒后的画面；请核对数字刚刚变化')
 
     def show_preview(self):
         self.strip.clear()
@@ -219,7 +229,8 @@ class ClockLane(QWidget):
             x, y, width, height = self.region
             image = image.copy(round(x * image.width()), round(y * image.height()),
                                max(1, round(width * image.width())), max(1, round(height * image.height())))
-        item = QListWidgetItem(QIcon(QPixmap.fromImage(image)), '计时器选区' if self.region else '画面预览')
+        label = '赛事选区' if self.dialog.is_event_mode() else '计时器选区'
+        item = QListWidgetItem(QIcon(QPixmap.fromImage(image)), label if self.region else '画面预览')
         item.setSizeHint(QSize(160, 90))
         self.strip.addItem(item)
 
@@ -232,14 +243,24 @@ class ClockLane(QWidget):
         self.frames = []
         self.first.clear()
         self.show_preview()
-        self.status.setText('已获取画面，请框选游戏计时器区域' if self.region is None else '已显示计时器选区，可重新框选或采样')
+        if self.dialog.is_event_mode():
+            self.status.setText('可框选圈数、名次或圈速变化所在区域')
+        else:
+            self.status.setText('已获取画面，请框选游戏计时器区域' if self.region is None else '已显示计时器选区，可重新框选或采样')
+
+    def region_setting(self):
+        return 'event_regions' if self.dialog.is_event_mode() else 'clock_regions'
+
+    def load_region(self):
+        saved = self.dialog.viewer.context.setting(self.region_setting(), {}).get(self.key, ())
+        self.region = tuple(saved) if valid_region(saved) else None
 
     def choose_region(self):
         if self.preview is None:
             self.dialog.status.setText('当前没有可框选画面，请点击获取画面')
             return
         picker = QDialog(self.dialog)
-        picker.setWindowTitle('框选游戏计时器 · ' + self.display_name)
+        picker.setWindowTitle(('框选赛事区域 · ' if self.dialog.is_event_mode() else '框选游戏计时器 · ') + self.display_name)
         picker.resize(1000, 650)
         canvas = Canvas(selecting=True)
         canvas.set_frame(self.preview)
@@ -256,9 +277,9 @@ class ClockLane(QWidget):
             crop = canvas.crop
             self.region = (crop.x(), crop.y(), crop.width(), crop.height())
             if valid_region(self.region):
-                saved = dict(self.dialog.viewer.context.setting('clock_regions', {}))
+                saved = dict(self.dialog.viewer.context.setting(self.region_setting(), {}))
                 saved[self.key] = self.region
-                self.dialog.viewer.context.set_setting('clock_regions', saved)
+                self.dialog.viewer.context.set_setting(self.region_setting(), saved)
                 self.frames = []
                 self.first.clear()
                 self.show_preview()
@@ -269,6 +290,15 @@ class ClockLane(QWidget):
     def set_band(self, frames, readings, direction):
         self.frames = frames
         self.strip.clear()
+        if direction == 0:
+            anchor = self.dialog.anchors[self.key]
+            for stamp, image in frames:
+                self.strip.addItem(QListWidgetItem(QIcon(QPixmap.fromImage(image)), f'{stamp - anchor:+.2f}s'))
+            nearest = min(range(len(frames)), key=lambda index: abs(frames[index][0] - anchor))
+            self.strip.scrollToItem(self.strip.item(nearest), QAbstractItemView.PositionAtCenter)
+            first, last = frames[0][0] - anchor, frames[-1][0] - anchor
+            self.status.setText(f'{self.display_name} · 已取帧 {first:+.2f}s 至 {last:+.2f}s · 选择变化刚出现的画面')
+            return
         for index, (_stamp, image) in enumerate(frames):
             value = readings[index] if index < len(readings) else None
             label = ('第一帧 ' if index == 0 else f'{index + 1} · ') + (format_clock(value) if value is not None else '未识别')
@@ -326,12 +356,14 @@ class ClockDialog(QDialog):
         self.mode = QComboBox()
         self.mode.setObjectName('ClockMode')
         self.mode.setFixedWidth(132)
+        if getattr(viewer, 'race_event_alignment', False):
+            self.mode.addItem('赛事事件', 0)
         self.mode.addItem('倒计时', -1)
         self.mode.addItem('正计时', 1)
-        self.mode.currentIndexChanged.connect(self.clear_bands)
+        self.mode.currentIndexChanged.connect(self.mode_changed)
         self.refresh = settings_button('获取画面', '从现有缓存获取画面')
         self.refresh.setFixedWidth(max(88, self.refresh.fontMetrics().horizontalAdvance(self.refresh.text()) + 20))
-        self.refresh.clicked.connect(lambda: self.start_job(preview=True))
+        self.refresh.clicked.connect(self.refresh_previews)
         self.sample = settings_button('采样并识别', '采样计时器并本地识别')
         self.sample.setFixedWidth(max(104, self.sample.fontMetrics().horizontalAdvance(self.sample.text()) + 20))
         self.sample.clicked.connect(lambda: self.start_job(preview=False))
@@ -393,8 +425,9 @@ class ClockDialog(QDialog):
         self.watch.setInterval(250)
         self.watch.timeout.connect(self.check_session)
         self.watch.start()
+        self.mode_changed()
         self.populate_current_previews()
-        QTimer.singleShot(0, self, lambda: self.start_job(preview=True))
+        QTimer.singleShot(0, self, lambda: self.start_job(preview=True, sample_event=self.is_event_mode()))
         self.finished.connect(lambda: self.cancelled.set())
 
     def paintEvent(self, event):
@@ -433,6 +466,10 @@ class ClockDialog(QDialog):
         else:
             card = self.viewer.comparison_panel.cards.get(key)
             frame = card[2].frame if card is not None else None
+            if self.is_event_mode() and (card is None or not card[2].isVisible()):
+                floating = next((item for item in self.viewer.floating_crops.get(key, {}).values()
+                                 if item.isVisible() and item.frame_key is not None), None)
+                return (floating.frame_key, floating.image) if floating is not None else None
         if frame is None or not hasattr(frame, '__len__') or len(frame) != 2:
             return None
         return frame
@@ -445,6 +482,47 @@ class ClockDialog(QDialog):
 
     def selected_keys(self):
         return tuple(self.lanes)
+
+    def is_event_mode(self):
+        return self.mode.currentData() == 0
+
+    def pin_event(self):
+        if not self.is_event_mode():
+            return
+        clock = self.viewer.live_clock()
+        # Use the displayed main frame as click time, including during a short buffer wait.
+        shifts = self.viewer.shifts()
+        main = self.current_preview(self.reference)
+        if main is not None:
+            clock = main[0] - shifts[self.reference]
+        self.event_anchors = {key: clock + shifts[key] for key in self.lanes if key in shifts}
+        for key in self.event_anchors:
+            if key == self.reference:
+                continue
+            frame = self.current_preview(key)
+            if frame is not None:
+                self.event_anchors[key] = frame[0]
+
+    def refresh_previews(self):
+        self.pin_event()
+        self.start_job(preview=True)
+
+    def mode_changed(self, *_args):
+        event_mode = self.is_event_mode()
+        for lane in self.lanes.values():
+            lane.load_region()
+            lane.first_group.setVisible(not event_mode)
+            lane.strip.setProperty('eventFrames', event_mode)
+            lane.pick.setToolTip('框选圈数、排名或圈速区域' if event_mode else '框选游戏计时器区域')
+            lane.strip.setAccessibleName(lane.display_name + ('：选择事件变化后第一帧' if event_mode else '：选择首次翻秒帧'))
+        self.sample.setText('赛事取帧' if event_mode else '采样并识别')
+        self.sample.setToolTip(f'取点击前 {EVENT_BEFORE:g} 秒、后 {EVENT_AFTER:g} 秒的画面' if event_mode else '采样计时器并本地识别')
+        self.clear_bands()
+        if event_mode:
+            self.pin_event()
+            self.status.setText('已标记点击位置。请选两路共同的圈数、排名或圈速变化，可先各自框选对应区域。')
+        else:
+            self.status.setText('请框选各路相同的游戏计时器，然后采样和核对首次翻秒。')
 
     def invalidate(self, *_args):
         self.proposal = None
@@ -479,7 +557,7 @@ class ClockDialog(QDialog):
         if self.selected_keys() != self.sample_keys:
             raise ValueError('参与对齐的直播间已变化，请重新采样')
         shifts = self.viewer.shifts()
-        if any(abs(shifts[key] - self.sample_shifts[key]) > .05 for key in self.sample_keys):
+        if not self.is_event_mode() and any(abs(shifts[key] - self.sample_shifts[key]) > .05 for key in self.sample_keys):
             raise ValueError('播放偏移已变化，请重新采样')
 
     def set_busy(self, busy):
@@ -489,19 +567,21 @@ class ClockDialog(QDialog):
         for lane in self.lanes.values():
             lane.pick.setEnabled(not busy and lane.preview is not None)
 
-    def start_job(self, *, preview):
+    def start_job(self, *, preview, sample_event=False):
         if self.busy or self.cancelled.is_set():
             return
         self.invalidate()
         keys = self.selected_keys()
+        event_mode = self.is_event_mode()
         try:
             token = session_token(self.viewer, keys)
             if self.reference not in keys or len(keys) < 2:
                 raise ValueError('至少需要主画面和一路副画面')
-            if not preview and any(self.lanes[key].region is None for key in keys):
+            if not preview and not event_mode and any(self.lanes[key].region is None for key in keys):
                 raise ValueError('请先分别框选各路游戏计时器')
             clock, shifts = self.viewer.live_clock(), dict(self.viewer.shifts())
-            requests = [(key, self.viewer.rows[key].decoder.history, clock + shifts[key],
+            requests = [(key, self.viewer.rows[key].decoder.history,
+                         self.event_anchors.get(key, clock + shifts[key]) if event_mode else clock + shifts[key],
                          self.lanes[key].region or (0, 0, 1, 1)) for key in keys]
         except ValueError as error:
             self.status.setText(str(error))
@@ -509,20 +589,29 @@ class ClockDialog(QDialog):
         current = {key: self.current_preview(key) for key in keys} if preview else {}
         missing = tuple(key for key in keys if current.get(key) is None)
         self.set_busy(True)
-        self.status.setText('正在从缓存取帧…' if preview else '正在采样与本地识别；直播继续播放…')
+        self.status.setText('正在从缓存取帧…' if preview else '正在等待并截取事件前后的画面…'
+                            if event_mode else '正在采样与本地识别；直播继续播放…')
         bridge = ClockResult()
         self.bridge = bridge
         cancelled = self.cancelled
+        deadline = time.monotonic() + EVENT_AFTER
         def work():
             try:
                 bands = {key: [item] for key, item in current.items() if item is not None}
                 for key, history, anchor, region in requests:
                     if key not in missing:
                         continue
-                    bands[key] = capture_band(history, anchor, region, cancelled, preview=preview)
+                    if event_mode and not preview:
+                        bands[key] = capture_event_band(history, anchor, region, cancelled, deadline=deadline)
+                    else:
+                        try:
+                            bands[key] = capture_band(history, anchor, region, cancelled, preview=preview)
+                        except ValueError:
+                            if not (event_mode and sample_event):
+                                raise
                 if cancelled.is_set():
                     return
-                readings, note = ({}, '') if preview else recognize_bands(bands, cancelled)
+                readings, note = ({}, '') if preview or event_mode else recognize_bands(bands, cancelled)
                 result = (bands, readings, note, '')
             except Exception as error:
                 message = str(error) if isinstance(error, ValueError) else f'取帧或识别失败：{type(error).__name__}；请重新采样'
@@ -543,14 +632,18 @@ class ClockDialog(QDialog):
                     self.sample_token = None
                     for key, frames in bands.items():
                         self.lanes[key].set_preview(frames[-1])
-                    self.status.setText('画面已准备，请框选各路相同的游戏计时器')
+                    self.status.setText('已标记位置，可框选区域并点击「赛事取帧」' if event_mode
+                                        else '画面已准备，请框选各路相同的游戏计时器')
+                    if event_mode and sample_event:
+                        self.start_job(preview=False)
                 else:
                     self.sample_token, self.sample_keys = token, keys
                     self.sample_shifts = shifts
                     self.anchors = {key: anchor for key, _history, anchor, _region in requests}
                     for key, frames in bands.items():
                         self.lanes[key].set_band(frames, readings.get(key, [None] * len(frames)), self.mode.currentData())
-                    self.status.setText(note or '请核对第一帧时间与首次翻秒帧，再计算偏移；建议不等于自动确认。')
+                    self.status.setText('请选择两路同一变化刚出现的帧，再计算偏移。可用方向键逐帧核对。'
+                                        if event_mode else note or '请核对第一帧时间与首次翻秒帧，再计算偏移；建议不等于自动确认。')
             except ValueError as error:
                 self.status.setText(str(error))
         bridge.finished.connect(ready)
@@ -563,21 +656,29 @@ class ClockDialog(QDialog):
             readings = {}
             for key in self.sample_keys:
                 lane = self.lanes[key]
+                if self.is_event_mode():
+                    index = lane.strip.currentRow()
+                    if index > 0:
+                        readings[key] = (lane.frames[index - 1][0], lane.frames[index][0])
+                    continue
                 value = parse_clock(lane.first.text())
                 if value is None:
                     raise ValueError('请填写各路第一帧时间，例如 0130 或 01:30')
                 readings[key] = ClockReading(value, tuple(stamp for stamp, _image in lane.frames),
                                              lane.strip.currentRow(), self.anchors[key])
-            desired, errors = calculate_offsets(readings, self.sample_shifts, self.reference, self.mode.currentData())
+            if self.is_event_mode():
+                desired, errors = calculate_event_offsets(readings, self.viewer.shifts(), self.reference)
+            else:
+                desired, errors = calculate_offsets(readings, self.sample_shifts, self.reference, self.mode.currentData())
             self.reviewed_readings = readings
             self.proposal = desired
             labels = []
-            for key in self.sample_keys:
+            for key in readings:
                 if key != self.reference:
                     delay = desired[self.reference] - desired[key]
                     labels.append(f'{self.lanes[key].display_name}：偏移 {delay:+.2f}s，采样边界误差约 ±{errors[key]:.2f}s')
                     self.lanes[key].status.setText(
-                        f'建议偏移 {delay:+.2f}s · 误差约 ±{errors[key]:.2f}s；应用后可在控制台偏移组继续微调')
+                        f'{self.lanes[key].display_name} · 建议偏移 {delay:+.2f}s · 误差约 ±{errors[key]:.2f}s')
             self.status.setText('；'.join(labels) + '。确认应用后自动打开对照微调，仍可逐路继续调整。')
             self.apply.setEnabled(True)
         except ValueError as error:
@@ -588,13 +689,16 @@ class ClockDialog(QDialog):
             self.validate_sample()
             if self.proposal is None:
                 return
-            apply_offsets(self.viewer, self.proposal, self.sample_keys)
-            self.viewer.clock_recovery.arm(self.reviewed_readings,
-                {key: self.lanes[key].region for key in self.sample_keys}, self.mode.currentData())
+            apply_offsets(self.viewer, self.proposal, self.reviewed_readings, event=self.is_event_mode())
+            if self.is_event_mode():
+                self.viewer.clock_recovery.cancel()
+            else:
+                self.viewer.clock_recovery.arm(self.reviewed_readings,
+                    {key: self.lanes[key].region for key in self.sample_keys}, self.mode.currentData())
         except ValueError as error:
             self.status.setText(str(error))
             return
-        secondary = next((key for key in self.sample_keys if key != self.reference), None)
+        secondary = next((key for key in self.reviewed_readings if key != self.reference), None)
         self.viewer.compare.setChecked(True)
         if secondary is not None:
             self.viewer.show_comparison(secondary)

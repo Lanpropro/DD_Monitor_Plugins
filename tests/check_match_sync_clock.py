@@ -39,6 +39,16 @@ def check(app, host, module, output=None):
     assert model.suggest_transition(times, [90] * 16, -1) is None
     assert model.suggest_transition(times, readings[:8] + [95] * 8, -1) is None
     assert model.suggest_transition(times, [None] + readings[1:], -1) is None
+    event_marks = {'a': (90., 90.125), 'b': (94.5, 94.625)}
+    event_shifts, event_errors = model.calculate_event_offsets(event_marks, {'a': -3., 'b': -20.}, 'a')
+    assert event_shifts == {'a': -3., 'b': 1.5}
+    assert event_errors['b'] == .125
+    try:
+        model.calculate_event_offsets({**event_marks, 'b': (94., 95.)}, {'a': -3., 'b': -20.}, 'a')
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('Reject discontinuous event boundaries')
     first = model.ClockReading(90, times, 5, 101.5)
     # B's game is 0.3s ahead at the same sampling instant: delay B by 0.3s.
     second = model.ClockReading(90, times, 2, 101.5)
@@ -90,10 +100,32 @@ def check(app, host, module, output=None):
                 for frame in packet.decode():
                     pts = float(frame.pts * frame.time_base)
                     history.append(100 + pts, pts)
+        long_path = directory / 'long.mkv'
+        subprocess.run([recording.ffmpeg_path(), '-hide_banner', '-loglevel', 'error', '-nostdin',
+                        '-stream_loop', '7', '-i', str(path), '-c', 'copy', str(long_path)],
+                       check=True, capture_output=True, timeout=30, creationflags=recording._FFMPEG_FLAGS)
+        long_history = video.VideoHistory(seconds=60)
+        long_history.set_origin(100)
+        with video.av.open(str(long_path)) as container:
+            stream = container.streams.video[0]
+            long_history.codec = stream.codec_context.name, stream.codec_context.extradata
+            for packet in container.demux(stream):
+                if packet.size:
+                    long_history.append_packet(packet)
+                for frame in packet.decode():
+                    pts = float(frame.pts * frame.time_base)
+                    long_history.append(100 + pts, pts)
         cancel = threading.Event()
         frames = capture.capture_band(history, 103, (.2, .25, .6, .5), cancel)
         assert len(frames) >= 12 and frames[-1][0] - frames[0][0] >= 1.1
         assert frames[0][1].width() <= 480 and frames[0][1].height() <= 160
+        event_frames = capture.capture_event_band(history, 102, (.2, .25, .6, .5), cancel,
+                                                  deadline=time.monotonic())
+        assert event_frames[0][0] <= 100.05 and event_frames[-1][0] > 103.7
+        assert any(stamp < 102 for stamp, _ in event_frames) and any(stamp > 102 for stamp, _ in event_frames)
+        window_frames = capture.capture_event_band(long_history, 117, (.2, .25, .6, .5), cancel,
+                                                   deadline=time.monotonic())
+        assert 102 <= window_frames[0][0] < 102.2 and 126.8 < window_frames[-1][0] <= 127
         preview = capture.capture_band(history, 102, (0, 0, 1, 1), cancel, preview=True)
         assert len(preview) == 1 and preview[0][1].width() == 640
         cancel.set()
@@ -139,7 +171,7 @@ def check(app, host, module, output=None):
                     async_dialog.setAttribute(Qt.WA_DontShowOnScreen)
                     async_dialog.show()
                     QTest.qWait(120)
-                    auto_preview.assert_called_once_with(preview=True)
+                    auto_preview.assert_called_once_with(preview=True, sample_event=False)
                 assert async_dialog.objectName() == 'MatchSyncClockDialog'
                 assert not async_dialog.property('settingsGlassWindow')
                 assert async_dialog.testAttribute(Qt.WA_TranslucentBackground)
@@ -286,6 +318,45 @@ def check(app, host, module, output=None):
                 assert viewer.rows['2'].user_confirmed
                 assert viewer.compare.isChecked(), 'Applied offsets should return to comparison controls'
                 assert dialog.cancelled.is_set()
+            with patch.object(viewer, 'shifts', return_value={'1': -3., '2': -4.}), \
+                    patch.object(viewer, 'live_clock', return_value=120.):
+                viewer.race_event_alignment = True
+                test_picture = timer_image(90)
+                for row in viewer.rows.values():
+                    row.decoder.history = long_history
+                    row.decoder.picture_at = lambda stamp: (stamp, test_picture)
+                viewer.comparison_panel.cards.clear()
+                viewer.canvas.set_frame((117., test_picture))
+                event_dialog = ui.ClockDialog(viewer)
+                event_dialog.setAttribute(Qt.WA_DontShowOnScreen)
+                event_dialog.show()
+                assert event_dialog.is_event_mode()
+                assert event_dialog.lanes['1'].first_group.isHidden()
+                assert event_dialog.event_anchors == {'1': 117., '2': 116.}
+                deadline = time.monotonic() + 15
+                while event_dialog.sample_token is None and time.monotonic() < deadline:
+                    app.processEvents()
+                    time.sleep(.01)
+                assert event_dialog.sample_token is not None, event_dialog.status.text()
+                boundaries = {}
+                for key, selected in (('1', 100), ('2', 125)):
+                    lane = event_dialog.lanes[key]
+                    assert lane.frames[0][0] < event_dialog.anchors[key] - 14.8
+                    assert lane.frames[-1][0] > event_dialog.anchors[key] + 9.8
+                    lane.strip.setCurrentRow(selected)
+                    boundaries[key] = sum(lane.frames[index][0] for index in (selected - 1, selected)) / 2
+                    assert '变化边界' in lane.status.text()
+                event_dialog.calculate_proposal()
+                assert event_dialog.apply.isEnabled()
+                offset = boundaries['2'] - boundaries['1']
+                assert abs(event_dialog.proposal['2'] - (offset - 3.)) < .01
+                if output:
+                    event_dialog.grab().save(str(output.with_name('race-event.png')))
+                with patch.object(viewer, 'render'), patch.object(viewer, 'changed'), \
+                        patch.object(viewer.clock_recovery, 'arm', side_effect=AssertionError('No OCR recovery for event')):
+                    event_dialog.apply_proposal()
+                assert abs(viewer.rows['2'].delay.value() + offset) < .011
+                event_dialog.deleteLater()
         finally:
             viewer.running = False
             for row in viewer.rows.values():
