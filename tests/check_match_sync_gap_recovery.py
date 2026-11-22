@@ -78,6 +78,34 @@ def check(app, host, module):
             state = diagnostic.picture_state(decoder, 8696.044, 8696.044, True)
             assert state['encoded_ahead_s'] == 11.667 and state['contiguous_ahead_s'] == .05
             assert state['following_bounds'] == (8700.261, 8707.711)
+            # CCTV-5+ stayed 770 ms from the old tail while the replacement
+            # connection received frames for minutes. Refill can no longer
+            # grow that tail, but there is enough data to play it and move on.
+            old = video.VideoHistory(audio_factory=lambda seconds: SimpleNamespace(end=0, capacity=48000))
+            replacement = video.VideoHistory(audio_factory=lambda seconds: SimpleNamespace(end=0, capacity=48000))
+            for epoch, interval in ((old, (87772.471, 87804.791)),
+                                    (replacement, (87810.071, 87810.391))):
+                epoch.intervals.append(interval)
+                epoch.frames.extend((stamp, stamp - interval[0]) for stamp in interval)
+            replacement.previous = old
+            main.paused = False
+            main.was_isolated = True
+            main.decoder.history = replacement
+            viewer.audio.correction = 0.
+            held = 87804.021 - shifts['1']
+            viewer.locked_clock, viewer.sync_waiting = held, True
+            with patch.object(module.time, 'monotonic', return_value=100.):
+                assert viewer._recover_clock(held, shifts) == held
+                assert not viewer.sync_waiting, 'Recovered input must release a held old tail'
+                at_tail = 87804.791 - .05 - shifts['1']
+                viewer.sync_waiting, viewer.locked_clock = True, at_tail
+                recovered = viewer._recover_clock(at_tail, shifts)
+            assert abs(recovered + shifts['1'] - 87810.071) < 1e-8
+            assert replacement.previous is old, 'Retained playback history must remain available'
+            old.frames.append((87806.01, 87806.01 - 87772.471))
+            old.intervals.append((87806.01, 87806.01))
+            assert replacement.bounds_at(87804.891, minimum_duration=.3) == (87810.071, 87810.391), (
+                'An unusable fragment in the retained epoch must not hide the new epoch')
             # Real follow-up evidence: the immediately following interval is
             # a singleton, followed by a normal continuous interval.
             fragmented = video.VideoHistory(audio_factory=lambda seconds: SimpleNamespace(end=0, capacity=48000))
@@ -125,6 +153,7 @@ def check(app, host, module):
             assert viewer.stable_reference_shift == -56. and viewer.alignment.lags == {'1': 0., '2': -2.}
             return dict(passed=True, media_playback=False, pts_gap_resumes=True,
                         retained_tail_played=True, starvation_still_waits=True,
+                        early_wait_after_reconnect_resumes=True,
                         insufficient_next_reserve_waits=True, offsets_preserved=True,
                         pause_preserved=True, contiguous_reserve_reported=True,
                         singleton_does_not_block=True, fragmented_startup=True,

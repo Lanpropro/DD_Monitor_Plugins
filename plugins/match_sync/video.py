@@ -151,7 +151,9 @@ class VideoHistory(History):
     def bounds_at(self, timestamp, minimum_duration=0.):
         segment = self.segment_at(timestamp)
         if segment is not None and segment is not self:
-            return segment.bounds_at(timestamp, minimum_duration)
+            retained = segment.bounds_at(timestamp, minimum_duration)
+            if retained is not None or not minimum_duration:
+                return retained
         with self.lock:
             bounds = super().bounds()
             if bounds is None:
