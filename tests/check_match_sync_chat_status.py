@@ -1,10 +1,44 @@
-"""Authenticated chat states drive zero/one/two lit signal arcs."""
+"""Check connection indicators and Super Chat expiration in the match viewer."""
 import argparse
 import os
 from pathlib import Path
 import sys
 import tempfile
+import time
 from types import SimpleNamespace
+
+
+def check_super_chat_expiry(viewer):
+    from PySide6.QtCore import QSignalBlocker
+    from PySide6.QtTest import QTest
+    from ddm.super_chat_model import normalize
+
+    overlay = viewer.video_danmaku
+    overlay.set_enabled(True)
+    overlay.set_active(True)
+    now = int(time.time())
+    stamp = time.monotonic()
+    shifts = {'1': 0, '2': 0}
+    second_chat = viewer.rows['2'].show_chat
+    with QSignalBlocker(second_chat):
+        second_chat.setChecked(True)
+    for room, chat_id, end_time in (('1', 'first', now + 2), ('2', 'second', now + 5)):
+        event = normalize({'id': chat_id, 'message': 'fixture', 'price': 30,
+                           'start_time': now - 1, 'end_time': end_time})
+        viewer.overlay_pending[room] = (stamp, dict(event, color='#ffffff'))
+        viewer._render_overlay(stamp, shifts)
+    assert {chat['id'] for chat in overlay.super_chats} == {'first', 'second'}
+    assert overlay.super_chat_overlay.isVisible()
+    assert not viewer.render_timer.isActive(), 'Expiry must run while playback is idle'
+    QTest.qWait(max(1, int((now + 3.2 - time.time()) * 1000)))
+    assert [chat['id'] for chat in overlay.super_chats] == ['second'], 'Remove only the SC that expired'
+    assert overlay.super_chat_overlay.isVisible()
+    QTest.qWait(max(1, int((now + 6.2 - time.time()) * 1000)))
+    assert not overlay.super_chats and overlay.super_chat_overlay.isHidden(), 'Hide the last expired SC'
+    expired = dict(event, id='expired', super_chat_id='expired', end_time=now)
+    viewer.overlay_pending['2'] = (stamp, expired)
+    viewer._render_overlay(stamp, shifts)
+    assert not overlay.super_chats and '2' not in viewer.overlay_pending, 'Skip an already expired SC'
 
 
 def check(app, host, module):
@@ -67,9 +101,10 @@ def check(app, host, module):
             assert icon.connections == 1
             viewer.stop()
             assert icon.connections == 0
+            check_super_chat_expiry(viewer)
             return {'passed': True, 'levels': [0, 1, 2], 'disconnect_reset': True,
                     'stale_worker_ignored': True, 'disabled_excluded': True,
-                    'console_kept_visible': True}
+                    'console_kept_visible': True, 'super_chats_expire_without_playback': True}
         finally:
             viewer.close()
             viewer.deleteLater()

@@ -1,7 +1,9 @@
 """Chat control. Session state remains on the Viewer facade."""
 from __future__ import annotations
 
+import math
 import time
+from ddm.super_chat_model import remaining_seconds
 from .chat_clients import Chat, PlatformChat
 
 def _start_chat(viewer, row):
@@ -61,6 +63,19 @@ def _message(viewer, row, worker, event):
         row.pending.append((received, dict(event)))
 
 
+def _tick_super_chats(viewer):
+    overlay = viewer.video_danmaku
+    now = time.time()
+    active = [chat for chat in overlay.super_chats if remaining_seconds(chat.get('end_time'), now)]
+    if len(active) != len(overlay.super_chats):
+        overlay.set_super_chats(active)
+    elif active:
+        overlay.super_chat_overlay.update()
+    if active:
+        # Use the same second boundary as the displayed countdown.
+        viewer.super_chat_timer.start(max(1, math.ceil((int(now) + 1 - now) * 1000)))
+
+
 def _render_overlay(viewer, clock, shifts):
     if viewer.video_danmaku is None:
         return
@@ -74,7 +89,9 @@ def _render_overlay(viewer, clock, shifts):
         if pending is None:
             continue
         received, event = pending
-        if key not in shifts or not viewer.rows[key].show_chat.isChecked() or clock + shifts[key] - received > 5:
+        super_chat = event.get('kind') == 'super_chat'
+        if (key not in shifts or not viewer.rows[key].show_chat.isChecked() or clock + shifts[key] - received > 5
+                or (super_chat and not remaining_seconds(event.get('end_time')))):
             viewer.overlay_pending.pop(key, None)
         else:
             overlay_event = dict(event)
@@ -83,6 +100,8 @@ def _render_overlay(viewer, clock, shifts):
             if viewer.video_danmaku.add_event(overlay_event):
                 viewer.overlay_pending.pop(key, None)
                 viewer.overlay_last = key
+                if super_chat and not viewer.super_chat_timer.isActive():
+                    _tick_super_chats(viewer)
 
 
 def _rebuild_replay_chat(viewer, stamp, live=False):

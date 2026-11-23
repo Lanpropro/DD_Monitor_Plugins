@@ -95,6 +95,10 @@ class Viewer(QDialog):
         self.render_timer.setTimerType(Qt.PreciseTimer)
         self.render_timer.setInterval(33)
         self.render_timer.timeout.connect(self.render)
+        self.super_chat_timer = QTimer(self)
+        self.super_chat_timer.setTimerType(Qt.PreciseTimer)
+        self.super_chat_timer.setSingleShot(True)
+        self.super_chat_timer.timeout.connect(lambda: chat_control._tick_super_chats(self))
         self.playback_probe = PlaybackProbe(self, Path(config_module.REPO) / 'logs' / 'match-playback.jsonl')
         self.playback_probe.preview = self.replay_bar.preview.metrics
         self.playback_probe.audio = self.audio
