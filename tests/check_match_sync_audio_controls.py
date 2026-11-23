@@ -9,6 +9,41 @@ import tempfile
 from unittest.mock import patch
 
 
+def check_channel_hover(app):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QWidget
+    from ddm import theme
+    from plugins.match_sync.panels import ConsoleChannels
+
+    theme.apply('dark')
+    window = QWidget()
+    window.resize(180, 80)
+    channels = ConsoleChannels(window)
+    channels.move(60, 24)
+    window.show()
+    try:
+        for mode in ('dark', 'light'):
+            theme.apply(mode)
+            for checked in (False, True):
+                channels.set_audible(checked)
+                for button in (channels.left, channels.right):
+                    QTest.mouseMove(window, QPoint(4, 4))
+                    app.processEvents()
+                    idle = button.grab().toImage()
+                    QTest.mouseMove(button, button.rect().center())
+                    app.processEvents()
+                    assert button.underMouse()
+                    hover = button.grab().toImage()
+                    assert hover.pixelColor(0, 0) == idle.pixelColor(0, 0)
+                    assert hover.pixelColor(hover.width() - 1, hover.height() - 1) == idle.pixelColor(
+                        idle.width() - 1, idle.height() - 1)
+                    assert hover.pixelColor(hover.width() // 2, 4) != idle.pixelColor(idle.width() // 2, 4)
+    finally:
+        window.close()
+        theme.apply('dark')
+
+
 def check(app, host, module):
     from ddm import plugins
     with tempfile.TemporaryDirectory() as directory, \
@@ -118,6 +153,7 @@ def main():
     app = QApplication([])
     host = QWidget()
     try:
+        check_channel_hover(app)
         print(check(app, host, import_module('plugins.match_sync.viewer')))
     finally:
         host.close()

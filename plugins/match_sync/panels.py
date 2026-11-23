@@ -232,7 +232,7 @@ class ConsoleIconButton(QPushButton):
             painter.drawLine(QPointF(7, -6), QPointF(7, 6))
 
 
-def native_console_button(button, tooltip, size=32):
+def native_console_button(button, tooltip, size=32, *, unchecked_hover=None):
     """Keep the host's icon drawing and behavior with the console's spacing."""
     button.setFixedSize(size, size)
     button.setAutoDefault(False)
@@ -241,13 +241,16 @@ def native_console_button(button, tooltip, size=32):
     button.setToolTip(tooltip)
     button.setAccessibleName(tooltip)
     use_link_cursor(button)
+    hover_rule = (f'QPushButton:!checked:hover {{background: {unchecked_hover};}}'
+                  if unchecked_hover is not None else '')
     button.setStyleSheet(f'''QPushButton {{background: transparent; border: none; outline: none;
         padding: 0; border-radius: 6px;}}
         QPushButton:hover {{background: {console_hover_color()};}}
         QPushButton:pressed {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}
         QPushButton:checked {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}
         QPushButton:checked:hover {{background: {console_hover_color()};}}
-        QPushButton:disabled {{color: {theme.TEXT4};}}''')
+        QPushButton:disabled {{color: {theme.TEXT4};}}
+        {hover_rule}''')
     return button
 
 
@@ -281,16 +284,14 @@ class ConsoleChannels(QComboBox):
         self.setFocusPolicy(Qt.NoFocus)
         for label, value in (('原始声道', 0), ('仅左输出', 3), ('仅右输出', 4)):
             self.addItem(label, value)
-        self.left = native_console_button(QPushButton('L'), '左声道')
-        self.right = native_console_button(QPushButton('R'), '右声道')
+        self.left = native_console_button(QPushButton('L'), '左声道', unchecked_hover=theme.CONTENT_HOVER)
+        self.right = native_console_button(QPushButton('R'), '右声道', unchecked_hover=theme.CONTENT_HOVER)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
         for button in (self.left, self.right):
             button.setFixedSize(30, 32)
             button.setCheckable(True)
-            button.setStyleSheet(button.styleSheet() + f'''
-                QPushButton:!checked:hover {{background: {theme.CONTENT_HOVER};}}''')
             button.clicked.connect(self._clicked)
             layout.addWidget(button)
         use_link_cursor(self)
