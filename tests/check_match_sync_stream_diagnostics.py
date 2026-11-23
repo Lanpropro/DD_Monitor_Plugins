@@ -64,7 +64,7 @@ def check(app, host, diagnostic, media, video):
     assert stream.read(2) == b'' and calls == [True]
 
     decoder = media.Decoder('fixture', {'balanced_quality': True})
-    decoder.events = SimpleNamespace(information=Mock(), state=Mock(), reset=Mock())
+    decoder.events = SimpleNamespace(information=Mock(), state=Mock(), reset=Mock(), playback_issue=Mock())
     entered, release = threading.Event(), threading.Event()
     def play_url(*_args):
         entered.set()
@@ -101,6 +101,7 @@ def check(app, host, diagnostic, media, video):
             patch.object(media.recording, 'ffmpeg_path', return_value='ffmpeg'):
         decoder._run()
     capture.assert_not_called()
+    assert "未取得当前清晰度的播放地址" in decoder.events.playback_issue.emit.call_args.args[0]
     failed = decoder.acquisition.snapshot()
     assert failed['outcome'] == 'error' and failed['error_phase'] == 'play_url'
     assert failed['error_codes'] == ['http_403'] and 'resolved' not in failed['milestones_ms']
@@ -111,6 +112,8 @@ def check(app, host, diagnostic, media, video):
     wrapped = RuntimeError('provider error')
     wrapped.__cause__ = login_error
     attempts = []
+    issues = []
+    switched.events.playback_issue.connect(issues.append)
 
     def wait_for_retry(seconds):
         attempts.append(switched.acquisition.snapshot())
@@ -127,6 +130,7 @@ def check(app, host, diagnostic, media, video):
             patch.object(media.recording, 'ffmpeg_path', return_value='ffmpeg'):
         switched._run()
     capture.assert_called_once()
+    assert len(issues) == 2 and all("需要有效登录" in detail and secret not in detail for detail in issues)
     for receipt in attempts[:2]:
         assert receipt['error_kind'] == 'LoginRequiredError' and receipt['error_phase'] == 'play_url'
         assert receipt['quality_switch']['result'] == 'retrying' and 'actual_quality' not in receipt
@@ -164,6 +168,8 @@ def check(app, host, diagnostic, media, video):
             patch.object(media, 'av', SimpleNamespace(open=open_input)), \
             patch.object(media, 'recording_template', return_value=nullcontext()):
         assert decoder._capture('ffmpeg', address, {'Cookie': secret}) == 'eof'
+    assert decoder.events.playback_issue.emit.call_args_list[-2].args == ("",)
+    assert "正在重连" in decoder.events.playback_issue.emit.call_args.args[0]
     decoder.preview_frames.submit.assert_called_once_with(decoder, history, frame, -.01)
     decoder.preview_frames = None
     assert launch.call_args.kwargs['stderr'] == subprocess.PIPE
@@ -218,7 +224,7 @@ def check(app, host, diagnostic, media, video):
         disabled.begin(0)
         disabled.quality(requested=250, actual=1004000)
         disabled.phase('receive')
-        disabled.error(RuntimeError(secret))
+        assert disabled.error(LoginRequiredError(secret)) == 'LoginRequiredError'
         disabled.mark('first_byte')
         disabled.exited(1)
         disabled.finish('error')

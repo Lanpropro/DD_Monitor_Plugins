@@ -45,6 +45,7 @@ render_ms/stages_ms来自该窗口最慢轮次，audio_gap_ms是采样时距最�
 `quality_switch`、`error_phase`、`error_kind`、`attempt` 和 `retry_delay_ms`。
 `quality_switch.id` 在同一次切档的自动重试中保持一致。`video_cached` 表示新档已有首帧入缓存，
 画面实际推进仍应查 `picture` 或呈现记录。测试使用替身取流与包描述，不读取账号或连接直播。
+同一回归检查主画面中央的失败说明在重试期间保留，首帧入缓存后清除，切换主画面时复用该路自己的状态；被替换的取流线程不能再更新提示。
 
 `check_match_sync_live_ui.py --host <宿主目录>` 使用空控件检查直播状态未变化时不重复执行
 侧栏样式、头像占位文字及状态控件更新；启用真实宿主连续圆角QSS转换，比较原始样式

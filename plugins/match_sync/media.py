@@ -299,25 +299,31 @@ class Decoder:
             self.events.information.emit({'requested_quality': quality})
             return result
 
+    def _report_playback_issue(self, detail):
+        self.events.state.emit(detail)
+        self.events.playback_issue.emit(detail)
+
     def _run(self) -> None:
         if av is None:
-            self.events.state.emit("缺少二路视频解码组件 PyAV；请安装新版完整程序或更新 requirements.txt 中的依赖")
+            self._report_playback_issue("缺少 PyAV 视频解码组件，请检查开发环境或安装完整程序。")
             return
         if np is None:
-            self.events.state.emit("缺少二路图像比较组件 NumPy；请更新 requirements.txt 中的依赖")
+            self._report_playback_issue("缺少 NumPy 图像组件，请检查开发环境或安装完整程序。")
             return
         executable = recording.ffmpeg_path()
         if not executable:
-            self.events.state.emit("找不到 FFmpeg：请使用完整发布包，或将 FFmpeg 放入 PATH")
+            self._report_playback_issue("找不到 FFmpeg，请检查开发环境或安装完整程序。")
             return
         attempt = 0
         while not self.cancelled.is_set():
             self.acquisition.begin(attempt)
             retry_delay = min(5, .5 + attempt * .5)
             outcome = 'cancelled'
+            resolving = True
             self.events.state.emit("正在取流…" if attempt == 0 else "正在重新连接…")
             try:
                 url, headers = self._resolve(attempt)
+                resolving = False
                 self.acquisition.mark('resolved')
                 if self.cancelled.is_set():
                     return
@@ -334,9 +340,14 @@ class Decoder:
                 return
             except Exception as error:
                 outcome = 'cancelled' if self.cancelled.is_set() else 'error'
-                self.acquisition.error(error)
-                if not self.cancelled.is_set():
-                    self.events.state.emit("连接或解码失败；稍后重试，可停止后重新开始")
+                kind = self.acquisition.error(error)
+                if outcome == 'error':
+                    if kind == 'LoginRequiredError':
+                        self._report_playback_issue("当前清晰度需要有效登录。\n请检查平台登录状态，或切换清晰度。")
+                    elif resolving:
+                        self._report_playback_issue("未取得当前清晰度的播放地址，正在重试。\n也可以切换清晰度。")
+                    else:
+                        self._report_playback_issue("直播流连接或解码失败，正在重试。")
             finally:
                 self.acquisition.finish(outcome, retry_delay=retry_delay)
             if self.cancelled.wait(retry_delay):
@@ -345,6 +356,7 @@ class Decoder:
 
     def _capture(self, executable: str, url: str, headers: dict) -> str:
         process = None
+        has_cached_video = False
         error_reader = None
         hls_proxy = None
         finished = threading.Event()
@@ -513,19 +525,22 @@ class Decoder:
                             self.timings.record('preview_submit', time.perf_counter() - started)
                         self.last_frame_received = last_frame[0]
                         self.acquisition.mark('first_cached_video')
+                        if not has_cached_video:
+                            has_cached_video = True
+                            self.events.playback_issue.emit("")
                     reading = time.perf_counter()
             if not self.cancelled.is_set():
                 refresh = getattr(hls_proxy, "refresh_required", None)
-                self.events.state.emit("播放地址已失效，正在重新取流" if refresh is not None and refresh.is_set()
-                                       else "画面接收超时，正在重新取流" if timed_out.is_set()
-                                       else "直播流已结束或中断，正在重连")
+                self._report_playback_issue("播放地址已失效，正在重新取流" if refresh is not None and refresh.is_set()
+                                            else "画面接收超时，正在重新取流" if timed_out.is_set()
+                                            else "直播流已结束或中断，正在重连")
             refresh = getattr(hls_proxy, "refresh_required", None)
             return ('cancelled' if self.cancelled.is_set() else
                     'url_expired' if refresh is not None and refresh.is_set() else
                     'frame_timeout' if timed_out.is_set() else 'eof')
         except Exception:
             if timed_out.is_set() and not self.cancelled.is_set():
-                self.events.state.emit("画面接收超时，正在重新取流")
+                self._report_playback_issue("画面接收超时，正在重新取流")
                 return 'frame_timeout'
             elif not self.cancelled.is_set():
                 raise

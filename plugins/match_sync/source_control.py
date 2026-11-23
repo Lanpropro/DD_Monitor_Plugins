@@ -153,6 +153,7 @@ def _start_row(viewer, row):
     if viewer.alignment.manual_locked:
         row.match_text = "手动时间已锁定；勾选自动对齐可解除"
     row.pending.clear()
+    row.playback_issue = ""
     row.actual_quality = 0
     seed = dict(viewer.sources.get(row.room_id) or {})
     seed["title"] = seed.get("title") or row.title
@@ -173,6 +174,7 @@ def _start_row(viewer, row):
     decoder = row.decoder
     decoder.events.information.connect(lambda info, r=row, d=decoder: viewer._information(r, d, info))
     decoder.events.state.connect(lambda text, r=row, d=decoder: viewer._state(r, d, text, False))
+    decoder.events.playback_issue.connect(lambda detail, r=row, d=decoder: _playback_issue(viewer, r, d, detail))
     decoder.events.reset.connect(lambda r=row, d=decoder: viewer._reset(r, d))
     decoder.start()
     viewer._start_chat(row)
@@ -213,6 +215,15 @@ def _state(viewer, row, worker, text, chat):
         else:
             row.video_text = text
         row.refresh_status()
+
+
+def _playback_issue(viewer, row, worker, detail):
+    if not viewer._valid(row, worker) or row.playback_issue == detail:
+        return
+    row.playback_issue = detail
+    row.refresh_status()
+    if row.room_id == viewer.main.currentData():
+        viewer.sync_picture(refresh_metadata=False)
 
 
 def _reset(viewer, row, worker):
@@ -264,6 +275,7 @@ def _stop_row(row):
     row.join.hide()
     row.pending.clear()
     row.video_text = "已停止"
+    row.playback_issue = ""
     row.chat_text = "弹幕已停止"
     row.match_text = "等待画面"
     row.buffer_text = ""

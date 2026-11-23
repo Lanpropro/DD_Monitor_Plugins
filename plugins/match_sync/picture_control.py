@@ -55,8 +55,13 @@ def _show_buffering(viewer, active):
     if viewer.canvas.waiting != bool(active):
         viewer.canvas.waiting = bool(active)
         viewer.canvas.update()
-    if getattr(viewer.picture, "_buffering", False) != bool(active):
-        viewer.picture.set_buffering(bool(active))
+    tile = viewer.picture
+    row = viewer.rows.get(viewer.main.currentData())
+    detail = row.playback_issue if active and row is not None else ""
+    if tile._status_detail != detail:
+        tile.set_status("直播暂不可播放" if detail else "", detail=detail)
+    if getattr(tile, "_buffering", False) != bool(active):
+        tile.set_buffering(bool(active))
 
 
 def _stream_info_snapshot(viewer):

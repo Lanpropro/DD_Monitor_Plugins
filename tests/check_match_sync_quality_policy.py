@@ -146,6 +146,26 @@ def check(app, host, module):
                 assert switch['requested_quality'] == 1014100
                 assert switch['result'] == 'pending'
                 assert row.pending_quality_switch is None
+                worker = row.decoder
+                detail = "当前清晰度需要有效登录。\n请检查平台登录状态，或切换清晰度。"
+                viewer.running = True
+                try:
+                    worker.events.playback_issue.emit(detail)
+                    assert viewer.picture._status_detail == detail and not viewer.picture.spinner.isHidden()
+                    assert detail in viewer.picture.spinner._text.text()
+                    worker.events.state.emit("正在重新连接…")
+                    assert viewer.picture._status_detail == detail
+                    viewer.select_main('2')
+                    assert not viewer.picture._status_detail
+                    viewer.select_main('1')
+                    assert viewer.picture._status_detail == detail
+                    worker.events.playback_issue.emit("")
+                    assert not viewer.picture._status_detail
+                    viewer._quality_changed(None, 1014100)
+                    worker.events.playback_issue.emit(detail)
+                    assert not viewer.picture._status_detail
+                finally:
+                    viewer.running = False
                 viewer.rows['1'].quality_auto = True
                 viewer._start_row(viewer.rows['1'])
                 assert viewer.rows['1'].decoder.seed['highest_quality']

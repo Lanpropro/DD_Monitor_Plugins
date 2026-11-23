@@ -91,9 +91,6 @@ class StreamAcquisition:
                 self.switch.update(result='video_cached', actual_quality=self.state.get('actual_quality'))
 
     def error(self, error):
-        if not self.enabled:
-            return
-        self.stderr(str(error))
         kind = type(error).__name__
         cause = error
         for _ in range(5):
@@ -107,8 +104,11 @@ class StreamAcquisition:
                         'OSError', 'HTTPError', 'InvalidDataError', 'FFmpegError', 'ValueError',
                         'RuntimeError', 'LoginRequiredError'):
             kind = 'other'
-        with self.lock:
-            self.state.update(error_phase=self.state.get('phase'), error_kind=kind)
+        if self.enabled:
+            self.stderr(str(error))
+            with self.lock:
+                self.state.update(error_phase=self.state.get('phase'), error_kind=kind)
+        return kind
 
     def stderr(self, text):
         if self.enabled:

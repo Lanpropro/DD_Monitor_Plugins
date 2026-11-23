@@ -7,5 +7,6 @@ from PySide6.QtCore import QObject, Signal
 class Events(QObject):
     information = Signal(dict)
     state = Signal(str)
+    playback_issue = Signal(str)
     message = Signal(dict)
     reset = Signal()

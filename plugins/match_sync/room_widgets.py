@@ -160,6 +160,7 @@ class RoomRow(QFrame):
         self.crop = tuple(preferences.get("crop", (0, 0, 1, 1)))
         self.match_text = "等待画面"
         self.video_text = "未开始"
+        self.playback_issue = ""
         self.chat_text = "弹幕未连接"
         self.buffer_text = ""
         self.buffer_exhaustions = deque(maxlen=3)
@@ -603,10 +604,11 @@ class RoomRow(QFrame):
             match_text = "自动对齐已关闭；手动偏移"
         elif self.room_id == self.viewer.alignment.reference:
             match_text = "主画面基准"
-        text = f"{self.video_text} · {match_text} · {self.chat_text}"
+        video_text = self.playback_issue or self.video_text
+        text = f"{video_text} · {match_text} · {self.chat_text}"
         detail = text + f" · {self.playback_status()}" + (f" · {self.buffer_text}" if self.buffer_text else "")
         parts = []
-        if '失败' in self.video_text or '缺少' in self.video_text or '找不到' in self.video_text:
+        if self.playback_issue or '失败' in video_text or '缺少' in video_text or '找不到' in video_text:
             parts.append((QStyle.SP_MessageBoxWarning, '连接异常'))
         elif '超时' in self.video_text or '重新' in self.video_text:
             parts.append((QStyle.SP_BrowserReload, '重连中'))
@@ -651,7 +653,7 @@ class RoomRow(QFrame):
         hints = []
         for icon, label in parts:
             if icon == 'connected' or label in ('连接异常', '重连中', '连接中'):
-                hints.append(self.video_text)
+                hints.append(video_text)
             elif icon == 'search' or label in ('已对齐', '待确认对齐', '待确认计时器', '计时器复核中'):
                 hints.append(match_text)
             elif icon == 'buffer' or label.startswith('缺少 '):
