@@ -14,6 +14,8 @@ from unittest.mock import Mock, patch
 
 
 def check(app, host, diagnostic, media, video):
+    from ddm.plugins import LoginRequiredError
+
     process_control = import_module(media.recording._ensure_job.__module__)
     secret = 'DO_NOT_LOG_PRIVATE_VALUE'
     address = 'https://private.invalid/live?token=' + secret
@@ -84,7 +86,7 @@ def check(app, host, diagnostic, media, video):
         release.set()
         worker.join(3)
     assert not worker.is_alive() and resolved == [(address, {'Cookie': secret})]
-    assert platform.play_url.call_count == 1 and platform.room_quality_options.call_count == 2
+    assert platform.play_url.call_count == 1 and platform.room_quality_options.call_count == 1
     assert 'play_url_ready' in decoder.acquisition.snapshot()['milestones_ms']
     assert decoder.acquisition.snapshot()['actual_quality'] == 20000
     assert decoder.acquisition.snapshot()['phase'] == 'quality_metadata'
@@ -102,6 +104,38 @@ def check(app, host, diagnostic, media, video):
     failed = decoder.acquisition.snapshot()
     assert failed['outcome'] == 'error' and failed['error_phase'] == 'play_url'
     assert failed['error_codes'] == ['http_403'] and 'resolved' not in failed['milestones_ms']
+
+    switched = media.Decoder('fixture', {'quality': 10000}, platform)
+    switched.acquisition.select_quality(2000004, 2000004, 10000)
+    login_error = LoginRequiredError(secret)
+    wrapped = RuntimeError('provider error')
+    wrapped.__cause__ = login_error
+    attempts = []
+
+    def wait_for_retry(seconds):
+        attempts.append(switched.acquisition.snapshot())
+        assert seconds * 1000 == attempts[-1]['retry_delay_ms']
+        return len(attempts) == 3
+
+    def cache_video(*_args):
+        switched.acquisition.mark('first_cached_video')
+        return 'eof'
+
+    with patch.object(platform, 'play_url', side_effect=[login_error, wrapped, (address, 10000, 0)]), \
+            patch.object(switched, '_capture', side_effect=cache_video) as capture, \
+            patch.object(switched, 'cancelled', SimpleNamespace(is_set=lambda: False, wait=wait_for_retry)), \
+            patch.object(media.recording, 'ffmpeg_path', return_value='ffmpeg'):
+        switched._run()
+    capture.assert_called_once()
+    for receipt in attempts[:2]:
+        assert receipt['error_kind'] == 'LoginRequiredError' and receipt['error_phase'] == 'play_url'
+        assert receipt['quality_switch']['result'] == 'retrying' and 'actual_quality' not in receipt
+    assert [receipt['retry_delay_ms'] for receipt in attempts] == [500, 1000, 1500]
+    assert len({receipt['quality_switch']['id'] for receipt in attempts}) == 1
+    assert attempts[-1]['quality_switch']['result'] == 'video_cached'
+    assert attempts[-1]['quality_switch']['actual_quality'] == 10000
+    assert attempts[-1]['previous_attempt']['error_kind'] == 'LoginRequiredError'
+    assert secret not in json.dumps(attempts) and address not in json.dumps(attempts)
 
     # Descriptor packets exercise the real capture routing without a media codec.
     decoder.seed = {}
@@ -180,6 +214,7 @@ def check(app, host, diagnostic, media, video):
     assert secret not in json.dumps(pipe_trace.snapshot())
     with patch.dict(os.environ, DDM_MATCH_DIAGNOSTICS='0'):
         disabled = diagnostic.StreamAcquisition()
+        disabled.select_quality(2000004, 2000004, 10000)
         disabled.begin(0)
         disabled.quality(requested=250, actual=1004000)
         disabled.phase('receive')
@@ -209,7 +244,7 @@ def check(app, host, diagnostic, media, video):
         probe.pipeline_sources = ()
         probe.deleteLater()
         app.processEvents()
-    return dict(passed=True, startup_milestones=True, resolve_phase=True, retry_failure=True,
+    return dict(passed=True, startup_milestones=True, resolve_phase=True, retry_failure=True, quality_switch=True,
                 bounded_errors=True, no_raw_secrets=True, pipe_drained=True, disabled=True, media_generated=False)
 
 

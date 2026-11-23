@@ -125,12 +125,27 @@ def check(app, host, module):
                 assert not reload.called and [row.quality for row in viewer.rows.values()] == [1014000, 1004000]
                 viewer._quality_changed(None, 1014100)
                 assert viewer.rows['1'].quality == 1014100 and reload.call_count == 1
+                assert viewer.rows['1'].pending_quality_switch is None
                 assert not viewer.rows['1'].quality_auto
                 assert not viewer.rows['1'].preferences()['quality_auto']
             with patch.object(module.source_control.Decoder, 'start'), patch.object(viewer, '_start_chat'):
                 viewer._start_row(viewer.rows['1'])
                 assert viewer.rows['1'].decoder.seed['quality'] == 1014100
                 assert not viewer.rows['1'].decoder.seed['highest_quality']
+                row = viewer.rows['1']
+                assert 'quality_switch' not in row.decoder.acquisition.snapshot()
+                row.actual_quality = 1014000
+                viewer.running = True
+                try:
+                    viewer._quality_changed(None, 1014100)
+                finally:
+                    viewer.running = False
+                switch = row.decoder.acquisition.snapshot()['quality_switch']
+                assert switch['previous_requested_quality'] == 1014100
+                assert switch['previous_actual_quality'] == 1014000
+                assert switch['requested_quality'] == 1014100
+                assert switch['result'] == 'pending'
+                assert row.pending_quality_switch is None
                 viewer.rows['1'].quality_auto = True
                 viewer._start_row(viewer.rows['1'])
                 assert viewer.rows['1'].decoder.seed['highest_quality']

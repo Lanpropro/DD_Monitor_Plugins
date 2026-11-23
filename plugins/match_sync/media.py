@@ -313,6 +313,7 @@ class Decoder:
         attempt = 0
         while not self.cancelled.is_set():
             self.acquisition.begin(attempt)
+            retry_delay = min(5, .5 + attempt * .5)
             outcome = 'cancelled'
             self.events.state.emit("正在取流…" if attempt == 0 else "正在重新连接…")
             try:
@@ -337,8 +338,8 @@ class Decoder:
                 if not self.cancelled.is_set():
                     self.events.state.emit("连接或解码失败；稍后重试，可停止后重新开始")
             finally:
-                self.acquisition.finish(outcome)
-            if self.cancelled.wait(min(5, .5 + attempt * .5)):
+                self.acquisition.finish(outcome, retry_delay=retry_delay)
+            if self.cancelled.wait(retry_delay):
                 break
             attempt += 1
 

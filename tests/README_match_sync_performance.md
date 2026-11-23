@@ -40,6 +40,12 @@
 render_ms/stages_ms来自该窗口最慢轮次，audio_gap_ms是采样时距最后一次供给的时间。
 这些字段不能直接当作所有渲染轮次的平均耗时或音频设备断流时长。
 
+`check_match_sync_stream_diagnostics.py` 和 `check_match_sync_quality_policy.py` 覆盖手动切档、
+登录要求、退避与首帧入缓存。实播核对 `source_pipelines[].acquisition` 中的
+`quality_switch`、`error_phase`、`error_kind`、`attempt` 和 `retry_delay_ms`。
+`quality_switch.id` 在同一次切档的自动重试中保持一致。`video_cached` 表示新档已有首帧入缓存，
+画面实际推进仍应查 `picture` 或呈现记录。测试使用替身取流与包描述，不读取账号或连接直播。
+
 `check_match_sync_live_ui.py --host <宿主目录>` 使用空控件检查直播状态未变化时不重复执行
 侧栏样式、头像占位文字及状态控件更新；启用真实宿主连续圆角QSS转换，比较原始样式
 而不是转换后的字符串，覆盖同数量侧栏卡片替换、卡片更换房间、

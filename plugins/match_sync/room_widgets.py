@@ -148,6 +148,7 @@ class RoomRow(QFrame):
                      if str(item.get("room_id") or "") == room_id), {})
         self.title = room.get("title") or (viewer.sources.get(room_id) or {}).get("title") or ""
         self.quality = int(preferences.get("quality", 10000 if self.platform is not None else 250))
+        self.pending_quality_switch = None
         self.quality_auto = bool(preferences.get('quality_auto', True))
         self.actual_quality = 0
         self.quality_options = []

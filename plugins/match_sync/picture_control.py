@@ -189,9 +189,13 @@ def _picture_setting(viewer, key, value):
 def _quality_changed(viewer, _room, quality):
     row = viewer.rows.get(viewer.main.currentData())
     if row is not None:
+        row.pending_quality_switch = (row.quality, row.actual_quality or None, quality)
         row.quality = quality
         row.quality_auto = False
-        viewer._reload_picture()
+        try:
+            viewer._reload_picture()
+        finally:
+            row.pending_quality_switch = None
         viewer.changed()
 
 

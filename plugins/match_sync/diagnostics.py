@@ -50,6 +50,13 @@ class StreamAcquisition:
         self.milestones = {}
         self.errors = deque(maxlen=8)
         self.previous = None
+        self.switch = None
+
+    def select_quality(self, previous_requested, previous_actual, requested):
+        if self.enabled:
+            with self.lock:
+                self.switch = dict(id=time.perf_counter_ns(), previous_requested_quality=previous_requested,
+                                   previous_actual_quality=previous_actual, requested_quality=requested, result='pending')
 
     def begin(self, attempt):
         if not self.enabled:
@@ -80,14 +87,25 @@ class StreamAcquisition:
             return
         with self.lock:
             self.milestones.setdefault(name, round((time.perf_counter() - self.started) * 1000, 3))
+            if name == 'first_cached_video' and self.switch is not None and self.switch['result'] == 'pending':
+                self.switch.update(result='video_cached', actual_quality=self.state.get('actual_quality'))
 
     def error(self, error):
         if not self.enabled:
             return
         self.stderr(str(error))
         kind = type(error).__name__
+        cause = error
+        for _ in range(5):
+            if cause is None:
+                break
+            if type(cause).__name__ == 'LoginRequiredError':
+                kind = 'LoginRequiredError'
+                break
+            cause = cause.__cause__
         if kind not in ('TimeoutError', 'ConnectionError', 'PermissionError', 'FileNotFoundError',
-                        'OSError', 'HTTPError', 'InvalidDataError', 'FFmpegError', 'ValueError', 'RuntimeError'):
+                        'OSError', 'HTTPError', 'InvalidDataError', 'FFmpegError', 'ValueError',
+                        'RuntimeError', 'LoginRequiredError'):
             kind = 'other'
         with self.lock:
             self.state.update(error_phase=self.state.get('phase'), error_kind=kind)
@@ -114,11 +132,13 @@ class StreamAcquisition:
                 self.state['ffmpeg_exit_code'] = code
             self.mark('ffmpeg_exited')
 
-    def finish(self, outcome):
+    def finish(self, outcome, *, retry_delay=None):
         if self.enabled:
             self.mark('finished')
             with self.lock:
                 self.state.update(outcome=outcome, phase='cancelled' if outcome == 'cancelled' else 'retry_wait')
+                if outcome != 'cancelled' and retry_delay is not None:
+                    self.state['retry_delay_ms'] = round(retry_delay * 1000)
 
     def _receipt(self):
         return dict(self.state, milestones_ms=dict(self.milestones), error_codes=list(self.errors))
@@ -134,6 +154,12 @@ class StreamAcquisition:
                 result['elapsed_ms'] = round((time.perf_counter() - self.started) * 1000, 3)
             if self.previous is not None:
                 result['previous_attempt'] = self.previous
+            if self.switch is not None:
+                switch = dict(self.switch)
+                if switch['result'] == 'pending':
+                    switch['result'] = {'retry_wait': 'retrying', 'cancelled': 'cancelled'}.get(
+                        self.state.get('phase'), 'pending')
+                result['quality_switch'] = switch
             return result
         finally:
             self.lock.release()
@@ -668,7 +694,7 @@ class PlaybackProbe(QObject):
             write('start', schema=3, picture_code=hashlib.sha256(marshal.dumps(PictureReader.get.__code__)).hexdigest(),
                   capture_code=hashlib.sha256(marshal.dumps(Decoder._capture.__code__)).hexdigest(),
                   analysis_gray_code=hashlib.sha256(marshal.dumps(analysis_gray.__code__)).hexdigest(),
-                  audio_read_metrics=1, pts_gap_recovery=2, stack_budget_window_s=60, stream_acquisition=1,
+                  audio_read_metrics=1, pts_gap_recovery=2, stack_budget_window_s=60, stream_acquisition=2,
                   replay_preview_metrics=1, replay_preview_continuous=1)
             sampled = 0
             sample_window = time.perf_counter()

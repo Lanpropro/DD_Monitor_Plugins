@@ -166,6 +166,8 @@ def _start_row(viewer, row):
     if policy != 'source':
         seed.pop('url', None)
     row.decoder = Decoder(row.room_id, seed, row.platform)
+    if row.pending_quality_switch is not None:
+        row.decoder.acquisition.select_quality(*row.pending_quality_switch)
     viewer.clock_recovery.source_reset(row.room_id)
     row.decoder.set_crop((0, 0, 1, 1))
     decoder = row.decoder
