@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 
 def check(app, host, module):
     from ddm import plugins
+    from PySide6.QtWidgets import QMenu
     host.settings, host.rooms = {}, []
     with tempfile.TemporaryDirectory() as directory:
         viewer = module.Viewer(plugins.PluginContext(
@@ -53,9 +54,66 @@ def check(app, host, module):
             with patch.object(viewer, '_reload_picture'):
                 viewer.select_main(native.room_id)
             assert viewer.picture.quality_options == first and viewer.picture.actual_quality == 10000
+
+            tiers = [{'qn': 10000, 'desc': '最高可用'}]
+            douyu_tiers = [{'qn': 10000, 'desc': '原画'}, {'qn': 2000004, 'desc': '高清'}]
+
+            def refused(_room, _quality):
+                tiers[:] = douyu_tiers
+                raise plugins.LoginRequiredError('fixture')
+
+            douyu = SimpleNamespace(kind='douyu', label='斗鱼', playback_mode='stream',
+                                    matches=lambda room: str(room).startswith('douyu:'), normalize=lambda room: room,
+                                    room_info=Mock(return_value=None), play_url=Mock(side_effect=refused),
+                                    room_quality_options=Mock(side_effect=lambda _room: list(tiers)))
+            viewer.context.manager.platforms['douyu'] = douyu
+            with patch.object(module.Decoder, 'start'), patch.object(viewer, '_start_chat'):
+                assert viewer.add_room('douyu:3', {'quality': 10000, 'quality_auto': False})
+            viewer.select_main('douyu:3')
+            douyu_row = viewer.rows['douyu:3']
+            decoder = douyu_row.decoder
+            decoder.acquisition.begin(0)
+            assert not viewer.picture._quality_choices()
+            try:
+                decoder._resolve(0)
+            except plugins.LoginRequiredError:
+                pass
+            else:
+                raise AssertionError('Fixture must reproduce the failed original-quality request')
+            assert viewer.picture.quality_options == douyu_tiers and not viewer.picture.actual_quality
+
+            menu_labels = []
+
+            class QualityMenu(QMenu):
+                def exec(self, _position):
+                    actions = {action.text(): action for action in self.actions()}
+                    menu_labels.extend(actions)
+                    if '高清' in actions:
+                        actions['高清'].trigger()
+
+            lookup_count = douyu.room_quality_options.call_count
+            with patch('ddm.tile_widgets.QMenu', QualityMenu), patch.object(viewer, '_reload_picture') as reload:
+                viewer.picture.quality_button.click()
+                reload.assert_called_once()
+            assert set(menu_labels) == {'原画', '高清'}
+            assert douyu_row.quality == 2000004 and not douyu_row.quality_auto
+            assert douyu.room_quality_options.call_count == lookup_count
+
+            def recovered(_room, quality):
+                tiers[:] = douyu_tiers
+                return 'https://private.invalid/fixture', quality, 'douyu', {}
+
+            tiers[:] = [{'qn': 10000, 'desc': '最高可用'}]
+            decoder.seed.update(quality=10000, highest_quality=True)
+            decoder.acquisition.begin(1)
+            douyu.play_url.side_effect = recovered
+            decoder._resolve(1)
+            assert viewer.picture.quality_options == douyu_tiers and viewer.picture.actual_quality == 10000
+
             return dict(passed=True, platform_calls_on_gui=0, native_path=True,
                         source_switch=True, selected_quality_preserved=True, partial_and_stale_events=True,
-                        empty_keeps_last_known=True, metadata_refreshes_per_event=1)
+                        empty_keeps_last_known=True, metadata_refreshes_per_event=1,
+                        douyu_menu_during_login_failure=True, douyu_refreshes_provisional_tiers=True)
         finally:
             viewer.close()
             viewer.deleteLater()

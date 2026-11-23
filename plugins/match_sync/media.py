@@ -246,7 +246,14 @@ class Decoder:
             if info:
                 self.events.information.emit(info.as_dict())
             self.acquisition.phase('play_url')
-            result = self._available_url(lambda quality: self.platform.play_url(self.room_id, quality), options)
+            try:
+                result = self._available_url(lambda quality: self.platform.play_url(self.room_id, quality), options)
+            except bili.Cancelled:
+                raise
+            except Exception:
+                if self.platform.kind == 'douyu' and not self.cancelled.is_set():
+                    self.events.information.emit({"quality_options": self._play_quality_options(options)})
+                raise
             self.acquisition.mark('play_url_ready')
             if self.cancelled.is_set():
                 raise bili.Cancelled()
@@ -254,8 +261,11 @@ class Decoder:
             self.acquisition.quality(actual=quality)
             headers = dict(result[3]) if len(result) > 3 else {}
             self.acquisition.phase('quality_metadata')
-            self.events.information.emit({"actual_quality": quality,
-                "quality_options": options if options is not None else self.platform.room_quality_options(self.room_id)})
+            # Douyu fills its quality cache while resolving the stream. The
+            # earlier read can contain only its provisional "highest" entry.
+            if self.platform.kind == 'douyu' or options is None:
+                options = self._play_quality_options(options)
+            self.events.information.emit({"actual_quality": quality, "quality_options": options})
             self.acquisition.mark('quality_metadata_ready')
             self.source_url, self.source_headers = url, headers
             return url, headers
@@ -274,6 +284,12 @@ class Decoder:
         self.events.information.emit({"actual_quality": quality})
         self.source_url, self.source_headers = url, headers
         return url, headers
+
+    def _play_quality_options(self, fallback):
+        try:
+            return self.platform.room_quality_options(self.room_id) or fallback or []
+        except Exception:
+            return fallback or []
 
     def _available_url(self, fetch, options):
         tiers = options if self.seed.get('highest_quality') and not self.seed.get('balanced_quality') else []

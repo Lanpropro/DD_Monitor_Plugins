@@ -86,7 +86,7 @@ def check(app, host, diagnostic, media, video):
         release.set()
         worker.join(3)
     assert not worker.is_alive() and resolved == [(address, {'Cookie': secret})]
-    assert platform.play_url.call_count == 1 and platform.room_quality_options.call_count == 1
+    assert platform.play_url.call_count == 1 and platform.room_quality_options.call_count == 2
     assert 'play_url_ready' in decoder.acquisition.snapshot()['milestones_ms']
     assert decoder.acquisition.snapshot()['actual_quality'] == 20000
     assert decoder.acquisition.snapshot()['phase'] == 'quality_metadata'
