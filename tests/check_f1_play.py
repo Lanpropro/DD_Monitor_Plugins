@@ -438,7 +438,9 @@ def main():
         config.CONFIG_PATH = str(Path(directory) / 'config.json')
         installer = plugins.PluginManager(plugins_dir=directory, enabled=[])
         assert installer.install_zip(str(ROOT / 'dist/f1_play-0.2.zip')) == 'f1_play'
-        assert installer.install_zip(str(ROOT / 'dist/match_sync-1.7.0.zip')) == 'match_sync'
+        match_manifest = ROOT / 'plugins/match_sync/plugin.json'
+        match_version = json.loads(match_manifest.read_text(encoding='utf-8'))['version']
+        assert installer.install_zip(str(ROOT / f'dist/match_sync-{match_version}.zip')) == 'match_sync'
         enabled = ['f1_play', 'match_sync']
         room_id = None
         settings = {}
