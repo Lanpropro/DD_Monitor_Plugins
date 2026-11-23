@@ -197,6 +197,10 @@ def check_workspace(window, entry, match, directory, evidence, suspended_tile):
         drag_card(window, '101', match)
         assert match.running and match.main.currentData() == '101'
         assert start_row.call_count == 1
+        assert match.native_main is None and match.native_picture.player is None
+        main = match.rows['101']
+        with patch.object(main, 'platform', Mock(kind='m3u')):
+            assert match.native_main is main
         drag_card(window, '102', match)
         assert match.main.currentData() == '101' and set(match.rows) == {'101', '102'}
         assert start_row.call_count == 2
@@ -476,6 +480,7 @@ def main():
                                     if plugin.context.name == 'match_sync')
                     provider.open_viewer({})
                     QTest.qWait(100)
+                    assert not hasattr(provider.viewer, 'native_picture')
                     assert provider.viewer.settings_panel.findChild(QWidget, 'MatchSyncFooter') is None
                     reference = layout_signature(provider.viewer)
                     if evidence:
