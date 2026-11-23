@@ -6,6 +6,14 @@ from PySide6.QtWidgets import (QCheckBox, QFrame, QGridLayout, QLabel, QMenu,
 from ddm import theme
 from ddm.config import DEFAULT_SETTINGS
 
+try:
+    from ddm.playback_material import style_menu
+    from ddm.settings_material import normalize
+except ModuleNotFoundError as error:
+    if error.name != 'ddm.playback_material':
+        raise
+    style_menu = None
+
 
 CONTROLS = (
     ('video_danmaku_area', '显示区域', 10, 100, '%'),
@@ -92,6 +100,10 @@ class MatchDanmakuSettings(QMenu):
 
     def open_at(self, button, _settings=None):
         self.apply_settings(self.viewer.video_danmaku.settings)
+        if style_menu is not None:
+            appearance = normalize(self.viewer.context.window.settings)
+            opacity = appearance['settings_glass_opacity'] if appearance['settings_glass_enabled'] else None
+            style_menu(self, opacity)
         self.ensurePolished()
         screen = button.screen().availableGeometry()
         top = button.mapToGlobal(QPoint(button.width(), 0))

@@ -1,4 +1,4 @@
-"""Plugin overlay settings stay independent and preserve per-room colors."""
+"""Check independent overlay settings and the host's playback popup material."""
 import argparse
 from copy import deepcopy
 from importlib import import_module
@@ -7,6 +7,34 @@ from pathlib import Path
 import sys
 import tempfile
 from unittest.mock import Mock, patch
+
+
+def check_material(app, host, menu, button, output):
+    from ddm import theme
+    from ddm.settings_material import BASE_COLORS
+    from PySide6.QtCore import Qt
+
+    menu.setAttribute(Qt.WA_DontShowOnScreen)
+    try:
+        for mode in ('dark', 'light'):
+            theme.apply(mode)
+            for enabled, opacity, expected_alpha in ((False, 0, 255), (True, 0, 214), (True, 100, 255)):
+                host.settings.update(settings_glass_enabled=enabled, settings_glass_opacity=opacity)
+                button.click()
+                app.processEvents()
+                assert menu.isVisible() and menu.width() > 300 and menu.height() < 600
+                assert button.screen().availableGeometry().contains(menu.geometry())
+                image = menu.grab().toImage()
+                color = image.pixelColor(image.width() // 2, image.height() - 4)
+                expected = theme.qcolor(BASE_COLORS[theme.is_light()]['background'] if enabled else theme.ELEVATED)
+                assert abs(color.alpha() - expected_alpha) <= 2, (mode, enabled, opacity, color.getRgb())
+                assert all(abs(actual - target) <= 2
+                           for actual, target in zip(color.getRgb()[:3], expected.getRgb()[:3])), color.getRgb()
+                if output and mode == 'dark' and enabled and opacity == 0:
+                    image.save(str(output))
+                menu.hide()
+    finally:
+        theme.apply('dark')
 
 
 def check(app, host, module, output=None):
@@ -79,13 +107,7 @@ def check(app, host, module, output=None):
                 viewer._open_danmaku_settings()
                 opened.assert_called_once()
             host.open_settings.assert_not_called()
-            menu.setAttribute(Qt.WA_DontShowOnScreen)
-            menu.open_at(viewer.picture.danmaku_settings_button)
-            app.processEvents()
-            assert menu.width() > 300 and menu.height() < 600
-            if output:
-                menu.grab().save(str(output))
-            menu.hide()
+            check_material(app, host, menu, viewer.picture.danmaku_settings_button, output)
             reopened = module.Viewer(context, {})
             assert reopened.video_danmaku.settings['video_danmaku_size'] == 37
             assert reopened.video_danmaku.settings['video_danmaku_scale'] is False
@@ -102,7 +124,7 @@ def check(app, host, module, output=None):
             app.processEvents()
     return dict(passed=True, room_colors_preserved=True, plugin_settings_persisted=True,
                 host_settings_untouched=True, host_menu_preserved=True,
-                no_curve_or_color_picker=True, local_button_entry=True,
+                no_curve_or_color_picker=True, local_button_entry=True, host_playback_material=True,
                 host_reapply_and_main_switch=True, real_messages=0, media_playback=False)
 
 
