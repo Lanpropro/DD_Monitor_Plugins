@@ -189,10 +189,16 @@ class ContributionGuideTests(unittest.TestCase):
                     self.assertIn('[@Mrhaimian](https://github.com/Mrhaimian)', row)
                     self.assertIn('0.8 热修复 1', row)
                 download = re.search(
-                    r'\[v([\d.]+)\]\(https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/([^/)]+)\)', row)
+                    r'\[(?:v([\d.]+)|([\d.]+) preview)\]'
+                    r'\(https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/([^/)]+)\)', row)
                 if download:
-                    self.assertEqual(download[2], f'{plugin_id.replace("_", "-")}-v{download[1]}')
-                    self.assertIn(download[2], release_tags)
+                    tag = download[3]
+                    tag_prefix = f'{plugin_id.replace("_", "-")}-v'
+                    if download[2]:
+                        self.assertRegex(tag, rf'^{tag_prefix}{re.escape(download[2])}-pre\.\d+$')
+                    else:
+                        self.assertEqual(tag, tag_prefix + download[1])
+                    self.assertIn(tag, release_tags)
                 else:
                     candidate = f'{plugin_id.replace("_", "-")}-v{manifest["version"]}'
                     if candidate in bundled:
@@ -368,7 +374,11 @@ class ContributionGuideTests(unittest.TestCase):
                 self.assertIn(f']({note.name})', index)
                 heading = note.read_text(encoding='utf-8').splitlines()[0]
                 self.assertTrue(heading.startswith('# '))
-                self.assertTrue(heading.endswith(' v' + tag.rsplit('-v', 1)[1]))
+                version = tag.rsplit('-v', 1)[1]
+                if '-pre.' in version:
+                    self.assertTrue(heading.endswith(' ' + version.split('-pre.', 1)[0] + ' preview'))
+                else:
+                    self.assertTrue(heading.endswith(' v' + version))
 
 
 if __name__ == '__main__':
