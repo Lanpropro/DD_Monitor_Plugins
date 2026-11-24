@@ -245,6 +245,7 @@ class Decoder:
                                           "title": self.seed.get("title") or ""})
             return self.seed["url"], dict(self.seed.get("headers") or {})
         if self.platform is not None:
+            refresh_tiers = self.platform.kind in ('douyu', 'huya')
             self.acquisition.phase('room_info')
             info = self.platform.room_info(self.room_id)
             self.acquisition.mark('room_info_ready')
@@ -258,7 +259,7 @@ class Decoder:
             except bili.Cancelled:
                 raise
             except Exception:
-                if self.platform.kind == 'douyu' and not self.cancelled.is_set():
+                if refresh_tiers and not self.cancelled.is_set():
                     self.events.information.emit({"quality_options": self._play_quality_options(options)})
                 raise
             self.acquisition.mark('play_url_ready')
@@ -268,9 +269,8 @@ class Decoder:
             self.acquisition.quality(actual=quality)
             headers = dict(result[3]) if len(result) > 3 else {}
             self.acquisition.phase('quality_metadata')
-            # Douyu fills its quality cache while resolving the stream. The
-            # earlier read can contain only its provisional "highest" entry.
-            if self.platform.kind == 'douyu' or options is None:
+            # These platforms populate their cached tiers while resolving a stream.
+            if refresh_tiers or options is None:
                 options = self._play_quality_options(options)
             self.events.information.emit({"actual_quality": quality, "quality_options": options})
             self.acquisition.mark('quality_metadata_ready')

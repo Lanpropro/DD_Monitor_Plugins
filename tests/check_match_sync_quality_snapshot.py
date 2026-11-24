@@ -110,10 +110,38 @@ def check(app, host, module):
             decoder._resolve(1)
             assert viewer.picture.quality_options == douyu_tiers and viewer.picture.actual_quality == 10000
 
+            tiers[:] = [{'qn': 10000, 'desc': '最高可用'}]
+            huya_tiers = [{'qn': 1000000, 'desc': '原画'}, {'qn': 1004000, 'desc': '蓝光'}]
+
+            def resolve_huya(_room, _quality):
+                tiers[:] = huya_tiers
+                return 'https://private.invalid/fixture', 1004000, 'huya', {}
+
+            huya = SimpleNamespace(kind='huya', label='虎牙', playback_mode='stream',
+                                   matches=lambda room: str(room).startswith('huya:'), normalize=lambda room: room,
+                                   room_info=Mock(return_value=None), play_url=Mock(side_effect=resolve_huya),
+                                   room_quality_options=Mock(side_effect=lambda _room: list(tiers)))
+            viewer.context.manager.platforms['huya'] = huya
+            with patch.object(module.Decoder, 'start'), patch.object(viewer, '_start_chat'):
+                assert viewer.add_room('huya:3', {'quality': 10000})
+                viewer.select_main('huya:3')
+            huya_row = viewer.rows['huya:3']
+            assert huya_row.decoder.seed['highest_quality']
+            huya_row.decoder._resolve(0)
+            assert viewer.picture.quality_options == huya_tiers
+            assert viewer.picture.actual_quality == 1004000
+            assert {quality for _, quality in viewer.picture._quality_choices()} == {1000000, 1004000}
+            huya_row.decoder.video_size = (1920, 1080)
+            huya_row.decoder.fps = 30.
+            viewer.sync_picture()
+            hint = viewer.picture.quality_button.toolTip()
+            assert '1920×1080' in hint and '30 帧/秒' in hint and '原画' not in hint, hint
+
             return dict(passed=True, platform_calls_on_gui=0, native_path=True,
                         source_switch=True, selected_quality_preserved=True, partial_and_stale_events=True,
                         empty_keeps_last_known=True, metadata_refreshes_per_event=1,
-                        douyu_menu_during_login_failure=True, douyu_refreshes_provisional_tiers=True)
+                        douyu_menu_during_login_failure=True, douyu_refreshes_provisional_tiers=True,
+                        huya_menu_after_cold_resolve=True, actual_huya_resolution_and_rate=True)
         finally:
             viewer.close()
             viewer.deleteLater()

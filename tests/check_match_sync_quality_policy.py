@@ -58,7 +58,7 @@ def check(app, host, module):
         calls.clear()
         decoder.acquisition.begin(4)
         decoder._resolve(0)
-        assert calls == [('metadata', None), ('play', 1014100), ('play', 1014000)], calls
+        assert calls == [('metadata', None), ('play', 1014100), ('play', 1014000), ('metadata', None)], calls
         assert decoder.seed['quality'] == 1014000 and 'url' not in decoder.seed
         assert decoder.acquisition.snapshot()['actual_quality'] == 1014000
         decoder.seed['balanced_quality'] = True
