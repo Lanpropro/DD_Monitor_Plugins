@@ -162,7 +162,7 @@ def build_ui(viewer):
                                              viewer.restore_settings, 0, Qt.AlignVCenter)
     viewer.restore_settings.hide()
     viewer.picture.bottom.installEventFilter(viewer)
-    viewer.canvas = Canvas(viewer.picture.video)
+    viewer.canvas = Canvas(viewer.picture.video, immediate_frame_paint=viewer.split_presentation)
     # Canvas owns the empty-state prompt, including when its skin is transparent.
     viewer.picture.cover.installEventFilter(viewer)
     viewer.picture.cover.hide()
@@ -194,6 +194,9 @@ def build_ui(viewer):
         # Canvas is painted by Qt; a native VLC overlay can obscure its backing store.
         if hasattr(viewer.video_danmaku, "set_native_video"):
             viewer.video_danmaku.set_native_video(False)
+        set_raster_interval = getattr(viewer.video_danmaku, "set_raster_frame_interval", None)
+        if viewer.split_presentation and set_raster_interval is not None:
+            set_raster_interval(16)
         danmaku_settings.install(viewer, settings)
         viewer.picture.videoDanmakuChanged.connect(lambda: viewer.overlay_pending.clear())
     viewer.panel.apply_style(settings.get("danmaku_font", ""),

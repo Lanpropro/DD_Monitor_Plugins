@@ -13,7 +13,7 @@ from ddm import theme
 class Canvas(QFrame):
     selection_finished = Signal()
 
-    def __init__(self, parent=None, selecting=False):
+    def __init__(self, parent=None, selecting=False, *, immediate_frame_paint=False):
         super().__init__(parent)
         self.image = QImage()
         self.waiting = False
@@ -29,6 +29,7 @@ class Canvas(QFrame):
         self.repeated = 0
         self.paint_probe = None
         self.submitted_at = None
+        self.immediate_frame_paint = immediate_frame_paint
         self.selecting = selecting
         self.crop = QRectF(0, 0, 1, 1)
         self.selection_color = QColor('#38bdf8')
@@ -62,7 +63,15 @@ class Canvas(QFrame):
             self.submitted_at = time.perf_counter()
             probe.timings.record('main_ready_to_submit', self.submitted_at - ready_at, at=self.submitted_at)
             probe.submitted.record(self.submitted_at, key)
-        self.update()
+        if (item is not None and self.immediate_frame_paint and self.isVisible()
+                and self.updatesEnabled() and not self.window().isMinimized()):
+            # A newer frame can replace a queued QWidget update before it paints.
+            submitted_at = self.submitted_at
+            self.repaint()
+            if submitted_at is not None:
+                probe.timings.record('main_repaint_sync', time.perf_counter() - submitted_at)
+        else:
+            self.update()
 
     def show_at(self, decoder, timestamp):
         probe = self.paint_probe
@@ -117,6 +126,8 @@ class Canvas(QFrame):
         if probe is None or probe.thread is None:
             return self._paint_frame(event)
         started = time.perf_counter()
+        if self.submitted_at is not None:
+            probe.timings.record('main_submit_to_paint_start', started - self.submitted_at, at=started)
         try:
             self._paint_frame(event)
         finally:
