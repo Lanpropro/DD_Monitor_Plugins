@@ -27,6 +27,10 @@
 | 海外直播平台 | [1.2](RELEASE-global-live-v1.2.md) | [global-live-v1.2](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2) |
 | 网络代理 | [1.0](RELEASE-proxy-control-v1.0.md) | [proxy-control-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/proxy-control-v1.0) |
 
+## 预发布说明
+
+- 比赛二路同步 [2.0 preview](RELEASE-match-sync-v2.0-pre.1.md) · [GitHub 预发布](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v2.0-pre.1)。
+
 
 ## 替代版本的核验归档
 
