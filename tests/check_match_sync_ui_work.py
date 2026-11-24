@@ -52,6 +52,54 @@ def check_main_canvas_paint(app, canvas_type):
         canvas.close()
 
 
+def check_append_scroll(app, panel_type, host):
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QTextCursor
+    from PySide6.QtTest import QTest
+    reference, candidate = panel_type(host), panel_type(host)
+    reference.manage_append_scroll = False
+    markup = [
+        {'text': f'message-{index} ' + 'wrapped row ' * (index % 4), 'uname': 'fixture',
+         'source_room': 'one', '_replay_divider': index == 50}
+        for index in range(110)
+    ]
+    try:
+        for panel in (reference, candidate):
+            panel.setWindowFlag(Qt.Window, True)
+            panel.set_max_blocks(100)
+            panel.resize(360, 240)
+            panel.show()
+            panel.add_events(markup[:95])
+            QTest.qWait(20)
+            assert panel.body.verticalScrollBar().value() == panel.body.verticalScrollBar().maximum()
+            cursor = QTextCursor(panel.body.document().findBlockByNumber(60))
+            cursor.select(QTextCursor.BlockUnderCursor)
+            panel.body.setTextCursor(cursor)
+            bar = panel.body.verticalScrollBar()
+            assert bar.maximum() > 20
+            bar.setValue(bar.maximum() // 2)
+            panel._on_user_scroll()
+            assert not panel._follow_tail
+            panel.add_events(markup[95:])
+            QTest.qWait(20)
+        assert candidate._blocks == reference._blocks
+        assert candidate.body.document().blockCount() == reference.body.document().blockCount() == 100
+        assert candidate.body.toHtml() == reference.body.toHtml()
+        assert 'message-60' in candidate.body.textCursor().selectedText()
+        assert candidate.body.textCursor().selectedText() == reference.body.textCursor().selectedText()
+        assert candidate.body.verticalScrollBar().value() == reference.body.verticalScrollBar().value()
+        for panel in (reference, candidate):
+            panel.jump_to_bottom()
+            panel.add_event({'text': 'tail', 'uname': 'fixture'})
+            QTest.qWait(20)
+            assert panel.body.verticalScrollBar().value() == panel.body.verticalScrollBar().maximum()
+    finally:
+        for panel in (reference, candidate):
+            panel.close()
+            panel.deleteLater()
+        app.processEvents()
+
+
 def check(app, host, module):
     from PySide6.QtCore import Qt, QUrl, QPoint
     from PySide6.QtGui import QPixmap, QTextCursor, QTextDocument
@@ -60,6 +108,7 @@ def check(app, host, module):
     sending = import_module(module.__package__ + '.sending')
     canvas = import_module(module.__package__ + '.canvas')
     check_main_canvas_paint(app, canvas.Canvas)
+    check_append_scroll(app, sending.SendingDanmakuPanel, host)
     with tempfile.TemporaryDirectory() as directory, \
             patch.object(sending.SendingDanmakuPanel, '_ensure_emoticon', lambda *_args: None):
         host.settings, host.rooms = {}, []
@@ -74,7 +123,7 @@ def check(app, host, module):
             panel.show()
             panel.add_event({'text': '0', 'uname': 'fixture', 'source_room': '1'})
             url = 'https://example.invalid/batch-emoticon.png'
-            with patch.object(panel.body, 'append', wraps=panel.body.append) as append, \
+            with patch.object(panel.document_control, '_append_rich_text', wraps=panel.document_control._append_rich_text) as append, \
                     patch.object(panel, '_restore_scroll_state', wraps=panel._restore_scroll_state) as scroll:
                 panel.add_events({'text': str(index) + ('[face]' if index == 42 else ''),
                                   'uname': 'fixture', 'source_room': '1',
@@ -115,7 +164,7 @@ def check(app, host, module):
             assert [entry['source_room'] for entry in panel._blocks] == ['1'] * 100
             panel.queue_playback_events(({'text': f'queued-{index}'} for index in range(24)), time.monotonic())
             assert len(panel._blocks) == 100 and panel.playback_backlog(time.monotonic())[0] == 24
-            with patch.object(panel.body, 'append', wraps=panel.body.append) as append:
+            with patch.object(panel.document_control, '_append_rich_text', wraps=panel.document_control._append_rich_text) as append:
                 panel._playback_flush.stop()
                 panel._flush_playback_batch()
                 assert len(panel._blocks) == 116 and panel.playback_backlog(time.monotonic())[0] == 8

@@ -13,6 +13,7 @@ from ddm import motion, theme
 
 
 class SendingDanmakuPanel(DanmakuPanel):
+    manage_append_scroll = True
     PLAYBACK_BATCH = 16
     PLAYBACK_BACKLOG = 64
 
