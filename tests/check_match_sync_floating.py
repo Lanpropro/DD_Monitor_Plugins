@@ -460,19 +460,109 @@ def check(app, host, module, output=None):
             app.processEvents()
 
 
+def check_native_input(app, module):
+    """Check the Windows hit target after moving over the player's native children."""
+    import ctypes
+    from ctypes import wintypes
+
+    from PySide6.QtCore import QEvent, QPoint, Qt
+    from PySide6.QtGui import QColor, QImage
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QMainWindow, QWidget
+    from ddm import plugins
+
+    # This is the same attribute the desktop host sets before QApplication.
+    assert app.testAttribute(Qt.AA_DontCreateNativeWidgetSiblings)
+    hit_test = ctypes.windll.user32.ChildWindowFromPointEx
+    hit_test.argtypes = (wintypes.HWND, wintypes.POINT, wintypes.UINT)
+    hit_test.restype = wintypes.HWND
+    host = QMainWindow()
+    host.settings, host.rooms = {}, []
+    host.setAttribute(Qt.WA_ShowWithoutActivating)
+    host.setWindowFlag(Qt.Tool)
+    host.resize(1200, 820)
+    host.move(app.primaryScreen().geometry().topLeft() - QPoint(2400, 2100))
+    root = QWidget()
+    host.setCentralWidget(root)
+    content = QWidget(root)
+    content.setGeometry(180, 0, 1020, 820)
+    with tempfile.TemporaryDirectory() as directory:
+        manager = plugins.PluginManager(window=host, plugins_dir=directory)
+        viewer = module.Viewer(plugins.PluginContext(manager, 'floating_native_input'), {})
+        viewer.embed(content)
+        try:
+            viewer.add_room('1', {'alias': 'Fixture'})
+            viewer.show()
+            host.show()
+            app.processEvents()
+            frame = QImage(640, 360, QImage.Format_RGB32)
+            frame.fill(Qt.red)
+            crop = viewer.show_floating_crop(viewer.rows['1'], (0, 0, 1, 1), (1, frame))
+            crop.fit_geometry(10, 40, 160)
+            app.processEvents()
+
+            def drag(surface, start, target):
+                release = surface.mapToGlobal(target)
+                QTest.mousePress(surface, Qt.LeftButton, pos=start)
+                assert crop.drag is not None, 'The crop must receive the press'
+                QTest.mouseMove(surface, target)
+                QTest.mouseRelease(surface, Qt.LeftButton, pos=surface.mapFromGlobal(release))
+                app.processEvents()
+                assert crop.drag is None
+
+            def hit_crop():
+                point = crop.mapTo(root, crop.rect().center())
+                ratio = root.devicePixelRatioF()
+                native_point = wintypes.POINT(round(point.x() * ratio), round(point.y() * ratio))
+                assert root.childAt(point) is crop
+                target = hit_test(int(root.winId()), native_point, 7)
+                assert QWidget.find(target or 0) is crop, 'Windows must route pointer input to the moved crop'
+
+            picture_center = viewer.picture.mapTo(host, viewer.picture.rect().center())
+            first = crop.pos()
+            # A native crop receives the gesture through its own window. For a
+            # non-native crop the Qt backing widget handles the initial press.
+            if crop.windowHandle() is None:
+                drag(host.windowHandle(), crop.mapTo(host, crop.rect().center()), picture_center)
+            else:
+                drag(crop.windowHandle(), crop.rect().center(), crop.mapFrom(host, picture_center))
+            assert crop.x() > first.x() + 200
+            hit_crop()
+            app.sendEvent(crop, QEvent(QEvent.Leave))
+            assert not crop.tools_visible
+            QTest.mouseMove(crop.windowHandle(), crop.rect().center() + QPoint(1, 1))
+            assert crop.tools_visible, 'Moving the pointer over the crop must show its tools again'
+            second = crop.pos()
+            center = crop.rect().center()
+            drag(crop.windowHandle(), center, center + QPoint(74, 52))
+            assert (crop.pos() - second - QPoint(74, 52)).manhattanLength() <= 2, (crop.pos(), second)
+            hit_crop()
+            image = crop.grab().toImage()
+            assert image.pixelColor(image.rect().center()) == QColor('red'), 'The moved crop still paints its source'
+        finally:
+            viewer.close()
+            host.close()
+            app.processEvents()
+    return {'passed': True, 'native_hit_after_both_drags': True, 'hover_tools_return': True}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--host', type=Path, required=True)
     parser.add_argument('--output', type=Path)
+    parser.add_argument('--native-input', action='store_true', help='Check real Windows child-window hit testing')
     args = parser.parse_args()
     sys.path[:0] = [str(args.host), str(Path(__file__).resolve().parents[1])]
-    os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+    os.environ['QT_QPA_PLATFORM'] = 'windows' if args.native_input else 'offscreen'
     os.environ['DDM_NO_SAVE'] = '1'
     from PySide6.QtWidgets import QApplication, QWidget
     from plugins.match_sync import viewer as module
+    if args.native_input:
+        from PySide6.QtCore import Qt
+        QApplication.setAttribute(Qt.AA_DontCreateNativeWidgetSiblings)
     app = QApplication([])
     module.theme.apply('dark')
-    print(check(app, QWidget(), module, args.output))
+    print(check_native_input(app, module) if args.native_input else check(app, QWidget(), module, args.output))
 
 
 if __name__ == '__main__':

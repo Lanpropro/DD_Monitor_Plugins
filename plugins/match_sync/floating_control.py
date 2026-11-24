@@ -4,7 +4,7 @@ from __future__ import annotations
 from .canvas import Canvas
 from .floating import FloatingCrop
 from .panels import console_button_style
-from PySide6.QtWidgets import (QButtonGroup, QDialog, QDialogButtonBox, QHBoxLayout, QLabel,
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QDialog, QDialogButtonBox, QHBoxLayout, QLabel,
                                QPushButton, QToolButton, QVBoxLayout, QWidget)
 from PySide6.QtCore import QPoint, QRect, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QIcon, QKeySequence, QPixmap, QRegion, QShortcut
@@ -108,7 +108,9 @@ def show_floating_crop(viewer, row, crop, frame, *, slot=0):
     group = viewer.floating_crops.setdefault(row.room_id, {})
     floating = group.get(slot)
     if floating is None:
-        floating = FloatingCrop(viewer.floating_surface(), row.label(), crop, native=viewer.workspace_crops)
+        # Windows gives native playback children priority over non-native siblings.
+        native = viewer.workspace_crops or QApplication.platformName() == 'windows'
+        floating = FloatingCrop(viewer.floating_surface(), row.label(), crop, native=native)
         group[slot] = floating
         floating.closed.connect(lambda: _close_floating_crop(viewer, row.room_id, slot))
         floating.background_exposed.connect(lambda rect, item=floating: viewer.restore_crop_background(item, rect))
