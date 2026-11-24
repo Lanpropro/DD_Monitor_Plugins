@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QEasingCurve, QEvent, QSize, Qt, QTimer, QVariantAnimation, Signal
-from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import QAction, QIcon, QPainter
 from PySide6.QtWidgets import QSizePolicy, QStyle, QStyleOptionToolButton, QToolButton, QWidget
 
 from ddm import plugins as api
@@ -58,16 +58,7 @@ class EntryButton(QToolButton):
         self.setDefaultAction(action)
         action.setToolTip("比赛二路：开启或关闭比赛二路模式")
         self.setAccessibleName("比赛二路")
-        pixmap = QPixmap(36, 36)
-        pixmap.setDevicePixelRatio(2)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(QPen(QColor("#dde3eb"), 1.5))
-        painter.drawRoundedRect(2, 3, 8, 12, 2, 2)
-        painter.drawRoundedRect(12, 6, 4, 9, 1, 1)
-        painter.end()
-        action.setIcon(QIcon(pixmap))
+        action.setIcon(QIcon(str(Path(__file__).with_name('icon.svg'))))
         self.setIconSize(QSize(18, 18))
         self._placement = QTimer(self)
         self._placement.setSingleShot(True)

@@ -33,14 +33,17 @@ def main():
     os.environ['DDM_NO_SAVE'] = '1'
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     from PySide6.QtCore import QCoreApplication, QEvent, Qt
+    from PySide6.QtGui import QIcon
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QVBoxLayout, QWidget
     from ddm import config, theme
     from ddm.online import version_key
+    from ddm.plugin_icons import decode_catalog_icon
     from ddm.plugin_updates import apply_pending, pending_versions, stage
     from ddm.plugins import PluginManager
     from ddm.room_placement import RoomPlacement
     from ddm.widgets import Sidebar
+    from ddm.workspace_controls import WorkspaceIcon
 
     app = QApplication.instance() or QApplication([])
 
@@ -58,6 +61,9 @@ def main():
     with zipfile.ZipFile(args.archive) as package:
         assert package.testzip() is None
         manifest = json.loads(package.read('match_sync/plugin.json'))
+        assert manifest['icon'] == 'icon.png'
+        icon_bytes = package.read('match_sync/icon.png')
+        assert 'match_sync/icon.svg' in package.namelist()
         version = manifest['version']
         assert version_key(version) > version_key('1.6')
         assert all(name.startswith('match_sync/') for name in package.namelist())
@@ -102,6 +108,11 @@ def main():
             assert not manager.skipped and len(manager.plugins) == 1
             plugin = manager.plugins[0]
             assert plugin.version == version
+            assert decode_catalog_icon(manager.catalog()[0]['icon_png']) == icon_bytes
+            icon_path = Path(manager.plugins_dir) / 'match_sync/icon.svg'
+            source_icon = QIcon(str(icon_path))
+            assert not source_icon.isNull()
+            expected_icon = QIcon(WorkspaceIcon(source_icon))
             host.resize(1180, 800)
             host.show()
             settle()
@@ -113,7 +124,13 @@ def main():
             panel.search.setText('比赛二路')
             settle()
             assert not panel.empty.isVisible()
-            panel._rows[identity][1].click()
+            launch = panel._rows[identity][1]
+            for button in (plugin.entry, launch):
+                size = button.iconSize()
+                actual = button.icon().pixmap(size)
+                assert not actual.isNull()
+                assert actual.toImage() == expected_icon.pixmap(size).toImage()
+            launch.click()
             wait_for(lambda: plugin.viewer is not None and plugin.viewer.isVisible())
             assert not plugin.viewer.isWindow() and plugin.viewer.parentWidget() is host._content
             assert manager._workspace_pages.active[0] == 'match_sync'
