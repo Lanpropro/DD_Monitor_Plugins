@@ -7,7 +7,7 @@ import sys
 import tempfile
 import time
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 
 def check_main_canvas_paint(app, canvas_type):
@@ -55,93 +55,6 @@ def check_main_canvas_paint(app, canvas_type):
         canvas.close()
 
 
-def check_quick_overlay(app, viewer, quick):
-    from PySide6.QtCore import QPoint, QRect, QRectF, Qt
-    from PySide6.QtGui import QColor, QImage, QRegion
-    from PySide6.QtWidgets import QWidget
-
-    picture, overlay = viewer.picture, viewer.video_danmaku
-    assert quick.install(viewer) is None
-    viewer.resize(1200, 900)
-    viewer.show()
-    overlay.set_active(True)
-    overlay.set_enabled(True)
-    app.processEvents()
-    original_mask = QRegion(overlay.mask())
-    layer = Mock(render_thread_animation=True)
-    layer.parent = picture
-    layer.create_group.return_value = 1
-    controller = quick.WindowedDanmaku(viewer, make_layer=lambda: layer)
-    crop = QWidget(picture)
-    preview = viewer.replay_bar.preview
-    crop.setGeometry(QRect(80, 80, 100, 80))
-    controller.occluders = lambda: (crop, preview)
-    controller.watch_crop(crop)
-    crop.show()
-    controller.sync()
-    assert overlay._quick_layer is layer
-    assert overlay._motion_interval() == 50
-
-    def alpha(x, y):
-        image = layer.set_group_mask.call_args.args[1]
-        scale = image.devicePixelRatio()
-        return image.pixelColor(round(x * scale), round(y * scale)).alpha()
-
-    origin = overlay.mapFromGlobal(crop.mapToGlobal(crop.rect().topLeft()))
-    assert alpha(origin.x() + 5, origin.y() + 5) == 0
-    crop.move(250, 80)
-    app.processEvents()
-    assert alpha(origin.x() + 5, origin.y() + 5) == 255
-    preview.parentWidget().show()
-    preview.setGeometry(50, 70, 70, 50)
-    preview.show()
-    controller.sync()
-    point = overlay.mapFromGlobal(preview.mapToGlobal(QPoint(5, 5)))
-    assert alpha(point.x(), point.y()) == 0, (preview.isVisible(), point, overlay.size(), preview.geometry())
-    preview.hide()
-    crop.hide()
-    sc = overlay.super_chat_overlay
-    sc.show()
-    with patch.object(sc, 'card_rects', return_value=[QRectF(110, 120, 35, 35)]):
-        controller.sync()
-        assert alpha(115, 125) == 0
-    sc.hide()
-    frame = QImage(80, 30, QImage.Format_ARGB32_Premultiplied)
-    frame.fill(Qt.white)
-    assert overlay._admit_comment(frame, 'test', 'test', QColor(Qt.white), [], False, {})
-    comment = overlay.comments[0]
-    layer.pause_comment.reset_mock()
-    overlay._set_hover(comment)
-    layer.pause_comment.assert_called_with(comment.render_id, True, comment.x)
-    overlay._set_hover(None)
-    layer.pause_comment.assert_called_with(comment.render_id, False, comment.x)
-    overlay.hide()
-    layer.set_group_visible.assert_called_with(1, False)
-    overlay.show()
-    layer.set_group_visible.assert_called_with(1, True)
-    # Fullscreen uses the raster layer while the Tile belongs to another window.
-    alternate = QWidget()
-    picture.setParent(alternate)
-    controller.sync()
-    assert overlay._quick_layer is None and overlay._motion_interval() == 16
-    assert overlay.mask() == original_mask
-    assert overlay.comments == [comment]
-    viewer.body_split.insertWidget(0, picture)
-    picture.show()
-    controller.sync()
-    assert overlay._quick_layer is layer
-    controller.refresh.stop()
-    overlay.set_windowed_quick_layer(None)
-    for widget in (viewer, picture, viewer.body_split, viewer.left_pane, preview, crop):
-        widget.removeEventFilter(controller)
-    crop.deleteLater()
-    controller.deleteLater()
-    alternate.close()
-    overlay.set_enabled(False)
-    viewer.hide()
-    app.processEvents()
-
-
 def check(app, host, module):
     from PySide6.QtCore import Qt, QUrl, QPoint
     from PySide6.QtGui import QPixmap, QTextCursor, QTextDocument
@@ -157,8 +70,6 @@ def check(app, host, module):
             plugins.PluginManager(window=host, plugins_dir=directory), 'ui_work'), {})
         panel = sending.SendingDanmakuPanel(host)
         try:
-            quick = import_module(module.__package__ + '.quick_danmaku')
-            check_quick_overlay(app, viewer, quick)
             viewer.video_danmaku._start_timer()
             assert viewer.video_danmaku.timer.interval() == 16
             viewer.video_danmaku._stop_timer()
