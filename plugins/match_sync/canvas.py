@@ -13,7 +13,7 @@ from ddm import theme
 class Canvas(QFrame):
     selection_finished = Signal()
 
-    def __init__(self, parent=None, selecting=False):
+    def __init__(self, parent=None, selecting=False, *, limit_frame_damage=False):
         super().__init__(parent)
         self.image = QImage()
         self.waiting = False
@@ -29,6 +29,7 @@ class Canvas(QFrame):
         self.repeated = 0
         self.paint_probe = None
         self.submitted_at = None
+        self.limit_frame_damage = limit_frame_damage
         self.selecting = selecting
         self.crop = QRectF(0, 0, 1, 1)
         self.selection_color = QColor('#38bdf8')
@@ -62,6 +63,11 @@ class Canvas(QFrame):
             self.submitted_at = time.perf_counter()
             probe.timings.record('main_ready_to_submit', self.submitted_at - ready_at, at=self.submitted_at)
             probe.submitted.record(self.submitted_at, key)
+        if self.limit_frame_damage and not self.image.isNull() and not self.selecting:
+            current_rect = self._image_target(self._source_rect())
+            if current_rect == self.image_rect:
+                self.update(current_rect.toAlignedRect())
+                return
         self.update()
 
     def show_at(self, decoder, timestamp):
@@ -103,6 +109,11 @@ class Canvas(QFrame):
                            max(1, round(rect.height() * image.height()))).intersected(source)
         return source
 
+    def _image_target(self, source):
+        size = source.size().scaled(self.size(), Qt.KeepAspectRatio)
+        return QRectF((self.width() - size.width()) / 2,
+                      (self.height() - size.height()) / 2, size.width(), size.height())
+
     def _sync_opaque_paint(self):
         covered = (not self.image.isNull() and
                    self._source_rect().size().scaled(self.size(), Qt.KeepAspectRatio) == self.size())
@@ -137,15 +148,13 @@ class Canvas(QFrame):
             return
         image = self.image
         source = self._source_rect()
-        size = source.size().scaled(self.size(), Qt.KeepAspectRatio)
-        self.image_rect = QRectF((self.width() - size.width()) / 2,
-                                (self.height() - size.height()) / 2,
-                                size.width(), size.height())
+        self.image_rect = self._image_target(source)
         if self.selecting:
             center = self.image_rect.center()
-            self.image_rect = QRectF(center.x() - size.width() * self.selection_zoom / 2 + self.selection_pan.x(),
-                                     center.y() - size.height() * self.selection_zoom / 2 + self.selection_pan.y(),
-                                     size.width() * self.selection_zoom, size.height() * self.selection_zoom)
+            width = self.image_rect.width() * self.selection_zoom
+            height = self.image_rect.height() * self.selection_zoom
+            self.image_rect = QRectF(center.x() - width / 2 + self.selection_pan.x(),
+                                     center.y() - height / 2 + self.selection_pan.y(), width, height)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
         started = time.perf_counter()
         painter.drawImage(self.image_rect, image, QRectF(source))

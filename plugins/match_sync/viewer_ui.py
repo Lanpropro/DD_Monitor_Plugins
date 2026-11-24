@@ -162,7 +162,7 @@ def build_ui(viewer):
                                              viewer.restore_settings, 0, Qt.AlignVCenter)
     viewer.restore_settings.hide()
     viewer.picture.bottom.installEventFilter(viewer)
-    viewer.canvas = Canvas(viewer.picture.video)
+    viewer.canvas = Canvas(viewer.picture.video, limit_frame_damage=viewer.split_presentation)
     # Canvas owns the empty-state prompt, including when its skin is transparent.
     viewer.picture.cover.installEventFilter(viewer)
     viewer.picture.cover.hide()

@@ -99,7 +99,6 @@ class Viewer(QDialog):
         self.render_timer = QTimer(self)
         self.render_timer.setTimerType(Qt.PreciseTimer)
         self.render_timer.setInterval(33)
-        self.render_timer.setSingleShot(self.split_presentation)
         if self.split_presentation:
             self.render_timer.timeout.connect(self._picture_tick)
         else:

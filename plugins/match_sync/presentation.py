@@ -38,10 +38,16 @@ def render_picture_tick(viewer):
     if not viewer.running:
         return
     probe = viewer.playback_probe if viewer.playback_probe.thread is not None else None
+    deadline = viewer._picture_due
+    period = viewer.render_timer.interval() / 1000
+    if deadline is not None:
+        lateness = max(0., entered - deadline)
+        viewer._picture_due = deadline + (1 + int(lateness / period)) * period
     if probe is not None:
         probe.begin()
-        if viewer._picture_due is not None:
-            probe.timings.record('picture_timer_late', max(0., entered - viewer._picture_due), at=entered)
+        probe.timings.record('picture_poll_gap', probe.render_gap / 1000, at=entered)
+        if deadline is not None:
+            probe.timings.record('picture_timer_late', lateness, at=entered)
     viewer._picture_poll = None
     try:
         position = _playback_position(viewer, probe)
@@ -50,8 +56,9 @@ def render_picture_tick(viewer):
     finally:
         if probe is not None:
             probe.end()
-        if viewer.running:
-            _arm_picture_timer(viewer, _next_picture_interval(viewer))
+        interval = getattr(viewer, '_picture_poll_base', 33)
+        if viewer.running and interval != viewer.render_timer.interval():
+            _arm_picture_timer(viewer, interval)
 
 
 def render_auxiliary_tick(viewer):

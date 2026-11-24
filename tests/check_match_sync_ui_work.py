@@ -11,14 +11,14 @@ from unittest.mock import patch
 
 
 def check_main_canvas_paint(app, canvas_type):
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import QRect, Qt
     from PySide6.QtGui import QImage
     from unittest.mock import Mock
 
-    canvas = canvas_type()
+    canvas = canvas_type(limit_frame_damage=True)
     try:
         canvas.setAttribute(Qt.WA_ShowWithoutActivating)
-        canvas.resize(480, 270)
+        canvas.resize(480, 360)
         canvas.show()
         app.processEvents()
         probe = canvas.paint_probe = Mock(thread=True, paints=[])
@@ -42,6 +42,12 @@ def check_main_canvas_paint(app, canvas_type):
             canvas.show()
             app.processEvents()
             assert paint.call_count == 2 and canvas.frame_key == 3
+        with patch.object(canvas, 'update') as update:
+            canvas.set_frame((4, image))
+            update.assert_called_once_with(QRect(0, 45, 480, 270))
+            update.reset_mock()
+            canvas.set_frame((5, QImage(270, 270, QImage.Format_RGB32)))
+            update.assert_called_once_with()
     finally:
         canvas.close()
 
@@ -113,6 +119,8 @@ def check(app, host, module):
                 viewer.playback_probe.path = Path(directory) / 'playback.jsonl'
                 viewer.add_room('1')
                 viewer.toggle_running()
+            assert not viewer.render_timer.isSingleShot()
+            picture_timer_id = viewer.render_timer.timerId()
             # Drive the real timers. A fresh picture callback must not run the
             # crop and chat work inline, even when both are active.
             order = []
@@ -121,6 +129,8 @@ def check(app, host, module):
                     patch.object(viewer, '_render_overlay', side_effect=lambda *_: order.append('chat')):
                 QTest.qWait(90)
             assert order[0] == 'picture' and 'crop' in order and 'chat' in order, order
+            assert order.count('picture') >= 3
+            assert viewer.render_timer.timerId() == picture_timer_id, 'Keep the timer phase across picture polls'
             assert len(viewer.playback_probe.auxiliary_updates) > 0
             stats = viewer.playback_probe.snapshot()
             assert 'picture_timer_late' in stats['gui_pipeline']['stages']
