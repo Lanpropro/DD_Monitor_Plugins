@@ -28,6 +28,7 @@ class Canvas(QFrame):
         self.presented = 0
         self.repeated = 0
         self.paint_probe = None
+        self.submitted_at = None
         self.selecting = selecting
         self.crop = QRectF(0, 0, 1, 1)
         self.selection_color = QColor('#38bdf8')
@@ -50,21 +51,34 @@ class Canvas(QFrame):
             self.presented += 1
         self.frame_key = key
         self.frame = item
-        if self.paint_probe is not None and self.paint_probe.thread is not None and item is not None:
-            self.paint_probe.submitted.record(time.perf_counter(), key)
+        probe = self.paint_probe
+        ready_at = time.perf_counter() if probe is not None and probe.thread is not None and item is not None else None
+        if ready_at is not None and self.submitted_at is not None:
+            probe.timings.record('main_submit_replaced', ready_at - self.submitted_at, at=ready_at)
         self.image = (item[1] if isinstance(item[1], QImage) else QImage.fromData(item[1])) if item is not None else QImage()
         self._sync_opaque_paint()
+        self.submitted_at = None
+        if ready_at is not None:
+            self.submitted_at = time.perf_counter()
+            probe.timings.record('main_ready_to_submit', self.submitted_at - ready_at, at=self.submitted_at)
+            probe.submitted.record(self.submitted_at, key)
         self.update()
 
     def show_at(self, decoder, timestamp):
+        probe = self.paint_probe
+        requested = time.perf_counter() if probe is not None and probe.thread is not None else None
         frame = decoder.history.frame_at(timestamp)
         self.requested_frame_key = frame[0] if frame is not None else None
+        ready = None
         if frame is not None:
             ready = decoder.picture_at(timestamp) if hasattr(decoder, "picture_at") else frame
-            if ready is not None:
-                self.set_frame(ready)
-            return ready
-        return None
+        if requested is not None:
+            stage = ('main_target_unbuffered' if frame is None else 'main_target_unready' if ready is None
+                     else 'main_target_ready' if ready[0] == frame[0] else 'main_target_fallback')
+            probe.timings.record(stage, time.perf_counter() - requested)
+        if ready is not None:
+            self.set_frame(ready)
+        return ready
 
     def playback_waiting(self, decoder, timestamp, frame, shared_wait=False):
         if frame is not None:
@@ -106,8 +120,12 @@ class Canvas(QFrame):
         try:
             self._paint_frame(event)
         finally:
-            probe.paints.append((time.perf_counter(), (time.perf_counter() - started) * 1000))
-            probe.painted.record(time.perf_counter(), self.frame_key)
+            painted_at = time.perf_counter()
+            probe.paints.append((painted_at, (painted_at - started) * 1000))
+            probe.painted.record(painted_at, self.frame_key)
+            if self.submitted_at is not None:
+                probe.timings.record('main_submit_to_paint', painted_at - self.submitted_at, at=painted_at)
+                self.submitted_at = None
 
     def _paint_frame(self, event):
         painter = QPainter(self)

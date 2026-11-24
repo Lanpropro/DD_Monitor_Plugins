@@ -25,6 +25,8 @@ class RaceFeed(Platform):
 
 
 class RaceViewer(Viewer):
+    split_presentation = False
+
     picture_clock_changed = Signal()
     overlay_changed = Signal(bool)
 

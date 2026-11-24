@@ -120,7 +120,8 @@ def sync_picture(viewer, *_args, refresh_metadata=True):
     state = (row.room_id, id(row.decoder), getattr(row.decoder, 'fps', 30)) if row is not None else None
     if state != getattr(viewer, '_picture_poll_source', None):
         viewer._picture_poll_source = state
-        viewer.render_timer.setInterval(interval)
+        if not viewer.split_presentation or not viewer.running:
+            viewer.render_timer.setInterval(interval)
     tile = viewer.picture
     if row is None:
         viewer._stop_recording()

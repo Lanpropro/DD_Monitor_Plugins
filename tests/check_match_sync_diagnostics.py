@@ -43,6 +43,7 @@ def check(app, host, module):
             probe.start()
             viewer.eventFilter(viewer.canvas, QEvent(QEvent.Enter))
             probe.observe(decoder, 102., 102., False)
+            viewer.canvas.set_frame((101.9, image))
             viewer.canvas.set_frame((102., image))
             # Exercise the actual paintEvent wrapper without showing a test window.
             viewer.canvas.grab()
@@ -82,6 +83,9 @@ def check(app, host, module):
             playback = [item for item in records if item['event'] == 'playback']
             assert any(item['render_ms'] >= 300 and item['stages_ms']['picture'] >= 300 for item in playback), playback
             assert any(item['mouse_events'] >= 1 and item['paint_calls'] >= 1 for item in playback), playback
+            assert any({'main_ready_to_submit', 'main_submit_to_paint', 'main_submit_replaced'}
+                       <= item['gui_pipeline']['stages'].keys()
+                       for item in playback), playback
             assert any(item['picture']['encoded_ahead_s'] == 7.5 and item['picture']['rgb_bounds'] == [102., 102.]
                        for item in playback), playback
             transitions = [entry for item in records if item['event'] == 'frame_wait' for entry in item['transitions']]

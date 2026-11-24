@@ -165,8 +165,10 @@ def check(app, host, module, output=None):
                     'source_room': '1', 'source_label': 'room1'})
             correction = viewer.audio.correction
             with patch.object(viewer, 'shifts', return_value={'1': .5, '2': 4.5}):
+                viewer._presentation_update = object()
                 viewer.seek_replay(target)
                 assert viewer.replay.active and viewer.audio.correction == correction
+                assert viewer._presentation_update is None
                 anchor, updated = viewer._replay_live_anchor, viewer._replay_live_updated
                 old_rate = viewer.playback_rate
                 viewer.playback_rate = .98
@@ -282,8 +284,10 @@ def check(app, host, module, output=None):
                     bar.enter_time()
                     tooltip.assert_called_once()
                 assert viewer.replay.delay == expected_delay
+                viewer._presentation_update = object()
                 viewer.return_live()
                 assert not viewer.replay.active and viewer.audio.correction == correction
+                assert viewer._presentation_update is None
                 assert 'live only' in viewer.panel.body.toPlainText()
                 assert 'new incoming live' in viewer.panel.body.toPlainText()
                 assert any(entry.get('_replay_divider') and '返回直播' in entry['text']

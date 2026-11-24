@@ -545,6 +545,7 @@ class PlaybackProbe(QObject):
         super().__init__(parent)
         self.path = Path(path)
         self.enabled = os.environ.get('DDM_MATCH_DIAGNOSTICS', '1') != '0'
+        self.split_picture_timing = int(getattr(parent, 'split_presentation', False))
         self.timer = QTimer(self)
         self.timer.setTimerType(Qt.PreciseTimer)
         self.timer.setInterval(50)
@@ -557,6 +558,7 @@ class PlaybackProbe(QObject):
         self.frame = None
         self.transitions = deque(maxlen=60)
         self.renders = deque(maxlen=240)
+        self.auxiliary_updates = deque(maxlen=120)
         self.paints = deque(maxlen=120)
         self.mouse_count = 0
         self.mouse_target = ''
@@ -579,6 +581,7 @@ class PlaybackProbe(QObject):
         self.frame = None
         self.transitions.clear()
         self.renders.clear()
+        self.auxiliary_updates.clear()
         self.paints.clear()
         self.submitted.samples.clear()
         self.painted.samples.clear()
@@ -624,10 +627,12 @@ class PlaybackProbe(QObject):
         self.frame = frame
         self.clock_steps.record(time.perf_counter(), target)
 
-    def begin(self):
+    def begin(self, *, auxiliary=False):
         now = time.perf_counter()
-        self.render_gap = (now - self.last_render) * 1000
-        self.last_render = self.started = self.checkpoint = now
+        self.render_gap = 0. if auxiliary else (now - self.last_render) * 1000
+        if not auxiliary:
+            self.last_render = now
+        self.started = self.checkpoint = now
         self.stages = []
         self.stage = 'metadata'
 
@@ -636,10 +641,11 @@ class PlaybackProbe(QObject):
         self.stages.append((self.stage, round((now - self.checkpoint) * 1000, 3)))
         self.checkpoint, self.stage = now, stage
 
-    def end(self):
+    def end(self, *, auxiliary=False):
         self.mark('idle')
-        self.renders.append((time.perf_counter(), self.render_gap,
-                             (time.perf_counter() - self.started) * 1000, tuple(self.stages)))
+        now = time.perf_counter()
+        samples = self.auxiliary_updates if auxiliary else self.renders
+        samples.append((now, self.render_gap, (now - self.started) * 1000, tuple(self.stages)))
 
     def snapshot(self):
         now = time.perf_counter()
@@ -647,13 +653,18 @@ class PlaybackProbe(QObject):
         previous_wall, previous_cpu = self.cpu_observation
         self.cpu_observation = (now, cpu)
         renders = [item for item in tuple(self.renders) if now - item[0] < 1]
+        auxiliary = [item for item in tuple(self.auxiliary_updates) if now - item[0] < 1]
         paints = [item for item in tuple(self.paints) if now - item[0] < 1]
         slowest = max(renders, key=lambda item: item[2], default=None)
+        slowest_auxiliary = max(auxiliary, key=lambda item: item[2], default=None)
         last_fill = self.audio.last_fill if self.audio is not None else None
         result = dict(stage=self.stage, render_calls=len(renders),
                       render_gap_ms=round(max((item[1] for item in renders), default=0), 3),
                       render_ms=round(slowest[2], 3) if slowest else 0,
                       stages_ms=dict(slowest[3]) if slowest else {},
+                      auxiliary_calls=len(auxiliary),
+                      auxiliary_ms=round(slowest_auxiliary[2], 3) if slowest_auxiliary else 0,
+                      auxiliary_stages_ms=dict(slowest_auxiliary[3]) if slowest_auxiliary else {},
                       paint_calls=len(paints), paint_ms=round(max((item[1] for item in paints), default=0), 3),
                       mouse_events=self.mouse_count, mouse_target=self.mouse_target,
                       mouse_age_ms=round((now - self.mouse_time) * 1000, 1) if self.mouse_time else None,
@@ -695,7 +706,7 @@ class PlaybackProbe(QObject):
                   capture_code=hashlib.sha256(marshal.dumps(Decoder._capture.__code__)).hexdigest(),
                   analysis_gray_code=hashlib.sha256(marshal.dumps(analysis_gray.__code__)).hexdigest(),
                   audio_read_metrics=1, pts_gap_recovery=2, stack_budget_window_s=60, stream_acquisition=2,
-                  replay_preview_metrics=1, replay_preview_continuous=1)
+                  replay_preview_metrics=1, replay_preview_continuous=1, split_picture_timing=self.split_picture_timing)
             sampled = 0
             sample_window = time.perf_counter()
             last_stack = last_report = 0.0

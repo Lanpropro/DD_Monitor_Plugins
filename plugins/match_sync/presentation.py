@@ -4,6 +4,74 @@ from __future__ import annotations
 import time
 from .playback_timing import cache_gap, picture_poll_interval
 
+
+def start_rendering(viewer):
+    if viewer.split_presentation:
+        viewer._configure_picture_budget()
+        _arm_picture_timer(viewer, getattr(viewer, '_picture_poll_base', 33))
+        viewer.auxiliary_timer.start()
+    else:
+        viewer.render_timer.start()
+
+
+def stop_rendering(viewer):
+    viewer.render_timer.stop()
+    viewer.auxiliary_timer.stop()
+    viewer._picture_due = viewer._presentation_update = None
+
+
+def _arm_picture_timer(viewer, interval):
+    viewer._picture_due = time.perf_counter() + interval / 1000
+    viewer.render_timer.start(interval)
+
+
+def _next_picture_interval(viewer):
+    if viewer._picture_poll is not None:
+        target, frame_stamp, fps, rate, requested = viewer._picture_poll
+        return picture_poll_interval(target, frame_stamp, fps, rate, time.perf_counter() - requested)
+    return getattr(viewer, '_picture_poll_base', 33)
+
+
+def render_picture_tick(viewer):
+    entered = time.perf_counter()
+    if not viewer.running:
+        return
+    probe = viewer.playback_probe if viewer.playback_probe.thread is not None else None
+    if probe is not None:
+        probe.begin()
+        if viewer._picture_due is not None:
+            probe.timings.record('picture_timer_late', max(0., entered - viewer._picture_due), at=entered)
+    viewer._picture_poll = None
+    try:
+        position = _playback_position(viewer, probe)
+        waiting = _render_picture(viewer, probe, position)
+        viewer._presentation_update = (viewer.generation, position, waiting)
+    finally:
+        if probe is not None:
+            probe.end()
+        if viewer.running:
+            _arm_picture_timer(viewer, _next_picture_interval(viewer))
+
+
+def render_auxiliary_tick(viewer):
+    update = viewer._presentation_update
+    if not viewer.running or update is None or update[0] != viewer.generation:
+        return
+    _, position, waiting = update
+    probe = viewer.playback_probe if viewer.playback_probe.thread is not None else None
+    if probe is not None:
+        probe.begin(auxiliary=True)
+    try:
+        dragging_crop, refresh_status_ui = _prepare_auxiliary(viewer, probe)
+        _sync_delay_controls(viewer, position[1])
+        viewer._configure_picture_budget()
+        _render_previews(viewer, probe, position)
+        _render_auxiliary(viewer, probe, position, waiting, dragging_crop, refresh_status_ui)
+    finally:
+        if probe is not None:
+            probe.end(auxiliary=True)
+
+
 def render(viewer):
     if not viewer.running:
         return
@@ -16,15 +84,20 @@ def render(viewer):
     finally:
         if probe is not None:
             probe.end()
-        interval = getattr(viewer, '_picture_poll_base', 33)
-        if viewer._picture_poll is not None:
-            target, frame_stamp, fps, rate, requested = viewer._picture_poll
-            interval = picture_poll_interval(target, frame_stamp, fps, rate, time.perf_counter() - requested)
+        interval = _next_picture_interval(viewer)
         if viewer.running and viewer.render_timer.interval() != interval:
             viewer.render_timer.setInterval(interval)
 
 
 def _render(viewer, probe):
+    dragging_crop, refresh_status_ui = _prepare_auxiliary(viewer, probe)
+    position = _playback_position(viewer, probe, combined=True)
+    _render_previews(viewer, probe, position)
+    waiting = _render_picture(viewer, probe, position)
+    _render_auxiliary(viewer, probe, position, waiting, dragging_crop, refresh_status_ui)
+
+
+def _prepare_auxiliary(viewer, probe):
     if not viewer.embedded:
         viewer._suppress_host_audio()
     dragging_crop = any(crop.drag is not None for crop in viewer.all_floating_crops())
@@ -42,11 +115,10 @@ def _render(viewer, probe):
     if probe is not None:
         probe.mark('metadata_picture')
     viewer.sync_picture(refresh_metadata=refresh_status_ui)
-    if probe is not None:
-        probe.mark('clock')
-    clock = viewer.live_clock()
-    wanted = viewer.target_shifts()
-    shifts = viewer._smooth_shifts(wanted)
+    return dragging_crop, refresh_status_ui
+
+
+def _sync_delay_controls(viewer, shifts):
     if viewer.alignment.automatic:
         origin = shifts.get(viewer.alignment.reference, 0)
         for key, row in viewer.rows.items():
@@ -55,7 +127,17 @@ def _render(viewer, probe):
                 row.delay.setValue(origin - shifts[key])
                 row.delay.blockSignals(False)
                 row.previous_delay = row.delay.value()
-    viewer._configure_picture_budget()
+
+
+def _playback_position(viewer, probe, *, combined=False):
+    if probe is not None:
+        probe.mark('clock')
+    clock = viewer.live_clock()
+    wanted = viewer.target_shifts()
+    shifts = viewer._smooth_shifts(wanted)
+    if combined:
+        _sync_delay_controls(viewer, shifts)
+        viewer._configure_picture_budget()
     for key, current in viewer.rows.items():
         if current.reset_pending and current.decoder is not None:
             previous = getattr(current.decoder.history, 'previous', None)
@@ -71,14 +153,47 @@ def _render(viewer, probe):
     if viewer.replay.active and not viewer.replay.valid(shown_clock, shown_shifts, viewer.replay_histories()):
         viewer.return_live()
         shown_clock, shown_shifts = clock, shifts
+    return clock, shifts, wanted, shown_clock, shown_shifts
+
+
+def _render_previews(viewer, probe, position):
+    _, _, _, shown_clock, shown_shifts = position
     viewer.replay_bar.refresh()
     if probe is not None:
         probe.mark('floating')
     viewer.render_floating_crops(shown_clock, shown_shifts)
+
+
+def _render_picture(viewer, probe, position):
+    _, _, _, shown_clock, shown_shifts = position
     if probe is not None:
         probe.mark('picture')
     row = viewer.rows.get(viewer.alignment.reference)
-    if row is not None and row.decoder is not None and not row.paused and row.room_id in shown_shifts:
+    if row is None or row.decoder is None or row.paused or row.room_id not in shown_shifts:
+        if probe is not None:
+            probe.frame = None
+        return None
+    target = shown_clock + shown_shifts[row.room_id]
+    requested = time.perf_counter()
+    frame = viewer.canvas.show_at(row.decoder, target)
+    viewer._picture_poll = (target, viewer.canvas.requested_frame_key if frame is not None else None,
+                            getattr(row.decoder, 'fps', 30),
+                            1. if viewer.replay.active else viewer.playback_rate, requested)
+    row.actual_position = viewer.canvas.frame_key
+    waiting = viewer.canvas.playback_waiting(row.decoder, target, frame,
+                                             viewer.sync_waiting and not viewer.replay.active)
+    if probe is not None:
+        probe.observe(row.decoder, target, viewer.canvas.frame_key, waiting)
+    return waiting
+
+
+def _render_auxiliary(viewer, probe, position, waiting, dragging_crop, refresh_status_ui):
+    clock, shifts, wanted, shown_clock, shown_shifts = position
+    now = time.monotonic()
+    row = viewer.rows.get(viewer.alignment.reference)
+    if waiting is not None and row is not None and row.decoder is not None and not row.paused:
+        if probe is not None:
+            probe.mark('picture_status')
         if probe is not None and refresh_status_ui:
             window = viewer.window()
             handle = window.windowHandle()
@@ -97,17 +212,6 @@ def _render(viewer, probe):
                                  native_clip_retry_blocks=viewer.native_clip_retry_blocks,
                                  floating=[crop.diagnostics() for crop in viewer.all_floating_crops()],
                                  render_interval_ms=viewer.render_timer.interval())
-        target = shown_clock + shown_shifts[row.room_id]
-        requested = time.perf_counter()
-        frame = viewer.canvas.show_at(row.decoder, target)
-        viewer._picture_poll = (target, viewer.canvas.requested_frame_key if frame is not None else None,
-                              getattr(row.decoder, 'fps', 30),
-                              1. if viewer.replay.active else viewer.playback_rate, requested)
-        row.actual_position = viewer.canvas.frame_key
-        waiting = viewer.canvas.playback_waiting(row.decoder, shown_clock + shown_shifts[row.room_id], frame,
-                                               viewer.sync_waiting and not viewer.replay.active)
-        if probe is not None:
-            probe.observe(row.decoder, shown_clock + shown_shifts[row.room_id], viewer.canvas.frame_key, waiting)
         viewer._show_buffering(waiting)
         if viewer.sync_waiting:
             viewer.notice.setText("主画面等待缓存恢复；异常二路已静音，已确认偏移保持不变")
@@ -128,8 +232,6 @@ def _render(viewer, probe):
             mode = ("自动对齐已开启" if viewer.alignment.automatic else
                     "自动对齐已关闭；手动偏移")
             viewer.notice.setText(f"主画面：{row.label()} · 本地播放延后约 {delay:.1f} 秒 · {mode}")
-    elif probe is not None:
-        probe.frame = None
     if probe is not None:
         probe.mark('comparison')
     if viewer.compare.isChecked():

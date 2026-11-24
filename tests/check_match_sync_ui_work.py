@@ -49,9 +49,29 @@ def check(app, host, module):
             with patch.object(module.Decoder, 'start', lambda _self: None), \
                     patch.object(module.Chat, 'start', lambda _self: None), \
                     patch.object(module.AudioPump, 'start', lambda _self: None):
+                viewer.playback_probe.path = Path(directory) / 'playback.jsonl'
                 viewer.add_room('1')
                 viewer.toggle_running()
+            # Drive the real timers. A fresh picture callback must not run the
+            # crop and chat work inline, even when both are active.
+            order = []
+            with patch.object(viewer.canvas, 'show_at', side_effect=lambda *_: order.append('picture')), \
+                    patch.object(viewer, 'render_floating_crops', side_effect=lambda *_: order.append('crop')), \
+                    patch.object(viewer, '_render_overlay', side_effect=lambda *_: order.append('chat')):
+                QTest.qWait(90)
+            assert order[0] == 'picture' and 'crop' in order and 'chat' in order, order
+            assert len(viewer.playback_probe.auxiliary_updates) > 0
+            stats = viewer.playback_probe.snapshot()
+            assert 'picture_timer_late' in stats['gui_pipeline']['stages']
+            assert 'chat' in stats['auxiliary_stages_ms']
+            assert 'chat' not in stats['stages_ms'] and 'floating' not in stats['stages_ms']
             viewer.render_timer.stop()
+            viewer.auxiliary_timer.stop()
+            assert viewer._presentation_update is not None
+            viewer.generation += 1
+            with patch.object(viewer, 'sync_picture') as stale_update:
+                viewer._auxiliary_tick()
+                stale_update.assert_not_called()
             viewer.match_timer.stop()
             viewer.audio.timer.stop()
             row = viewer.rows['1']
@@ -119,7 +139,11 @@ def check(app, host, module):
                     viewer._render_overlay(base, {'1': 0})
                     assert emitted[-1]['text'] == '【主播一】 ' + incoming['text']
                     assert plain['text'] == incoming['text'], 'Fallback must not change the chat/replay event'
+            viewer.stop()
+            assert viewer._presentation_update is None and viewer._picture_due is None
+            assert not viewer.render_timer.isActive() and not viewer.auxiliary_timer.isActive()
             return {'passed': True, 'resize_full_rebuilds': 0, 'messages_preserved': 100,
+                    'picture_timer_isolated': True, 'separate_picture_and_auxiliary_metrics': True,
                     'playback_updates': 125, 'metadata_refreshes': 4, 'platform_polls': 0, 'immediate_controls': True,
                     'colored_overlay_without_source_prefix': True, 'uncolored_prefix_preserved': True,
                     'replay_overlay_consistent': True, 'sidebar_source_preserved': True}

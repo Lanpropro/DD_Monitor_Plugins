@@ -114,7 +114,7 @@ def check(app, host, module):
             assert batch.timer.parent() is batch and batch.timer.interval() == 50
             assert not batch.timer.isActive() and not batch.pending and batch.active is None
             for timer, interval in ((viewer.crop_repaint_timer, 16), (viewer.buffer_notice_timer, 15000),
-                                    (viewer.removal_timer, 5000), (viewer.render_timer, 33),
+                                    (viewer.removal_timer, 5000), (viewer.render_timer, 33), (viewer.auxiliary_timer, 16),
                                     (viewer.match_timer, 500), (viewer.save_timer, 350)):
                 assert timer.parent() is viewer and timer.thread() == app.thread()
                 assert timer.interval() == interval

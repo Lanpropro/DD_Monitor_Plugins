@@ -32,6 +32,8 @@ from . import source_control, chat_control, alignment_control, playback_timing, 
 
 
 class Viewer(QDialog):
+    split_presentation = True
+
     def __init__(self, context, sources, initial_room=None, *, workspace_crops=False):
         super().__init__(context.window)
         self.context = context
@@ -94,7 +96,15 @@ class Viewer(QDialog):
         self.render_timer = QTimer(self)
         self.render_timer.setTimerType(Qt.PreciseTimer)
         self.render_timer.setInterval(33)
-        self.render_timer.timeout.connect(self.render)
+        self.render_timer.setSingleShot(self.split_presentation)
+        if self.split_presentation:
+            self.render_timer.timeout.connect(self._picture_tick)
+        else:
+            self.render_timer.timeout.connect(self.render)
+        self.auxiliary_timer = QTimer(self)
+        self.auxiliary_timer.setInterval(16)
+        self.auxiliary_timer.timeout.connect(self._auxiliary_tick)
+        self._picture_due = self._presentation_update = None
         self.super_chat_timer = QTimer(self)
         self.super_chat_timer.setTimerType(Qt.PreciseTimer)
         self.super_chat_timer.setSingleShot(True)
@@ -474,6 +484,12 @@ class Viewer(QDialog):
 
     def render(self):
         return presentation.render(self)
+
+    def _picture_tick(self):
+        return presentation.render_picture_tick(self)
+
+    def _auxiliary_tick(self):
+        return presentation.render_auxiliary_tick(self)
 
     def _render(self, probe):
         return presentation._render(self, probe)

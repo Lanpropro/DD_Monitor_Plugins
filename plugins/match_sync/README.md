@@ -221,6 +221,8 @@ v0.1.28 将完整粗匹配的指纹距离与精校正的时间搜索也改为 Nu
 
 二路播放期间自动写入宿主 `logs/match-playback.jsonl`，每秒一条播放快照；文件轮转为主文件及两份备份，每份上限约 2 MiB。停止播放时结束采样。设置环境变量 `DDM_MATCH_DIAGNOSTICS=0` 后启动可关闭诊断。
 
+普通比赛二路的主画面由单次定时器按播放目标重新安排，侧栏、对照、画中画和弹幕由独立界面回调更新。两者共用音频时钟与既有对齐状态，定时器都随播放会话停止。当启动记录的 `split_picture_timing` 为 1，`render_*`、`stages_ms` 记录主画面回调，`auxiliary_*` 记录辅助界面更新。`gui_pipeline` 增加 `picture_timer_late`、`main_target_ready` / `main_target_fallback` / `main_target_unready` / `main_target_unbuffered`、`main_ready_to_submit`、`main_submit_to_paint`、`main_submit_replaced`。最后一项统计绘制前已被更新帧替换的提交，分析时结合窗口曝光状态。三路与四路的优化结果仍需在同一实播配置下比较最终屏幕呈现。
+
 - `ui_stall`：50ms 界面心跳超过150ms未更新，记录主线程函数栈和当前播放阶段；每次停顿最多一份，每秒最多一份，每次播放最多120份栈。未出现该事件不能排除更短的停顿，或采样线程同样无法获得执行机会的阻塞。
 - `playback`：记录取帧轮询间隔、最慢一轮各阶段耗时、主画面绘制耗时、鼠标事件数量/控件类型、音频供给距今时间，以及目标/已显示时间、压缩缓存范围、目标前方余量、RGB帧范围、解码耗时/阶段和解码器创建次数（含首次创建）。
 - `frame_wait`：记录进入/退出显示帧等待的目标位置与时间，避免短于一秒的等待被周期快照漏掉。缓存范围在后台读取，锁忙时只标记busy，不等待解码线程。

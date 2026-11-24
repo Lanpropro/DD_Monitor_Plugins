@@ -8,6 +8,8 @@ from .viewer import Viewer
 
 
 class HybridRaceWorkspace(Viewer):
+    split_presentation = False
+
     def __init__(self, context, sources):
         self.native_picture = NativePicture(self)
         super().__init__(context, sources, workspace_crops=True)
