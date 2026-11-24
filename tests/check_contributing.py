@@ -227,6 +227,8 @@ class ContributionGuideTests(unittest.TestCase):
         directory = ROOT / 'docs/releases'
         sources = json.loads((directory / 'sources.json').read_text(encoding='utf-8'))
         entries = sources['entries']
+        index = (directory / 'README.md').read_text(encoding='utf-8')
+        online = index.split('## 当前在线发布说明', 1)[1].split('## ', 1)[0]
         self.assertEqual(len({entry['tag'] for entry in entries}), len(entries))
         self.assertEqual({entry['file'] for entry in entries},
                          {path.name for path in directory.glob('RELEASE-*.md')})
@@ -238,6 +240,8 @@ class ContributionGuideTests(unittest.TestCase):
                     self.assertTrue(entry['last_edit_verified'])
                     self.assertEqual(entry['source_kind'], 'github_release')
                     self.assertIn('release_updated_at', entry)
+                    if entry['status'] == 'online' and 'prerelease' in entry:
+                        self.assertEqual(entry['file'] in online, not entry['prerelease'])
                     if entry['status'] == 'archived_verified':
                         self.assertRegex(entry['source_commit'], r'^[0-9a-f]{40}$')
                         if 'superseded_by_url' in entry:
@@ -248,9 +252,7 @@ class ContributionGuideTests(unittest.TestCase):
                         self.assertTrue(entry['plugin_author'])
                         self.assertTrue(entry['release_author'])
                         self.assertIn('archived_at', entry)
-                        index = (directory / 'README.md').read_text(encoding='utf-8')
                         self.assertIn('/tree/' + entry['tag'], index)
-                        online = index.split('## 当前在线发布说明', 1)[1].split('## ', 1)[0]
                         self.assertNotIn(entry['file'], online)
                         self.assertTrue(entry['assets'])
                         for asset in entry['assets']:
