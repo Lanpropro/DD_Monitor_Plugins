@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import math
 import time
-from ddm.super_chat_model import remaining_seconds
+from ddm.super_chat import remaining_seconds
 from .chat_clients import Chat, PlatformChat
 
 def _start_chat(viewer, row):
@@ -91,7 +91,8 @@ def _render_overlay(viewer, clock, shifts):
         received, event = pending
         super_chat = event.get('kind') == 'super_chat'
         if (key not in shifts or not viewer.rows[key].show_chat.isChecked() or clock + shifts[key] - received > 5
-                or (super_chat and not remaining_seconds(event.get('end_time')))):
+                or (super_chat and (not viewer.video_danmaku.settings.get('super_chat_enabled', True)
+                                    or not remaining_seconds(event.get('end_time'))))):
             viewer.overlay_pending.pop(key, None)
         else:
             overlay_event = dict(event)

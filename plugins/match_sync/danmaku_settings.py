@@ -1,10 +1,17 @@
 """Plugin-owned viewing settings; room controls own rolling comment colors."""
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, QSignalBlocker, Qt
 from PySide6.QtWidgets import (QCheckBox, QFrame, QGridLayout, QLabel, QMenu,
                               QScrollArea, QSlider, QWidget, QWidgetAction)
 
 from ddm import theme
 from ddm.config import DEFAULT_SETTINGS
+
+try:
+    from ddm.ui.selection import ToggleSwitch
+except ModuleNotFoundError as error:
+    if error.name not in ('ddm.ui', 'ddm.ui.selection'):
+        raise
+    ToggleSwitch = QCheckBox
 
 try:
     from ddm.playback_material import style_menu
@@ -33,7 +40,8 @@ class MatchDanmakuSettings(QMenu):
             QSlider::handle:horizontal {{background: {theme.TEXT1};}}''')
         saved = viewer.context.setting('overlay_settings', {})
         values = {key: saved.get(key, settings.get(key, DEFAULT_SETTINGS[key]))
-                  for key in ('danmaku_font', 'video_danmaku_scale', *(item[0] for item in CONTROLS))}
+                  for key in ('danmaku_font', 'video_danmaku_scale', 'super_chat_enabled',
+                              *(item[0] for item in CONTROLS))}
         # The Tile's existing independent-setting contract also protects these
         # values when the host reapplies global settings or switches the main room.
         values.update(video_danmaku_color_mode='original', video_danmaku_color='#ffffff',
@@ -64,8 +72,15 @@ class MatchDanmakuSettings(QMenu):
         self.scale = QCheckBox('弹幕随屏幕缩放', holder)
         self.scale.toggled.connect(lambda checked: self.change({'video_danmaku_scale': checked}))
         grid.addWidget(self.scale, 6, 0, 1, 3)
+        label = QLabel('显示醒目留言（SC）')
+        self.super_chat = ToggleSwitch(parent=holder)
+        self.super_chat.setAccessibleName(label.text())
+        label.setBuddy(self.super_chat)
+        self.super_chat.toggled.connect(self.change_super_chat)
+        grid.addWidget(label, 7, 0, 1, 2)
+        grid.addWidget(self.super_chat, 7, 2, Qt.AlignRight)
         self.color_note = QLabel('弹幕颜色由下方控制台各路颜色控制')
-        grid.addWidget(self.color_note, 7, 0, 1, 3)
+        grid.addWidget(self.color_note, 8, 0, 1, 3)
         self.scroll = QScrollArea(self)
         self.scroll.setFrameShape(QFrame.NoFrame)
         self.scroll.setWidgetResizable(True)
@@ -80,6 +95,15 @@ class MatchDanmakuSettings(QMenu):
         self.viewer.picture.video_danmaku_overrides.update(values)
         self.viewer.picture.apply_video_danmaku_settings()
         self.save()
+
+    def change_super_chat(self, enabled):
+        self.change({'super_chat_enabled': enabled})
+        if not enabled:
+            self.viewer.video_danmaku.set_super_chats([])
+            self.viewer.super_chat_timer.stop()
+            pending = self.viewer.overlay_pending
+            for room in [room for room, (_, event) in pending.items() if event.get('kind') == 'super_chat']:
+                pending.pop(room)
 
     def save(self):
         self.viewer.context.set_setting('overlay_settings', dict(self.viewer.picture.video_danmaku_overrides))
@@ -97,6 +121,8 @@ class MatchDanmakuSettings(QMenu):
         self.scale.blockSignals(True)
         self.scale.setChecked(bool(settings.get('video_danmaku_scale', True)))
         self.scale.blockSignals(False)
+        with QSignalBlocker(self.super_chat):
+            self.super_chat.setChecked(bool(settings.get('super_chat_enabled', True)))
 
     def open_at(self, button, _settings=None):
         self.apply_settings(self.viewer.video_danmaku.settings)

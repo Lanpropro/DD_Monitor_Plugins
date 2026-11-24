@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import time
 from unittest.mock import Mock, patch
 
 
@@ -39,6 +40,7 @@ def check_material(app, host, menu, button, output):
 
 def check(app, host, module, output=None):
     from ddm import plugins
+    from ddm.super_chat_model import normalize
     from ddm.widgets import Tile
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QCheckBox, QLabel
@@ -70,7 +72,8 @@ def check(app, host, module, output=None):
             assert overlay.settings['video_danmaku_scale_curve'] is None
             assert overlay.settings['video_danmaku_size'] == 20
             assert overlay.settings['super_chat_enabled'] is False, 'Keep host super-chat settings'
-            assert len(menu.findChildren(QCheckBox)) == 1, 'Only screen scaling; no global/independent switch'
+            assert len(menu.findChildren(QCheckBox)) == 2, 'Screen scaling and video Super Chats'
+            assert not menu.super_chat.isChecked()
             assert not any('缩放曲线' in label.text() for label in menu.findChildren(QLabel))
             assert not hasattr(menu, 'color_button') and not hasattr(menu, 'scale_curve')
             for row in viewer.rows.values():
@@ -79,6 +82,42 @@ def check(app, host, module, output=None):
             assert normal.video_danmaku._comment_color({'color': '#38bdf8'}).name() == '#ffffff'
             assert normal.video_danmaku_overrides is None
             assert hasattr(normal.danmaku_settings_menu, 'color_button'), 'Host menu remains intact'
+
+            overlay.set_enabled(True)
+            overlay.set_active(True)
+            overlay.set_paused(False)
+            stamp = time.monotonic()
+            now = int(time.time())
+            shifts = {'1': 0, '2': 0}
+            sc = dict(normalize({'id': 'sc', 'message': 'fixture', 'price': 30,
+                                 'start_time': now, 'end_time': now + 30}), color='#ffffff')
+            comment = {'kind': 'danmaku', 'text': '普通弹幕', 'color': '#38bdf8'}
+            menu.super_chat.click()
+            viewer.panel.add_event(sc)
+            viewer.overlay_pending['1'] = (stamp, sc)
+            viewer._render_overlay(stamp, shifts)
+            assert overlay.super_chat_overlay.isVisible() and viewer.super_chat_timer.isActive()
+            viewer.overlay_pending.update({'1': (stamp, sc), '2': (stamp, comment)})
+            menu.super_chat.click()
+            assert not overlay.super_chats and overlay.super_chat_overlay.isHidden()
+            assert not viewer.super_chat_timer.isActive()
+            assert viewer.overlay_pending == {'2': (stamp, comment)}
+            assert viewer.panel._blocks[-1]['kind'] == 'super_chat', 'Preserve sidebar history'
+            later = dict(sc, id='later', super_chat_id='later')
+            viewer.panel.add_event(later)
+            assert len(viewer.panel._blocks) == 2
+            viewer.overlay_pending['1'] = (stamp, later)
+            with patch.object(overlay, 'add_event', wraps=overlay.add_event) as add_event:
+                viewer._render_overlay(stamp, shifts)
+                add_event.assert_called_once_with(comment)
+            assert not overlay.super_chats and '1' not in viewer.overlay_pending
+            menu.super_chat.click()
+            assert not overlay.super_chats, 'Re-enabling does not restore hidden cards'
+            viewer.overlay_pending['1'] = (stamp, later)
+            viewer._render_overlay(stamp, shifts)
+            assert [chat['id'] for chat in overlay.super_chats] == ['later']
+            assert normal.video_danmaku.settings['super_chat_enabled'] is False
+            menu.super_chat.click()
 
             menu.controls['video_danmaku_size'].setValue(37)
             menu.controls['video_danmaku_outline_width'].setValue(0)
@@ -93,9 +132,11 @@ def check(app, host, module, output=None):
             assert saved['video_danmaku_scale_curve'] is None
 
             # The public Tile API may reapply host settings; independent values still win.
-            changed = dict(host.settings, video_danmaku_color='#00ff00', video_danmaku_size=55)
+            changed = dict(host.settings, video_danmaku_color='#00ff00', video_danmaku_size=55,
+                           super_chat_enabled=True)
             viewer.picture.apply_video_danmaku_settings(changed)
             assert overlay.settings['video_danmaku_size'] == 37
+            assert overlay.settings['super_chat_enabled'] is False
             assert overlay._comment_color({'color': '#fb7185'}).name() == '#fb7185'
             viewer.select_main('2')
             assert viewer.picture.video_danmaku_overrides == saved
@@ -108,11 +149,14 @@ def check(app, host, module, output=None):
                 opened.assert_called_once()
             host.open_settings.assert_not_called()
             check_material(app, host, menu, viewer.picture.danmaku_settings_button, output)
+            host.settings = dict(host.settings, super_chat_enabled=True)
             reopened = module.Viewer(context, {})
             assert reopened.video_danmaku.settings['video_danmaku_size'] == 37
             assert reopened.video_danmaku.settings['video_danmaku_scale'] is False
             assert reopened.video_danmaku.settings['video_danmaku_color_mode'] == 'original'
             assert reopened.video_danmaku.settings['video_danmaku_scale_curve'] is None
+            assert not reopened.video_danmaku.settings['super_chat_enabled']
+            assert not reopened.picture.danmaku_settings_menu.super_chat.isChecked()
         finally:
             if reopened is not None:
                 reopened.close()
@@ -125,7 +169,8 @@ def check(app, host, module, output=None):
     return dict(passed=True, room_colors_preserved=True, plugin_settings_persisted=True,
                 host_settings_untouched=True, host_menu_preserved=True,
                 no_curve_or_color_picker=True, local_button_entry=True, host_playback_material=True,
-                host_reapply_and_main_switch=True, real_messages=0, media_playback=False)
+                host_reapply_and_main_switch=True, independent_super_chat_toggle=True,
+                real_messages=0, media_playback=False)
 
 
 if __name__ == '__main__':

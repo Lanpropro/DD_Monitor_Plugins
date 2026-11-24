@@ -80,6 +80,7 @@ def stop(viewer):
     viewer.offset_repositioning = False
     viewer.generation += 1
     viewer.match_timer.stop()
+    viewer.super_chat_timer.stop()
     viewer.compare.setChecked(False)
     with viewer._switch_stage('stop_audio'):
         viewer.audio.stop()
