@@ -128,6 +128,9 @@ def show_floating_crop(viewer, row, crop, frame, *, slot=0):
         # Windows gives native playback children priority over non-native siblings.
         native = viewer.workspace_crops or QApplication.platformName() == 'windows'
         floating = FloatingCrop(viewer.floating_surface(), row.label(), crop, native=native)
+        quick = getattr(viewer, 'quick_danmaku', None)
+        if quick is not None:
+            quick.watch_crop(floating)
         floating.playback_probe = getattr(viewer, 'playback_probe', None)
         group[slot] = floating
         floating.closed.connect(lambda: _close_floating_crop(viewer, row.room_id, slot))

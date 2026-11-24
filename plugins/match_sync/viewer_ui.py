@@ -10,7 +10,7 @@ from PySide6.QtCore import QTimer, Qt
 from .replay import ReplayBar
 from .sending import SendConsole
 from .chat_panel import SendingDanmakuPanel
-from . import danmaku_settings
+from . import danmaku_settings, quick_danmaku
 from ddm.widgets import Tile, TileButton
 from ddm import theme
 
@@ -315,6 +315,7 @@ def build_ui(viewer):
     layout = QVBoxLayout(viewer)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.addWidget(split)
+    viewer.quick_danmaku = quick_danmaku.install(viewer)
 
 
 def refresh_appearance(viewer, *_args):
