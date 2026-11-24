@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from contextlib import nullcontext
 from .chat_control import live_chat_events, replay_chat_events
 from .playback_timing import cache_gap, picture_poll_interval
 
@@ -48,6 +49,11 @@ def render_picture_tick(viewer):
         probe.timings.record('picture_poll_gap', probe.render_gap / 1000, at=entered)
         if deadline is not None:
             probe.timings.record('picture_timer_late', lateness, at=entered)
+    timeline = probe.gui_timeline if probe is not None else None
+    if timeline is not None:
+        if deadline is not None:
+            timeline.point('picture.timer_due', deadline)
+        timeline.point('picture.poll', entered)
     viewer._picture_poll = None
     try:
         position = _playback_position(viewer, probe)
@@ -67,12 +73,15 @@ def render_auxiliary_tick(viewer):
         return
     _, position, waiting = update
     probe = viewer.playback_probe if viewer.playback_probe.thread is not None else None
+    timeline = probe.gui_timeline if probe is not None else None
     if probe is not None:
         probe.begin(auxiliary=True)
     try:
         dragging_crop, refresh_status_ui = _prepare_auxiliary(viewer, probe)
-        _sync_delay_controls(viewer, position[1])
-        viewer._configure_picture_budget()
+        with timeline.span('controls.delay') if timeline is not None else nullcontext():
+            _sync_delay_controls(viewer, position[1])
+        with timeline.span('controls.reader_budget') if timeline is not None else nullcontext():
+            viewer._configure_picture_budget()
         _render_previews(viewer, probe, position)
         _render_auxiliary(viewer, probe, position, waiting, dragging_crop, refresh_status_ui)
     finally:
@@ -106,6 +115,7 @@ def _render(viewer, probe):
 
 
 def _prepare_auxiliary(viewer, probe):
+    timeline = probe.gui_timeline if probe is not None else None
     if not viewer.embedded:
         viewer._suppress_host_audio()
     dragging_crop = any(crop.drag is not None for crop in viewer.all_floating_crops())
@@ -119,10 +129,12 @@ def _prepare_auxiliary(viewer, probe):
     if probe is not None:
         probe.mark('metadata_sidebar')
     if not dragging_crop:
-        viewer._sync_sidebar_marks()
+        with timeline.span('controls.sidebar') if timeline is not None else nullcontext():
+            viewer._sync_sidebar_marks()
     if probe is not None:
         probe.mark('metadata_picture')
-    viewer.sync_picture(refresh_metadata=refresh_status_ui)
+    with timeline.span('controls.picture') if timeline is not None else nullcontext():
+        viewer.sync_picture(refresh_metadata=refresh_status_ui)
     return dragging_crop, refresh_status_ui
 
 
@@ -166,7 +178,9 @@ def _playback_position(viewer, probe, *, combined=False):
 
 def _render_previews(viewer, probe, position):
     _, _, _, shown_clock, shown_shifts = position
-    viewer.replay_bar.refresh()
+    timeline = probe.gui_timeline if probe is not None else None
+    with timeline.span('controls.replay_bar') if timeline is not None else nullcontext():
+        viewer.replay_bar.refresh()
     if probe is not None:
         probe.mark('floating')
     viewer.render_floating_crops(shown_clock, shown_shifts)
@@ -198,6 +212,7 @@ def _render_picture(viewer, probe, position):
 def _render_auxiliary(viewer, probe, position, waiting, dragging_crop, refresh_status_ui):
     clock, shifts, wanted, shown_clock, shown_shifts = position
     now = time.monotonic()
+    timeline = probe.gui_timeline if probe is not None else None
     row = viewer.rows.get(viewer.alignment.reference)
     if waiting is not None and row is not None and row.decoder is not None and not row.paused:
         if probe is not None:
@@ -286,10 +301,12 @@ def _render_auxiliary(viewer, probe, position, waiting, dragging_crop, refresh_s
             # A corrected source timestamp can go backward; keep its queue in FIFO order.
             due = max(due, received - shift)
             eligible.append((due, room_id, row, received, event))
-    viewer.panel.add_events(live_chat_events(viewer, eligible, clock, now, chat_deadline))
-    if viewer.replay.active:
-        viewer.panel.add_events(replay_chat_events(viewer, shown_clock, shown_shifts))
-    viewer._render_overlay(shown_clock, shown_shifts)
+    with timeline.span('chat.sidebar_batch') if timeline is not None else nullcontext():
+        viewer.panel.add_events(live_chat_events(viewer, eligible, clock, now, chat_deadline))
+        if viewer.replay.active:
+            viewer.panel.add_events(replay_chat_events(viewer, shown_clock, shown_shifts))
+    with timeline.span('chat.overlay_feed') if timeline is not None else nullcontext():
+        viewer._render_overlay(shown_clock, shown_shifts)
     if viewer.multi_recorder is not None and not viewer.multi_recorder.cancelled.is_set():
         main = viewer.rows.get(viewer.alignment.reference)
         if main is None or main.decoder is None or main.decoder.history is not viewer.multi_recorder.history:

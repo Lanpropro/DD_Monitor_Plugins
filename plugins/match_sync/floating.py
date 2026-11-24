@@ -1,4 +1,5 @@
 """In-application crops keep source pixels and are independent of the video tile."""
+from contextlib import nullcontext
 import time
 import logging
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal, Slot
@@ -23,6 +24,7 @@ class FloatingCrop(QWidget):
         self.avatar = QImage()
         self.avatar_key = None
         self.frame_key = None
+        self.playback_probe = None
         self.quality_mode = 'source'
         self.enhancer = None
         self.enhanced = QImage()
@@ -164,8 +166,11 @@ class FloatingCrop(QWidget):
     @Slot(object)
     def _enhancement_updated(self, worker):
         if worker is self.enhancer:
-            self.enhance_updates += 1
-            self._refresh_enhancement()
+            probe = self.playback_probe
+            timeline = probe.gui_timeline if probe is not None else None
+            with timeline.span('pip.enhancement_delivery') if timeline is not None else nullcontext():
+                self.enhance_updates += 1
+                self._refresh_enhancement()
 
     def _refresh_enhancement(self):
         result = self.enhancer.take_result()

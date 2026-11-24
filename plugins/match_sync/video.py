@@ -319,8 +319,11 @@ class PictureReader:
             while len(self.images) > 1 and sum(image.sizeInBytes() for image in self.images.values()) > byte_limit:
                 self.images.pop(next(iter(self.images)))
 
-    def get(self, history, frame, exact=False):
+    def get(self, history, frame, exact=False, *, timeline=None):
+        acquiring = timeline.begin() if timeline is not None else None
         with self.lock:
+            if timeline is not None:
+                timeline.end('pip.reader_lock', acquiring)
             # Explicit crop dialogs may request a snapshot of a hidden source.
             self.active = True
             if exact:

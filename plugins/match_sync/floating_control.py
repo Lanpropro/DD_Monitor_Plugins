@@ -1,6 +1,8 @@
 """Floating control. Session state remains on the Viewer facade."""
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 from .canvas import Canvas
 from .floating import FloatingCrop
 from .panels import console_button_style
@@ -126,6 +128,7 @@ def show_floating_crop(viewer, row, crop, frame, *, slot=0):
         # Windows gives native playback children priority over non-native siblings.
         native = viewer.workspace_crops or QApplication.platformName() == 'windows'
         floating = FloatingCrop(viewer.floating_surface(), row.label(), crop, native=native)
+        floating.playback_probe = getattr(viewer, 'playback_probe', None)
         group[slot] = floating
         floating.closed.connect(lambda: _close_floating_crop(viewer, row.room_id, slot))
         floating.background_exposed.connect(lambda rect, item=floating: viewer.restore_crop_background(item, rect))
@@ -150,15 +153,23 @@ def show_floating_crop(viewer, row, crop, frame, *, slot=0):
 
 
 def render_floating_crops(viewer, clock, shifts):
+    probe = getattr(viewer, 'playback_probe', None)
+    timeline = probe.gui_timeline if probe is not None else None
     for key, group in viewer.floating_crops.items():
         row = viewer.rows.get(key)
         if row is not None and row.decoder is not None and not row.paused and key in shifts:
-            frame = row.decoder.picture_at(clock + shifts[key])
+            if timeline is None:
+                frame = row.decoder.picture_at(clock + shifts[key])
+            else:
+                with timeline.span('pip.picture_lookup'):
+                    frame = row.decoder.picture_at(clock + shifts[key], timeline=timeline)
             for floating in group.values():
-                floating.label = row.label()
-                floating.set_avatar(row.avatar.pixmap())
+                with timeline.span('pip.avatar') if timeline is not None else nullcontext():
+                    floating.label = row.label()
+                    floating.set_avatar(row.avatar.pixmap())
                 if frame is not None:
-                    floating.set_frame(frame)
+                    with timeline.span('pip.set_frame') if timeline is not None else nullcontext():
+                        floating.set_frame(frame)
         elif key not in shifts:
             for floating in group.values():
                 floating.set_frame(None)

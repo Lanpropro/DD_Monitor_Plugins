@@ -170,12 +170,19 @@ class Decoder:
             except OSError:
                 pass
 
-    def picture_at(self, timestamp, exact=False):
+    def picture_at(self, timestamp, exact=False, *, timeline=None):
         if not exact:
             self.playback_timestamp = timestamp
+        lookup = timeline.begin() if timeline is not None else None
         history = self.history.segment_at(timestamp) or self.history
         frame = history.frame_at(timestamp)
-        return self.pictures.get(history, frame, exact=exact) if frame is not None and not self.cancelled.is_set() else None
+        if timeline is not None:
+            timeline.end('pip.history_lookup', lookup)
+        if frame is None or self.cancelled.is_set():
+            return None
+        if timeline is None:
+            return self.pictures.get(history, frame, exact=exact)
+        return self.pictures.get(history, frame, exact=exact, timeline=timeline)
 
     def diagnostics(self):
         with self.history.lock:

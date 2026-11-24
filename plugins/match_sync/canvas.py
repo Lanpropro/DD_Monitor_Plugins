@@ -56,6 +56,8 @@ class Canvas(QFrame):
         ready_at = time.perf_counter() if probe is not None and probe.thread is not None and item is not None else None
         if ready_at is not None and self.submitted_at is not None:
             probe.timings.record('main_submit_replaced', ready_at - self.submitted_at, at=ready_at)
+            if probe.gui_timeline is not None:
+                probe.gui_timeline.point('picture.replace', ready_at)
         self.image = (item[1] if isinstance(item[1], QImage) else QImage.fromData(item[1])) if item is not None else QImage()
         self._sync_opaque_paint()
         self.submitted_at = None
@@ -63,6 +65,8 @@ class Canvas(QFrame):
             self.submitted_at = time.perf_counter()
             probe.timings.record('main_ready_to_submit', self.submitted_at - ready_at, at=self.submitted_at)
             probe.submitted.record(self.submitted_at, key)
+            if probe.gui_timeline is not None:
+                probe.gui_timeline.point('picture.submit', self.submitted_at)
         if self.limit_frame_damage and not self.image.isNull() and not self.selecting:
             current_rect = self._image_target(self._source_rect())
             if current_rect == self.image_rect:
@@ -81,7 +85,10 @@ class Canvas(QFrame):
         if requested is not None:
             stage = ('main_target_unbuffered' if frame is None else 'main_target_unready' if ready is None
                      else 'main_target_ready' if ready[0] == frame[0] else 'main_target_fallback')
-            probe.timings.record(stage, time.perf_counter() - requested)
+            resolved = time.perf_counter()
+            probe.timings.record(stage, resolved - requested)
+            if probe.gui_timeline is not None:
+                probe.gui_timeline.point(stage, resolved)
         if ready is not None:
             self.set_frame(ready)
         return ready
@@ -128,14 +135,20 @@ class Canvas(QFrame):
         if probe is None or probe.thread is None:
             return self._paint_frame(event)
         started = time.perf_counter()
+        timeline = probe.gui_timeline
+        cpu_started = time.thread_time() if timeline is not None else None
         if self.submitted_at is not None:
             probe.timings.record('main_submit_to_paint_start', started - self.submitted_at, at=started)
+            if timeline is not None:
+                timeline.point('picture.queue', started, round((started - self.submitted_at) * 1000, 3))
         try:
             self._paint_frame(event)
         finally:
             painted_at = time.perf_counter()
             probe.paints.append((painted_at, (painted_at - started) * 1000))
             probe.painted.record(painted_at, self.frame_key)
+            if timeline is not None:
+                timeline.paint(started, painted_at, self.frame_key, cpu_started)
             if self.submitted_at is not None:
                 probe.timings.record('main_submit_to_paint', painted_at - self.submitted_at, at=painted_at)
                 self.submitted_at = None

@@ -16,6 +16,58 @@ def block_gui():
     time.sleep(.3)
 
 
+def check_short_gui_timeline(app, host, module):
+    from PySide6.QtCore import QTimer, Qt
+    from PySide6.QtGui import QImage
+    from PySide6.QtTest import QTest
+    from ddm import plugins
+    with tempfile.TemporaryDirectory(prefix='ddm-match-timeline-') as directory, \
+            patch.dict(os.environ, {'DDM_DANMAKU_MOTION_CAPTURE': '1'}):
+        host.settings, host.rooms = {}, []
+        with patch.object(module.config_module, 'REPO', directory):
+            viewer = module.Viewer(plugins.PluginContext(
+                plugins.PluginManager(window=host, plugins_dir=directory), 'playback_diag'), {})
+        probe = viewer.playback_probe
+        try:
+            probe.start()
+            assert app.match_gui_timeline is viewer.panel.match_gui_timeline is probe.gui_timeline
+            QTest.qWait(100)
+            image = QImage(320, 180, QImage.Format_RGB32)
+            image.fill(Qt.red)
+            viewer.canvas.set_frame((1., image))
+            viewer.canvas.grab()
+
+            timer = QTimer(viewer.canvas)
+            timer.setSingleShot(True)
+            def do_work():
+                viewer.panel.add_event({'text': 'DO_NOT_LOG', 'uname': 'fixture'})
+                time.sleep(.045)
+                viewer.canvas.grab()  # A redraw of the old frame is not a presentation.
+                viewer.canvas.set_frame((2., image))
+                viewer.canvas.grab()
+            timer.timeout.connect(do_work)
+            timer.start(1)
+            QTest.qWait(1150)
+            timeline_path = probe.path.with_name('match-gui-timeline.jsonl')
+            raw = timeline_path.read_text(encoding='utf-8')
+            windows = [window for line in raw.splitlines()
+                       for window in json.loads(line).get('samples', [])]
+            expected = {'qt.Canvas.Timer', 'chat.sidebar_prepare', 'chat.sidebar_insert',
+                        'chat.sidebar_scroll_restore', 'picture.submit', 'picture.queue', 'picture.paint'}
+            assert any(30 <= window['gap_ms'] < 150
+                       and 0 <= window['gap_thread_cpu_ms'] <= window['gap_ms'] + 20
+                       and expected <= {event[0] for event in window['events']}
+                       for window in windows), windows
+            assert 'DO_NOT_LOG' not in raw
+            probe.stop()
+            assert probe.gui_timeline is None and app.match_gui_timeline is None
+            assert viewer.panel.match_gui_timeline is None
+        finally:
+            viewer.close()
+            viewer.deleteLater()
+            app.processEvents()
+
+
 def check(app, host, module):
     from PySide6.QtCore import QEvent, Qt, QTimer
     from PySide6.QtGui import QImage
@@ -77,6 +129,7 @@ def check(app, host, module):
             probe.stop()
             assert probe.thread is None and not probe.timer.isActive()
             raw = probe.path.read_text(encoding='utf-8')
+            assert not probe.path.with_name('match-gui-timeline.jsonl').exists()
             records = [json.loads(line) for line in raw.splitlines()]
             stalls = [item for item in records if item['event'] == 'ui_stall']
             assert any(any(frame['function'] == 'block_gui' for frame in item['stack']) for item in stalls), stalls
@@ -120,11 +173,16 @@ def main():
     os.environ['DDM_NO_SAVE'] = '1'
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     from PySide6.QtWidgets import QApplication, QWidget
+    from dev.match_gui_dispatch import install
     from plugins.match_sync import viewer as module
-    app = QApplication([])
+    namespace = SimpleNamespace(QApplication=QApplication)
+    install(namespace)
+    app = namespace.QApplication([])
     host = QWidget()
     try:
         print(check(app, host, module))
+        check_short_gui_timeline(app, host, module)
+        print('Short GUI stall, Qt dispatch, chat insertion and privacy passed')
     finally:
         host.close()
         app.processEvents()

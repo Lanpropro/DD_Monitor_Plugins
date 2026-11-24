@@ -15,7 +15,9 @@ import sys
 import threading
 import time
 
-from PySide6.QtCore import QEvent, QObject, QTimer, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QTimer, Qt
+
+from .gui_timeline import GuiTimeline
 
 
 def stream_error_codes(message):
@@ -546,6 +548,7 @@ class PlaybackProbe(QObject):
         self.path = Path(path)
         self.enabled = os.environ.get('DDM_MATCH_DIAGNOSTICS', '1') != '0'
         self.split_picture_timing = int(getattr(parent, 'split_presentation', False))
+        self.gui_timeline = None
         self.timer = QTimer(self)
         self.timer.setTimerType(Qt.PreciseTimer)
         self.timer.setInterval(50)
@@ -593,17 +596,28 @@ class PlaybackProbe(QObject):
         self.cpu_observation = (time.perf_counter(), time.process_time())
         self.last_render = self.last_tick = time.perf_counter()
         self.stage = 'idle'
+        if self.split_picture_timing and os.environ.get('DDM_DANMAKU_MOTION_CAPTURE') == '1':
+            self.gui_timeline = GuiTimeline()
+            app = QCoreApplication.instance()
+            app.match_gui_timeline = self.gui_timeline
+            self.parent().panel.match_gui_timeline = self.gui_timeline
         self.thread = threading.Thread(target=self._run, name='match-sync-diagnostics', daemon=True)
         self.thread.start()
         self.timer.start()
 
     def stop(self):
         self.timer.stop()
+        if self.gui_timeline is not None:
+            app = QCoreApplication.instance()
+            if app is not None and getattr(app, 'match_gui_timeline', None) is self.gui_timeline:
+                app.match_gui_timeline = None
+            self.parent().panel.match_gui_timeline = None
         self.stopped.set()
         if self.thread is not None:
             self.thread.join(.3)
             if not self.thread.is_alive():
                 self.thread = None
+                self.gui_timeline = None
         self.frame = None
         self.transitions.clear()
         self.pipeline_sources = ()
@@ -692,24 +706,32 @@ class PlaybackProbe(QObject):
         return result
 
     def _run(self):
-        handler = None
+        handler = timeline_handler = None
+        timeline = self.gui_timeline
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             handler = RotatingFileHandler(self.path, maxBytes=2 * 1024 ** 2, backupCount=2, encoding='utf-8')
-            def write(event, **fields):
+            def write(event, *, destination=handler, **fields):
                 payload = dict(time=datetime.now().astimezone().isoformat(timespec='milliseconds'),
                                pid=os.getpid(), event=event, **fields)
-                handler.emit(logging.makeLogRecord(dict(msg=json.dumps(payload, ensure_ascii=False))))
+                destination.emit(logging.makeLogRecord(dict(msg=json.dumps(payload, ensure_ascii=False))))
+            if timeline is not None:
+                timeline_handler = RotatingFileHandler(self.path.with_name('match-gui-timeline.jsonl'),
+                    maxBytes=8 * 1024 ** 2, backupCount=2, encoding='utf-8')
+                write('gui_timeline_start', destination=timeline_handler,
+                      fields=['label', 'offset_ms', 'wall_ms', 'thread_cpu_ms', 'value'])
             from .video import PictureReader
             from .media import Decoder, analysis_gray
             write('start', schema=3, picture_code=hashlib.sha256(marshal.dumps(PictureReader.get.__code__)).hexdigest(),
                   capture_code=hashlib.sha256(marshal.dumps(Decoder._capture.__code__)).hexdigest(),
                   analysis_gray_code=hashlib.sha256(marshal.dumps(analysis_gray.__code__)).hexdigest(),
                   audio_read_metrics=1, pts_gap_recovery=2, stack_budget_window_s=60, stream_acquisition=2,
-                  replay_preview_metrics=1, replay_preview_continuous=1, split_picture_timing=self.split_picture_timing)
+                  replay_preview_metrics=1, replay_preview_continuous=1, split_picture_timing=self.split_picture_timing,
+                  gui_timeline=int(timeline is not None))
             sampled = 0
             sample_window = time.perf_counter()
             last_stack = last_report = 0.0
+            last_timeline = time.perf_counter()
             reported_stall = False
             while not self.stopped.wait(.05):
                 now = time.perf_counter()
@@ -739,6 +761,12 @@ class PlaybackProbe(QObject):
                             state['picture_stack'] = stack(reader_thread.ident)
                             sampled += 1
                     write('playback', **state)
+                    if timeline is not None:
+                        cutoff = now - .05  # Let the paint's enclosing Qt dispatch finish.
+                        sample = timeline.sample(last_timeline, cutoff)
+                        if sample is not None:
+                            write('gui_timeline', destination=timeline_handler, **sample)
+                        last_timeline = max(last_timeline, cutoff)
                     last_report = now
             write('stop')
         except OSError as error:
@@ -746,3 +774,5 @@ class PlaybackProbe(QObject):
         finally:
             if handler is not None:
                 handler.close()
+            if timeline_handler is not None:
+                timeline_handler.close()
