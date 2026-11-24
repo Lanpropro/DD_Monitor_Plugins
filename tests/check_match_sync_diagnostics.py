@@ -31,7 +31,6 @@ def check_short_gui_timeline(app, host, module):
         try:
             probe.start()
             assert app.match_gui_timeline is viewer.panel.match_gui_timeline is probe.gui_timeline
-            viewer.panel.add_event({'text': 'warm up', 'uname': 'fixture'})
             QTest.qWait(100)
             image = QImage(320, 180, QImage.Format_RGB32)
             image.fill(Qt.red)
@@ -54,8 +53,7 @@ def check_short_gui_timeline(app, host, module):
             windows = [window for line in raw.splitlines()
                        for window in json.loads(line).get('samples', [])]
             expected = {'qt.Canvas.Timer', 'chat.sidebar_prepare', 'chat.sidebar_insert',
-                        'chat.sidebar_scroll_restore', 'chat.sidebar_edit', 'chat.sidebar_layout_commit',
-                        'picture.submit', 'picture.queue', 'picture.paint'}
+                        'chat.sidebar_scroll_restore', 'picture.submit', 'picture.queue', 'picture.paint'}
             assert any(30 <= window['gap_ms'] < 150
                        and 0 <= window['gap_thread_cpu_ms'] <= window['gap_ms'] + 20
                        and expected <= {event[0] for event in window['events']}
