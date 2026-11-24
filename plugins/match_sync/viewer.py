@@ -290,6 +290,14 @@ class Viewer(QDialog):
     def _add_dragged(self, room_id):
         return source_control._add_dragged(self, room_id)
 
+    def workspace_room_action(self):
+        if self.embedded and not self.workspace_crops and self.context.name == 'match_sync':
+            return '添加二路', self._add_workspace_rooms
+        return None
+
+    def _add_workspace_rooms(self, rooms):
+        return source_control.add_workspace_rooms(self, rooms)
+
     def changed(self, *_args):
         self.save_timer.start()
 

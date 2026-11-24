@@ -33,11 +33,13 @@ def main():
     os.environ['DDM_NO_SAVE'] = '1'
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     from PySide6.QtCore import QCoreApplication, QEvent, Qt
+    from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QVBoxLayout, QWidget
     from ddm import config, theme
     from ddm.online import version_key
     from ddm.plugin_updates import apply_pending, pending_versions, stage
     from ddm.plugins import PluginManager
+    from ddm.room_placement import RoomPlacement
     from ddm.widgets import Sidebar
 
     app = QApplication.instance() or QApplication([])
@@ -67,8 +69,12 @@ def main():
         host.setAttribute(Qt.WA_DontShowOnScreen)
         host.setStyleSheet(theme.qss())
         host.settings, host.rooms, host.players = dict(config.DEFAULT_SETTINGS), [], {}
+        room = {'room_id': '1001', 'uname': 'Offline fixture', 'live': True}
+        host.rooms.append(room)
         box = QHBoxLayout(host)
-        host.sidebar = Sidebar([], auto_compact=False)
+        host.sidebar = Sidebar(host.rooms, auto_compact=False)
+        wall_requests = []
+        host.sidebar.addToWallRequested.connect(wall_requests.append)
         box.addWidget(host.sidebar)
         host._content = QWidget(host)
         box.addWidget(host._content, 1)
@@ -112,10 +118,30 @@ def main():
             assert not plugin.viewer.isWindow() and plugin.viewer.parentWidget() is host._content
             assert manager._workspace_pages.active[0] == 'match_sync'
             assert host.wall.isHidden() and host.sidebar.layout_button.isVisible()
+            card = next(item for item in host.sidebar.items() if item.room['room_id'] == room['room_id'])
+            with patch.object(plugin.viewer, 'toggle_running') as start:
+                QTest.mouseDClick(card, Qt.LeftButton, Qt.ControlModifier, pos=card.rect().center())
+                assert not plugin.viewer.rows and not wall_requests
+                QTest.mouseDClick(card, Qt.LeftButton, pos=card.rect().center())
+                QTest.mouseDClick(card, Qt.LeftButton, pos=card.rect().center())
+                assert not wall_requests, 'A double-click in Match Sync must never add to the wall'
+                assert list(plugin.viewer.rows) == ['1001'], 'Add the selected room just once'
+                assert plugin.viewer.rows['1001'].label() == room['uname']
+                start.assert_called_once()
+                start.reset_mock()
+                placement = RoomPlacement(host)
+                announced = {'room_id': '1002', 'uname': 'Notice fixture'}
+                placement.place_live_notice_rooms([announced])
+                assert placement.replacement is None
+                assert list(plugin.viewer.rows) == ['1001', '1002']
+                assert plugin.viewer.rows['1002'].label() == announced['uname']
+                start.assert_called_once()
             plugin.viewer.close()
             settle()
             assert host.wall.isVisible() and not plugin.button.isChecked()
             assert manager._workspace_pages.active is None
+            QTest.mouseDClick(card, Qt.LeftButton, pos=card.rect().center())
+            assert [entry['room_id'] for entry in wall_requests] == ['1001']
             for side in ('top', 'left'):
                 host.sidebar.set_side(side)
                 settle()
@@ -127,7 +153,7 @@ def main():
             manager.unload()
             assert not panel.entries and not panel._rows
             print('PASS:', 'upgrade 1.6.1 -> ' + version if upgrade else 'fresh install ' + version,
-                  'search, launch real empty viewer, return, orientation and unload')
+                  'search, launch, follow-card and live-notice routing, return, orientation and unload')
         finally:
             if not manager._unloaded:
                 manager.unload()

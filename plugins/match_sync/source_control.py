@@ -282,11 +282,19 @@ def _stop_row(row):
     row.refresh_status()
 
 
-def _add_dragged(viewer, room_id):
-    room = next((item for item in getattr(viewer.context.window, "rooms", [])
-                 if str(item.get("room_id") or "") == room_id), {})
+def _add_dragged(viewer, room_id, *, room=None):
+    if room is None:
+        room = next((item for item in getattr(viewer.context.window, "rooms", [])
+                     if str(item.get("room_id") or "") == room_id), {})
     if viewer.add_room(room_id, {"alias": room.get("uname") or ""}):
         if viewer.embedded and not viewer.running:
             viewer.toggle_running()
         return True
     return False
+
+
+def add_workspace_rooms(viewer, rooms):
+    for room in rooms:
+        room_id = str(room.get('room_id') or '')
+        if room_id:
+            _add_dragged(viewer, room_id, room=room)
