@@ -138,6 +138,13 @@ def check(app, host, module, output=None):
                 reset = next(button for button in dialog.findChildren(QPushButton) if button.text() == '使用整个画面')
                 confirm = buttons.button(QDialogButtonBox.Ok)
                 cancel = buttons.button(QDialogButtonBox.Cancel)
+                assert dialog.windowFlags() & Qt.FramelessWindowHint
+                assert dialog.titlebar.breadcrumb.text() == dialog.windowTitle()
+                assert dialog.titlebar.close_button.accessibleName() == '关闭画中画选区'
+                assert [button.objectName() for button in (reset, confirm, cancel)] == ['IconButton', 'PrimaryButton', 'IconButton']
+                picker = dialog.findChild(module.floating_control.CropSelections)
+                assert picker.add_button.objectName() == picker.remove_button.objectName() == 'IconButton'
+                assert picker.buttons[0].objectName() == picker.arrangement_toggle.objectName() == 'PickerTab'
                 centers = [button.mapTo(dialog, button.rect().center()).y() for button in (reset, confirm, cancel)]
                 assert max(centers) - min(centers) <= 1, 'All crop actions belong on the same row'
                 gap = confirm.mapTo(dialog, QPoint()).x() - reset.mapTo(dialog, reset.rect().topRight()).x()
@@ -407,6 +414,10 @@ def check(app, host, module, output=None):
                 if output:
                     app.processEvents()
                     dialog.grab().save(str(output.with_name('selection-composition.png')))
+                    module.theme.apply('light')
+                    app.processEvents()
+                    dialog.grab().save(str(output.with_name('selection-composition-light.png')))
+                    module.theme.apply('dark')
                 dialog.hide()
                 return QDialog.Accepted
             with patch.object(QDialog, 'exec', add_second):
@@ -439,7 +450,8 @@ def check(app, host, module, output=None):
             def remove_first(dialog):
                 picker = dialog.findChild(module.floating_control.CropSelections)
                 picker.remove_button.click()
-                return QDialog.Rejected
+                dialog.titlebar.close_button.click()
+                return dialog.result()
             with patch.object(QDialog, 'exec', remove_first):
                 viewer.choose_crop(main, floating=True)
             assert list(viewer.all_floating_crops()) == [first, second], 'Cancel keeps saved crops'

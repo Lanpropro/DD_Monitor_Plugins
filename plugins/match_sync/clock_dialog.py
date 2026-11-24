@@ -247,6 +247,10 @@ class ClockLane(QWidget):
             x, y, width, height = self.region
             image = image.copy(round(x * image.width()), round(y * image.height()),
                                max(1, round(width * image.width())), max(1, round(height * image.height())))
+            # QIcon limits thumbnail size but does not enlarge a small crop on its own.
+            scale = self.strip.devicePixelRatioF()
+            image = image.scaled(self.strip.iconSize() * scale, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            image.setDevicePixelRatio(scale)
         label = '赛事选区' if self.dialog.is_event_mode() else '计时器选区'
         item = QListWidgetItem(QIcon(QPixmap.fromImage(image)), label if self.region else '画面预览')
         item.setSizeHint(QSize(160, 90))

@@ -5,12 +5,18 @@ from contextlib import nullcontext
 
 from .canvas import Canvas
 from .floating import FloatingCrop
-from .panels import console_button_style
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QDialog, QDialogButtonBox, QHBoxLayout, QLabel,
                                QPushButton, QToolButton, QVBoxLayout, QWidget)
-from PySide6.QtCore import QPoint, QRect, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QIcon, QKeySequence, QPixmap, QRegion, QShortcut
+from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt, QTimer
+from PySide6.QtGui import QColor, QIcon, QKeySequence, QPainter, QPen, QPixmap, QRegion, QShortcut
 from ddm import theme
+
+try:
+    from ddm.corner_geometry import continuous_path
+    from ddm.panel_resize import resize_edges, set_resize_cursor
+    from ddm.settings_window import SettingsTitleBar
+except ImportError:
+    SettingsTitleBar = None
 
 def _crop_source_policy(viewer, row):
     if row.room_id not in viewer.floating_crops:
@@ -179,26 +185,69 @@ def selection_color(slot):
     return QColor.fromHsv((198 + slot * 137) % 360, 190, 250)
 
 
+class FloatingCropDialog(QDialog):
+    def __init__(self, parent, title):
+        super().__init__(parent, Qt.Dialog | Qt.FramelessWindowHint)
+        self.setWindowTitle(title)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setProperty('customControlSurface', True)
+        self.setMouseTracking(True)
+        theme.signals().changed.connect(self.update)
+        self.titlebar = SettingsTitleBar(self)
+        self.titlebar.row.setContentsMargins(0, 0, 0, 0)
+        self.titlebar.breadcrumb.setObjectName('SettingsTitle')
+        self.titlebar.breadcrumb.setTextFormat(Qt.PlainText)
+        self.titlebar.breadcrumb.setText(title)
+        self.titlebar.close_button.setToolTip('关闭画中画选区')
+        self.titlebar.close_button.setAccessibleName('关闭画中画选区')
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        path = continuous_path(QRectF(self.rect()).adjusted(.5, .5, -.5, -.5), 22)
+        painter.fillPath(path, theme.qcolor(theme.BG))
+        painter.setPen(QPen(theme.qcolor(theme.BORDER_STRONG), 1))
+        painter.drawPath(path)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.windowHandle() is not None:
+            edges = resize_edges(self, event.position().toPoint())
+            if edges and self.windowHandle().startSystemResize(edges):
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        set_resize_cursor(self, resize_edges(self, event.position().toPoint()))
+        super().mouseMoveEvent(event)
+
+
 class CropSelections(QWidget):
     """Keep all edits as drafts until the picker is confirmed."""
 
     def __init__(self, canvas, group, current, parent):
         super().__init__(parent)
-        self.setStyleSheet(console_button_style('QToolButton'))
         self.canvas = canvas
         self.rects = {slot: QRectF(item.crop) for slot, item in group.items()}
         self.active = None
         self.buttons = {}
         self.bar = QHBoxLayout(self)
         self.bar.setContentsMargins(0, 0, 0, 0)
+        self.bar.setSpacing(6)
         self.group = QButtonGroup(self)
         self.add_button = QToolButton()
+        self.add_button.setObjectName('IconButton')
+        self.add_button.setCursor(Qt.PointingHandCursor)
+        self.add_button.setFixedHeight(32)
         self.add_button.setText('＋')
         self.add_button.setAccessibleName('新增画中画')
         self.add_button.setToolTip('新增画中画选区')
         self.add_button.clicked.connect(self.add_selection)
         self.bar.addWidget(self.add_button)
         self.remove_button = QToolButton()
+        self.remove_button.setObjectName('IconButton')
+        self.remove_button.setCursor(Qt.PointingHandCursor)
+        self.remove_button.setFixedHeight(32)
         self.remove_button.setText('×')
         self.remove_button.setAccessibleName('删除当前选区')
         self.remove_button.setToolTip('删除当前选区（Delete）')
@@ -207,6 +256,8 @@ class CropSelections(QWidget):
         self.bar.addStretch()
         QShortcut(QKeySequence(Qt.Key_Delete), parent, activated=self.remove_selection)
         self.arrangement_toggle = QToolButton(parent)
+        self.arrangement_toggle.setObjectName('PickerTab')
+        self.arrangement_toggle.setCursor(Qt.PointingHandCursor)
         self.arrangement_toggle.setText('排列预设')
         self.arrangement_toggle.setCheckable(True)
         self.arrangement_toggle.setToolTip('展开画中画排列预设')
@@ -229,6 +280,9 @@ class CropSelections(QWidget):
 
     def insert_button(self, slot):
         button = QToolButton()
+        button.setObjectName('PickerTab')
+        button.setCursor(Qt.PointingHandCursor)
+        button.setFixedHeight(32)
         label = f'选区 {slot + 1}'
         swatch = QPixmap(12, 12)
         swatch.fill(selection_color(slot))
@@ -348,9 +402,14 @@ def choose_crop(viewer, row, floating=False, *, current=None):
     if frame is None and frozen is None:
         viewer.notice.setText("请先开始观看，收到画面后再选择对照区域")
         return
-    dialog = QDialog(viewer)
-    dialog.setWindowTitle(f"{row.label()}：" + ('框选悬浮画面' if floating else '拖选计时器或共同内容，仅用于放大对照'))
-    dialog.resize(900, 600)
+    title = f"{row.label()}：" + ('框选悬浮画面' if floating else '拖选计时器或共同内容，仅用于放大对照')
+    if floating and SettingsTitleBar is not None:
+        dialog = FloatingCropDialog(viewer, title)
+        dialog.resize(QSize(900, 600).boundedTo(dialog.screen().availableGeometry().size()))
+    else:
+        dialog = QDialog(viewer)
+        dialog.setWindowTitle(title)
+        dialog.resize(900, 600)
     canvas = Canvas(selecting=True)
     canvas.set_frame(frame)
     canvas.waiting = frame is None
@@ -363,8 +422,20 @@ def choose_crop(viewer, row, floating=False, *, current=None):
     reset = QPushButton("使用整个画面")
     reset.clicked.connect(picker.use_full_frame if picker is not None else canvas.reset_selection)
     buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-    buttons.button(QDialogButtonBox.Ok).setObjectName("MatchSyncCropConfirm")
-    dialog.setStyleSheet(f"""
+    confirm = buttons.button(QDialogButtonBox.Ok)
+    if floating:
+        reset.setObjectName('IconButton')
+        confirm.setObjectName('PrimaryButton')
+        confirm.setText('确定')
+        confirm.setStyleSheet('QPushButton:disabled { background: palette(button); color: palette(placeholder-text); }')
+        cancel = buttons.button(QDialogButtonBox.Cancel)
+        cancel.setObjectName('IconButton')
+        cancel.setText('取消')
+        for button in (reset, *buttons.buttons()):
+            button.setCursor(Qt.PointingHandCursor)
+    else:
+        confirm.setObjectName('MatchSyncCropConfirm')
+        dialog.setStyleSheet(f"""
             QPushButton {{
                 background: {theme.CONTENT_HOVER}; color: {theme.TEXT1};
                 border: 1px solid {theme.BORDER_STRONG}; border-radius: 6px;
@@ -381,7 +452,7 @@ def choose_crop(viewer, row, floating=False, *, current=None):
             }}
         """)
     if frame is None:
-        buttons.button(QDialogButtonBox.Ok).setEnabled(False)
+        confirm.setEnabled(False)
         prepare = QTimer(dialog)
         prepare.setInterval(16)
 
@@ -390,7 +461,7 @@ def choose_crop(viewer, row, floating=False, *, current=None):
             if ready is not None:
                 canvas.set_frame(ready)
                 canvas.waiting = False
-                buttons.button(QDialogButtonBox.Ok).setEnabled(True)
+                confirm.setEnabled(True)
                 prepare.stop()
 
         prepare.timeout.connect(show_frozen)
@@ -398,10 +469,16 @@ def choose_crop(viewer, row, floating=False, *, current=None):
     buttons.accepted.connect(dialog.accept)
     buttons.rejected.connect(dialog.reject)
     layout = QVBoxLayout(dialog)
+    if isinstance(dialog, FloatingCropDialog):
+        layout.setContentsMargins(20, 12, 20, 20)
+        layout.setSpacing(10)
+        layout.addWidget(dialog.titlebar)
     hint = QLabel('Ctrl＋滚轮：缩放　滚轮：上下平移　Shift＋滚轮：左右平移'
                   if floating else "自动匹配始终使用完整画面；框选仅用于放大对照、人工微调偏移。"
                   "两路请选择相同计时器，框选不会改变自动匹配或读取计时器数字。")
     hint.setWordWrap(True)
+    if floating:
+        hint.setObjectName('SettingsHint')
     layout.addWidget(hint)
     if picker is not None:
         layout.addWidget(picker, 0, Qt.AlignLeft)

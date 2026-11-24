@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 
 def check(app, host, module, output=None):
-    from PySide6.QtCore import QRectF, Qt
+    from PySide6.QtCore import QRectF, QSize, Qt
     from PySide6.QtGui import QColor, QFont, QFontDatabase, QImage, QPainter
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QCheckBox, QWidget
@@ -216,17 +216,37 @@ def check(app, host, module, output=None):
                            for lane in async_dialog.lanes.values()), 'Getting a picture must display it'
                 if output:
                     async_dialog.grab().save(str(output.with_name('clock-preview.png')))
+                lane = async_dialog.lanes['1']
+                original_preview = lane.preview
+                small_timer = QImage(640, 360, QImage.Format_RGB32)
+                small_timer.fill(QColor('#202630'))
+                painter = QPainter(small_timer)
+                timer_area = small_timer.rect().adjusted(128, 90, -480, -258)
+                painter.fillRect(timer_area, Qt.black)
+                font = QFont(family)
+                font.setPixelSize(10)
+                painter.setFont(font)
+                painter.setPen(Qt.white)
+                painter.drawText(timer_area, Qt.AlignCenter, '01:52')
+                painter.end()
+                lane.set_preview((original_preview[0], small_timer))
                 def accept_region(picker):
                     canvas = picker.findChild(ui.Canvas)
                     assert canvas is not None and not canvas.image.isNull()
-                    canvas.crop = QRectF(.2, .25, .6, .5)
+                    canvas.crop = QRectF(.2, .25, 32 / 640, 12 / 360)
                     return ui.QDialog.DialogCode.Accepted
                 with patch.object(ui.QDialog, 'exec', accept_region):
-                    async_dialog.lanes['1'].choose_region()
-                assert async_dialog.lanes['1'].strip.item(0).text() == '计时器选区'
-                assert not async_dialog.lanes['1'].frames and async_dialog.sample_token is None
+                    lane.choose_region()
+                item = lane.strip.item(0)
+                assert item.text() == '计时器选区'
+                thumbnail = item.icon().pixmap(lane.strip.iconSize(), lane.strip.devicePixelRatioF())
+                assert thumbnail.deviceIndependentSize().toSize() == QSize(128, 48)
+                pixels = thumbnail.toImage()
+                assert pixels.pixelColor(0, 0) == pixels.pixelColor(pixels.rect().bottomRight()) == QColor(Qt.black)
+                assert not lane.frames and async_dialog.sample_token is None
                 if output:
                     async_dialog.grab().save(str(output.with_name('clock-region.png')))
+                lane.set_preview(original_preview)
                 for lane in async_dialog.lanes.values():
                     lane.region = (.2, .25, .6, .5)
                 async_dialog.start_job(preview=False)
