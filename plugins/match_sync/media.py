@@ -381,7 +381,8 @@ class Decoder:
         process = None
         has_cached_video = False
         error_reader = None
-        hls_proxy = None
+        transport = None
+        hls_retry = False
         finished = threading.Event()
         timed_out = threading.Event()
         last_frame = [time.monotonic()]
@@ -390,7 +391,7 @@ class Decoder:
             while not finished.wait(.2):
                 if self.cancelled.is_set() or process.poll() is not None:
                     return
-                refresh = getattr(hls_proxy, "refresh_required", None)
+                refresh = getattr(transport, "refresh_required", None)
                 if (refresh is not None and refresh.is_set() or
                         time.monotonic() - last_frame[0] > FRAME_TIMEOUT):
                     timed_out.set()
@@ -404,14 +405,22 @@ class Decoder:
                                     name=f"match-sync-watchdog-{self.room_id}", daemon=True)
         try:
             if self.platform is not None and self.platform.kind in ("twitch", "youtube"):
-                from ddm.global_danmaku import request_proxy
-                from ddm.hls_proxy import HlsProxy
-                hls_proxy = HlsProxy(url, headers, request_proxy(url))
-                url, headers = hls_proxy.url, {}
+                try:
+                    from ddm.media_sources import take
+                except ImportError:
+                    pass  # Older hosts and plugins only use the HLS path.
+                else:
+                    transport = take(url)
+                if transport is None:
+                    from ddm.global_danmaku import request_proxy
+                    from ddm.hls_proxy import HlsProxy
+                    transport = HlsProxy(url, headers, request_proxy(url))
+                    hls_retry = True
+                url, headers = transport.url, {}
             self.acquisition.phase('ffmpeg_start')
             process = subprocess.Popen(
                 decode_command(executable, url, headers, 0, self.seed.get("quality", 250),
-                               hls_retry=hls_proxy is not None,
+                               hls_retry=hls_retry,
                                platform_kind=self.platform.kind if self.platform is not None else ""),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE if self.acquisition.enabled else subprocess.DEVNULL, bufsize=0,
@@ -553,11 +562,11 @@ class Decoder:
                             self.events.playback_issue.emit("")
                     reading = time.perf_counter()
             if not self.cancelled.is_set():
-                refresh = getattr(hls_proxy, "refresh_required", None)
+                refresh = getattr(transport, "refresh_required", None)
                 self._report_playback_issue("播放地址已失效，正在重新取流" if refresh is not None and refresh.is_set()
                                             else "画面接收超时，正在重新取流" if timed_out.is_set()
                                             else "直播流已结束或中断，正在重连")
-            refresh = getattr(hls_proxy, "refresh_required", None)
+            refresh = getattr(transport, "refresh_required", None)
             return ('cancelled' if self.cancelled.is_set() else
                     'url_expired' if refresh is not None and refresh.is_set() else
                     'frame_timeout' if timed_out.is_set() else 'eof')
@@ -587,5 +596,5 @@ class Decoder:
                     error_reader.join(1)
                     process.stderr.close()
                 self.acquisition.exited(process.returncode)
-            if hls_proxy is not None:
-                hls_proxy.stop()
+            if transport is not None:
+                transport.stop()

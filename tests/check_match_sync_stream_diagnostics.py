@@ -14,6 +14,7 @@ from unittest.mock import Mock, patch
 
 
 def check(app, host, diagnostic, media, video):
+    from ddm import media_sources
     from ddm.plugins import LoginRequiredError
 
     process_control = import_module(media.recording._ensure_job.__module__)
@@ -195,6 +196,36 @@ def check(app, host, diagnostic, media, video):
     assert failed['outcome'] == 'error' and failed['error_phase'] == 'input_open'
     assert failed['ffmpeg_exit_code'] == 1 and 'invalid_data' in failed['error_codes']
     assert failed_process.stdout.closed and failed_process.stderr.closed
+
+    # A provider-owned Matroska relay is not HLS. Keep its owner alive through
+    # FFmpeg startup and release it even when creating the process fails.
+    for platform_kind, is_retained in (('youtube', True), ('youtube', False), ('twitch', False)):
+        decoder.platform = SimpleNamespace(kind=platform_kind)
+        source = SimpleNamespace(url='http://127.0.0.1:12345/media/fixture', stop=Mock())
+        relay = SimpleNamespace(url='http://127.0.0.1:12346/resource.m3u8', stop=Mock())
+        startup_error = OSError('fixture FFmpeg launch failure')
+        with patch.object(media_sources, 'take', return_value=source if is_retained else None) as take, \
+                patch('ddm.global_danmaku.request_proxy', return_value=''), \
+                patch('ddm.hls_proxy.HlsProxy', return_value=relay) as wrap, \
+                patch.object(media.subprocess, 'Popen', side_effect=startup_error) as launch:
+            try:
+                decoder._capture('ffmpeg', address, {})
+            except OSError as exc:
+                assert exc is startup_error
+            else:
+                raise AssertionError('FFmpeg startup failures must reach the retry loop')
+        take.assert_called_once_with(address)
+        command = launch.call_args.args[0]
+        if is_retained:
+            wrap.assert_not_called()
+            assert command[command.index('-i') + 1] == source.url
+            assert not {'-http_persistent', '-http_multiple', '-seg_max_retry'}.intersection(command)
+            source.stop.assert_called_once_with()
+        else:
+            wrap.assert_called_once_with(address, {}, '')
+            assert command[command.index('-i') + 1] == relay.url and '-seg_max_retry' in command
+            relay.stop.assert_called_once_with()
+    decoder.platform = None
 
     # A real pipe must be drained beyond its capacity; never persist its raw text.
     pipe_trace = diagnostic.StreamAcquisition()
