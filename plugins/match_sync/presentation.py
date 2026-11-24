@@ -270,11 +270,15 @@ def _render_auxiliary(viewer, probe, position, waiting, dragging_crop, refresh_s
             if row.buffer_text != text:
                 row.buffer_text = text
                 row.refresh_status()
-        target = clock + shifts[room_id]
+        shift = shifts[room_id]
+        target = clock + shift
+        due = float('-inf')
         for index, (received, event) in enumerate(row.pending):
             if index >= chat_budget or received > target:
                 break
-            eligible.append((received - shifts[room_id], room_id, row, received, event))
+            # A corrected source timestamp can go backward; keep its queue in FIFO order.
+            due = max(due, received - shift)
+            eligible.append((due, room_id, row, received, event))
     viewer.panel.add_events(live_chat_events(viewer, eligible, clock, now, chat_deadline))
     if viewer.replay.active:
         viewer.panel.add_events(replay_chat_events(viewer, shown_clock, shown_shifts))

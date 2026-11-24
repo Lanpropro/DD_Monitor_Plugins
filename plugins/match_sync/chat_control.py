@@ -114,11 +114,9 @@ def live_chat_events(viewer, eligible, clock, now, deadline):
         row.pending.popleft()
         if clock - received > 120:
             continue
-        event["medal"] = {}
-        event["uname"] = f"【{row.label()}】 {event.get('uname') or ''}"
-        event["source_label"] = row.label()
-        event["source_room"] = room_id
-        event["color"] = row.color
+        label = row.label()
+        event = dict(event, medal={}, uname=f"【{label}】 {event.get('uname') or ''}",
+                     source_label=label, source_room=room_id, color=row.color)
         viewer.replay.record_message(now, event)
         if not viewer.replay.active:
             viewer.overlay_pending[room_id] = (received, event)

@@ -75,16 +75,26 @@ def check(app, host, module):
                 assert len(viewer.replay.messages) == 200, 'Every live message must still enter replay history'
                 insertion_us[0] = 5000
                 row = viewer.rows['1']
-                for text in ('slow-1', 'slow-2'):
-                    row.pending.append((time.monotonic() - 40, {'kind': 'danmaku', 'text': text, 'uname': 'fixture'}))
+                stamp = time.monotonic() - 40
+                first = {'kind': 'danmaku', 'text': 'slow-1', 'uname': 'fixture'}
+                second = dict(first, text='slow-2')
+                row.pending.extend(((stamp, first), (stamp - .5, second)))
                 viewer.render()
                 assert len(delivered) == 201 and len(row.pending) == 1, 'One slow insertion must yield after making progress'
-                assert row.pending[0][1]['uname'] == 'fixture'
+                assert delivered[-1] == ('1', 'slow-1'), 'Timestamp rollback must preserve source FIFO order'
+                assert row.pending[0][1] is second and second['uname'] == 'fixture'
                 viewer.render()
                 assert len(delivered) == 202 and not row.pending
                 assert len(viewer.replay.messages) == 202
+                assert delivered[-2:] == [('1', 'slow-1'), ('1', 'slow-2')]
+                assert first['uname'] == second['uname'] == 'fixture', 'Formatting must preserve raw queue entries'
+            replayed = viewer.replay.messages_between(0, time.monotonic())[-2:]
+            viewer.panel.add_events(replayed)
+            assert [entry['uname'] for entry in viewer.panel._blocks[-2:]] == [f'【{row.label()}】 fixture'] * 2
+            assert viewer.panel.body.toPlainText().count(f'【{row.label()}】') == 2
             return {'passed': True, 'queued_messages': 200, 'drag_list_updates': 4, 'no_chat_loss': True,
-                    'time_budget_model': True, 'remaining_messages_unmodified': True, 'slow_insertion_progress': True}
+                    'time_budget_model': True, 'remaining_messages_unmodified': True, 'slow_insertion_progress': True,
+                    'timestamp_rollback_fifo': True, 'single_source_label_in_replay': True}
         finally:
             viewer.close()
             viewer.deleteLater()
