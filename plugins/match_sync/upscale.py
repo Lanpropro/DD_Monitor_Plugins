@@ -5,7 +5,7 @@ import threading
 import time
 from collections import deque
 
-from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtCore import QObject, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QImage
 
 
@@ -33,14 +33,17 @@ class LightScaler:
         return QImage(output.data, output.shape[1], output.shape[0], output.strides[0], QImage.Format_RGB888).copy()
 
 
-class CropEnhancer:
+class CropEnhancer(QObject):
+    updated = Signal(object)
     MAX_PIXELS = 640 * 360
 
     def __init__(self):
+        super().__init__()
         self.condition = threading.Condition()
         self.pending = None
         self.result = None
         self.closed = False
+        self.update_posted = False
         self.generation = 0
         self.thread = None
         self.stats = dict(ready=False, completed=0, superseded=0, bypassed=0,
@@ -65,8 +68,17 @@ class CropEnhancer:
 
     def take_result(self):
         with self.condition:
+            self.update_posted = False
             result, self.result = self.result, None
             return result
+
+    def _notify(self):
+        with self.condition:
+            # The queued GUI receiver takes the latest result, including replacements.
+            if self.closed or self.update_posted:
+                return
+            self.update_posted = True
+        self.updated.emit(self)
 
     def diagnostics(self):
         with self.condition:
@@ -92,7 +104,10 @@ class CropEnhancer:
                           crop.width() * image.width(), crop.height() * image.height()).toAlignedRect().intersected(image.rect())
             if area.isEmpty() or area.width() * area.height() > self.MAX_PIXELS:
                 with self.condition:
+                    if self.closed or generation != self.generation:
+                        continue
                     self.stats['bypassed'] += 1
+                self._notify()
                 continue
             try:
                 if backend is None:
@@ -113,9 +128,13 @@ class CropEnhancer:
                     self.stats['completed'] += 1
                     if not self.closed and generation == self.generation:
                         self.result = (timestamp, image, output, area, duration, cpu_ms)
+                    else:
+                        continue
+                self._notify()
             except Exception as error:
                 with self.condition:
                     self.pending = None
                     self.stats['error'] = str(error)
+                self._notify()
                 logging.getLogger(__name__).exception('Crop enhancement unavailable; using source pixels')
                 return

@@ -37,7 +37,7 @@ def check_backend(module):
 
 
 def check_worker(module):
-    from PySide6.QtCore import QRectF, QSize
+    from PySide6.QtCore import QRectF, QSize, Qt
     from PySide6.QtGui import QImage
     upscale = importlib.import_module(module.__package__ + '.upscale')
     entered, release = threading.Event(), threading.Event()
@@ -52,6 +52,8 @@ def check_worker(module):
     source = QImage(1000, 600, QImage.Format_RGB32)
     source.fill(0xff507090)
     worker = upscale.CropEnhancer()
+    notifications = []
+    worker.updated.connect(notifications.append, Qt.DirectConnection)
     try:
         with patch.object(upscale, 'LightScaler', Backend):
             worker.submit(1, source, QRectF(.1, .2, .1, .1), QSize(200, 120))
@@ -68,15 +70,24 @@ def check_worker(module):
             assert calls == [QSize(100, 60)]
             worker.submit(200, source, QRectF(.1, .2, .1, .1), QSize(200, 120))
             deadline = time.perf_counter() + 3
-            result = None
-            while result is None and time.perf_counter() < deadline:
-                result = worker.take_result()
+            while not notifications and time.perf_counter() < deadline:
                 time.sleep(.005)
+            assert notifications == [worker]
+            result = worker.take_result()
             assert result[0] == 200 and result[1].size() == source.size()
             assert result[2].size() == QSize(100, 60), 'Keep the exact source alongside its filtered result'
+            for timestamp in (201, 202, 203):
+                completed = worker.diagnostics()['completed']
+                worker.submit(timestamp, source, QRectF(.1, .2, .1, .1), QSize(200, 120))
+                deadline = time.perf_counter() + 3
+                while worker.diagnostics()['completed'] == completed and time.perf_counter() < deadline:
+                    time.sleep(.005)
+                assert worker.diagnostics()['completed'] == completed + 1
+            assert notifications == [worker, worker], 'Coalesce results while the GUI callback is queued'
+            assert worker.take_result()[0] == 203
             entered.clear()
             release.clear()
-            worker.submit(201, source, QRectF(.1, .2, .1, .1), QSize(200, 120))
+            worker.submit(204, source, QRectF(.1, .2, .1, .1), QSize(200, 120))
             assert entered.wait(3)
             worker.stop()
             assert worker.thread.is_alive(), 'Closing must not wait for a busy filter'
@@ -86,16 +97,20 @@ def check_worker(module):
         if worker.thread is not None:
             worker.thread.join(3)
             assert not worker.thread.is_alive()
-    return dict(single_pending=True, crop_only=True, old_generation_discarded=True, nonblocking_stop=True)
+    return dict(single_pending=True, crop_only=True, old_generation_discarded=True, nonblocking_stop=True,
+                coalesced_gui_notification=True)
 
 
 def check_timeline(app, module):
-    from PySide6.QtCore import QRect, QRectF
+    from PySide6.QtCore import QObject, QRect, QRectF, Signal
     from PySide6.QtGui import QImage, QPainter
     from PySide6.QtWidgets import QWidget
     floating_module = importlib.import_module(module.__package__ + '.floating')
-    class Worker:
+    class Worker(QObject):
+        updated = Signal(object)
+
         def __init__(self):
+            super().__init__()
             self.result = None
             self.requests = []
             self.closed = False
@@ -120,13 +135,19 @@ def check_timeline(app, module):
         floating.resize(200, 80)
         floating.set_quality_mode('light')
         try:
+            assert floating.enhance_timer.interval() == 100, 'Watchdog must not poll for frames'
             floating.set_frame((100., source))
             worker = floating.enhancer
+            area = QRectF(.12345 * 256, .13 * 128, .4 * 256, .3 * 128).toAlignedRect()
+            worker.result = (100., source, source.copy(area), area, 1., 1.)
+            worker.updated.emit(worker)
+            app.processEvents()
             floating.set_frame((100.02, source))
             assert floating.frame_key == 100., 'Do not jump to raw input before the corresponding enhanced frame'
-            area = QRectF(.12345 * 256, .13 * 128, .4 * 256, .3 * 128).toAlignedRect()
             worker.result = (100.02, source, source.copy(area), area, 1., 1.)
-            floating._refresh_enhancement()
+            worker.updated.emit(worker)
+            assert floating.frame_key == 100., 'Deliver worker results through the GUI queue'
+            app.processEvents()
             assert floating.frame_key == 100.02 and not floating.enhanced.isNull()
             # The filtered crop and full source must use identical fractional coordinates.
             filtered = QImage(floating.size(), QImage.Format_RGB32)
@@ -147,13 +168,14 @@ def check_timeline(app, module):
             resumed = floating.enhance_poll + .150
             worker.result = (100.04, source, source.copy(area), area, 150., 1.)
             with patch.object(floating_module.time, 'perf_counter', return_value=resumed):
+                floating._check_enhancement_progress()
                 floating._refresh_enhancement()
             assert floating.enhance_state == 'active' and floating.frame_key == 100.04
             floating.set_frame((100.06, source))
             with patch.object(floating_module.time, 'perf_counter') as clock:
-                for tick in range(1, 28):
-                    clock.return_value = resumed + tick * .020
-                    floating._refresh_enhancement()
+                for tick in range(1, 7):
+                    clock.return_value = resumed + tick * .100
+                    floating._check_enhancement_progress()
             assert floating.enhance_state == 'fallback' and floating.frame_key == 100.06 and worker.closed
             assert floating.enhance_reason == 'backend_timeout'
             count = len(worker.requests)
@@ -164,7 +186,12 @@ def check_timeline(app, module):
             floating.set_quality_mode('source')
             floating.set_quality_mode('light')
             floating.set_frame((10., source))
-            assert floating.frame_key == 10. and floating.enhance_state == 'active', 'Explicit seeks start a new timeline'
+            assert floating.frame_key == 10. and floating.enhance_state == 'warming', 'Explicit seeks start a new timeline'
+            worker.updated.emit(worker)
+            app.processEvents()
+            assert floating.enhance_state == 'warming', 'Late notifications from a stopped worker must be ignored'
+            floating.enhancer.result = (10., source, source.copy(area), area, 1., 1.)
+            floating._refresh_enhancement()
             floating.set_frame((10.12, source))
             floating.enhancer.result = (10.02, source, source.copy(area), area, 100., 1.)
             floating._refresh_enhancement()
@@ -177,6 +204,7 @@ def check_timeline(app, module):
                 stamp = 10.12 + tick * .02
                 floating.enhancer.result = (stamp, source, source.copy(area), area, 80., 40.)
                 floating.set_frame((stamp, source))
+                floating._refresh_enhancement()
             assert floating.enhance_state == 'fallback' and floating.enhance_reason == 'cpu_budget'
             return dict(monotonic=True, stable_fallback=True, exact_crop_geometry=True, seek_reset=True,
                         gui_pause_not_filter_overload=True, sustained_cpu_overrun=True)
@@ -190,6 +218,7 @@ def check_timeline(app, module):
 def check_routing(app, host, module):
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QImage
+    from PySide6.QtTest import QTest
     from ddm import plugins
     host.settings, host.rooms = {}, []
     with tempfile.TemporaryDirectory() as directory:
@@ -219,6 +248,12 @@ def check_routing(app, host, module):
                     viewer.crop_quality.setCurrentIndex(viewer.crop_quality.findData('source'))
                     viewer.crop_quality.setCurrentIndex(viewer.crop_quality.findData('light'))
                     assert start.call_count == 0 and row.decoder is decoder, 'Changing the filter must not reconnect'
+                crop.set_frame((2, source))
+                deadline = time.monotonic() + 3
+                while crop.enhanced.isNull() and time.monotonic() < deadline:
+                    QTest.qWait(10)
+                assert crop.enhance_updates > 0 and not crop.enhanced.isNull()
+                assert crop.frame_key == 2
                 viewer._information(row, decoder, {'requested_quality': 64, 'actual_quality': 64})
                 assert row.quality == preference
                 crop._fallback_enhancement('cpu_budget')
