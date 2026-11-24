@@ -13,31 +13,37 @@ from unittest.mock import patch
 def check_main_canvas_paint(app, canvas_type):
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QImage
+    from unittest.mock import Mock
 
-    for immediate in (True, False):
-        canvas = canvas_type(immediate_frame_paint=immediate)
-        try:
-            canvas.setAttribute(Qt.WA_ShowWithoutActivating)
-            canvas.resize(480, 270)
+    canvas = canvas_type()
+    try:
+        canvas.setAttribute(Qt.WA_ShowWithoutActivating)
+        canvas.resize(480, 270)
+        canvas.show()
+        app.processEvents()
+        probe = canvas.paint_probe = Mock(thread=True, paints=[])
+        image = QImage(320, 180, QImage.Format_RGB32)
+        image.fill(Qt.blue)
+        with patch.object(canvas, '_paint_frame', wraps=canvas._paint_frame) as paint:
+            canvas.set_frame((1, image))
+            canvas.set_frame((2, image))
+            canvas.set_frame((2, image))
+            paint.assert_not_called()
+            app.processEvents()
+            paint.assert_called_once()
+            assert canvas.frame_key == 2
+            stages = [call.args[0] for call in probe.timings.record.call_args_list]
+            assert stages.count('main_submit_replaced') == 1
+            assert stages.count('main_submit_to_paint_start') == 1
+            assert stages.index('main_submit_to_paint_start') < stages.index('main_submit_to_paint')
+            canvas.hide()
+            canvas.set_frame((3, image))
+            paint.assert_called_once()
             canvas.show()
             app.processEvents()
-            image = QImage(320, 180, QImage.Format_RGB32)
-            image.fill(Qt.blue)
-            with patch.object(canvas, '_paint_frame', wraps=canvas._paint_frame) as paint:
-                canvas.set_frame((1, image))
-                assert paint.call_count == int(immediate)
-                canvas.set_frame((1, image))
-                assert paint.call_count == int(immediate)
-                app.processEvents()
-                assert paint.call_count == 1
-                canvas.hide()
-                canvas.set_frame((2, image))
-                assert paint.call_count == 1
-                canvas.show()
-                app.processEvents()
-                assert paint.call_count == 2 and canvas.frame_key == 2
-        finally:
-            canvas.close()
+            assert paint.call_count == 2 and canvas.frame_key == 3
+    finally:
+        canvas.close()
 
 
 def check(app, host, module):
@@ -55,7 +61,6 @@ def check(app, host, module):
             plugins.PluginManager(window=host, plugins_dir=directory), 'ui_work'), {})
         panel = sending.SendingDanmakuPanel(host)
         try:
-            assert viewer.canvas.immediate_frame_paint
             viewer.video_danmaku._start_timer()
             assert viewer.video_danmaku.timer.interval() == 16
             viewer.video_danmaku._stop_timer()
