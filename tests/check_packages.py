@@ -32,10 +32,17 @@ def main():
         f"# 国内直播平台 v{domestic_version}\n")
     match_version = versions["match_sync"]
     match_readme = (ROOT / "plugins/match_sync/README.md").read_text(encoding="utf-8")
-    assert match_readme.startswith(f"# 比赛二路同步 v{match_version}\n")
     assert f"match_sync-{match_version}.zip" in match_readme
-    notes = ROOT / 'docs/releases' / f"RELEASE-match-sync-v{match_version}.md"
-    assert notes.read_text(encoding="utf-8").startswith(f"# 比赛二路同步 v{match_version}\n")
+    release_dir = ROOT / "docs/releases"
+    preview_heading = f"# 比赛二路同步 {match_version} preview\n"
+    if match_readme.startswith(preview_heading):
+        assert any(note.read_text(encoding="utf-8").startswith(preview_heading)
+                   for note in release_dir.glob(f"RELEASE-match-sync-v{match_version}-pre.*.md"))
+    else:
+        heading = f"# 比赛二路同步 v{match_version}\n"
+        assert match_readme.startswith(heading)
+        notes = release_dir / f"RELEASE-match-sync-v{match_version}.md"
+        assert notes.read_text(encoding="utf-8").startswith(heading)
     proxy_version = versions['proxy_control']
     proxy_readme = (ROOT / 'plugins/proxy_control/README.md').read_text(encoding='utf-8')
     assert proxy_readme.startswith(f'# 网络代理 v{proxy_version}\n')

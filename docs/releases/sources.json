@@ -345,6 +345,45 @@
       ]
     },
     {
+      "tag": "match-sync-v1.7.0.1",
+      "file": "RELEASE-match-sync-v1.7.0.1.md",
+      "sha256": "c7fe4bdc11275ce471bd7544a97b763f4341a8137b65e3f4e90c65cd08c1e2ba",
+      "status": "repository_archive",
+      "source_kind": "repository_history",
+      "last_edit_verified": false,
+      "source_commit": "2e84bf5b6887df96c420ad64428b641115a2a360",
+      "source_path": "docs/releases/RELEASE-match-sync-v1.7.0.1.md"
+    },
+    {
+      "tag": "match-sync-v1.7.0.2",
+      "file": "RELEASE-match-sync-v1.7.0.2.md",
+      "sha256": "1eaadfc090005a2ab66939e4de8db661c187c55df4bddc43e188341786579edd",
+      "status": "repository_archive",
+      "source_kind": "repository_history",
+      "last_edit_verified": false,
+      "source_commit": "c40aba5d02dba5f5de08f32d44c519ca39678894",
+      "source_path": "docs/releases/RELEASE-match-sync-v1.7.0.2.md"
+    },
+    {
+      "tag": "match-sync-v1.7.0.3",
+      "file": "RELEASE-match-sync-v1.7.0.3.md",
+      "sha256": "19cf767f4c05a0dbf42ea81898f1bda93297061e49f4ff67e94d00ea4cf01cbb",
+      "status": "repository_archive",
+      "source_kind": "repository_history",
+      "last_edit_verified": false,
+      "source_commit": "5367fa6ad86e730f88cc341f4ffaddb8d9cb85b1",
+      "source_path": "docs/releases/RELEASE-match-sync-v1.7.0.3.md"
+    },
+    {
+      "tag": "match-sync-v2.0-pre.1",
+      "file": "RELEASE-match-sync-v2.0-pre.1.md",
+      "sha256": "8a0579d69b57e002d1cd70aaec37d1789e42fd84eeb1cfaf7a0e1fef9ddd8fcf",
+      "status": "prepared",
+      "source_kind": "repository_candidate",
+      "base_commit": "6bad049afea1a1c551c65f192f71c0518bcc4826",
+      "last_edit_verified": false
+    },
+    {
       "tag": "proxy-control-v1.0",
       "file": "RELEASE-proxy-control-v1.0.md",
       "status": "online",

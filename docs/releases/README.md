@@ -30,7 +30,7 @@
 ## 预发布说明
 
 - 比赛二路同步 [2.0 preview](RELEASE-match-sync-v2.0-pre.1.md) · [GitHub 预发布](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v2.0-pre.1)。
-
+- 比赛二路本地开发记录 [1.7.0.1](RELEASE-match-sync-v1.7.0.1.md)、[1.7.0.2](RELEASE-match-sync-v1.7.0.2.md)、[1.7.0.3](RELEASE-match-sync-v1.7.0.3.md)。
 
 ## 替代版本的核验归档
 
