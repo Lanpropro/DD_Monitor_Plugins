@@ -208,6 +208,10 @@ def check(app, host, module, output=None):
             viewer.show()
             QTest.qWait(80)
             console = viewer.send_console
+            from ddm.sidebar_navigation import NavigationButton
+            settings_button = viewer.match_settings_button
+            assert isinstance(settings_button, NavigationButton) and settings_button.kind == 'settings'
+            assert not settings_button.text() and settings_button.accessibleName() == '比赛二路设置'
             for button in (viewer.automatic, viewer.compare, viewer.rows['1'].audible,
                            viewer.match_settings_button, viewer.minimize_settings, console.minimize):
                 assert button.cursor().shape() == Qt.PointingHandCursor, button

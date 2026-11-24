@@ -14,6 +14,13 @@ from . import danmaku_settings
 from ddm.widgets import Tile, TileButton
 from ddm import theme
 
+try:
+    from ddm.sidebar_navigation import NavigationButton
+except ModuleNotFoundError as error:
+    if error.name != 'ddm.sidebar_navigation':
+        raise
+    NavigationButton = None
+
 
 def build_ui(viewer):
     context = viewer.context
@@ -138,7 +145,9 @@ def build_ui(viewer):
     trailing_layout.setSpacing(16)
     for widget in viewer.add_controls:
         trailing_layout.addWidget(widget)
-    viewer.match_settings_button = native_console_button(TileButton('⚙'), '比赛二路设置')
+    settings_button = (NavigationButton('比赛二路设置', 'settings')
+                       if NavigationButton is not None else TileButton('⚙'))
+    viewer.match_settings_button = native_console_button(settings_button, '比赛二路设置')
     viewer.match_settings_button.clicked.connect(viewer.open_match_settings)
     trailing_layout.addWidget(viewer.match_settings_button)
     trailing_layout.addWidget(viewer.minimize_settings)
