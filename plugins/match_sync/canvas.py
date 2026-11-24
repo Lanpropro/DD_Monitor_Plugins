@@ -30,6 +30,7 @@ class Canvas(QFrame):
         self.paint_probe = None
         self.submitted_at = None
         self.limit_frame_damage = limit_frame_damage
+        self.flush_overlay_motion = None
         self.selecting = selecting
         self.crop = QRectF(0, 0, 1, 1)
         self.selection_color = QColor('#38bdf8')
@@ -67,12 +68,17 @@ class Canvas(QFrame):
             probe.submitted.record(self.submitted_at, key)
             if probe.gui_timeline is not None:
                 probe.gui_timeline.point('picture.submit', self.submitted_at)
+        damage = None
         if self.limit_frame_damage and not self.image.isNull() and not self.selecting:
             current_rect = self._image_target(self._source_rect())
             if current_rect == self.image_rect:
-                self.update(current_rect.toAlignedRect())
-                return
-        self.update()
+                damage = current_rect.toAlignedRect()
+        if damage is None:
+            self.update()
+        else:
+            self.update(damage)
+        if self.flush_overlay_motion is not None:
+            self.flush_overlay_motion()
 
     def show_at(self, decoder, timestamp):
         probe = self.paint_probe

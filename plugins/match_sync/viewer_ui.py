@@ -206,6 +206,10 @@ def build_ui(viewer):
         set_raster_interval = getattr(viewer.video_danmaku, "set_raster_frame_interval", None)
         if viewer.split_presentation and set_raster_interval is not None:
             set_raster_interval(16)
+        raster = getattr(viewer.video_danmaku, 'raster_control', None)
+        enable_motion_coalescing = getattr(raster, 'enable_motion_coalescing', None)
+        if viewer.split_presentation and enable_motion_coalescing is not None:
+            viewer.canvas.flush_overlay_motion = enable_motion_coalescing()
         danmaku_settings.install(viewer, settings)
         viewer.picture.videoDanmakuChanged.connect(lambda: viewer.overlay_pending.clear())
     viewer.panel.apply_style(settings.get("danmaku_font", ""),

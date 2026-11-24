@@ -43,7 +43,10 @@ def check_main_canvas_paint(app, canvas_type):
             app.processEvents()
             assert paint.call_count == 2 and canvas.frame_key == 3
         with patch.object(canvas, 'update') as update:
-            canvas.set_frame((4, image))
+            with patch.object(canvas, 'flush_overlay_motion', side_effect=lambda: update.assert_called()):
+                canvas.set_frame((4, image))
+                canvas.set_frame((4, image))
+                canvas.flush_overlay_motion.assert_called_once()
             update.assert_called_once_with(QRect(0, 45, 480, 270))
             update.reset_mock()
             canvas.set_frame((5, QImage(270, 270, QImage.Format_RGB32)))
