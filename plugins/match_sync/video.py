@@ -301,6 +301,11 @@ class PictureReader:
         self.decode_phase = 'idle'
 
     def configure(self, byte_limit, fps, lead=.35, active=True):
+        fps = max(1, fps)
+        settings = (byte_limit, fps, lead, 24)
+        # The GUI owns configuration changes. A stable active budget needs no reader lock.
+        if active and self.active and (self.byte_limit, self.fps, self.lead, self.max_frames) == settings:
+            return
         with self.lock:
             previous_active = self.active
             self.active = active or time.monotonic() < self.snapshot_until
@@ -310,11 +315,11 @@ class PictureReader:
                     self.reset_reason = 'inactive'
                 self.target = None
                 self.images.clear()
-            if (self.byte_limit, self.fps, self.lead, self.max_frames) == (byte_limit, max(1, fps), lead, 24):
+            if (self.byte_limit, self.fps, self.lead, self.max_frames) == settings:
                 return
             self.byte_limit = byte_limit
             self.max_frames = 24
-            self.fps = max(1, fps)
+            self.fps = fps
             self.lead = lead
             while len(self.images) > 1 and sum(image.sizeInBytes() for image in self.images.values()) > byte_limit:
                 self.images.pop(next(iter(self.images)))

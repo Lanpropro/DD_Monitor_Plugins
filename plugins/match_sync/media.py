@@ -171,11 +171,18 @@ class Decoder:
                 pass
 
     def picture_at(self, timestamp, exact=False):
-        if not exact:
-            self.playback_timestamp = timestamp
+        return self.picture_sample(timestamp, exact=exact, track_missing=True)[1]
+
+    def picture_sample(self, timestamp, exact=False, *, track_missing=False):
+        """Return the requested timestamp and the available decoded frame from one lookup."""
         history = self.history.segment_at(timestamp) or self.history
         frame = history.frame_at(timestamp)
-        return self.pictures.get(history, frame, exact=exact) if frame is not None and not self.cancelled.is_set() else None
+        if not exact and (frame is not None or track_missing):
+            self.playback_timestamp = timestamp
+        if frame is None:
+            return None, None
+        ready = self.pictures.get(history, frame, exact=exact) if not self.cancelled.is_set() else None
+        return frame[0], ready
 
     def diagnostics(self):
         with self.history.lock:
