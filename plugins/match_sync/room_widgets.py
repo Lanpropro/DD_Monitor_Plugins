@@ -32,20 +32,21 @@ class CompactStatus(QLabel):
 
     def set_status(self, parts, detail, hints=None):
         hints = hints if hints is not None else [text for _, text in parts]
-        if (self.parts, self.detail, self.hints) == (parts, detail, hints):
+        self.hints = hints
+        if self.detail != detail:
+            self.detail = detail
+            self.setAccessibleDescription(detail)
+        if self.parts == parts:
             return
         self.parts = parts
-        self.hints = hints
         self.hit_regions = []
-        self.detail = detail
         self.setText(' · '.join(text for _, text in parts if text))
         self.setAccessibleName(' · '.join(text or ('已连接' if icon == 'connected' else '已静音')
                                          for icon, text in parts))
-        self.setAccessibleDescription(detail)
         self.update()
 
     def tooltip_at(self, point):
-        return next((hint for rect, hint in self.hit_regions if rect.contains(point)), '')
+        return next((self.hints[index] for rect, index in self.hit_regions if rect.contains(point)), '')
 
     def event(self, event):
         if event.type() == QEvent.ToolTip:
@@ -67,7 +68,7 @@ class CompactStatus(QLabel):
         size, x = 16, 0
         y = (self.height() - size) // 2
         self.hit_regions = []
-        for (icon, text), hint in zip(self.parts, self.hints):
+        for index, (icon, text) in enumerate(self.parts):
             if x + size > self.width():
                 break
             start = x
@@ -99,11 +100,11 @@ class CompactStatus(QLabel):
                 shown = metrics.elidedText(text, Qt.ElideRight, max(0, self.width() - x))
                 painter.drawText(QRect(x, 0, max(0, self.width() - x), self.height()), Qt.AlignVCenter, shown)
                 x += metrics.horizontalAdvance(shown) + 12
-                self.hit_regions.append((QRect(start, 0, x - start - 12, self.height()), hint))
+                self.hit_regions.append((QRect(start, 0, x - start - 12, self.height()), index))
                 if shown != text:
                     break
             else:
-                self.hit_regions.append((QRect(start, 0, size, self.height()), hint))
+                self.hit_regions.append((QRect(start, 0, size, self.height()), index))
                 x += 8
 
 
@@ -573,10 +574,13 @@ class RoomRow(QFrame):
         independent = self.room_id in self.viewer.independent_playback
         self.independent.setEnabled(self.room_id != self.viewer.alignment.reference)
         self.independent.setChecked(independent)
-        self.independent.kind = 'resync' if independent else 'independent'
-        self.independent.setToolTip('恢复自动对齐' if independent else '独立播放：不等待对齐，使用本路缓存进度')
-        self.independent.setAccessibleName(self.independent.toolTip())
-        self.independent.update()
+        kind = 'resync' if independent else 'independent'
+        if self.independent.kind != kind:
+            self.independent.kind = kind
+            hint = '恢复自动对齐' if independent else '独立播放：不等待对齐，使用本路缓存进度'
+            self.independent.setToolTip(hint)
+            self.independent.setAccessibleName(hint)
+            self.independent.update()
         self.realign.setEnabled(self.viewer.alignment.automatic and self.room_id != self.viewer.alignment.reference)
         can_submit_hint = (self.viewer.running and self.viewer.alignment.automatic
                            and self.room_id != self.viewer.alignment.reference and not self.hint_pending

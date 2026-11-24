@@ -57,6 +57,7 @@ def stop(viewer):
     viewer.replay_bar.preview.stop()
     viewer.running = False
     stop_rendering(viewer)
+    viewer.panel.flush_playback_events()
     if viewer.stream_info_dialog is not None:
         viewer.stream_info_dialog.close()
     with viewer._switch_stage('stop_playback_probe'):

@@ -105,11 +105,11 @@ def _render_overlay(viewer, clock, shifts):
                     _tick_super_chats(viewer)
 
 
-def live_chat_events(viewer, eligible, clock, now, deadline):
+def live_chat_events(viewer, eligible, clock, now, deadline, limit=16):
     for index, (_due, room_id, row, received, event) in enumerate(sorted(eligible, key=lambda item: item[0])):
         # Bound the HTML batch as well as its preparation, since the final
         # Qt insertion cannot be interrupted. Always make progress.
-        if index and not viewer.replay.active and (index >= 16 or time.perf_counter() >= deadline):
+        if not viewer.replay.active and (index >= limit or index and time.perf_counter() >= deadline):
             break
         row.pending.popleft()
         if clock - received > 120:

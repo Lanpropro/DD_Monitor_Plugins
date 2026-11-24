@@ -1,6 +1,9 @@
 """Chat panel. Existing component ownership and lifecycle are preserved."""
 from __future__ import annotations
 
+from collections import deque
+import time
+
 from ddm.widgets import DanmakuPanel
 
 from .panels import ChatConnectionIcon
@@ -10,6 +13,9 @@ from ddm import motion, theme
 
 
 class SendingDanmakuPanel(DanmakuPanel):
+    PLAYBACK_BATCH = 16
+    PLAYBACK_BACKLOG = 64
+
     def __init__(self, viewer):
         super().__init__(viewer)
         previous = self.count
@@ -22,6 +28,10 @@ class SendingDanmakuPanel(DanmakuPanel):
         self.viewer = viewer
         self._adding_divider = False
         self._replay_section = False
+        self._playback_events = deque()
+        self._playback_flush = QTimer(self)
+        self._playback_flush.setSingleShot(True)
+        self._playback_flush.timeout.connect(self._flush_playback_batch)
         self._scroll_animation = QPropertyAnimation(self.body.verticalScrollBar(), b'value', self)
         self._scroll_animation.setDuration(220)
         self._scroll_animation.setEasingCurve(motion.THEME_WAVE_EASING)
@@ -35,10 +45,52 @@ class SendingDanmakuPanel(DanmakuPanel):
         self.body.viewport().installEventFilter(self)
 
     def begin_replay_section(self):
+        self.flush_playback_events()
         self._scroll_animation.stop()
         self._replay_section = True
         self._section_scroll = self.body.verticalScrollBar().value()
         self._scroll_revision += 1
+
+    @property
+    def playback_batch_limit(self):
+        return min(self.PLAYBACK_BATCH, self.PLAYBACK_BACKLOG - len(self._playback_events))
+
+    def playback_backlog(self, now):
+        return (len(self._playback_events),
+                max(0, now - self._playback_events[0][0]) * 1000 if self._playback_events else 0)
+
+    def queue_playback_events(self, events, now):
+        self._playback_events.extend((now, event) for event in events)
+        if self._playback_events and not self._playback_flush.isActive():
+            self._playback_flush.start(32)
+
+    def _flush_playback_batch(self):
+        # Keep the GUI responsive if arrivals briefly exceed one batch.
+        count = min(self.PLAYBACK_BATCH, len(self._playback_events))
+        if not count:
+            return
+        timeline = getattr(self, 'match_gui_timeline', None)
+        if timeline is not None:
+            started = timeline.begin()
+            _, age_ms = self.playback_backlog(time.monotonic())
+            timeline.point('chat.sidebar_oldest_ms', started[0], round(age_ms, 1))
+        self.add_events(self._playback_events.popleft()[1] for _ in range(count))
+        if timeline is not None:
+            timeline.end('chat.sidebar_flush', started, count)
+        if self._playback_events:
+            self._playback_flush.start(4)
+
+    def flush_playback_events(self):
+        self._playback_flush.stop()
+        if self._playback_events:
+            events = [event for _, event in self._playback_events]
+            self._playback_events.clear()
+            self.add_events(events)
+
+    def clear(self):
+        self._playback_flush.stop()
+        self._playback_events.clear()
+        return super().clear()
 
     def _restore_scroll_state(self, state):
         if self._replay_section:

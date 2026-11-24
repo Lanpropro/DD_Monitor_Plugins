@@ -53,7 +53,7 @@ def check_main_canvas_paint(app, canvas_type):
 
 
 def check(app, host, module):
-    from PySide6.QtCore import Qt, QUrl
+    from PySide6.QtCore import Qt, QUrl, QPoint
     from PySide6.QtGui import QPixmap, QTextCursor, QTextDocument
     from PySide6.QtTest import QTest
     from ddm import plugins
@@ -113,6 +113,19 @@ def check(app, host, module):
                         resource = panel.body.document().resource(QTextDocument.ImageResource, QUrl(image.name()))
                         assert resource.width() == expected and resource.height() == 80
             assert [entry['source_room'] for entry in panel._blocks] == ['1'] * 100
+            panel.queue_playback_events(({'text': f'queued-{index}'} for index in range(24)), time.monotonic())
+            assert len(panel._blocks) == 100 and panel.playback_backlog(time.monotonic())[0] == 24
+            with patch.object(panel.body, 'append', wraps=panel.body.append) as append:
+                panel._playback_flush.stop()
+                panel._flush_playback_batch()
+                assert len(panel._blocks) == 116 and panel.playback_backlog(time.monotonic())[0] == 8
+                panel.begin_replay_section()
+                assert not panel._playback_flush.isActive() and append.call_count == 2
+            assert [entry['text'] for entry in panel._blocks[-24:]] == [f'queued-{index}' for index in range(24)]
+            panel.end_replay_section()
+            panel.queue_playback_events([{'text': 'discarded-on-clear'}], time.monotonic())
+            panel.clear()
+            assert not panel._playback_flush.isActive() and not panel._playback_events
             with patch.object(module.Decoder, 'start', lambda _self: None), \
                     patch.object(module.Chat, 'start', lambda _self: None), \
                     patch.object(module.AudioPump, 'start', lambda _self: None):
@@ -146,6 +159,21 @@ def check(app, host, module):
             viewer.match_timer.stop()
             viewer.audio.timer.stop()
             row = viewer.rows['1']
+            controls = import_module(module.__package__ + '.presentation')
+            viewer.alignment.automatic = True
+            row.delay.setValue(0.0)
+            with patch.object(row.delay, 'setValue', wraps=row.delay.setValue) as change:
+                controls._sync_delay_controls(viewer, {'1': 0.0001})
+                change.assert_not_called()
+            status = row.status
+            status.set_status([('connected', '直播')], '详情一', ['提示一'])
+            status.resize(180, 22)
+            status.grab()
+            with patch.object(status, 'update') as update:
+                status.set_status([('connected', '直播')], '详情二', ['提示二'])
+                update.assert_not_called()
+            assert status.tooltip_at(QPoint(2, 8)) == '提示二'
+            assert status.accessibleDescription() == '详情二'
             row.decoder.fps = 60
             calls = []
             row.platform = SimpleNamespace(kind='huya', room_quality_options=lambda _key: calls.append(_key) or [])
@@ -191,6 +219,8 @@ def check(app, host, module):
                 assert emitted[-1]['color'] == row.color
                 assert emitted[-1]['emoticons'] == incoming['emoticons'] and emitted[-1]['self_sent']
                 assert emitted[-1]['source_label'] == '主播一' and emitted[-1]['source_room'] == '1'
+                assert '【主播一】 观众' not in viewer.panel.body.toPlainText()
+                QTest.qWait(100)
                 assert '【主播一】 观众' in viewer.panel.body.toPlainText(), 'Keep source labels in the chat list'
                 recorded = dict(viewer.replay.messages[-1][1])
                 assert recorded['text'] == incoming['text'], 'Keep original replay text'

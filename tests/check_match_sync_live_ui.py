@@ -96,7 +96,7 @@ def check(app, _host, module):
             status = row.status
             parts, hints = [('buffer', '5.0s')], ['buffer detail']
             status.set_status(parts, 'detail', hints)
-            regions = status.hit_regions = [('preserved until repaint', 'buffer detail')]
+            regions = status.hit_regions = [('preserved until repaint', 0)]
             with patch.object(status, 'setText', wraps=status.setText) as text, \
                     patch.object(status, 'update', wraps=status.update) as update:
                 status.set_status(list(parts), 'detail', list(hints))
@@ -106,9 +106,10 @@ def check(app, _host, module):
                 assert status.accessibleDescription() == 'changed detail'
                 status.set_status(parts, 'changed detail', ['new hint'])
                 assert status.hints == ['new hint']
+                assert status.hit_regions is regions and text.call_count == update.call_count == 0
                 status.set_status([('buffer', '4.0s')], 'changed detail')
                 assert status.text() == '4.0s' and status.hints == ['4.0s']
-                assert text.call_count == update.call_count == 3
+                assert text.call_count == update.call_count == 1
             return dict(passed=True, unchanged_sidebar_style_updates=0,
                         unchanged_status_updates=0, artwork_polling=True,
                         same_size_rebuild=True, reentry=True, status_hints=True)

@@ -142,11 +142,17 @@ def _sync_delay_controls(viewer, shifts):
     if viewer.alignment.automatic:
         origin = shifts.get(viewer.alignment.reference, 0)
         for key, row in viewer.rows.items():
-            if not row.delay.lineEdit().isModified():
-                row.delay.blockSignals(True)
-                row.delay.setValue(origin - shifts[key])
-                row.delay.blockSignals(False)
-                row.previous_delay = row.delay.value()
+            delay = row.delay
+            if delay.lineEdit().isModified():
+                continue
+            target = max(delay.minimum(), min(delay.maximum(), origin - shifts[key]))
+            current = delay.value()
+            if abs(current - target) >= .5 * 10 ** -delay.decimals():
+                blocked = delay.blockSignals(True)
+                delay.setValue(target)
+                delay.blockSignals(blocked)
+                current = delay.value()
+            row.previous_delay = current
 
 
 def _playback_position(viewer, probe, *, combined=False):
@@ -221,6 +227,7 @@ def _render_auxiliary(viewer, probe, position, waiting, dragging_crop, refresh_s
             window = viewer.window()
             handle = window.windowHandle()
             screen = window.screen()
+            sidebar_depth, sidebar_age = viewer.panel.playback_backlog(now)
             probe.surface = dict(visible=viewer.canvas.isVisible(), window_visible=window.isVisible(),
                                  minimized=window.isMinimized(), exposed=handle.isExposed() if handle else False,
                                  active=window.isActiveWindow(), canvas_size=(viewer.canvas.width(), viewer.canvas.height()),
@@ -233,6 +240,7 @@ def _render_auxiliary(viewer, probe, position, waiting, dragging_crop, refresh_s
                                  playback_rate=viewer.playback_rate, replay=viewer.replay.active,
                                  audio_clock_interpolated=viewer.audio.clock_observation is not None,
                                  native_clip_retry_blocks=viewer.native_clip_retry_blocks,
+                                 sidebar_backlog=sidebar_depth, sidebar_oldest_ms=round(sidebar_age, 1),
                                  floating=[crop.diagnostics() for crop in viewer.all_floating_crops()],
                                  render_interval_ms=viewer.render_timer.interval())
         viewer._show_buffering(waiting)
@@ -302,7 +310,11 @@ def _render_auxiliary(viewer, probe, position, waiting, dragging_crop, refresh_s
             due = max(due, received - shift)
             eligible.append((due, room_id, row, received, event))
     with timeline.span('chat.sidebar_batch') if timeline is not None else nullcontext():
-        viewer.panel.add_events(live_chat_events(viewer, eligible, clock, now, chat_deadline))
+        if viewer.split_presentation and not viewer.replay.active:
+            viewer.panel.queue_playback_events(
+                live_chat_events(viewer, eligible, clock, now, chat_deadline, limit=viewer.panel.playback_batch_limit), now)
+        else:
+            viewer.panel.add_events(live_chat_events(viewer, eligible, clock, now, chat_deadline))
         if viewer.replay.active:
             viewer.panel.add_events(replay_chat_events(viewer, shown_clock, shown_shifts))
     with timeline.span('chat.overlay_feed') if timeline is not None else nullcontext():
