@@ -153,6 +153,7 @@ def build_ui(viewer):
     trailing_layout.addWidget(viewer.minimize_settings)
     heading.addWidget(trailing, 0, 2, Qt.AlignRight)
     viewer.picture = Tile({})
+    viewer.picture.setProperty('keepWindowedVideoCursor', True)
     # Keep pixel hover inside the tile instead of dispatching it through
     # every surrounding layout and application event filter again.
     viewer.picture.setAttribute(Qt.WA_NoMousePropagation, True)

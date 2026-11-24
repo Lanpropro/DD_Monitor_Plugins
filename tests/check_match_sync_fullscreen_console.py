@@ -11,7 +11,7 @@ def check(app, host, module, output=None):
     from PySide6.QtCore import QPoint, Qt
     from PySide6.QtGui import QImage, QPainter, QRegion
     from PySide6.QtWidgets import QApplication, QDialog, QWidget
-    from ddm import fullscreen_cursor, plugins
+    from ddm import fullscreen_cursor, plugins, tile_controls
     host.settings, host.rooms = {'fullscreen_auto_hide_controls': True}, []
     with tempfile.TemporaryDirectory() as directory:
         viewer = module.Viewer(plugins.PluginContext(
@@ -28,6 +28,21 @@ def check(app, host, module, output=None):
             viewer.add_room('1', {'alias': 'fixture'})
             app.processEvents()
             assert viewer.body_split.count() == 3
+            tile = viewer.picture
+            point = tile.video.mapToGlobal(tile.video.rect().center())
+            shape = tile.video.cursor().shape()
+            with patch.object(tile_controls.QCursor, 'pos', return_value=point) as position, \
+                    patch.object(tile_controls.time, 'monotonic', return_value=100.) as clock, \
+                    patch('ddm.tile_widgets.set_native_cursor') as native_cursor:
+                tile._poll_control_hover()
+                clock.return_value += tile.CONTROL_IDLE_SECONDS + .1
+                tile._poll_control_hover()
+                assert tile.controls.isHidden(), 'Idle controls should still hide in the window'
+                assert tile.video.cursor().shape() == shape and not tile._normal_cursor_hidden
+                position.return_value = point + QPoint(10, 0)
+                tile._poll_control_hover()
+                assert tile.controls.isVisible() and tile.video.cursor().shape() == shape
+                native_cursor.assert_not_called()
             with patch.object(module.QDialog, 'showFullScreen', hidden_fullscreen), \
                     patch.object(module.picture_control, 'mark_fullscreen', return_value=True):
                 for _ in range(3):
@@ -53,6 +68,7 @@ def check(app, host, module, output=None):
                         cursor.update_cursor()
                         assert viewer.picture.controls.isHidden() and viewer.picture.bottom.isHidden()
                         assert viewer.picture._fullscreen_controls_hidden
+                        assert cursor.hidden
                         position.return_value = point + QPoint(10, 0)
                         cursor.update_cursor()
                         assert not viewer.picture.controls.isHidden() and not viewer.picture.bottom.isHidden()
@@ -101,6 +117,7 @@ def check(app, host, module, output=None):
                         comparison_toggle_safe=True, pending_fit_cancelled=True,
                         queued_fit_safe=True, restored_three_pane_fit=True,
                         idle_bars_hidden=True, pointer_restores_controls=True,
+                        windowed_cursor_visible=True,
                         fullscreen_presentation_restored=True, native_alpha_checked=app.platformName() == 'windows',
                         auto_hide_setting_preserved=True,
                         media_playback=False)
