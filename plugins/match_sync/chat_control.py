@@ -105,15 +105,43 @@ def _render_overlay(viewer, clock, shifts):
                     _tick_super_chats(viewer)
 
 
+def live_chat_events(viewer, eligible, clock, now, deadline):
+    for index, (_due, room_id, row, received, event) in enumerate(sorted(eligible, key=lambda item: item[0])):
+        # Bound the HTML batch as well as its preparation, since the final
+        # Qt insertion cannot be interrupted. Always make progress.
+        if index and not viewer.replay.active and (index >= 16 or time.perf_counter() >= deadline):
+            break
+        row.pending.popleft()
+        if clock - received > 120:
+            continue
+        event["medal"] = {}
+        event["uname"] = f"【{row.label()}】 {event.get('uname') or ''}"
+        event["source_label"] = row.label()
+        event["source_room"] = room_id
+        event["color"] = row.color
+        viewer.replay.record_message(now, event)
+        if not viewer.replay.active:
+            viewer.overlay_pending[room_id] = (received, event)
+            yield event
+
+
+def replay_chat_events(viewer, clock, shifts):
+    for event in viewer.replay.messages_between(viewer.replay.cursor, clock):
+        key = event['source_room']
+        if key in shifts:
+            viewer.overlay_pending[key] = (clock + shifts[key], event)
+            yield event
+    viewer.replay.cursor = clock
+
+
 def _rebuild_replay_chat(viewer, stamp, live=False):
     viewer.panel.begin_replay_section()
     viewer.panel._follow_tail = True
     label = '返回直播' if live else '回看至'
     timestamp = time.strftime('%H:%M:%S', time.localtime(time.time() - (time.monotonic() - stamp)))
-    viewer.panel.add_event({'text': f'{label} {timestamp}', '_replay_divider': True})
     viewer.overlay_pending.clear()
     if viewer.video_danmaku is not None:
         viewer.video_danmaku.clear()
-    for event in viewer.replay.messages_between(stamp - 30, stamp):
-        viewer.panel.add_event(event)
+    divider = {'text': f'{label} {timestamp}', '_replay_divider': True}
+    viewer.panel.add_events([divider, *viewer.replay.messages_between(stamp - 30, stamp)])
     viewer.panel.end_replay_section()

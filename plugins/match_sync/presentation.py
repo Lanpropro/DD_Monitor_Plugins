@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from .chat_control import live_chat_events, replay_chat_events
 from .playback_timing import cache_gap, picture_poll_interval
 
 
@@ -274,32 +275,9 @@ def _render_auxiliary(viewer, probe, position, waiting, dragging_crop, refresh_s
             if index >= chat_budget or received > target:
                 break
             eligible.append((received - shifts[room_id], room_id, row, received, event))
-    processed = 0
-    for _due, room_id, row, received, event in sorted(eligible, key=lambda item: item[0]):
-        # One Qt text insertion cannot be interrupted. Always make progress,
-        # then leave remaining messages in their original queues for the next poll.
-        if processed and not viewer.replay.active and time.perf_counter() >= chat_deadline:
-            break
-        row.pending.popleft()
-        processed += 1
-        if clock - received > 120:
-            continue
-        event["medal"] = {}
-        event["uname"] = f"【{row.label()}】 {event.get('uname') or ''}"
-        event["source_label"] = row.label()
-        event["source_room"] = room_id
-        event["color"] = row.color
-        viewer.replay.record_message(now, event)
-        if not viewer.replay.active:
-            viewer.panel.add_event(event)
-            viewer.overlay_pending[event["source_room"]] = (received, event)
+    viewer.panel.add_events(live_chat_events(viewer, eligible, clock, now, chat_deadline))
     if viewer.replay.active:
-        for event in viewer.replay.messages_between(viewer.replay.cursor, shown_clock):
-            key = event['source_room']
-            if key in shown_shifts:
-                viewer.panel.add_event(event)
-                viewer.overlay_pending[key] = (shown_clock + shown_shifts[key], event)
-        viewer.replay.cursor = shown_clock
+        viewer.panel.add_events(replay_chat_events(viewer, shown_clock, shown_shifts))
     viewer._render_overlay(shown_clock, shown_shifts)
     if viewer.multi_recorder is not None and not viewer.multi_recorder.cancelled.is_set():
         main = viewer.rows.get(viewer.alignment.reference)

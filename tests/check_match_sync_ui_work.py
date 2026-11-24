@@ -11,8 +11,8 @@ from unittest.mock import patch
 
 
 def check(app, host, module):
-    from PySide6.QtCore import QUrl
-    from PySide6.QtGui import QTextCursor, QTextDocument
+    from PySide6.QtCore import Qt, QUrl
+    from PySide6.QtGui import QPixmap, QTextCursor, QTextDocument
     from PySide6.QtTest import QTest
     from ddm import plugins
     sending = import_module(module.__package__ + '.sending')
@@ -25,10 +25,30 @@ def check(app, host, module):
         try:
             panel.resize(600, 400)
             panel.show()
-            for index in range(100):
-                panel.add_event({'text': str(index), 'uname': 'fixture', 'source_room': '1',
-                                 '_replay_divider': index in (20, 80)})
+            panel.add_event({'text': '0', 'uname': 'fixture', 'source_room': '1'})
+            url = 'https://example.invalid/batch-emoticon.png'
+            with patch.object(panel.body, 'append', wraps=panel.body.append) as append, \
+                    patch.object(panel, '_restore_scroll_state', wraps=panel._restore_scroll_state) as scroll:
+                panel.add_events({'text': str(index) + ('[face]' if index == 42 else ''),
+                                  'uname': 'fixture', 'source_room': '1',
+                                  'emoticons': {'[face]': url} if index == 42 else {},
+                                  '_replay_divider': index in (20, 80)} for index in range(1, 100))
+                assert append.call_count == scroll.call_count == 1
             QTest.qWait(20)
+            document = panel.body.document()
+            original = document.findBlockByNumber(41)
+            old_text = original.text()
+            with patch.object(panel, '_render_all', side_effect=AssertionError('Emoticon rebuilt all chat')), \
+                    patch.object(panel, '_block_html', wraps=panel._block_html) as format_block:
+                pixmap = QPixmap(18, 10)
+                pixmap.fill(Qt.cyan)
+                panel._on_emoticon_loaded(url, pixmap)
+                QTest.qWait(40)
+                assert [call.args[0]['text'] for call in format_block.call_args_list] == ['42[face]']
+                assert document.blockCount() == 100 and original.isValid() and original.text() == old_text
+                assert '[face]' not in document.findBlockByNumber(42).text()
+                assert '\ufffc' in document.findBlockByNumber(42).text()
+                assert not document.resource(QTextDocument.ImageResource, QUrl(url)).isNull()
             text = panel.body.toPlainText()
             blocks = panel.body.document().blockCount()
             with patch.object(panel, '_render_all', side_effect=AssertionError('Resize rebuilt chat')):

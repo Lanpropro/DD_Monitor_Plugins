@@ -63,11 +63,26 @@ class SendingDanmakuPanel(DanmakuPanel):
             bar.setValue(bar.maximum())
 
     def add_event(self, event):
+        if hasattr(super(), 'add_events'):
+            return super().add_event(event)
         self._adding_divider = bool(event.get('_replay_divider'))
         super().add_event(event)
         self._blocks[-1]['source_room'] = str(event.get('source_room') or '')
         self._blocks[-1]['_replay_divider'] = self._adding_divider
         self._adding_divider = False
+
+    def add_events(self, events):
+        append = getattr(super(), 'add_events', None)
+        if append is not None:
+            return append(events)
+        for event in events:
+            self.add_event(event)
+
+    def _event_entry(self, event):
+        entry = super()._event_entry(event)
+        entry['source_room'] = str(event.get('source_room') or '')
+        entry['_replay_divider'] = bool(event.get('_replay_divider'))
+        return entry
 
     def _block_html(self, entry):
         if self._adding_divider or entry.get('_replay_divider'):

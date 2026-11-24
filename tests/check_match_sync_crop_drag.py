@@ -38,15 +38,16 @@ def check(app, host, module):
             crop = viewer.show_floating_crop(viewer.rows['2'], (0, 0, 1, 1), (1, image))
             work_us = [0]
             insertion_us = [500]
-            def add(event):
-                delivered.append((event['source_room'], event['text']))
-                work_us[0] += insertion_us[0]  # Deterministic work model; not a performance measurement.
+            def add(events):
+                for event in events:
+                    delivered.append((event['source_room'], event['text']))
+                    work_us[0] += insertion_us[0]  # Deterministic work model.
             def enqueue():
                 for row in viewer.rows.values():
                     for index in range(100):
                         row.pending.append((time.monotonic() - 40, {'kind': 'danmaku', 'text': str(index), 'uname': 'fixture'}))
             enqueue()
-            with patch.object(viewer.panel, 'add_event', side_effect=add), \
+            with patch.object(viewer.panel, 'add_events', side_effect=add), \
                     patch.object(module.time, 'perf_counter', side_effect=lambda: work_us[0] / 1_000_000), \
                     patch.object(viewer, '_sync_sidebar_marks') as marks:
                 crop.drag = (QPoint(), crop.geometry(), False)
