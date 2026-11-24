@@ -235,8 +235,8 @@ class Decoder:
             self.acquisition.quality(requested=self.seed['quality'])
             self.seed.pop("url", None)
             self.events.information.emit({"requested_quality": self.seed["quality"], "quality_options": options})
-        # Douyu signed addresses may allow only one consumer; do not reuse the wall's URL.
-        reuse_seed = self.platform is None or self.platform.kind != "douyu"
+        # Douyu URLs can be single-consumer and YouTube relays may still belong to the wall.
+        reuse_seed = self.platform is None or self.platform.kind not in ('douyu', 'youtube')
         if attempt == 0 and self.seed.get("url") and reuse_seed:
             self.acquisition.mark('seed_address')
             self.source_url = self.seed["url"]

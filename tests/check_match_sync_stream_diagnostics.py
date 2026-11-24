@@ -92,6 +92,15 @@ def check(app, host, diagnostic, media, video):
     assert decoder.acquisition.snapshot()['actual_quality'] == 20000
     assert decoder.acquisition.snapshot()['phase'] == 'quality_metadata'
     assert 'private.invalid' not in json.dumps(decoder.acquisition.snapshot())
+
+    # The cached wall URL can still belong to a recording or a native player.
+    youtube = SimpleNamespace(kind='youtube', room_info=Mock(return_value=None),
+        play_url=Mock(return_value=(address, 10000, 'youtube')), room_quality_options=Mock(return_value=[]))
+    wall_url = 'http://127.0.0.1:12345/media/wall'
+    independent = media.Decoder('fixture', {'url': wall_url, 'quality': 10000}, youtube)
+    assert independent._resolve(0) == (address, {})
+    youtube.play_url.assert_called_once_with('fixture', 10000)
+
     # A retry after failure to get an address must preserve the failing phase.
     def resolve_failure(_attempt):
         decoder.acquisition.phase('play_url')
