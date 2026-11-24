@@ -18,7 +18,6 @@
 
 | 插件 | 仓库说明 | GitHub 来源 |
 | --- | --- | --- |
-| 比赛二路同步 | [1.7.0](RELEASE-match-sync-v1.7.0.md) | [match-sync-v1.7.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.7.0) |
 | 国内直播平台 | [2.0](RELEASE-domestic-live-v2.0.md) | [domestic-live-v2.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v2.0) |
 | 海外直播平台 | [1.2](RELEASE-global-live-v1.2.md) | [global-live-v1.2](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2) |
 | 网络代理 | [1.0](RELEASE-proxy-control-v1.0.md) | [proxy-control-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/proxy-control-v1.0) |
@@ -32,12 +31,17 @@
 | B站稍后再看 | [1.0](RELEASE-bili-watchlater-v1.0.md) | [bili-watchlater-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-watchlater-v1.0) |
 
 
+## 预发布说明
+
+- 比赛二路同步 [2.0 preview](RELEASE-match-sync-v2.0-pre.1.md) · [GitHub 预发布](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v2.0-pre.1)。从 GitHub 下载后手动安装。
+
 ## 替代版本的核验归档
 
 新版公开下载及商店、网站入口验证完成后，先同步旧 Release 最新正文和来源信息、提交归档，再删除旧发布页及附件。保留源码标签和提交；原始 Release JSON、安装包及目录附件另存本地备份，不加入源码仓库。
 
 | 插件 | 历史说明 | 保留源码 | 替代版本 |
 | --- | --- | --- | --- |
+| 比赛二路同步 | [1.7.0](RELEASE-match-sync-v1.7.0.md) | [match-sync-v1.7.0 标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/match-sync-v1.7.0) | [2.0 preview](RELEASE-match-sync-v2.0-pre.1.md) |
 | 比赛二路同步 | [1.6.1](RELEASE-match-sync-v1.6.1.md) | [match-sync-v1.6.1 标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/match-sync-v1.6.1) | [1.7.0](RELEASE-match-sync-v1.7.0.md) |
 | 比赛二路同步 | [1.6](RELEASE-match-sync-v1.6.md) | [match-sync-v1.6 标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/match-sync-v1.6) | [1.7.0](RELEASE-match-sync-v1.7.0.md) |
 | 比赛二路同步 | [1.5](RELEASE-match-sync-v1.5.md) | [match-sync-v1.5 标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/match-sync-v1.5) | [1.6](RELEASE-match-sync-v1.6.md) |

@@ -2,7 +2,7 @@
 
 插件 ID：`match_sync`。
 
-上次公开发布基线：[match-sync-v1.7.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.7.0)。
+当前公开预览：[2.0 preview](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v2.0-pre.1)。上次正式发布：[1.7.0 归档](../releases/RELEASE-match-sync-v1.7.0.md)。
 
 记录规则与条目模板见[增量记录入口](README.md)。
 

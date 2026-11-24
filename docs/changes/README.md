@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | 国内直播平台 | [domestic_live](domestic_live.md) | [domestic-live-v2.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v2.0) |
 | 海外直播平台 | [global_live](global_live.md) | [global-live-v1.2](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2) |
-| 比赛二路同步 | [match_sync](match_sync.md) | [match-sync-v1.7.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.7.0) |
+| 比赛二路同步 | [match_sync](match_sync.md) | [2.0 preview](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v2.0-pre.1) |
 | B站直播互动 | [bili_live](bili_live.md) | [1.1 历史发布](../releases/RELEASE-bili-live-v1.1.md) |
 | 网络代理 | [proxy_control](proxy_control.md) | [proxy-control-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/proxy-control-v1.0) |
 | 抖音直播 | [douyin_live](douyin_live.md) | [douyin-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyin-live-v1.0) |
