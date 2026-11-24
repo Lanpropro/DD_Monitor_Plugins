@@ -18,7 +18,6 @@
 
 | 插件 | 仓库说明 | GitHub 来源 |
 | --- | --- | --- |
-| B站直播互动 | [1.1](RELEASE-bili-live-v1.1.md) | [bili-live-v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.1) |
 | 比赛二路同步 | [1.7.0](RELEASE-match-sync-v1.7.0.md) | [match-sync-v1.7.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.7.0) |
 | 国内直播平台 | [2.0](RELEASE-domestic-live-v2.0.md) | [domestic-live-v2.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v2.0) |
 | 海外直播平台 | [1.2](RELEASE-global-live-v1.2.md) | [global-live-v1.2](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2) |
@@ -44,6 +43,7 @@
 | 比赛二路同步 | [1.5](RELEASE-match-sync-v1.5.md) | [match-sync-v1.5 标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/match-sync-v1.5) | [1.6](RELEASE-match-sync-v1.6.md) |
 | 国内直播平台 | [1.5](RELEASE-domestic-live-v1.5.md) | [domestic-live-v1.5 标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/domestic-live-v1.5) | [2.0](RELEASE-domestic-live-v2.0.md) |
 | B站直播互动 | [1.0](RELEASE-bili-live-v1.0.md) | [bili-live-v1.0 标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/bili-live-v1.0) | [1.1](RELEASE-bili-live-v1.1.md) |
+| B站直播互动 | [1.1](RELEASE-bili-live-v1.1.md) | [bili-live-v1.1 标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/bili-live-v1.1) | [DD监控室CE v0.9.1 内置](https://github.com/Lanpropro/DD_Monitor_CE/releases/tag/v0.9.1) |
 
 二路 1.5、B站 1.0 与国内平台 1.5 于 2026-11-05 在删除前分别核对最新正文及两个附件，正文未改写。作者、原发布者、发布时间、最后更新时间、源码提交和附件大小／SHA256 均保存在 [sources.json](sources.json)。`archived_verified` 表示归档前已核对网页最后编辑版，与下方无法确认最后编辑版的旧备份区分。
 
