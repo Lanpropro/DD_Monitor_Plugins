@@ -64,6 +64,21 @@ def floating_surface(viewer):
     return (central() if callable(central) else None) or host
 
 
+def schedule_crop_raise(viewer, watched):
+    if (isinstance(watched, QWidget) and not isinstance(watched, FloatingCrop)
+            and not watched.isWindow() and watched.parentWidget() is viewer.floating_surface()
+            and not viewer.crop_stack_timer.isActive()):
+        # Wait until the sibling's native show or restack has finished.
+        viewer.crop_stack_timer.start(0)
+
+
+def raise_floating_crops(viewer):
+    # Qt keeps children in stacking order, so preserve the order between crops.
+    for child in viewer.floating_surface().children():
+        if isinstance(child, FloatingCrop) and child.isVisible():
+            child.raise_()
+
+
 def reparent_floating_crops(viewer, parent):
     for floating in viewer.all_floating_crops():
         geometry = floating.geometry()

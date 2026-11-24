@@ -86,6 +86,9 @@ class Viewer(QDialog):
         self.embedded = False
         self.workspace_crops = workspace_crops
         self.floating_crops = {}
+        self.crop_stack_timer = QTimer(self)
+        self.crop_stack_timer.setSingleShot(True)
+        self.crop_stack_timer.timeout.connect(lambda: floating_control.raise_floating_crops(self))
         self.stream_info_dialog = None
         viewer_ui.build_ui(self)
         self.audio = AudioPump(self)
@@ -151,6 +154,8 @@ class Viewer(QDialog):
 
     def eventFilter(self, watched, event):
         kind = event.type()
+        if kind in (QEvent.Show, QEvent.ZOrderChange) and self.floating_crops:
+            floating_control.schedule_crop_raise(self, watched)
         if kind == QEvent.Timer and watched is getattr(self, '_native_clip_timer', None):
             self.native_clip_retry_blocks += 1
             watched.stop()

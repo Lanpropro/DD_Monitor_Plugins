@@ -528,6 +528,15 @@ def check_native_input(app, module):
                 drag(crop.windowHandle(), crop.rect().center(), crop.mapFrom(host, picture_center))
             assert crop.x() > first.x() + 200
             hit_crop()
+            content.raise_()
+            app.processEvents()
+            hit_crop()
+            cover = QWidget(root)
+            cover.setAttribute(Qt.WA_NativeWindow)
+            cover.setGeometry(crop.geometry())
+            cover.show()
+            app.processEvents()
+            hit_crop()
             app.sendEvent(crop, QEvent(QEvent.Leave))
             assert not crop.tools_visible
             QTest.mouseMove(crop.windowHandle(), crop.rect().center() + QPoint(1, 1))
@@ -543,7 +552,8 @@ def check_native_input(app, module):
             viewer.close()
             host.close()
             app.processEvents()
-    return {'passed': True, 'native_hit_after_both_drags': True, 'hover_tools_return': True}
+    return {'passed': True, 'native_hit_after_both_drags': True, 'hover_tools_return': True,
+            'stays_above_restacks_and_new_siblings': True}
 
 
 def main():
