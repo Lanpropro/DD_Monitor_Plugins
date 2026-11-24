@@ -11,7 +11,6 @@ from unittest.mock import patch
 
 
 def check(app, host, module):
-    from PySide6.QtGui import QImage
     from ddm import plugins
     video = import_module(module.__package__ + '.video')
     diagnostic = import_module(module.__package__ + '.diagnostics')
@@ -89,25 +88,6 @@ def check(app, host, module):
                 epoch.intervals.append(interval)
                 epoch.frames.extend((stamp, stamp - interval[0]) for stamp in interval)
             replacement.previous = old
-            decoder = module.Decoder('offline-same-target')
-            try:
-                decoder.history = replacement
-                ready = (87772.471, QImage(16, 9, QImage.Format_RGB32))
-                with patch.object(old, 'frame_at', wraps=old.frame_at) as lookup, \
-                        patch.object(decoder.pictures, 'get', return_value=ready) as decode:
-                    assert viewer.canvas.show_at(decoder, 87773.) == ready
-                    lookup.assert_called_once_with(87773.)
-                    decode.assert_called_once_with(old, old.frames[0], exact=False)
-                    assert viewer.canvas.requested_frame_key == 87772.471
-                with patch.object(decoder.pictures, 'get') as decode:
-                    assert viewer.canvas.show_at(decoder, 87807.) is None
-                    assert viewer.canvas.requested_frame_key is None
-                    assert decoder.playback_timestamp == 87773.
-                    assert decoder.picture_at(87807.) is None
-                    assert decoder.playback_timestamp == 87807.
-                    decode.assert_not_called()
-            finally:
-                decoder.stop()
             main.paused = False
             main.was_isolated = True
             main.decoder.history = replacement
@@ -158,14 +138,6 @@ def check(app, host, module):
             with patch.object(module.time, 'monotonic', return_value=100.):
                 recovered = viewer._recover_clock(clock, shifts)
             assert intervals[2][0] <= recovered + shifts['1'] <= intervals[2][1] - viewer.safety_buffer.target
-            main.was_isolated = False
-            viewer.stable_reference_shift = shifts['1']
-            viewer.sync_waiting = False
-            with patch.object(fragmented, 'bounds_at', wraps=fragmented.bounds_at) as bounds, \
-                    patch.object(module.time, 'monotonic', return_value=100.):
-                clock = 10265. - shifts['1']
-                assert viewer._recover_clock(clock, shifts) == clock
-                bounds.assert_called_once_with(10265.)
             # Rebuilding the main source must re-establish automatic startup,
             # while a manually locked timeline retains its chosen offsets.
             viewer.running = True

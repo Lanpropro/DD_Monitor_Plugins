@@ -73,17 +73,14 @@ class Canvas(QFrame):
     def show_at(self, decoder, timestamp):
         probe = self.paint_probe
         requested = time.perf_counter() if probe is not None and probe.thread is not None else None
-        sample_picture = getattr(decoder, 'picture_sample', None)
-        if sample_picture is not None:
-            self.requested_frame_key, ready = sample_picture(timestamp)
-        else:
-            frame = decoder.history.frame_at(timestamp)
-            self.requested_frame_key = frame[0] if frame is not None else None
-            ready = decoder.picture_at(timestamp) if frame is not None and hasattr(decoder, "picture_at") else frame
+        frame = decoder.history.frame_at(timestamp)
+        self.requested_frame_key = frame[0] if frame is not None else None
+        ready = None
+        if frame is not None:
+            ready = decoder.picture_at(timestamp) if hasattr(decoder, "picture_at") else frame
         if requested is not None:
-            stage = ('main_target_unbuffered' if self.requested_frame_key is None
-                     else 'main_target_unready' if ready is None
-                     else 'main_target_ready' if ready[0] == self.requested_frame_key else 'main_target_fallback')
+            stage = ('main_target_unbuffered' if frame is None else 'main_target_unready' if ready is None
+                     else 'main_target_ready' if ready[0] == frame[0] else 'main_target_fallback')
             probe.timings.record(stage, time.perf_counter() - requested)
         if ready is not None:
             self.set_frame(ready)

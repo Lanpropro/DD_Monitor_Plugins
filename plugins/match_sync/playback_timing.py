@@ -43,14 +43,12 @@ def _recover_clock(viewer, clock, shifts):
         viewer.sync_waiting = False
         return clock
     secondary_edit = viewer.offset_target in viewer.rows and viewer.offset_target != main.room_id
-    history = main.decoder.history
-    shift = shifts[main.room_id]
-    bounds = history.bounds_at(clock + shift)
-    if bounds is None or not bounds[0] <= clock + shift <= bounds[1]:
+    main_bounds = main.decoder.history.bounds_at(clock + shifts[main.room_id])
+    if main_bounds is None or not main_bounds[0] <= clock + shifts[main.room_id] <= main_bounds[1]:
         viewer.late_buffer = LateBuffer(viewer.reserve_seconds)
         viewer.late_notice.hide()
-    if (viewer.offset_repositioning and secondary_edit and bounds
-            and bounds[0] <= clock + shift <= bounds[1] - .05):
+    if (viewer.offset_repositioning and secondary_edit and main_bounds
+            and main_bounds[0] <= clock + shifts[main.room_id] <= main_bounds[1] - .05):
         viewer.offset_repositioning = False
     if viewer.offset_repositioning:
         reposition_rows = {viewer.alignment.reference}
@@ -67,10 +65,9 @@ def _recover_clock(viewer, clock, shifts):
             if lower <= upper - .25:
                 recovered = min(max(clock, lower + .1), upper - .25)
                 viewer.audio.correction += recovered - clock
-                if recovered != clock:
-                    bounds = history.bounds_at(recovered + shift)
                 clock = recovered
                 viewer.offset_repositioning = False
+    bounds = main.decoder.history.bounds_at(clock + shifts[main.room_id])
     reserve = viewer.safety_buffer.target + (max(0, main.delay.value()) if not viewer.alignment.automatic else 0)
     if bounds is None:
         viewer.sync_waiting = main.was_isolated

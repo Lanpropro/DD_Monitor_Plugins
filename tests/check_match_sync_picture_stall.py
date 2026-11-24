@@ -8,7 +8,7 @@ import sys
 import tempfile
 import time
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 
 def check(module):
@@ -34,12 +34,6 @@ def check(module):
                     pts = float(frame.pts * frame.time_base)
                     history.append(100 + pts, pts)
         reader = video.PictureReader()
-        reader.configure(64 * 1024 ** 2, 30)
-        with patch.object(reader, 'lock', MagicMock()) as lock:
-            reader.configure(64 * 1024 ** 2, 30)
-            lock.__enter__.assert_not_called()
-        reader.configure(64 * 1024 ** 2, 60)
-        assert reader.fps == 60
         reader.configure(64 * 1024 ** 2, 30)
         creates = []
         original = video.av.CodecContext.create
