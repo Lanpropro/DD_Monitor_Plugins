@@ -5,7 +5,7 @@ import threading
 import time
 from collections import deque
 
-from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtCore import QObject, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QImage
 
 
@@ -15,6 +15,13 @@ class LightScaler:
         import numpy
         self.np = numpy
         self.backend = 'CPU / Qt + NumPy'
+        try:
+            import cv2
+        except ImportError:
+            cv2 = None
+        self.cv = cv2
+        if cv2 is not None:
+            self.backend = 'CPU / Qt + OpenCV'
 
     def upscale(self, image, target):
         np = self.np
@@ -25,22 +32,32 @@ class LightScaler:
         rgb = rgb.scaled(*size, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
         pixels = np.frombuffer(rgb.constBits(), np.uint8).reshape(rgb.height(), rgb.bytesPerLine())
         pixels = pixels[:, :rgb.width() * 3].reshape(rgb.height(), rgb.width(), 3)
-        padded = np.pad(pixels.astype(np.int16), ((1, 1), (1, 1), (0, 0)), mode='edge')
-        center = padded[1:-1, 1:-1]
-        laplacian = 4 * center - padded[:-2, 1:-1] - padded[2:, 1:-1] - padded[1:-1, :-2] - padded[1:-1, 2:]
-        detail = np.clip(np.rint(laplacian.astype(np.float32) / 12), -10, 10)
-        output = np.clip(center + detail, 0, 255).astype(np.uint8)
+        cv = self.cv
+        if cv is not None:
+            edges = cv.Laplacian(pixels, cv.CV_16S, ksize=1, borderType=cv.BORDER_REPLICATE)
+            detail = cv.addWeighted(edges, -1 / 12, edges, 0, 0)
+            np.clip(detail, -10, 10, out=detail)
+            output = cv.add(pixels, detail, dtype=cv.CV_8U)
+        else:
+            padded = np.pad(pixels.astype(np.int16), ((1, 1), (1, 1), (0, 0)), mode='edge')
+            center = padded[1:-1, 1:-1]
+            laplacian = 4 * center - padded[:-2, 1:-1] - padded[2:, 1:-1] - padded[1:-1, :-2] - padded[1:-1, 2:]
+            detail = np.clip(np.rint(laplacian.astype(np.float32) / 12), -10, 10)
+            output = np.clip(center + detail, 0, 255).astype(np.uint8)
         return QImage(output.data, output.shape[1], output.shape[0], output.strides[0], QImage.Format_RGB888).copy()
 
 
-class CropEnhancer:
+class CropEnhancer(QObject):
+    updated = Signal(object)
     MAX_PIXELS = 640 * 360
 
     def __init__(self):
+        super().__init__()
         self.condition = threading.Condition()
         self.pending = None
         self.result = None
         self.closed = False
+        self.update_posted = False
         self.generation = 0
         self.thread = None
         self.stats = dict(ready=False, completed=0, superseded=0, bypassed=0,
@@ -65,8 +82,17 @@ class CropEnhancer:
 
     def take_result(self):
         with self.condition:
+            self.update_posted = False
             result, self.result = self.result, None
             return result
+
+    def _notify(self):
+        with self.condition:
+            # The queued GUI receiver takes the latest result, including replacements.
+            if self.closed or self.update_posted:
+                return
+            self.update_posted = True
+        self.updated.emit(self)
 
     def diagnostics(self):
         with self.condition:
@@ -92,7 +118,10 @@ class CropEnhancer:
                           crop.width() * image.width(), crop.height() * image.height()).toAlignedRect().intersected(image.rect())
             if area.isEmpty() or area.width() * area.height() > self.MAX_PIXELS:
                 with self.condition:
+                    if self.closed or generation != self.generation:
+                        continue
                     self.stats['bypassed'] += 1
+                self._notify()
                 continue
             try:
                 if backend is None:
@@ -113,9 +142,13 @@ class CropEnhancer:
                     self.stats['completed'] += 1
                     if not self.closed and generation == self.generation:
                         self.result = (timestamp, image, output, area, duration, cpu_ms)
+                    else:
+                        continue
+                self._notify()
             except Exception as error:
                 with self.condition:
                     self.pending = None
                     self.stats['error'] = str(error)
+                self._notify()
                 logging.getLogger(__name__).exception('Crop enhancement unavailable; using source pixels')
                 return

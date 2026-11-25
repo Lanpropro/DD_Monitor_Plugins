@@ -1,8 +1,9 @@
 """In-application crops keep source pixels and are independent of the video tile."""
+from contextlib import nullcontext
 import time
 import logging
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen, QTransform
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal, Slot
+from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPainterPath, QPen, QRegion, QTransform
 from PySide6.QtWidgets import QWidget
 
 from ddm import theme
@@ -15,13 +16,15 @@ class FloatingCrop(QWidget):
     background_exposed = Signal(QRect)
     gesture_finished = Signal()
 
-    def __init__(self, parent, label, crop):
+    def __init__(self, parent, label, crop, *, native=False):
         super().__init__(parent)
+        self._native_overlay = native
         self.label, self.crop = label, QRectF(*crop)
         self.image = QImage()
         self.avatar = QImage()
         self.avatar_key = None
         self.frame_key = None
+        self.playback_probe = None
         self.quality_mode = 'source'
         self.enhancer = None
         self.enhanced = QImage()
@@ -36,8 +39,10 @@ class FloatingCrop(QWidget):
         self.slow_results = 0
         self.enhance_timer = QTimer(self)
         self.enhance_timer.setTimerType(Qt.PreciseTimer)
-        self.enhance_timer.setInterval(8)
-        self.enhance_timer.timeout.connect(self._refresh_enhancement)
+        self.enhance_timer.setInterval(100)
+        self.enhance_timer.timeout.connect(self._check_enhancement_progress)
+        self.enhance_updates = 0
+        self.enhance_checks = 0
         self.drag = None
         self.lock_mode = 0
         self.picture_widget = None
@@ -45,13 +50,24 @@ class FloatingCrop(QWidget):
         self.hover_point = QPoint(-1, -1)
         self.aspect = 16 / 9
         self.placement = None
+        self.minimum_crop_width = 120
         self.setMouseTracking(True)
         # Ordinary child transparency restores the backing store behind moved crops.
         self.setAutoFillBackground(False)
+        if native:
+            # Native panels can otherwise receive Windows input through this crop.
+            self.setAttribute(Qt.WA_NativeWindow)
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.setToolTip(label + '\n拖动移动；滚轮或四角缩放；微调按钮或双击调整选区；定位图标切换锁定；右上角关闭。')
         self.setAccessibleName(label + '：悬浮画面')
         parent.installEventFilter(self)
+
+    def resizeEvent(self, event):
+        if self._native_overlay:
+            outline = QPainterPath()
+            outline.addRoundedRect(QRectF(self.rect()), 10, 10)
+            self.setMask(QRegion(outline.toFillPolygon().toPolygon()))
+        super().resizeEvent(event)
 
     def set_avatar(self, pixmap):
         if pixmap is not None and not pixmap.isNull() and pixmap.cacheKey() != self.avatar_key:
@@ -88,7 +104,6 @@ class FloatingCrop(QWidget):
         if key != self.request_key and not image.isNull():
             self.request_key = key
             self.enhancer.submit(frame[0], image, self.crop, target)
-        self._refresh_enhancement()
 
     def _present(self, timestamp, image, enhanced=None, area=None):
         if timestamp == self.frame_key and enhanced is None and self.enhanced.isNull():
@@ -112,6 +127,7 @@ class FloatingCrop(QWidget):
         self.enhance_state = 'warming' if mode == 'light' else 'off'
         if mode == 'light':
             self.enhancer = CropEnhancer()
+            self.enhancer.updated.connect(self._enhancement_updated, Qt.QueuedConnection)
             self.enhance_timer.start()
         else:
             self.enhance_timer.stop()
@@ -136,7 +152,8 @@ class FloatingCrop(QWidget):
                     enhanced=not self.enhanced.isNull(),
                     state=self.enhance_state, reason=self.enhance_reason, displayed_timestamp=self.frame_key,
                     source_timestamp=self.input_frame[0] if self.input_frame is not None else None,
-                    upscale=self.enhancer.diagnostics() if self.enhancer is not None else {})
+                    upscale=dict(self.enhancer.diagnostics(), gui_updates=self.enhance_updates,
+                                 watchdog_checks=self.enhance_checks) if self.enhancer is not None else {})
 
     def _fallback_enhancement(self, reason):
         self.enhance_state, self.enhance_reason = 'fallback', reason
@@ -146,14 +163,20 @@ class FloatingCrop(QWidget):
         if self.input_frame is not None:
             self._present(*self.input_frame)
 
+    @Slot(object)
+    def _enhancement_updated(self, worker):
+        if worker is self.enhancer:
+            probe = self.playback_probe
+            timeline = probe.gui_timeline if probe is not None else None
+            with timeline.span('pip.enhancement_delivery') if timeline is not None else nullcontext():
+                self.enhance_updates += 1
+                self._refresh_enhancement()
+
     def _refresh_enhancement(self):
+        result = self.enhancer.take_result()
         if self.input_frame is None or self.enhance_state not in ('warming', 'active'):
             return
         now = time.perf_counter()
-        # Time spent outside the GUI event loop is not evidence of a slow filter.
-        if now - self.enhance_poll > .050:
-            self.enhance_progress = now
-        self.enhance_poll = now
         stats = self.enhancer.diagnostics()
         if stats['error'] or stats['bypassed']:
             self._fallback_enhancement('unavailable' if stats['error'] else 'large_crop')
@@ -161,7 +184,6 @@ class FloatingCrop(QWidget):
         if self.enhance_state == 'warming' and stats['ready']:
             self.enhance_state = 'active'
             self.enhance_progress = now
-        result = self.enhancer.take_result()
         if result is not None:
             timestamp, image, enhanced, area, duration, cpu_ms = result
             # Present the source and filtered image atomically; never move backwards.
@@ -173,8 +195,17 @@ class FloatingCrop(QWidget):
                 if self.input_frame[0] - timestamp <= .080:
                     self._present(timestamp, image, enhanced, area)
                     self.enhance_progress = now
-        if (self.enhance_state == 'active' and self.input_frame[0] != self.frame_key
-                and now - self.enhance_progress > .500):
+
+    def _check_enhancement_progress(self):
+        self.enhance_checks += 1
+        if self.input_frame is None or self.enhance_state != 'active':
+            return
+        now = time.perf_counter()
+        # A delayed GUI watchdog is not evidence of a slow filter.
+        if now - self.enhance_poll > self.enhance_timer.interval() / 1000 + .050:
+            self.enhance_progress = now
+        self.enhance_poll = now
+        if self.input_frame[0] != self.frame_key and now - self.enhance_progress > .500:
             self._fallback_enhancement('backend_timeout')
 
     def fit_geometry(self, x, y, width, remember=True):
@@ -182,7 +213,7 @@ class FloatingCrop(QWidget):
         previous = self.geometry()
         bounds = self.movement_bounds()
         maximum = min(bounds.width(), bounds.height() * self.aspect)
-        width = max(1, min(maximum, max(120, width)))
+        width = max(1, min(maximum, max(self.minimum_crop_width, width)))
         height = min(bounds.height(), round(width / self.aspect))
         self.setGeometry(round(max(bounds.x(), min(bounds.right() + 1 - width, x))),
                          round(max(bounds.y(), min(bounds.bottom() + 1 - height, y))), round(width), height)
@@ -363,7 +394,7 @@ class FloatingCrop(QWidget):
                 bounds = self.movement_bounds()
                 room_x = bounds.right() + 1 - anchor_x if dx > 0 else anchor_x - bounds.left()
                 room_y = bounds.bottom() + 1 - anchor_y if dy > 0 else anchor_y - bounds.top()
-                width = max(1, min(room_x, room_y * self.aspect, max(120, geometry.width() + change)))
+                width = max(1, min(room_x, room_y * self.aspect, max(self.minimum_crop_width, geometry.width() + change)))
                 self.fit_geometry(anchor_x if dx > 0 else anchor_x - width,
                                   anchor_y if dy > 0 else anchor_y - round(width / self.aspect), width)
             else:

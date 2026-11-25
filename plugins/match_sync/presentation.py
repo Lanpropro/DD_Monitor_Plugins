@@ -2,7 +2,95 @@
 from __future__ import annotations
 
 import time
+from contextlib import nullcontext
+from .chat_control import live_chat_events, replay_chat_events
 from .playback_timing import cache_gap, picture_poll_interval
+
+
+def start_rendering(viewer):
+    if viewer.split_presentation:
+        viewer._configure_picture_budget()
+        _arm_picture_timer(viewer, getattr(viewer, '_picture_poll_base', 33))
+        viewer.auxiliary_timer.start()
+    else:
+        viewer.render_timer.start()
+
+
+def stop_rendering(viewer):
+    viewer.render_timer.stop()
+    viewer.auxiliary_timer.stop()
+    viewer._picture_due = viewer._presentation_update = None
+    gpu = getattr(viewer, 'd3d11_picture', None)
+    if gpu is not None:
+        gpu.stop()
+
+
+def _arm_picture_timer(viewer, interval):
+    viewer._picture_due = time.perf_counter() + interval / 1000
+    viewer.render_timer.start(interval)
+
+
+def _next_picture_interval(viewer):
+    if viewer._picture_poll is not None:
+        target, frame_stamp, fps, rate, requested = viewer._picture_poll
+        return picture_poll_interval(target, frame_stamp, fps, rate, time.perf_counter() - requested)
+    return getattr(viewer, '_picture_poll_base', 33)
+
+
+def render_picture_tick(viewer):
+    entered = time.perf_counter()
+    if not viewer.running:
+        return
+    probe = viewer.playback_probe if viewer.playback_probe.thread is not None else None
+    deadline = viewer._picture_due
+    period = viewer.render_timer.interval() / 1000
+    if deadline is not None:
+        lateness = max(0., entered - deadline)
+        viewer._picture_due = deadline + (1 + int(lateness / period)) * period
+    if probe is not None:
+        probe.begin()
+        probe.timings.record('picture_poll_gap', probe.render_gap / 1000, at=entered)
+        if deadline is not None:
+            probe.timings.record('picture_timer_late', lateness, at=entered)
+    timeline = probe.gui_timeline if probe is not None else None
+    if timeline is not None:
+        if deadline is not None:
+            timeline.point('picture.timer_due', deadline)
+        timeline.point('picture.poll', entered)
+    viewer._picture_poll = None
+    try:
+        position = _playback_position(viewer, probe)
+        waiting = _render_picture(viewer, probe, position)
+        viewer._presentation_update = (viewer.generation, position, waiting)
+    finally:
+        if probe is not None:
+            probe.end()
+        interval = getattr(viewer, '_picture_poll_base', 33)
+        if viewer.running and interval != viewer.render_timer.interval():
+            _arm_picture_timer(viewer, interval)
+
+
+def render_auxiliary_tick(viewer):
+    update = viewer._presentation_update
+    if not viewer.running or update is None or update[0] != viewer.generation:
+        return
+    _, position, waiting = update
+    probe = viewer.playback_probe if viewer.playback_probe.thread is not None else None
+    timeline = probe.gui_timeline if probe is not None else None
+    if probe is not None:
+        probe.begin(auxiliary=True)
+    try:
+        dragging_crop, refresh_status_ui = _prepare_auxiliary(viewer, probe)
+        with timeline.span('controls.delay') if timeline is not None else nullcontext():
+            _sync_delay_controls(viewer, position[1])
+        with timeline.span('controls.reader_budget') if timeline is not None else nullcontext():
+            viewer._configure_picture_budget()
+        _render_previews(viewer, probe, position)
+        _render_auxiliary(viewer, probe, position, waiting, dragging_crop, refresh_status_ui)
+    finally:
+        if probe is not None:
+            probe.end(auxiliary=True)
+
 
 def render(viewer):
     if not viewer.running:
@@ -16,18 +104,24 @@ def render(viewer):
     finally:
         if probe is not None:
             probe.end()
-        interval = getattr(viewer, '_picture_poll_base', 33)
-        if viewer._picture_poll is not None:
-            target, frame_stamp, fps, rate, requested = viewer._picture_poll
-            interval = picture_poll_interval(target, frame_stamp, fps, rate, time.perf_counter() - requested)
+        interval = _next_picture_interval(viewer)
         if viewer.running and viewer.render_timer.interval() != interval:
             viewer.render_timer.setInterval(interval)
 
 
 def _render(viewer, probe):
+    dragging_crop, refresh_status_ui = _prepare_auxiliary(viewer, probe)
+    position = _playback_position(viewer, probe, combined=True)
+    _render_previews(viewer, probe, position)
+    waiting = _render_picture(viewer, probe, position)
+    _render_auxiliary(viewer, probe, position, waiting, dragging_crop, refresh_status_ui)
+
+
+def _prepare_auxiliary(viewer, probe):
+    timeline = probe.gui_timeline if probe is not None else None
     if not viewer.embedded:
         viewer._suppress_host_audio()
-    dragging_crop = any(crop.drag is not None for crop in viewer.floating_crops.values())
+    dragging_crop = any(crop.drag is not None for crop in viewer.all_floating_crops())
     status_now = time.monotonic()
     refresh_status_ui = not dragging_crop and status_now >= viewer.status_ui_due
     if refresh_status_ui:
@@ -38,24 +132,41 @@ def _render(viewer, probe):
     if probe is not None:
         probe.mark('metadata_sidebar')
     if not dragging_crop:
-        viewer._sync_sidebar_marks()
+        with timeline.span('controls.sidebar') if timeline is not None else nullcontext():
+            viewer._sync_sidebar_marks()
     if probe is not None:
         probe.mark('metadata_picture')
-    viewer.sync_picture(refresh_metadata=refresh_status_ui)
+    with timeline.span('controls.picture') if timeline is not None else nullcontext():
+        viewer.sync_picture(refresh_metadata=refresh_status_ui)
+    return dragging_crop, refresh_status_ui
+
+
+def _sync_delay_controls(viewer, shifts):
+    if viewer.alignment.automatic:
+        origin = shifts.get(viewer.alignment.reference, 0)
+        for key, row in viewer.rows.items():
+            delay = row.delay
+            if delay.lineEdit().isModified():
+                continue
+            target = max(delay.minimum(), min(delay.maximum(), origin - shifts[key]))
+            current = delay.value()
+            if abs(current - target) >= .5 * 10 ** -delay.decimals():
+                blocked = delay.blockSignals(True)
+                delay.setValue(target)
+                delay.blockSignals(blocked)
+                current = delay.value()
+            row.previous_delay = current
+
+
+def _playback_position(viewer, probe, *, combined=False):
     if probe is not None:
         probe.mark('clock')
     clock = viewer.live_clock()
     wanted = viewer.target_shifts()
     shifts = viewer._smooth_shifts(wanted)
-    if viewer.alignment.automatic:
-        origin = shifts.get(viewer.alignment.reference, 0)
-        for key, row in viewer.rows.items():
-            if not row.delay.lineEdit().isModified():
-                row.delay.blockSignals(True)
-                row.delay.setValue(origin - shifts[key])
-                row.delay.blockSignals(False)
-                row.previous_delay = row.delay.value()
-    viewer._configure_picture_budget()
+    if combined:
+        _sync_delay_controls(viewer, shifts)
+        viewer._configure_picture_budget()
     for key, current in viewer.rows.items():
         if current.reset_pending and current.decoder is not None:
             previous = getattr(current.decoder.history, 'previous', None)
@@ -71,18 +182,59 @@ def _render(viewer, probe):
     if viewer.replay.active and not viewer.replay.valid(shown_clock, shown_shifts, viewer.replay_histories()):
         viewer.return_live()
         shown_clock, shown_shifts = clock, shifts
-    viewer.replay_bar.refresh()
+    return clock, shifts, wanted, shown_clock, shown_shifts
+
+
+def _render_previews(viewer, probe, position):
+    _, _, _, shown_clock, shown_shifts = position
+    timeline = probe.gui_timeline if probe is not None else None
+    with timeline.span('controls.replay_bar') if timeline is not None else nullcontext():
+        viewer.replay_bar.refresh()
     if probe is not None:
         probe.mark('floating')
     viewer.render_floating_crops(shown_clock, shown_shifts)
+
+
+def _render_picture(viewer, probe, position):
+    _, _, _, shown_clock, shown_shifts = position
     if probe is not None:
         probe.mark('picture')
     row = viewer.rows.get(viewer.alignment.reference)
-    if row is not None and row.decoder is not None and not row.paused and row.room_id in shown_shifts:
+    gpu = getattr(viewer, 'd3d11_picture', None)
+    if row is None or row.decoder is None or row.paused or row.room_id not in shown_shifts:
+        if gpu is not None:
+            gpu.suspend()
+        if probe is not None:
+            probe.frame = None
+        return None
+    target = shown_clock + shown_shifts[row.room_id]
+    requested = time.perf_counter()
+    frame = (gpu.render(row.decoder, target, viewer.playback_rate) if gpu is not None
+             else viewer.canvas.show_at(row.decoder, target))
+    viewer._picture_poll = (target, viewer.canvas.requested_frame_key if frame is not None else None,
+                            getattr(row.decoder, 'fps', 30),
+                            1. if viewer.replay.active else viewer.playback_rate, requested)
+    row.actual_position = viewer.canvas.frame_key
+    waiting = viewer.canvas.playback_waiting(row.decoder, target, frame,
+                                             viewer.sync_waiting and not viewer.replay.active)
+    if probe is not None:
+        probe.observe(row.decoder, target, viewer.canvas.frame_key, waiting)
+    return waiting
+
+
+def _render_auxiliary(viewer, probe, position, waiting, dragging_crop, refresh_status_ui):
+    clock, shifts, wanted, shown_clock, shown_shifts = position
+    now = time.monotonic()
+    timeline = probe.gui_timeline if probe is not None else None
+    row = viewer.rows.get(viewer.alignment.reference)
+    if waiting is not None and row is not None and row.decoder is not None and not row.paused:
+        if probe is not None:
+            probe.mark('picture_status')
         if probe is not None and refresh_status_ui:
             window = viewer.window()
             handle = window.windowHandle()
             screen = window.screen()
+            sidebar_depth, sidebar_age = viewer.panel.playback_backlog(now)
             probe.surface = dict(visible=viewer.canvas.isVisible(), window_visible=window.isVisible(),
                                  minimized=window.isMinimized(), exposed=handle.isExposed() if handle else False,
                                  active=window.isActiveWindow(), canvas_size=(viewer.canvas.width(), viewer.canvas.height()),
@@ -95,19 +247,12 @@ def _render(viewer, probe):
                                  playback_rate=viewer.playback_rate, replay=viewer.replay.active,
                                  audio_clock_interpolated=viewer.audio.clock_observation is not None,
                                  native_clip_retry_blocks=viewer.native_clip_retry_blocks,
-                                 floating=[crop.diagnostics() for crop in viewer.floating_crops.values()],
+                                 sidebar_backlog=sidebar_depth, sidebar_oldest_ms=round(sidebar_age, 1),
+                                 floating=[crop.diagnostics() for crop in viewer.all_floating_crops()],
                                  render_interval_ms=viewer.render_timer.interval())
-        target = shown_clock + shown_shifts[row.room_id]
-        requested = time.perf_counter()
-        frame = viewer.canvas.show_at(row.decoder, target)
-        viewer._picture_poll = (target, viewer.canvas.requested_frame_key if frame is not None else None,
-                              getattr(row.decoder, 'fps', 30),
-                              1. if viewer.replay.active else viewer.playback_rate, requested)
-        row.actual_position = viewer.canvas.frame_key
-        waiting = viewer.canvas.playback_waiting(row.decoder, shown_clock + shown_shifts[row.room_id], frame,
-                                               viewer.sync_waiting and not viewer.replay.active)
-        if probe is not None:
-            probe.observe(row.decoder, shown_clock + shown_shifts[row.room_id], viewer.canvas.frame_key, waiting)
+            gpu = getattr(viewer, 'd3d11_picture', None)
+            if gpu is not None:
+                probe.surface['main_presenter'] = gpu.diagnostics()
         viewer._show_buffering(waiting)
         if viewer.sync_waiting:
             viewer.notice.setText("主画面等待缓存恢复；异常二路已静音，已确认偏移保持不变")
@@ -128,8 +273,6 @@ def _render(viewer, probe):
             mode = ("自动对齐已开启" if viewer.alignment.automatic else
                     "自动对齐已关闭；手动偏移")
             viewer.notice.setText(f"主画面：{row.label()} · 本地播放延后约 {delay:.1f} 秒 · {mode}")
-    elif probe is not None:
-        probe.frame = None
     if probe is not None:
         probe.mark('comparison')
     if viewer.compare.isChecked():
@@ -167,38 +310,25 @@ def _render(viewer, probe):
             if row.buffer_text != text:
                 row.buffer_text = text
                 row.refresh_status()
-        target = clock + shifts[room_id]
+        shift = shifts[room_id]
+        target = clock + shift
+        due = float('-inf')
         for index, (received, event) in enumerate(row.pending):
             if index >= chat_budget or received > target:
                 break
-            eligible.append((received - shifts[room_id], room_id, row, received, event))
-    processed = 0
-    for _due, room_id, row, received, event in sorted(eligible, key=lambda item: item[0]):
-        # One Qt text insertion cannot be interrupted. Always make progress,
-        # then leave remaining messages in their original queues for the next poll.
-        if processed and not viewer.replay.active and time.perf_counter() >= chat_deadline:
-            break
-        row.pending.popleft()
-        processed += 1
-        if clock - received > 120:
-            continue
-        event["medal"] = {}
-        event["uname"] = f"【{row.label()}】 {event.get('uname') or ''}"
-        event["source_label"] = row.label()
-        event["source_room"] = room_id
-        event["color"] = row.color
-        viewer.replay.record_message(now, event)
-        if not viewer.replay.active:
-            viewer.panel.add_event(event)
-            viewer.overlay_pending[event["source_room"]] = (received, event)
-    if viewer.replay.active:
-        for event in viewer.replay.messages_between(viewer.replay.cursor, shown_clock):
-            key = event['source_room']
-            if key in shown_shifts:
-                viewer.panel.add_event(event)
-                viewer.overlay_pending[key] = (shown_clock + shown_shifts[key], event)
-        viewer.replay.cursor = shown_clock
-    viewer._render_overlay(shown_clock, shown_shifts)
+            # A corrected source timestamp can go backward; keep its queue in FIFO order.
+            due = max(due, received - shift)
+            eligible.append((due, room_id, row, received, event))
+    with timeline.span('chat.sidebar_batch') if timeline is not None else nullcontext():
+        if viewer.split_presentation and not viewer.replay.active:
+            viewer.panel.queue_playback_events(
+                live_chat_events(viewer, eligible, clock, now, chat_deadline, limit=viewer.panel.playback_batch_limit), now)
+        else:
+            viewer.panel.add_events(live_chat_events(viewer, eligible, clock, now, chat_deadline))
+        if viewer.replay.active:
+            viewer.panel.add_events(replay_chat_events(viewer, shown_clock, shown_shifts))
+    with timeline.span('chat.overlay_feed') if timeline is not None else nullcontext():
+        viewer._render_overlay(shown_clock, shown_shifts)
     if viewer.multi_recorder is not None and not viewer.multi_recorder.cancelled.is_set():
         main = viewer.rows.get(viewer.alignment.reference)
         if main is None or main.decoder is None or main.decoder.history is not viewer.multi_recorder.history:
@@ -216,7 +346,7 @@ def _configure_picture_budget(viewer):
     reference = viewer.alignment.reference
     shown = set(viewer.comparison_panel.rooms_to_show() if viewer.compare.isChecked() else (reference,))
     shown.update(viewer.floating_crops)
-    comparisons = max(0, len(shown) - 1)
+    comparisons = len(shown - {reference})
     inactive = max(1, len(viewer.rows) - len(shown))
     for key, row in viewer.rows.items():
         visible = key in shown

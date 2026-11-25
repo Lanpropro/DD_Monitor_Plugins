@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import QPointF, QRect, QRectF, Qt
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPen
 from PySide6.QtWidgets import QFrame
 
@@ -11,7 +11,9 @@ from ddm import theme
 
 
 class Canvas(QFrame):
-    def __init__(self, parent=None, selecting=False):
+    selection_finished = Signal()
+
+    def __init__(self, parent=None, selecting=False, *, limit_frame_damage=False):
         super().__init__(parent)
         self.image = QImage()
         self.waiting = False
@@ -26,8 +28,15 @@ class Canvas(QFrame):
         self.presented = 0
         self.repeated = 0
         self.paint_probe = None
+        self.submitted_at = None
+        self.limit_frame_damage = limit_frame_damage
+        self.immediate_frame_paint = False
+        self.native_presenting = False
+        self.flush_overlay_motion = None
         self.selecting = selecting
         self.crop = QRectF(0, 0, 1, 1)
+        self.selection_color = QColor('#38bdf8')
+        self.other_selections = ()
         self.anchor = None
         self.selection_ready = False
         self.selection_zoom = 1.
@@ -46,21 +55,55 @@ class Canvas(QFrame):
             self.presented += 1
         self.frame_key = key
         self.frame = item
-        if self.paint_probe is not None and self.paint_probe.thread is not None and item is not None:
-            self.paint_probe.submitted.record(time.perf_counter(), key)
+        probe = self.paint_probe
+        ready_at = time.perf_counter() if probe is not None and probe.thread is not None and item is not None else None
+        if ready_at is not None and self.submitted_at is not None:
+            probe.timings.record('main_submit_replaced', ready_at - self.submitted_at, at=ready_at)
+            if probe.gui_timeline is not None:
+                probe.gui_timeline.point('picture.replace', ready_at)
         self.image = (item[1] if isinstance(item[1], QImage) else QImage.fromData(item[1])) if item is not None else QImage()
         self._sync_opaque_paint()
-        self.update()
+        self.submitted_at = None
+        if self.native_presenting:
+            self.image_rect = self._image_target(self._source_rect())
+            return
+        if ready_at is not None:
+            self.submitted_at = time.perf_counter()
+            probe.timings.record('main_ready_to_submit', self.submitted_at - ready_at, at=self.submitted_at)
+            probe.submitted.record(self.submitted_at, key)
+            if probe.gui_timeline is not None:
+                probe.gui_timeline.point('picture.submit', self.submitted_at)
+        damage = None
+        if self.limit_frame_damage and not self.image.isNull() and not self.selecting:
+            current_rect = self._image_target(self._source_rect())
+            if current_rect == self.image_rect:
+                damage = current_rect.toAlignedRect()
+        paint = self.repaint if self.immediate_frame_paint and item is not None else self.update
+        if damage is None:
+            paint()
+        else:
+            paint(damage)
+        if self.flush_overlay_motion is not None:
+            self.flush_overlay_motion()
 
     def show_at(self, decoder, timestamp):
+        probe = self.paint_probe
+        requested = time.perf_counter() if probe is not None and probe.thread is not None else None
         frame = decoder.history.frame_at(timestamp)
         self.requested_frame_key = frame[0] if frame is not None else None
+        ready = None
         if frame is not None:
             ready = decoder.picture_at(timestamp) if hasattr(decoder, "picture_at") else frame
-            if ready is not None:
-                self.set_frame(ready)
-            return ready
-        return None
+        if requested is not None:
+            stage = ('main_target_unbuffered' if frame is None else 'main_target_unready' if ready is None
+                     else 'main_target_ready' if ready[0] == frame[0] else 'main_target_fallback')
+            resolved = time.perf_counter()
+            probe.timings.record(stage, resolved - requested)
+            if probe.gui_timeline is not None:
+                probe.gui_timeline.point(stage, resolved)
+        if ready is not None:
+            self.set_frame(ready)
+        return ready
 
     def playback_waiting(self, decoder, timestamp, frame, shared_wait=False):
         if frame is not None:
@@ -85,6 +128,11 @@ class Canvas(QFrame):
                            max(1, round(rect.height() * image.height()))).intersected(source)
         return source
 
+    def _image_target(self, source):
+        size = source.size().scaled(self.size(), Qt.KeepAspectRatio)
+        return QRectF((self.width() - size.width()) / 2,
+                      (self.height() - size.height()) / 2, size.width(), size.height())
+
     def _sync_opaque_paint(self):
         covered = (not self.image.isNull() and
                    self._source_rect().size().scaled(self.size(), Qt.KeepAspectRatio) == self.size())
@@ -95,51 +143,66 @@ class Canvas(QFrame):
         super().resizeEvent(event)
 
     def paintEvent(self, event):
+        if self.native_presenting:
+            return self._paint_frame(event)
         probe = self.paint_probe
         if probe is None or probe.thread is None:
             return self._paint_frame(event)
         started = time.perf_counter()
+        timeline = probe.gui_timeline
+        cpu_started = time.thread_time() if timeline is not None else None
+        if self.submitted_at is not None:
+            probe.timings.record('main_submit_to_paint_start', started - self.submitted_at, at=started)
+            if timeline is not None:
+                timeline.point('picture.queue', started, round((started - self.submitted_at) * 1000, 3))
         try:
             self._paint_frame(event)
         finally:
-            probe.paints.append((time.perf_counter(), (time.perf_counter() - started) * 1000))
-            probe.painted.record(time.perf_counter(), self.frame_key)
+            painted_at = time.perf_counter()
+            probe.paints.append((painted_at, (painted_at - started) * 1000))
+            probe.painted.record(painted_at, self.frame_key)
+            if timeline is not None:
+                timeline.paint(started, painted_at, self.frame_key, cpu_started)
+            if self.submitted_at is not None:
+                probe.timings.record('main_submit_to_paint', painted_at - self.submitted_at, at=painted_at)
+                self.submitted_at = None
 
     def _paint_frame(self, event):
         painter = QPainter(self)
         if not self.transparent_background:
             painter.fillRect(self.rect(), theme.qcolor(theme.CONTENT) if theme.is_light() else QColor("#101216"))
-        if self.image.isNull():
+        if self.native_presenting or self.image.isNull():
             return
         image = self.image
         source = self._source_rect()
-        size = source.size().scaled(self.size(), Qt.KeepAspectRatio)
-        self.image_rect = QRectF((self.width() - size.width()) / 2,
-                                (self.height() - size.height()) / 2,
-                                size.width(), size.height())
+        self.image_rect = self._image_target(source)
         if self.selecting:
             center = self.image_rect.center()
-            self.image_rect = QRectF(center.x() - size.width() * self.selection_zoom / 2 + self.selection_pan.x(),
-                                     center.y() - size.height() * self.selection_zoom / 2 + self.selection_pan.y(),
-                                     size.width() * self.selection_zoom, size.height() * self.selection_zoom)
+            width = self.image_rect.width() * self.selection_zoom
+            height = self.image_rect.height() * self.selection_zoom
+            self.image_rect = QRectF(center.x() - width / 2 + self.selection_pan.x(),
+                                     center.y() - height / 2 + self.selection_pan.y(), width, height)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
         started = time.perf_counter()
         painter.drawImage(self.image_rect, image, QRectF(source))
         if self.paint_probe is not None and self.paint_probe.thread is not None:
             self.paint_probe.timings.record('main_draw_image', time.perf_counter() - started)
         if self.selecting:
-            painter.setPen(QPen(QColor("#38bdf8"), 2))
+            for bounds, color in self.other_selections:
+                painter.setPen(QPen(color, 2))
+                painter.drawRect(self.selection_rect(bounds))
+            painter.setPen(QPen(self.selection_color, 2))
             rect = self.selection_rect()
             painter.drawRect(rect)
             if self.selection_ready:
-                painter.setBrush(QColor('#38bdf8'))
+                painter.setBrush(self.selection_color)
                 for point in (rect.topLeft(), rect.topRight(), rect.bottomLeft(), rect.bottomRight(),
                               QPointF(rect.center().x(), rect.top()), QPointF(rect.center().x(), rect.bottom()),
                               QPointF(rect.left(), rect.center().y()), QPointF(rect.right(), rect.center().y())):
                     painter.drawRect(QRectF(point.x() - 3, point.y() - 3, 6, 6))
 
-    def selection_rect(self):
-        rect, image = self.crop, self.image_rect
+    def selection_rect(self, rect=None):
+        rect, image = self.crop if rect is None else rect, self.image_rect
         return QRectF(image.x() + rect.x() * image.width(), image.y() + rect.y() * image.height(),
                       rect.width() * image.width(), rect.height() * image.height())
 
@@ -235,6 +298,7 @@ class Canvas(QFrame):
     def mouseReleaseEvent(self, event):
         if self.anchor is not None:
             self.selection_ready = self.crop.width() > 0 and self.crop.height() > 0
+            self.selection_finished.emit()
         self.anchor = None
         if self.selecting:
             self.update()

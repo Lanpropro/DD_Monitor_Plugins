@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QEasingCurve, QEvent, QSize, Qt, QTimer, QVariantAnimation, Signal
-from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import QAction, QIcon, QPainter
 from PySide6.QtWidgets import QSizePolicy, QStyle, QStyleOptionToolButton, QToolButton, QWidget
 
 from ddm import plugins as api
@@ -58,16 +58,7 @@ class EntryButton(QToolButton):
         self.setDefaultAction(action)
         action.setToolTip("比赛二路：开启或关闭比赛二路模式")
         self.setAccessibleName("比赛二路")
-        pixmap = QPixmap(36, 36)
-        pixmap.setDevicePixelRatio(2)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(QPen(QColor("#dde3eb"), 1.5))
-        painter.drawRoundedRect(2, 3, 8, 12, 2, 2)
-        painter.drawRoundedRect(12, 6, 4, 9, 1, 1)
-        painter.end()
-        action.setIcon(QIcon(pixmap))
+        action.setIcon(QIcon(str(Path(__file__).with_name('icon.svg'))))
         self.setIconSize(QSize(18, 18))
         self._placement = QTimer(self)
         self._placement.setSingleShot(True)
@@ -270,7 +261,45 @@ class MatchSyncPlugin(api.Plugin):
             self.entry.feedback_painted.connect(self._entry_painted)
             self.entry._stretch.valueChanged.connect(self.switch_probe.animation_tick)
             self.entry.transition_finished.connect(self.switch_probe.animation_finished)
+            if (os.environ.get('DDM_MATCH_MONITOR') == '1' and
+                    os.environ.get('DDM_MATCH_MONITOR_RESUME') == '1'):
+                QTimer.singleShot(0, self.entry, self._resume_diagnostic_rooms)
         context.log("比赛二路同步已就绪；点击关注栏「比赛二路」入口开启")
+
+    def _resume_diagnostic_rooms(self):
+        """Restore the plugin's last selection for an explicitly requested live trial."""
+        rooms = self.context.setting('rooms', [])
+        if self.viewer is not None or not rooms:
+            return
+        main = self.context.setting('main_room', '')
+        self.open_viewer({})
+        viewer = self.viewer
+        if not viewer.isVisible():
+            return
+        for room in rooms:
+            viewer.add_room(str(room['room_id']), room)
+        if main in viewer.rows:
+            viewer.select_main(main)
+        if viewer.rows and not viewer.running:
+            viewer.toggle_running()
+
+    def create_embedded_widget(self, capability, parent, caller, **options):
+        if capability == 'match_workspace_native_iptv_v1':
+            from .hybrid_workspace import HybridRaceWorkspace
+            viewer = HybridRaceWorkspace(caller, self.sources)
+            viewer.embed(parent if parent is not None else self.context.window._content)
+            return viewer
+        if capability == 'match_workspace_v1':
+            viewer = Viewer(caller, self.sources, workspace_crops=True)
+            viewer.embed(parent if parent is not None else self.context.window._content)
+            return viewer
+        if capability == 'race_workspace_v1':
+            from .race_workspace import RaceViewer
+            return RaceViewer(caller, parent, options['address'], options['muted'])
+        if capability == 'race_workspace_v2':
+            from .race_workspace import RaceViewer
+            return RaceViewer(caller, parent, onboard=options.get('onboard', False))
+        return None
 
     def on_event(self, event, payload):
         if event == api.EVENT_STREAM_RESOLVED:

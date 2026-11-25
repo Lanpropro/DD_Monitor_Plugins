@@ -72,6 +72,12 @@ def main():
                     assert manifest['author'] == 'reon-nynes'
                     assert manifest['min_app_version'] == '0.5.1'
                 if plugin_id == 'match_sync':
+                    native = 'match_sync/native/d3d11/'
+                    for name in ('presenter.exe', 'mailbox.dll'):
+                        assert native + name in names
+                        data = archive.read(native + name)
+                        offset = int.from_bytes(data[60:64], 'little')
+                        assert data[:2] == b'MZ' and data[offset:offset+6] == b'PE\0\0d\x86'
                     modules = ('audio', 'canvas', 'room_widgets', 'comparison', 'room_input',
                                'source_control', 'alignment_control', 'playback_timing', 'chat_control',
                                'presentation', 'picture_control', 'recording_control', 'replay_control',

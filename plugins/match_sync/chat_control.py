@@ -1,7 +1,9 @@
 """Chat control. Session state remains on the Viewer facade."""
 from __future__ import annotations
 
+import math
 import time
+from ddm.super_chat import remaining_seconds
 from .chat_clients import Chat, PlatformChat
 
 def _start_chat(viewer, row):
@@ -61,6 +63,19 @@ def _message(viewer, row, worker, event):
         row.pending.append((received, dict(event)))
 
 
+def _tick_super_chats(viewer):
+    overlay = viewer.video_danmaku
+    now = time.time()
+    active = [chat for chat in overlay.super_chats if remaining_seconds(chat.get('end_time'), now)]
+    if len(active) != len(overlay.super_chats):
+        overlay.set_super_chats(active)
+    elif active:
+        overlay.super_chat_overlay.update()
+    if active:
+        # Use the same second boundary as the displayed countdown.
+        viewer.super_chat_timer.start(max(1, math.ceil((int(now) + 1 - now) * 1000)))
+
+
 def _render_overlay(viewer, clock, shifts):
     if viewer.video_danmaku is None:
         return
@@ -74,7 +89,10 @@ def _render_overlay(viewer, clock, shifts):
         if pending is None:
             continue
         received, event = pending
-        if key not in shifts or not viewer.rows[key].show_chat.isChecked() or clock + shifts[key] - received > 5:
+        super_chat = event.get('kind') == 'super_chat'
+        if (key not in shifts or not viewer.rows[key].show_chat.isChecked() or clock + shifts[key] - received > 5
+                or (super_chat and (not viewer.video_danmaku.settings.get('super_chat_enabled', True)
+                                    or not remaining_seconds(event.get('end_time'))))):
             viewer.overlay_pending.pop(key, None)
         else:
             overlay_event = dict(event)
@@ -83,6 +101,35 @@ def _render_overlay(viewer, clock, shifts):
             if viewer.video_danmaku.add_event(overlay_event):
                 viewer.overlay_pending.pop(key, None)
                 viewer.overlay_last = key
+                if super_chat and not viewer.super_chat_timer.isActive():
+                    _tick_super_chats(viewer)
+
+
+def live_chat_events(viewer, eligible, clock, now, deadline, limit=16):
+    for index, (_due, room_id, row, received, event) in enumerate(sorted(eligible, key=lambda item: item[0])):
+        # Bound the HTML batch as well as its preparation, since the final
+        # Qt insertion cannot be interrupted. Always make progress.
+        if not viewer.replay.active and (index >= limit or index and time.perf_counter() >= deadline):
+            break
+        row.pending.popleft()
+        if clock - received > 120:
+            continue
+        label = row.label()
+        event = dict(event, medal={}, uname=f"【{label}】 {event.get('uname') or ''}",
+                     source_label=label, source_room=room_id, color=row.color)
+        viewer.replay.record_message(now, event)
+        if not viewer.replay.active:
+            viewer.overlay_pending[room_id] = (received, event)
+            yield event
+
+
+def replay_chat_events(viewer, clock, shifts):
+    for event in viewer.replay.messages_between(viewer.replay.cursor, clock):
+        key = event['source_room']
+        if key in shifts:
+            viewer.overlay_pending[key] = (clock + shifts[key], event)
+            yield event
+    viewer.replay.cursor = clock
 
 
 def _rebuild_replay_chat(viewer, stamp, live=False):
@@ -90,10 +137,9 @@ def _rebuild_replay_chat(viewer, stamp, live=False):
     viewer.panel._follow_tail = True
     label = '返回直播' if live else '回看至'
     timestamp = time.strftime('%H:%M:%S', time.localtime(time.time() - (time.monotonic() - stamp)))
-    viewer.panel.add_event({'text': f'{label} {timestamp}', '_replay_divider': True})
     viewer.overlay_pending.clear()
     if viewer.video_danmaku is not None:
         viewer.video_danmaku.clear()
-    for event in viewer.replay.messages_between(stamp - 30, stamp):
-        viewer.panel.add_event(event)
+    divider = {'text': f'{label} {timestamp}', '_replay_divider': True}
+    viewer.panel.add_events([divider, *viewer.replay.messages_between(stamp - 30, stamp)])
     viewer.panel.end_replay_section()

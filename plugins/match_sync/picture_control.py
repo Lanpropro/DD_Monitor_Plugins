@@ -55,8 +55,13 @@ def _show_buffering(viewer, active):
     if viewer.canvas.waiting != bool(active):
         viewer.canvas.waiting = bool(active)
         viewer.canvas.update()
-    if getattr(viewer.picture, "_buffering", False) != bool(active):
-        viewer.picture.set_buffering(bool(active))
+    tile = viewer.picture
+    row = viewer.rows.get(viewer.main.currentData())
+    detail = row.playback_issue if active and row is not None else ""
+    if tile._status_detail != detail:
+        tile.set_status("直播暂不可播放" if detail else "", detail=detail)
+    if getattr(tile, "_buffering", False) != bool(active):
+        tile.set_buffering(bool(active))
 
 
 def _stream_info_snapshot(viewer):
@@ -115,7 +120,8 @@ def sync_picture(viewer, *_args, refresh_metadata=True):
     state = (row.room_id, id(row.decoder), getattr(row.decoder, 'fps', 30)) if row is not None else None
     if state != getattr(viewer, '_picture_poll_source', None):
         viewer._picture_poll_source = state
-        viewer.render_timer.setInterval(interval)
+        if not viewer.split_presentation or not viewer.running:
+            viewer.render_timer.setInterval(interval)
     tile = viewer.picture
     if row is None:
         viewer._stop_recording()
@@ -146,6 +152,8 @@ def sync_picture(viewer, *_args, refresh_metadata=True):
                 tile.set_quality(row.quality)
             if tile.actual_quality != row.actual_quality:
                 tile.set_actual_quality(row.actual_quality)
+            if row.platform is not None and row.platform.kind == 'huya':
+                _update_huya_quality_hint(tile, row)
         if tile.volume != row.volume.value():
             tile.set_volume(row.volume.value())
         if tile.audio_channel != row.channel.currentData():
@@ -163,6 +171,21 @@ def sync_picture(viewer, *_args, refresh_metadata=True):
         tile.blockSignals(False)
     viewer._show_buffering(viewer.running and not row.paused and
                          (viewer.canvas.image.isNull() or viewer.canvas.waiting))
+
+
+def _update_huya_quality_hint(tile, row):
+    if not row.actual_quality or row.decoder is None:
+        return
+    width, height = row.decoder.video_size
+    if not width or not height:
+        return
+    hint = f'实际画面 {width}×{height} · {row.decoder.fps:g} 帧/秒'
+    if any(item.get('qn') == row.actual_quality for item in row.quality_options):
+        hint += f' · {tile._quality_name(row.actual_quality)}\n点击可选画质'
+    else:
+        hint += '\n平台暂未返回可选画质，可重新加载取流。'
+    if tile.quality_button.toolTip() != hint:
+        tile.quality_button.setToolTip(hint)
 
 
 def open_match_settings(viewer):
@@ -189,9 +212,13 @@ def _picture_setting(viewer, key, value):
 def _quality_changed(viewer, _room, quality):
     row = viewer.rows.get(viewer.main.currentData())
     if row is not None:
+        row.pending_quality_switch = (row.quality, row.actual_quality or None, quality)
         row.quality = quality
         row.quality_auto = False
-        viewer._reload_picture()
+        try:
+            viewer._reload_picture()
+        finally:
+            row.pending_quality_switch = None
         viewer.changed()
 
 
@@ -227,6 +254,9 @@ def _fullscreen_picture(viewer):
         return
     if not viewer.rows:
         return
+    gpu = getattr(viewer, 'd3d11_picture', None)
+    if gpu is not None:
+        gpu.stop()
     dialog = QDialog(viewer.window(), Qt.Window | Qt.FramelessWindowHint)
     dialog.setScreen(viewer.picture.screen())
     dialog.setWindowTitle("比赛二路主画面")
