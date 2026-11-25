@@ -12,6 +12,7 @@
 
 ## 待发布草稿
 
+- [YouTube 直播 1.1](RELEASE-youtube-live-v1.1.md)：恢复 2K／4K 画质，待受检发布。
 - [IPTV Play 1.0](RELEASE-m3u-live-v1.0.md)，等待支持频道列表接口的宿主发布。
 
 ## 当前在线发布说明
