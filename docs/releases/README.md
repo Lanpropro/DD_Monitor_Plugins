@@ -8,6 +8,7 @@
 
 ## 待发布草稿
 
+- [YouTube 直播 1.1](RELEASE-youtube-live-v1.1.md)：恢复 2K／4K 画质，待受检发布。
 - [虎牙直播1.0](RELEASE-huya-live-v1.0.md)：独立平台首发，保留最新海外及平台拆分修复，待受检发布。
 - [斗鱼直播1.0](RELEASE-douyu-live-v1.0.md)：独立平台首发，保留最新海外及平台拆分修复，待受检发布。
 - [抖音直播1.0](RELEASE-douyin-live-v1.0.md)：独立平台首发，保留最新海外及平台拆分修复，待受检发布。
