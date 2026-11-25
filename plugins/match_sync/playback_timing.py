@@ -78,8 +78,7 @@ def _recover_clock(viewer, clock, shifts):
     fresh = not arrival or now - arrival <= 3
     position = clock + shifts[main.room_id]
     if (viewer.sync_waiting and not viewer.offset_repositioning
-            and bounds[0] <= position <= bounds[1] + .05
-            and position >= bounds[1] - .3):
+            and bounds[0] <= position <= bounds[1] + .05):
         # bounds_at keeps separate PTS intervals. Once a later interval is
         # buffered, waiting for the old interval to grow can never finish.
         following = main.decoder.history.bounds_at(bounds[1] + .1, minimum_duration=.3)

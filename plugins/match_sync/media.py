@@ -170,12 +170,19 @@ class Decoder:
             except OSError:
                 pass
 
-    def picture_at(self, timestamp, exact=False):
+    def picture_at(self, timestamp, exact=False, *, timeline=None):
         if not exact:
             self.playback_timestamp = timestamp
+        lookup = timeline.begin() if timeline is not None else None
         history = self.history.segment_at(timestamp) or self.history
         frame = history.frame_at(timestamp)
-        return self.pictures.get(history, frame, exact=exact) if frame is not None and not self.cancelled.is_set() else None
+        if timeline is not None:
+            timeline.end('pip.history_lookup', lookup)
+        if frame is None or self.cancelled.is_set():
+            return None
+        if timeline is None:
+            return self.pictures.get(history, frame, exact=exact)
+        return self.pictures.get(history, frame, exact=exact, timeline=timeline)
 
     def diagnostics(self):
         with self.history.lock:
@@ -228,8 +235,8 @@ class Decoder:
             self.acquisition.quality(requested=self.seed['quality'])
             self.seed.pop("url", None)
             self.events.information.emit({"requested_quality": self.seed["quality"], "quality_options": options})
-        # Douyu signed addresses may allow only one consumer; do not reuse the wall's URL.
-        reuse_seed = self.platform is None or self.platform.kind != "douyu"
+        # Douyu URLs can be single-consumer and YouTube relays may still belong to the wall.
+        reuse_seed = self.platform is None or self.platform.kind not in ('douyu', 'youtube')
         if attempt == 0 and self.seed.get("url") and reuse_seed:
             self.acquisition.mark('seed_address')
             self.source_url = self.seed["url"]
@@ -238,6 +245,7 @@ class Decoder:
                                           "title": self.seed.get("title") or ""})
             return self.seed["url"], dict(self.seed.get("headers") or {})
         if self.platform is not None:
+            refresh_tiers = self.platform.kind in ('douyu', 'huya')
             self.acquisition.phase('room_info')
             info = self.platform.room_info(self.room_id)
             self.acquisition.mark('room_info_ready')
@@ -246,7 +254,14 @@ class Decoder:
             if info:
                 self.events.information.emit(info.as_dict())
             self.acquisition.phase('play_url')
-            result = self._available_url(lambda quality: self.platform.play_url(self.room_id, quality), options)
+            try:
+                result = self._available_url(lambda quality: self.platform.play_url(self.room_id, quality), options)
+            except bili.Cancelled:
+                raise
+            except Exception:
+                if refresh_tiers and not self.cancelled.is_set():
+                    self.events.information.emit({"quality_options": self._play_quality_options(options)})
+                raise
             self.acquisition.mark('play_url_ready')
             if self.cancelled.is_set():
                 raise bili.Cancelled()
@@ -254,8 +269,10 @@ class Decoder:
             self.acquisition.quality(actual=quality)
             headers = dict(result[3]) if len(result) > 3 else {}
             self.acquisition.phase('quality_metadata')
-            self.events.information.emit({"actual_quality": quality,
-                "quality_options": options if options is not None else self.platform.room_quality_options(self.room_id)})
+            # These platforms populate their cached tiers while resolving a stream.
+            if refresh_tiers or options is None:
+                options = self._play_quality_options(options)
+            self.events.information.emit({"actual_quality": quality, "quality_options": options})
             self.acquisition.mark('quality_metadata_ready')
             self.source_url, self.source_headers = url, headers
             return url, headers
@@ -274,6 +291,12 @@ class Decoder:
         self.events.information.emit({"actual_quality": quality})
         self.source_url, self.source_headers = url, headers
         return url, headers
+
+    def _play_quality_options(self, fallback):
+        try:
+            return self.platform.room_quality_options(self.room_id) or fallback or []
+        except Exception:
+            return fallback or []
 
     def _available_url(self, fetch, options):
         tiers = options if self.seed.get('highest_quality') and not self.seed.get('balanced_quality') else []
@@ -299,24 +322,31 @@ class Decoder:
             self.events.information.emit({'requested_quality': quality})
             return result
 
+    def _report_playback_issue(self, detail):
+        self.events.state.emit(detail)
+        self.events.playback_issue.emit(detail)
+
     def _run(self) -> None:
         if av is None:
-            self.events.state.emit("缺少二路视频解码组件 PyAV；请安装新版完整程序或更新 requirements.txt 中的依赖")
+            self._report_playback_issue("缺少 PyAV 视频解码组件，请检查开发环境或安装完整程序。")
             return
         if np is None:
-            self.events.state.emit("缺少二路图像比较组件 NumPy；请更新 requirements.txt 中的依赖")
+            self._report_playback_issue("缺少 NumPy 图像组件，请检查开发环境或安装完整程序。")
             return
         executable = recording.ffmpeg_path()
         if not executable:
-            self.events.state.emit("找不到 FFmpeg：请使用完整发布包，或将 FFmpeg 放入 PATH")
+            self._report_playback_issue("找不到 FFmpeg，请检查开发环境或安装完整程序。")
             return
         attempt = 0
         while not self.cancelled.is_set():
             self.acquisition.begin(attempt)
+            retry_delay = min(5, .5 + attempt * .5)
             outcome = 'cancelled'
+            resolving = True
             self.events.state.emit("正在取流…" if attempt == 0 else "正在重新连接…")
             try:
                 url, headers = self._resolve(attempt)
+                resolving = False
                 self.acquisition.mark('resolved')
                 if self.cancelled.is_set():
                     return
@@ -333,19 +363,26 @@ class Decoder:
                 return
             except Exception as error:
                 outcome = 'cancelled' if self.cancelled.is_set() else 'error'
-                self.acquisition.error(error)
-                if not self.cancelled.is_set():
-                    self.events.state.emit("连接或解码失败；稍后重试，可停止后重新开始")
+                kind = self.acquisition.error(error)
+                if outcome == 'error':
+                    if kind == 'LoginRequiredError':
+                        self._report_playback_issue("当前清晰度需要有效登录。\n请检查平台登录状态，或切换清晰度。")
+                    elif resolving:
+                        self._report_playback_issue("未取得当前清晰度的播放地址，正在重试。\n也可以切换清晰度。")
+                    else:
+                        self._report_playback_issue("直播流连接或解码失败，正在重试。")
             finally:
-                self.acquisition.finish(outcome)
-            if self.cancelled.wait(min(5, .5 + attempt * .5)):
+                self.acquisition.finish(outcome, retry_delay=retry_delay)
+            if self.cancelled.wait(retry_delay):
                 break
             attempt += 1
 
     def _capture(self, executable: str, url: str, headers: dict) -> str:
         process = None
+        has_cached_video = False
         error_reader = None
-        hls_proxy = None
+        transport = None
+        hls_retry = False
         finished = threading.Event()
         timed_out = threading.Event()
         last_frame = [time.monotonic()]
@@ -354,7 +391,7 @@ class Decoder:
             while not finished.wait(.2):
                 if self.cancelled.is_set() or process.poll() is not None:
                     return
-                refresh = getattr(hls_proxy, "refresh_required", None)
+                refresh = getattr(transport, "refresh_required", None)
                 if (refresh is not None and refresh.is_set() or
                         time.monotonic() - last_frame[0] > FRAME_TIMEOUT):
                     timed_out.set()
@@ -368,14 +405,22 @@ class Decoder:
                                     name=f"match-sync-watchdog-{self.room_id}", daemon=True)
         try:
             if self.platform is not None and self.platform.kind in ("twitch", "youtube"):
-                from ddm.global_danmaku import request_proxy
-                from ddm.hls_proxy import HlsProxy
-                hls_proxy = HlsProxy(url, headers, request_proxy(url))
-                url, headers = hls_proxy.url, {}
+                try:
+                    from ddm.media_sources import take
+                except ImportError:
+                    pass  # Older hosts and plugins only use the HLS path.
+                else:
+                    transport = take(url)
+                if transport is None:
+                    from ddm.global_danmaku import request_proxy
+                    from ddm.hls_proxy import HlsProxy
+                    transport = HlsProxy(url, headers, request_proxy(url))
+                    hls_retry = True
+                url, headers = transport.url, {}
             self.acquisition.phase('ffmpeg_start')
             process = subprocess.Popen(
                 decode_command(executable, url, headers, 0, self.seed.get("quality", 250),
-                               hls_retry=hls_proxy is not None,
+                               hls_retry=hls_retry,
                                platform_kind=self.platform.kind if self.platform is not None else ""),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE if self.acquisition.enabled else subprocess.DEVNULL, bufsize=0,
@@ -512,19 +557,22 @@ class Decoder:
                             self.timings.record('preview_submit', time.perf_counter() - started)
                         self.last_frame_received = last_frame[0]
                         self.acquisition.mark('first_cached_video')
+                        if not has_cached_video:
+                            has_cached_video = True
+                            self.events.playback_issue.emit("")
                     reading = time.perf_counter()
             if not self.cancelled.is_set():
-                refresh = getattr(hls_proxy, "refresh_required", None)
-                self.events.state.emit("播放地址已失效，正在重新取流" if refresh is not None and refresh.is_set()
-                                       else "画面接收超时，正在重新取流" if timed_out.is_set()
-                                       else "直播流已结束或中断，正在重连")
-            refresh = getattr(hls_proxy, "refresh_required", None)
+                refresh = getattr(transport, "refresh_required", None)
+                self._report_playback_issue("播放地址已失效，正在重新取流" if refresh is not None and refresh.is_set()
+                                            else "画面接收超时，正在重新取流" if timed_out.is_set()
+                                            else "直播流已结束或中断，正在重连")
+            refresh = getattr(transport, "refresh_required", None)
             return ('cancelled' if self.cancelled.is_set() else
                     'url_expired' if refresh is not None and refresh.is_set() else
                     'frame_timeout' if timed_out.is_set() else 'eof')
         except Exception:
             if timed_out.is_set() and not self.cancelled.is_set():
-                self.events.state.emit("画面接收超时，正在重新取流")
+                self._report_playback_issue("画面接收超时，正在重新取流")
                 return 'frame_timeout'
             elif not self.cancelled.is_set():
                 raise
@@ -548,5 +596,5 @@ class Decoder:
                     error_reader.join(1)
                     process.stderr.close()
                 self.acquisition.exited(process.returncode)
-            if hls_proxy is not None:
-                hls_proxy.stop()
+            if transport is not None:
+                transport.stop()

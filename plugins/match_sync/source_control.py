@@ -52,9 +52,9 @@ def _add_input(viewer):
         viewer.input.clear()
 
 
-def add_room(viewer, text, preferences=None):
+def add_room(viewer, text, preferences=None, *, platform=None):
     try:
-        room_id = parse_room(text, viewer.context.manager)
+        room_id = parse_room(text, viewer.context.manager) if platform is None else platform.normalize(text)
     except ValueError as error:
         viewer.notice.setText(str(error))
         return False
@@ -66,7 +66,7 @@ def add_room(viewer, text, preferences=None):
     options.update(preferences or {})
     used = {number for row in viewer.rows.values() for number in row.record_tracks}
     options.setdefault('record_tracks', next(([number] for number in range(1, 7) if number not in used), []))
-    row = RoomRow(viewer, room_id, options, COLORS[len(viewer.rows) % len(COLORS)])
+    row = RoomRow(viewer, room_id, options, COLORS[len(viewer.rows) % len(COLORS)], platform=platform)
     viewer.rows[room_id] = row
     viewer.rows_layout.addWidget(row)
     viewer.update_main_choices()
@@ -102,8 +102,8 @@ def update_main_choices(viewer):
 
 def remove_room(viewer, room_id):
     viewer._stop_recording()
-    if room_id in viewer.floating_crops:
-        viewer.floating_crops[room_id].close()
+    for floating in tuple(viewer.floating_crops.get(room_id, {}).values()):
+        floating.close()
     viewer.independent_playback.pop(room_id, None)
     row = viewer.rows.pop(room_id)
     viewer.rematch_rooms.discard(room_id)
@@ -153,6 +153,7 @@ def _start_row(viewer, row):
     if viewer.alignment.manual_locked:
         row.match_text = "手动时间已锁定；勾选自动对齐可解除"
     row.pending.clear()
+    row.playback_issue = ""
     row.actual_quality = 0
     seed = dict(viewer.sources.get(row.room_id) or {})
     seed["title"] = seed.get("title") or row.title
@@ -166,11 +167,14 @@ def _start_row(viewer, row):
     if policy != 'source':
         seed.pop('url', None)
     row.decoder = Decoder(row.room_id, seed, row.platform)
+    if row.pending_quality_switch is not None:
+        row.decoder.acquisition.select_quality(*row.pending_quality_switch)
     viewer.clock_recovery.source_reset(row.room_id)
     row.decoder.set_crop((0, 0, 1, 1))
     decoder = row.decoder
     decoder.events.information.connect(lambda info, r=row, d=decoder: viewer._information(r, d, info))
     decoder.events.state.connect(lambda text, r=row, d=decoder: viewer._state(r, d, text, False))
+    decoder.events.playback_issue.connect(lambda detail, r=row, d=decoder: _playback_issue(viewer, r, d, detail))
     decoder.events.reset.connect(lambda r=row, d=decoder: viewer._reset(r, d))
     decoder.start()
     viewer._start_chat(row)
@@ -213,6 +217,15 @@ def _state(viewer, row, worker, text, chat):
         row.refresh_status()
 
 
+def _playback_issue(viewer, row, worker, detail):
+    if not viewer._valid(row, worker) or row.playback_issue == detail:
+        return
+    row.playback_issue = detail
+    row.refresh_status()
+    if row.room_id == viewer.main.currentData():
+        viewer.sync_picture(refresh_metadata=False)
+
+
 def _reset(viewer, row, worker):
     if viewer._valid(row, worker):
         viewer.clock_recovery.source_reset(row.room_id)
@@ -247,6 +260,8 @@ def _reset(viewer, row, worker):
 
 
 def _stop_row(row):
+    if row.crop_editor is not None:
+        row.crop_editor.reject()
     row.clear_buffer_warning()
     row.alignment_hint, row.hint_pending, row.hint_searching = None, False, False
     if row.decoder is not None:
@@ -262,17 +277,26 @@ def _stop_row(row):
     row.join.hide()
     row.pending.clear()
     row.video_text = "已停止"
+    row.playback_issue = ""
     row.chat_text = "弹幕已停止"
     row.match_text = "等待画面"
     row.buffer_text = ""
     row.refresh_status()
 
 
-def _add_dragged(viewer, room_id):
-    room = next((item for item in getattr(viewer.context.window, "rooms", [])
-                 if str(item.get("room_id") or "") == room_id), {})
+def _add_dragged(viewer, room_id, *, room=None):
+    if room is None:
+        room = next((item for item in getattr(viewer.context.window, "rooms", [])
+                     if str(item.get("room_id") or "") == room_id), {})
     if viewer.add_room(room_id, {"alias": room.get("uname") or ""}):
         if viewer.embedded and not viewer.running:
             viewer.toggle_running()
         return True
     return False
+
+
+def add_workspace_rooms(viewer, rooms):
+    for room in rooms:
+        room_id = str(room.get('room_id') or '')
+        if room_id:
+            _add_dragged(viewer, room_id, room=room)

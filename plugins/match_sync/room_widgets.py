@@ -32,20 +32,21 @@ class CompactStatus(QLabel):
 
     def set_status(self, parts, detail, hints=None):
         hints = hints if hints is not None else [text for _, text in parts]
-        if (self.parts, self.detail, self.hints) == (parts, detail, hints):
+        self.hints = hints
+        if self.detail != detail:
+            self.detail = detail
+            self.setAccessibleDescription(detail)
+        if self.parts == parts:
             return
         self.parts = parts
-        self.hints = hints
         self.hit_regions = []
-        self.detail = detail
         self.setText(' · '.join(text for _, text in parts if text))
         self.setAccessibleName(' · '.join(text or ('已连接' if icon == 'connected' else '已静音')
                                          for icon, text in parts))
-        self.setAccessibleDescription(detail)
         self.update()
 
     def tooltip_at(self, point):
-        return next((hint for rect, hint in self.hit_regions if rect.contains(point)), '')
+        return next((self.hints[index] for rect, index in self.hit_regions if rect.contains(point)), '')
 
     def event(self, event):
         if event.type() == QEvent.ToolTip:
@@ -67,7 +68,7 @@ class CompactStatus(QLabel):
         size, x = 16, 0
         y = (self.height() - size) // 2
         self.hit_regions = []
-        for (icon, text), hint in zip(self.parts, self.hints):
+        for index, (icon, text) in enumerate(self.parts):
             if x + size > self.width():
                 break
             start = x
@@ -99,23 +100,24 @@ class CompactStatus(QLabel):
                 shown = metrics.elidedText(text, Qt.ElideRight, max(0, self.width() - x))
                 painter.drawText(QRect(x, 0, max(0, self.width() - x), self.height()), Qt.AlignVCenter, shown)
                 x += metrics.horizontalAdvance(shown) + 12
-                self.hit_regions.append((QRect(start, 0, x - start - 12, self.height()), hint))
+                self.hit_regions.append((QRect(start, 0, x - start - 12, self.height()), index))
                 if shown != text:
                     break
             else:
-                self.hit_regions.append((QRect(start, 0, size, self.height()), hint))
+                self.hit_regions.append((QRect(start, 0, size, self.height()), index))
                 x += 8
 
 
 class RoomRow(QFrame):
-    def __init__(self, viewer, room_id, preferences, color):
+    def __init__(self, viewer, room_id, preferences, color, *, platform=None):
         super().__init__(viewer)
         self.viewer = viewer
         self.room_id = room_id
         self.setObjectName("MatchSyncRoomRow")
         self.anchor = None
         self.setAcceptDrops(True)
-        self.platform = viewer.context.manager.platform_for(room_id)
+        self.platform = platform if platform is not None else viewer.context.manager.platform_for(room_id)
+        self.crop_editor = None
         self.decoder = None
         self.chat = None
         self.paused = False
@@ -148,6 +150,7 @@ class RoomRow(QFrame):
                      if str(item.get("room_id") or "") == room_id), {})
         self.title = room.get("title") or (viewer.sources.get(room_id) or {}).get("title") or ""
         self.quality = int(preferences.get("quality", 10000 if self.platform is not None else 250))
+        self.pending_quality_switch = None
         self.quality_auto = bool(preferences.get('quality_auto', True))
         self.actual_quality = 0
         self.quality_options = []
@@ -159,6 +162,7 @@ class RoomRow(QFrame):
         self.crop = tuple(preferences.get("crop", (0, 0, 1, 1)))
         self.match_text = "等待画面"
         self.video_text = "未开始"
+        self.playback_issue = ""
         self.chat_text = "弹幕未连接"
         self.buffer_text = ""
         self.buffer_exhaustions = deque(maxlen=3)
@@ -571,10 +575,13 @@ class RoomRow(QFrame):
         independent = self.room_id in self.viewer.independent_playback
         self.independent.setEnabled(self.room_id != self.viewer.alignment.reference)
         self.independent.setChecked(independent)
-        self.independent.kind = 'resync' if independent else 'independent'
-        self.independent.setToolTip('恢复自动对齐' if independent else '独立播放：不等待对齐，使用本路缓存进度')
-        self.independent.setAccessibleName(self.independent.toolTip())
-        self.independent.update()
+        kind = 'resync' if independent else 'independent'
+        if self.independent.kind != kind:
+            self.independent.kind = kind
+            hint = '恢复自动对齐' if independent else '独立播放：不等待对齐，使用本路缓存进度'
+            self.independent.setToolTip(hint)
+            self.independent.setAccessibleName(hint)
+            self.independent.update()
         self.realign.setEnabled(self.viewer.alignment.automatic and self.room_id != self.viewer.alignment.reference)
         can_submit_hint = (self.viewer.running and self.viewer.alignment.automatic
                            and self.room_id != self.viewer.alignment.reference and not self.hint_pending
@@ -602,10 +609,11 @@ class RoomRow(QFrame):
             match_text = "自动对齐已关闭；手动偏移"
         elif self.room_id == self.viewer.alignment.reference:
             match_text = "主画面基准"
-        text = f"{self.video_text} · {match_text} · {self.chat_text}"
+        video_text = self.playback_issue or self.video_text
+        text = f"{video_text} · {match_text} · {self.chat_text}"
         detail = text + f" · {self.playback_status()}" + (f" · {self.buffer_text}" if self.buffer_text else "")
         parts = []
-        if '失败' in self.video_text or '缺少' in self.video_text or '找不到' in self.video_text:
+        if self.playback_issue or '失败' in video_text or '缺少' in video_text or '找不到' in video_text:
             parts.append((QStyle.SP_MessageBoxWarning, '连接异常'))
         elif '超时' in self.video_text or '重新' in self.video_text:
             parts.append((QStyle.SP_BrowserReload, '重连中'))
@@ -650,7 +658,7 @@ class RoomRow(QFrame):
         hints = []
         for icon, label in parts:
             if icon == 'connected' or label in ('连接异常', '重连中', '连接中'):
-                hints.append(self.video_text)
+                hints.append(video_text)
             elif icon == 'search' or label in ('已对齐', '待确认对齐', '待确认计时器', '计时器复核中'):
                 hints.append(match_text)
             elif icon == 'buffer' or label.startswith('缺少 '):

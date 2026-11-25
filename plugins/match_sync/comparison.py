@@ -25,7 +25,7 @@ class ComparisonPanel(SettingsPanel):
         heading.addWidget(self.heading_label, 1)
         self.target = QComboBox()
         self.target.setMinimumWidth(150)
-        self.target.currentIndexChanged.connect(lambda: viewer.render())
+        self.target.currentIndexChanged.connect(self.refresh_target)
         heading.addWidget(self.target)
         self.zoom = ConsoleModeToggle("放大框选区域", 'automatic')
         self.zoom.setChecked(True)
@@ -63,6 +63,9 @@ class ComparisonPanel(SettingsPanel):
             state.setStyleSheet(f'font-size: 12px; color: {theme.TEXT2};')
 
     def open_clock(self):
+        if getattr(self.viewer, 'native_main', None) is not None:
+            self.viewer.context.notify('原生主画面请使用手动偏移')
+            return
         from .clock_dialog import open_clock_dialog
         open_clock_dialog(self.viewer)
 
@@ -71,7 +74,26 @@ class ComparisonPanel(SettingsPanel):
         others = tuple(key for key in rows if key != reference)
         selected = self.target.currentData()
         secondary = others if len(rows) <= 4 else ((selected,) if selected in others else others[:1])
-        return tuple(key for key in (reference, *secondary) if key in rows)
+        primary = () if getattr(self.viewer, 'native_main', None) is not None else (reference,)
+        return tuple(key for key in (*primary, *secondary) if key in rows)
+
+    def refresh_target(self):
+        if not (self.viewer.split_presentation and self.viewer.auxiliary_timer.isActive()):
+            self.viewer.render()
+
+    def sync_targets(self):
+        rows = self.viewer.rows
+        reference = self.viewer.alignment.reference
+        selected = self.target.currentData()
+        choices = [(key, row.label()) for key, row in rows.items() if key != reference]
+        if choices != [(self.target.itemData(i), self.target.itemText(i)) for i in range(self.target.count())]:
+            blocked = self.target.blockSignals(True)
+            self.target.clear()
+            for key, label in choices:
+                self.target.addItem(label, key)
+            self.target.setCurrentIndex(max(0, self.target.findData(selected)))
+            self.target.blockSignals(blocked)
+        self.target.setVisible(len(rows) > 4)
 
     def render(self, clock, shifts):
         rows = self.viewer.rows
@@ -85,43 +107,32 @@ class ComparisonPanel(SettingsPanel):
                 card = QFrame()
                 card.setObjectName('MatchSyncCompareCard')
                 name = QLabel()
-                name.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+                name.setTextFormat(Qt.PlainText)
+                name.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
                 canvas = Canvas()
                 canvas.transparent_background = self.viewer.skin_visible
                 canvas.setMinimumSize(0, 110)
                 canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
                 state = QLabel()
-                state.setWordWrap(True)
-                state.setAlignment(Qt.AlignLeft | Qt.AlignBottom)
-                meta = QWidget(card)
-                meta.setMinimumWidth(180)
-                meta_layout = QVBoxLayout(meta)
-                meta_layout.setContentsMargins(0, 0, 0, 0)
-                meta_layout.setSpacing(4)
-                meta_layout.addWidget(name)
-                meta_layout.addStretch(1)
-                meta_layout.addWidget(state)
-                layout = QHBoxLayout(card)
+                state.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                header = QHBoxLayout()
+                header.setContentsMargins(0, 0, 0, 0)
+                header.setSpacing(6)
+                header.addWidget(name, 1)
+                header.addWidget(state)
+                layout = QVBoxLayout(card)
                 layout.setContentsMargins(12, 8, 12, 8)
-                layout.setSpacing(12)
-                layout.addWidget(meta)
+                layout.setSpacing(4)
+                layout.addLayout(header)
                 layout.addWidget(canvas, 1)
                 card.hide()
                 self.cards[room_id] = (card, name, canvas, state)
             self.refresh_design()
         reference = self.viewer.alignment.reference
-        selected = self.target.currentData()
-        choices = [(key, row.label()) for key, row in rows.items() if key != reference]
-        if choices != [(self.target.itemData(i), self.target.itemText(i))
-                       for i in range(self.target.count())]:
-            self.target.blockSignals(True)
-            self.target.clear()
-            for key, label in choices:
-                self.target.addItem(label, key)
-            self.target.setCurrentIndex(max(0, self.target.findData(selected)))
-            self.target.blockSignals(False)
-        self.target.setVisible(len(rows) > 4)
-        self.heading_label.setText("偏移对照 · 全部直播间" if len(rows) <= 4 else "偏移对照 · 主画面与选中直播间")
+        self.sync_targets()
+        native_main = getattr(self.viewer, 'native_main', None) is not None
+        self.heading_label.setText("偏移对照 · 解说画面" if native_main else
+                                   "偏移对照 · 全部直播间" if len(rows) <= 4 else "偏移对照 · 主画面与选中直播间")
         shown = self.rooms_to_show()
         if shown != self.shown_rooms:
             for card, *_ in self.cards.values():
@@ -178,8 +189,11 @@ class ComparisonPanel(SettingsPanel):
             relative = shifts[room_id] - shifts.get(reference, 0)
             position = ("主画面基准" if room_id == reference else "与主画面偏移相同" if abs(relative) < .05 else
                         f"相对主画面{'提前' if relative >= 0 else '延后'} {abs(relative):.1f} 秒")
+            unaligned = room_id != reference and (
+                room_id in self.viewer.independent_shifts or
+                self.viewer.alignment.automatic and not row.match_confirmed)
             if room_id != reference:
-                if room_id in self.viewer.independent_shifts or (self.viewer.alignment.automatic and not row.match_confirmed):
+                if unaligned:
                     position = "画面时间差尚未确认"
                 elif not self.viewer.alignment.automatic:
                     position = f"设置偏移 {row.delay.value() - self.viewer.rows[reference].delay.value():+.2f} 秒"
@@ -189,5 +203,9 @@ class ComparisonPanel(SettingsPanel):
             else:
                 playback = "已暂停" if row.paused else "等待播放缓存" if canvas.waiting else row.playback_status()
             text = f"{position} · {playback}"
-            if state.text() != text:
-                state.setText(text)
+            short = ("已暂停" if row.paused else "缓冲中" if canvas.waiting else
+                     "缓存预览" if canvas.preview_only else "未对齐" if unaligned else "播放中")
+            if state.text() != short:
+                state.setText(short)
+            if state.toolTip() != text:
+                state.setToolTip(text)

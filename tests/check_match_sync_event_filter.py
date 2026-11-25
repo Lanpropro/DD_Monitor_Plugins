@@ -29,9 +29,22 @@ def main():
             watched = QObject()
             with patch.object(viewer.controls, 'widget', side_effect=AssertionError('Unrelated event inspected controls')):
                 for kind in (QEvent.Paint, QEvent.Timer, QEvent.Polish, QEvent.LayoutRequest,
-                             QEvent.MetaCall, QEvent.UpdateRequest, QEvent.EnabledChange):
+                             QEvent.MetaCall, QEvent.UpdateRequest, QEvent.EnabledChange,
+                             QEvent.WindowBlocked, QEvent.WindowUnblocked, QEvent.WindowActivate, QEvent.WindowDeactivate,
+                             QEvent.FontChange, QEvent.PaletteChange, QEvent.StyleChange):
                     assert not viewer.eventFilter(watched, QEvent(kind))
             viewer.add_room('1', {'alias': '1'})
+            from types import SimpleNamespace
+            from PySide6.QtTest import QTest
+            from plugins.match_sync.button_timings import ButtonTimings
+            viewer.monitor_bridge = SimpleNamespace(buttons=ButtonTimings(viewer), panels=SimpleNamespace(active=None))
+            viewer.show()
+            QTest.mouseClick(viewer.compare, Qt.LeftButton)
+            QTest.qWait(60)
+            timing = viewer.monitor_bridge.buttons.rows[-1]
+            assert timing['role'] == 'Viewer.compare' and timing['source'] == 'mouse_release'
+            assert timing['next_turn_ms'] >= 0 and timing['next_button_paint_ms'] >= 0
+            viewer.compare.setChecked(False)
             with patch.object(viewer, 'show_comparison') as compare:
                 viewer.eventFilter(viewer.rows['1'].delay, QEvent(QEvent.FocusIn))
                 compare.assert_called_once_with('1')

@@ -347,6 +347,9 @@ class RecipientDelegate(QStyledItemDelegate):
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing)
         rect = QRectF(option.rect.adjusted(6, 5, -18, -7))
+        enabled = bool(index.flags() & Qt.ItemIsEnabled)
+        if not enabled:
+            painter.setOpacity(.5)
         compact = bool(self.parent().property('avatarOnly'))
         if compact:
             rect = QRectF(option.rect.adjusted(4, 4, -4, -6))
@@ -367,7 +370,7 @@ class RecipientDelegate(QStyledItemDelegate):
             painter.drawRoundedRect(shadow, 6 + spread, 6 + spread)
         painter.setBrush(QColor(c['raised']))
         painter.drawRoundedRect(rect, 6, 6)
-        if progress or option.state & QStyle.State_MouseOver:
+        if enabled and (progress or option.state & QStyle.State_MouseOver):
             color = theme.qcolor(console_hover_color() if option.state & QStyle.State_MouseOver else theme.ACCENT_SOFT)
             color.setAlphaF(color.alphaF() * max(progress, .5 if option.state & QStyle.State_MouseOver else 0))
             painter.setBrush(color)
