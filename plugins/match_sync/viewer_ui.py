@@ -10,9 +10,16 @@ from PySide6.QtCore import QTimer, Qt
 from .replay import ReplayBar
 from .sending import SendConsole
 from .chat_panel import SendingDanmakuPanel
-from . import danmaku_settings
+from . import danmaku_settings, quick_danmaku
 from ddm.widgets import Tile, TileButton
 from ddm import theme
+
+try:
+    from ddm.sidebar_navigation import NavigationButton
+except ModuleNotFoundError as error:
+    if error.name != 'ddm.sidebar_navigation':
+        raise
+    NavigationButton = None
 
 
 def build_ui(viewer):
@@ -138,12 +145,15 @@ def build_ui(viewer):
     trailing_layout.setSpacing(16)
     for widget in viewer.add_controls:
         trailing_layout.addWidget(widget)
-    viewer.match_settings_button = native_console_button(TileButton('⚙'), '比赛二路设置')
+    settings_button = (NavigationButton('比赛二路设置', 'settings')
+                       if NavigationButton is not None else TileButton('⚙'))
+    viewer.match_settings_button = native_console_button(settings_button, '比赛二路设置')
     viewer.match_settings_button.clicked.connect(viewer.open_match_settings)
     trailing_layout.addWidget(viewer.match_settings_button)
     trailing_layout.addWidget(viewer.minimize_settings)
     heading.addWidget(trailing, 0, 2, Qt.AlignRight)
     viewer.picture = Tile({})
+    viewer.picture.setProperty('keepWindowedVideoCursor', True)
     # Keep pixel hover inside the tile instead of dispatching it through
     # every surrounding layout and application event filter again.
     viewer.picture.setAttribute(Qt.WA_NoMousePropagation, True)
@@ -162,7 +172,7 @@ def build_ui(viewer):
                                              viewer.restore_settings, 0, Qt.AlignVCenter)
     viewer.restore_settings.hide()
     viewer.picture.bottom.installEventFilter(viewer)
-    viewer.canvas = Canvas(viewer.picture.video)
+    viewer.canvas = Canvas(viewer.picture.video, limit_frame_damage=viewer.split_presentation)
     # Canvas owns the empty-state prompt, including when its skin is transparent.
     viewer.picture.cover.installEventFilter(viewer)
     viewer.picture.cover.hide()
@@ -194,6 +204,13 @@ def build_ui(viewer):
         # Canvas is painted by Qt; a native VLC overlay can obscure its backing store.
         if hasattr(viewer.video_danmaku, "set_native_video"):
             viewer.video_danmaku.set_native_video(False)
+        set_raster_interval = getattr(viewer.video_danmaku, "set_raster_frame_interval", None)
+        if viewer.split_presentation and set_raster_interval is not None:
+            set_raster_interval(16)
+        raster = getattr(viewer.video_danmaku, 'raster_control', None)
+        enable_motion_coalescing = getattr(raster, 'enable_motion_coalescing', None)
+        if viewer.split_presentation and enable_motion_coalescing is not None:
+            viewer.canvas.flush_overlay_motion = enable_motion_coalescing()
         danmaku_settings.install(viewer, settings)
         viewer.picture.videoDanmakuChanged.connect(lambda: viewer.overlay_pending.clear())
     viewer.panel.apply_style(settings.get("danmaku_font", ""),
@@ -231,30 +248,18 @@ def build_ui(viewer):
     viewer.comparison_panel = ComparisonPanel(viewer)
     viewer.body_split.addWidget(viewer.comparison_panel)
     viewer.body_split.addWidget(viewer.settings_panel)
+    viewer.body_split.setStretchFactor(0, 1)
     viewer.body_split.setSizes([660, 0, 280])
     viewer.body_split.splitterMoved.connect(viewer.remember_console_height)
-    viewer.audio_status = QLabel()
     settings_layout = QVBoxLayout(viewer.settings_panel)
     settings_layout.setContentsMargins(1, 1, 1, 1)
     settings_layout.setSpacing(0)
     settings_layout.addWidget(viewer.console_toolbar)
     settings_layout.addWidget(viewer.controls, 1)
-    viewer.console_footer = QWidget()
-    viewer.console_footer.setObjectName('MatchSyncFooter')
-    viewer.console_footer.setStyleSheet(f'''QWidget#MatchSyncFooter {{background: {theme.BG};
-            border-bottom-left-radius: 9px; border-bottom-right-radius: 9px;}}
-            #MatchSyncFooter QLabel {{color: {theme.TEXT2}; font-size: 12px;}}''')
-    footer = QHBoxLayout(viewer.console_footer)
-    footer.setContentsMargins(16, 10, 16, 10)
-    footer.setSpacing(16)
     viewer.buffer_notice_timer = QTimer(viewer)
     viewer.buffer_notice_timer.setSingleShot(True)
     viewer.buffer_notice_timer.setInterval(15000)
     viewer.buffer_notice_timer.timeout.connect(viewer.dismiss_buffer_notice)
-    viewer.audio_status.setWordWrap(True)
-    viewer.audio_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-    footer.addWidget(viewer.audio_status, 1)
-    settings_layout.addWidget(viewer.console_footer)
     viewer.removal_notice = QFrame(viewer.settings_panel)
     viewer.removal_notice.setObjectName('MatchSyncRemovalNotice')
     viewer.removal_notice.setStyleSheet(f'''#MatchSyncRemovalNotice {{background: {theme.ELEVATED};
@@ -312,6 +317,7 @@ def build_ui(viewer):
     layout = QVBoxLayout(viewer)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.addWidget(split)
+    viewer.quick_danmaku = quick_danmaku.install(viewer)
 
 
 def refresh_appearance(viewer, *_args):

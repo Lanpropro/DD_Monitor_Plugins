@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .engine import LateBuffer, SafetyBuffer
+from .presentation import start_rendering, stop_rendering
 from .replay import ReplayTimeline
 
 
@@ -43,7 +44,7 @@ def toggle_running(viewer):
     viewer._sync_sidebar_marks()
     viewer.audio.start()
     viewer.playback_probe.start()
-    viewer.render_timer.start()
+    start_rendering(viewer)
     viewer.match_timer.start()
 
 
@@ -55,12 +56,14 @@ def stop(viewer):
     viewer.dismiss_buffer_notice()
     viewer.replay_bar.preview.stop()
     viewer.running = False
+    stop_rendering(viewer)
+    viewer.panel.flush_playback_events()
     if viewer.stream_info_dialog is not None:
         viewer.stream_info_dialog.close()
     with viewer._switch_stage('stop_playback_probe'):
         viewer.playback_probe.stop()
     viewer.independent_playback.clear()
-    for floating in list(viewer.floating_crops.values()):
+    for floating in list(viewer.all_floating_crops()):
         floating.close()
     viewer.analysis_serial += 1
     viewer.late_buffer = LateBuffer(viewer.reserve_seconds)
@@ -77,8 +80,8 @@ def stop(viewer):
     viewer.locked_clock = None
     viewer.offset_repositioning = False
     viewer.generation += 1
-    viewer.render_timer.stop()
     viewer.match_timer.stop()
+    viewer.super_chat_timer.stop()
     viewer.compare.setChecked(False)
     with viewer._switch_stage('stop_audio'):
         viewer.audio.stop()

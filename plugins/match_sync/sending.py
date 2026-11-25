@@ -6,6 +6,7 @@ from PySide6.QtGui import QAction, QColor, QPalette
 from PySide6.QtWidgets import QApplication, QBoxLayout, QFrame, QHBoxLayout, QListView, QListWidget, QListWidgetItem, QLabel, QLayout, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget
 
 from ddm.danmaku_actions import CommentToolbar
+from ddm.plugin_controls import TileControl
 from ddm import theme
 from .panels import ConsoleIconButton, SettingsPanel, console_button_style
 from .send_design import RecipientDelegate, SavedTextDelegate, SavedTextList, align_composer, colors, style_compose, stylesheet
@@ -26,9 +27,12 @@ class SendConsole(SettingsPanel):
         self.watch_timer.setInterval(50)
         self.watch_timer.timeout.connect(self.check_sends)
         self.batch_targets = set()
+        self.sendable_rooms = set()
         self.selected_room = None
         self.collapsed = False
         self.expanded_without_settings = False
+        self.inline_height = None
+        self.excluded_rooms = set()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(1, 1, 1, 1)
         layout.setSpacing(0)
@@ -340,10 +344,11 @@ class SendConsole(SettingsPanel):
                 actions.setFixedWidth(actions.layout().sizeHint().width())
 
     def sync_rooms(self):
-        had_rows = bool(self.rows)
+        available = {key: room for key, room in self.viewer.rows.items() if key not in self.excluded_rooms}
+        had_sendable = bool(self.sendable_rooms)
         checked = set(self.checked_rooms())
         for key in tuple(self.rows):
-            if key not in self.viewer.rows:
+            if key not in available:
                 row = self.rows.pop(key)
                 self.stack.removeWidget(row)
                 row.shutdown()
@@ -354,7 +359,7 @@ class SendConsole(SettingsPanel):
                 if timer is not None:
                     timer.stop()
                     timer.deleteLater()
-        for key, room in self.viewer.rows.items():
+        for key, room in available.items():
             if key not in self.rows:
                 self.rows[key] = SendRow(self.viewer, room)
                 self.stack.addWidget(self.rows[key])
@@ -369,31 +374,38 @@ class SendConsole(SettingsPanel):
                             button.clicked.connect(lambda _checked=False, room_id=key, edit=editor:
                                                    self.watch_send(room_id, edit))
             self.rows[key].update_name(room)
-        if not had_rows and self.rows:
-            checked = {next(iter(self.rows))}
-        self.batch_targets = checked.intersection(self.rows)
+        self.sendable_rooms = {key for key, row in self.rows.items()
+                               if any(type(entry.control).focus_input is not TileControl.focus_input
+                                      for entry in row.tile._plugin_controls.applicable())}
+        if not had_sendable and self.sendable_rooms:
+            checked = {next(key for key in available if key in self.sendable_rooms)}
+        self.batch_targets = checked & self.sendable_rooms
         blocked = self.rooms.blockSignals(True)
         try:
             for index in range(self.rooms.count() - 1, -1, -1):
                 if self.rooms.item(index).data(Qt.UserRole) not in self.rows:
                     self.rooms.takeItem(index)
-            for index, key in enumerate(self.viewer.rows):
+            for index, key in enumerate(available):
                 current = next((i for i in range(self.rooms.count())
                                 if self.rooms.item(i).data(Qt.UserRole) == key), None)
                 if current is None:
                     item = QListWidgetItem()
                     item.setData(Qt.UserRole, key)
-                    item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
                     self.rooms.insertItem(index, item)
                 else:
                     item = self.rooms.item(current)
                     if current != index:
                         self.rooms.insertItem(index, self.rooms.takeItem(current))
-                item.setCheckState(Qt.Checked if key in self.batch_targets else Qt.Unchecked)
+                controls = Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable
+                if key in self.sendable_rooms:
+                    item.setFlags(item.flags() | controls)
+                    item.setCheckState(Qt.Checked if key in self.batch_targets else Qt.Unchecked)
+                else:
+                    item.setFlags(item.flags() & ~controls)
+                    item.setData(Qt.CheckStateRole, None)
                 self.refresh_room(key)
         finally:
             self.rooms.blockSignals(blocked)
-        self.batch_targets.intersection_update(self.rows)
         self._update_selection()
         self._layout_workspace()
         self.work.setVisible(bool(self.rows))
@@ -401,11 +413,11 @@ class SendConsole(SettingsPanel):
         self.refresh_design()
 
     def checked_rooms(self):
-        return [key for key in self.rows if key in self.batch_targets]
+        return [key for key in self.rows if key in self.batch_targets and key in self.sendable_rooms]
 
     def refresh_room(self, key):
         row = self.viewer.rows.get(key)
-        if row is None:
+        if row is None or key not in self.rows:
             return
         controls = self.rows[key].tile._plugin_controls
         editor = controls._repeat_editor()
@@ -414,7 +426,7 @@ class SendConsole(SettingsPanel):
             item = self.rooms.item(index)
             if item.data(Qt.UserRole) == key:
                 text = self.statuses.get(key, '')
-                detail = text or ('有草稿' if draft else '')
+                detail = ('无法发送弹幕' if key not in self.sendable_rooms else text or ('有草稿' if draft else ''))
                 item.setText(f"{row.label()}\n{detail}")
                 item.setToolTip(f'{row.label()} · {key}\n{item.text().partition(chr(10))[2]}')
                 self.refresh_avatar(key)
@@ -471,6 +483,8 @@ class SendConsole(SettingsPanel):
     def _room_checked(self, item):
         started = time.perf_counter()
         key = item.data(Qt.UserRole)
+        if key not in self.sendable_rooms:
+            return
         checked = item.checkState() == Qt.Checked
         if checked == (key in self.batch_targets):
             return
@@ -518,6 +532,10 @@ class SendConsole(SettingsPanel):
         self.refresh_interactions()
 
     def sync_height(self):
+        if self.inline_height is not None:
+            self.setFixedHeight(self.inline_height)
+            self.setVisible(not self.collapsed)
+            return
         scroll_state = self.viewer.panel._scroll_state()
         settings = self.viewer.settings_panel
         if not settings.isHidden():

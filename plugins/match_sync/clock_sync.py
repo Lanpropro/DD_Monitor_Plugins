@@ -82,3 +82,18 @@ def calculate_offsets(readings, shifts, reference, direction):
         desired[key] = shifts[key] - correction
         uncertainty[key] = error + values[reference][1]
     return desired, uncertainty
+
+
+def calculate_event_offsets(marks, shifts, reference):
+    """Match the midpoint between the last old frame and first changed frame."""
+    if reference not in marks or len(marks) < 2:
+        raise ValueError('至少选择主画面和一路副画面的同一事件')
+    for before, after in marks.values():
+        if not math.isfinite(before) or not math.isfinite(after) or not 0 < after - before <= .25:
+            raise ValueError('事件边界前后必须是连续画面，请重新选择')
+    base_before, base_after = marks[reference]
+    desired, uncertainty = dict(shifts), {}
+    for key, (before, after) in marks.items():
+        desired[key] = shifts[reference] + ((before + after) - (base_before + base_after)) / 2
+        uncertainty[key] = ((after - before) + (base_after - base_before)) / 2
+    return desired, uncertainty

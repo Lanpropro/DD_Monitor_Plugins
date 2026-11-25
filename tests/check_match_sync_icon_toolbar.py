@@ -113,6 +113,8 @@ def check(app, host, module, output=None):
             first.delay.setValue(.25)
             first.increase.click()
             assert first.delay.value() == .35
+            first.decrease.click()
+            assert first.delay.value() == .25
             with patch.object(viewer, 'choose_crop') as choose:
                 first.floating_button.click()
                 choose.assert_called_once_with(first, floating=True)
@@ -124,6 +126,8 @@ def check(app, host, module, output=None):
             assert first.channel.left.text() == 'L' and first.channel.right.text() == 'R'
             QTest.keyClick(first.channel, Qt.Key_Down)
             assert first.channel.currentData() == 4
+            QTest.keyClick(first.channel, Qt.Key_Up)
+            assert first.channel.currentData() == 3
             for width in (1100, 900, 2000):
                 viewer.resize(width, 900)
                 QTest.qWait(35)
@@ -168,7 +172,6 @@ def check(app, host, module, output=None):
                 viewer.console_content_height = None
                 viewer.align_room_controls()
                 viewer.notice.setText('主画面：Machine · 自动对齐已开启')
-                viewer.audio_status.setText('声音已接管')
                 second.join.show()
                 QTest.qWait(30)
                 viewer.settings_panel.grab().save(str(output))

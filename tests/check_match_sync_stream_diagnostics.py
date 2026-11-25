@@ -14,6 +14,9 @@ from unittest.mock import Mock, patch
 
 
 def check(app, host, diagnostic, media, video):
+    from ddm import media_sources
+    from ddm.plugins import LoginRequiredError
+
     process_control = import_module(media.recording._ensure_job.__module__)
     secret = 'DO_NOT_LOG_PRIVATE_VALUE'
     address = 'https://private.invalid/live?token=' + secret
@@ -62,7 +65,7 @@ def check(app, host, diagnostic, media, video):
     assert stream.read(2) == b'' and calls == [True]
 
     decoder = media.Decoder('fixture', {'balanced_quality': True})
-    decoder.events = SimpleNamespace(information=Mock(), state=Mock(), reset=Mock())
+    decoder.events = SimpleNamespace(information=Mock(), state=Mock(), reset=Mock(), playback_issue=Mock())
     entered, release = threading.Event(), threading.Event()
     def play_url(*_args):
         entered.set()
@@ -89,6 +92,15 @@ def check(app, host, diagnostic, media, video):
     assert decoder.acquisition.snapshot()['actual_quality'] == 20000
     assert decoder.acquisition.snapshot()['phase'] == 'quality_metadata'
     assert 'private.invalid' not in json.dumps(decoder.acquisition.snapshot())
+
+    # The cached wall URL can still belong to a recording or a native player.
+    youtube = SimpleNamespace(kind='youtube', room_info=Mock(return_value=None),
+        play_url=Mock(return_value=(address, 10000, 'youtube')), room_quality_options=Mock(return_value=[]))
+    wall_url = 'http://127.0.0.1:12345/media/wall'
+    independent = media.Decoder('fixture', {'url': wall_url, 'quality': 10000}, youtube)
+    assert independent._resolve(0) == (address, {})
+    youtube.play_url.assert_called_once_with('fixture', 10000)
+
     # A retry after failure to get an address must preserve the failing phase.
     def resolve_failure(_attempt):
         decoder.acquisition.phase('play_url')
@@ -99,9 +111,45 @@ def check(app, host, diagnostic, media, video):
             patch.object(media.recording, 'ffmpeg_path', return_value='ffmpeg'):
         decoder._run()
     capture.assert_not_called()
+    assert "未取得当前清晰度的播放地址" in decoder.events.playback_issue.emit.call_args.args[0]
     failed = decoder.acquisition.snapshot()
     assert failed['outcome'] == 'error' and failed['error_phase'] == 'play_url'
     assert failed['error_codes'] == ['http_403'] and 'resolved' not in failed['milestones_ms']
+
+    switched = media.Decoder('fixture', {'quality': 10000}, platform)
+    switched.acquisition.select_quality(2000004, 2000004, 10000)
+    login_error = LoginRequiredError(secret)
+    wrapped = RuntimeError('provider error')
+    wrapped.__cause__ = login_error
+    attempts = []
+    issues = []
+    switched.events.playback_issue.connect(issues.append)
+
+    def wait_for_retry(seconds):
+        attempts.append(switched.acquisition.snapshot())
+        assert seconds * 1000 == attempts[-1]['retry_delay_ms']
+        return len(attempts) == 3
+
+    def cache_video(*_args):
+        switched.acquisition.mark('first_cached_video')
+        return 'eof'
+
+    with patch.object(platform, 'play_url', side_effect=[login_error, wrapped, (address, 10000, 0)]), \
+            patch.object(switched, '_capture', side_effect=cache_video) as capture, \
+            patch.object(switched, 'cancelled', SimpleNamespace(is_set=lambda: False, wait=wait_for_retry)), \
+            patch.object(media.recording, 'ffmpeg_path', return_value='ffmpeg'):
+        switched._run()
+    capture.assert_called_once()
+    assert len(issues) == 2 and all("需要有效登录" in detail and secret not in detail for detail in issues)
+    for receipt in attempts[:2]:
+        assert receipt['error_kind'] == 'LoginRequiredError' and receipt['error_phase'] == 'play_url'
+        assert receipt['quality_switch']['result'] == 'retrying' and 'actual_quality' not in receipt
+    assert [receipt['retry_delay_ms'] for receipt in attempts] == [500, 1000, 1500]
+    assert len({receipt['quality_switch']['id'] for receipt in attempts}) == 1
+    assert attempts[-1]['quality_switch']['result'] == 'video_cached'
+    assert attempts[-1]['quality_switch']['actual_quality'] == 10000
+    assert attempts[-1]['previous_attempt']['error_kind'] == 'LoginRequiredError'
+    assert secret not in json.dumps(attempts) and address not in json.dumps(attempts)
 
     # Descriptor packets exercise the real capture routing without a media codec.
     decoder.seed = {}
@@ -130,6 +178,8 @@ def check(app, host, diagnostic, media, video):
             patch.object(media, 'av', SimpleNamespace(open=open_input)), \
             patch.object(media, 'recording_template', return_value=nullcontext()):
         assert decoder._capture('ffmpeg', address, {'Cookie': secret}) == 'eof'
+    assert decoder.events.playback_issue.emit.call_args_list[-2].args == ("",)
+    assert "正在重连" in decoder.events.playback_issue.emit.call_args.args[0]
     decoder.preview_frames.submit.assert_called_once_with(decoder, history, frame, -.01)
     decoder.preview_frames = None
     assert launch.call_args.kwargs['stderr'] == subprocess.PIPE
@@ -156,6 +206,36 @@ def check(app, host, diagnostic, media, video):
     assert failed['ffmpeg_exit_code'] == 1 and 'invalid_data' in failed['error_codes']
     assert failed_process.stdout.closed and failed_process.stderr.closed
 
+    # A provider-owned Matroska relay is not HLS. Keep its owner alive through
+    # FFmpeg startup and release it even when creating the process fails.
+    for platform_kind, is_retained in (('youtube', True), ('youtube', False), ('twitch', False)):
+        decoder.platform = SimpleNamespace(kind=platform_kind)
+        source = SimpleNamespace(url='http://127.0.0.1:12345/media/fixture', stop=Mock())
+        relay = SimpleNamespace(url='http://127.0.0.1:12346/resource.m3u8', stop=Mock())
+        startup_error = OSError('fixture FFmpeg launch failure')
+        with patch.object(media_sources, 'take', return_value=source if is_retained else None) as take, \
+                patch('ddm.global_danmaku.request_proxy', return_value=''), \
+                patch('ddm.hls_proxy.HlsProxy', return_value=relay) as wrap, \
+                patch.object(media.subprocess, 'Popen', side_effect=startup_error) as launch:
+            try:
+                decoder._capture('ffmpeg', address, {})
+            except OSError as exc:
+                assert exc is startup_error
+            else:
+                raise AssertionError('FFmpeg startup failures must reach the retry loop')
+        take.assert_called_once_with(address)
+        command = launch.call_args.args[0]
+        if is_retained:
+            wrap.assert_not_called()
+            assert command[command.index('-i') + 1] == source.url
+            assert not {'-http_persistent', '-http_multiple', '-seg_max_retry'}.intersection(command)
+            source.stop.assert_called_once_with()
+        else:
+            wrap.assert_called_once_with(address, {}, '')
+            assert command[command.index('-i') + 1] == relay.url and '-seg_max_retry' in command
+            relay.stop.assert_called_once_with()
+    decoder.platform = None
+
     # A real pipe must be drained beyond its capacity; never persist its raw text.
     pipe_trace = diagnostic.StreamAcquisition()
     pipe_trace.begin(0)
@@ -180,10 +260,11 @@ def check(app, host, diagnostic, media, video):
     assert secret not in json.dumps(pipe_trace.snapshot())
     with patch.dict(os.environ, DDM_MATCH_DIAGNOSTICS='0'):
         disabled = diagnostic.StreamAcquisition()
+        disabled.select_quality(2000004, 2000004, 10000)
         disabled.begin(0)
         disabled.quality(requested=250, actual=1004000)
         disabled.phase('receive')
-        disabled.error(RuntimeError(secret))
+        assert disabled.error(LoginRequiredError(secret)) == 'LoginRequiredError'
         disabled.mark('first_byte')
         disabled.exited(1)
         disabled.finish('error')
@@ -209,7 +290,7 @@ def check(app, host, diagnostic, media, video):
         probe.pipeline_sources = ()
         probe.deleteLater()
         app.processEvents()
-    return dict(passed=True, startup_milestones=True, resolve_phase=True, retry_failure=True,
+    return dict(passed=True, startup_milestones=True, resolve_phase=True, retry_failure=True, quality_switch=True,
                 bounded_errors=True, no_raw_secrets=True, pipe_drained=True, disabled=True, media_generated=False)
 
 

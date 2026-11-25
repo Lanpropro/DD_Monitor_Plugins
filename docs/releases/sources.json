@@ -4,6 +4,15 @@
   "normalization": "CRLF or repeated CR to LF; one final LF for synchronized release bodies",
   "entries": [
     {
+      "tag": "match-sync-v2.0.2",
+      "file": "RELEASE-match-sync-v2.0.2.md",
+      "status": "prepared",
+      "source_kind": "repository_candidate",
+      "base_commit": "7454ef811f0483d4e86843f5f2afb440391e5636",
+      "sha256": "cb4604d0cc3ce2c825a4fff76cf6063a2ed22589af7f4cd8c763f69f0b79ad11",
+      "last_edit_verified": false
+    },
+    {
       "tag": "bili-live-v1.0",
       "file": "RELEASE-bili-live-v1.0.md",
       "status": "archived_verified",
