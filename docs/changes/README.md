@@ -60,5 +60,5 @@
 - [斗鱼直播候选记录](douyu_live.md)
 - [抖音直播候选记录](douyin_live.md)
 - [Twitch直播候选记录](twitch_live.md)
-- [YouTube直播候选记录](youtube_live.md)
+- [YouTube 直播记录](youtube_live.md) · [v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.1)
 - [CHZZK直播候选记录](chzzk_live.md)
