@@ -12,6 +12,19 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ContributionGuideTests(unittest.TestCase):
+    def test_youtube_1_0_archive_preserves_source_and_replacement(self):
+        entries = json.loads((ROOT / 'docs/releases/sources.json').read_text(encoding='utf-8'))['entries']
+        old = next(entry for entry in entries if entry['tag'] == 'youtube-live-v1.0')
+        self.assertEqual(old['status'], 'archived_verified')
+        self.assertEqual(old['source_commit'], 'a7c9316134a0e85f36bcbcdf2d05d0ced4b48cc0')
+        self.assertEqual(old['superseded_by'], 'youtube-live-v1.1')
+        asset, = old['assets']
+        self.assertEqual(asset['name'], 'youtube_live-1.0.zip')
+        self.assertEqual(asset['sha256'], 'cd81a1b67aabb44286dcd8e13e45cb4114c3da674cfd20210c15c0d9037e115d')
+        changes = (ROOT / 'docs/changes/youtube_live.md').read_text(encoding='utf-8')
+        self.assertIn('(../releases/RELEASE-youtube-live-v1.0.md)', changes)
+        self.assertNotIn(asset['url'], changes)
+
     def test_domestic_1_5_archive_preserves_source_and_replacement(self):
         entries = json.loads((ROOT / 'docs/releases/sources.json').read_text(encoding='utf-8'))['entries']
         old = next(entry for entry in entries if entry['tag'] == 'domestic-live-v1.5')
