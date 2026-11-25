@@ -79,7 +79,7 @@
 | 斗鱼直播 | `douyu_live` | 1.0 |
 | 抖音直播 | `douyin_live` | 1.0 |
 | Twitch直播 | `twitch_live` | 1.0 |
-| YouTube直播 | `youtube_live` | 1.0 |
+| YouTube直播 | `youtube_live` | 1.1 |
 | CHZZK直播 | `chzzk_live` | 1.0 |
 | 比赛二路同步 | `match_sync` | 1.7.0 |
 | B站直播互动 | `bili_live` | 1.1 |
