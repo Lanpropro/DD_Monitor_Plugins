@@ -12,6 +12,19 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ContributionGuideTests(unittest.TestCase):
+    def test_youtube_1_0_archive_preserves_source_and_replacement(self):
+        entries = json.loads((ROOT / 'docs/releases/sources.json').read_text(encoding='utf-8'))['entries']
+        old = next(entry for entry in entries if entry['tag'] == 'youtube-live-v1.0')
+        self.assertEqual(old['status'], 'archived_verified')
+        self.assertEqual(old['source_commit'], 'a7c9316134a0e85f36bcbcdf2d05d0ced4b48cc0')
+        self.assertEqual(old['superseded_by'], 'youtube-live-v1.1')
+        asset, = old['assets']
+        self.assertEqual(asset['name'], 'youtube_live-1.0.zip')
+        self.assertEqual(asset['sha256'], 'cd81a1b67aabb44286dcd8e13e45cb4114c3da674cfd20210c15c0d9037e115d')
+        changes = (ROOT / 'docs/changes/youtube_live.md').read_text(encoding='utf-8')
+        self.assertIn('(../releases/RELEASE-youtube-live-v1.0.md)', changes)
+        self.assertNotIn(asset['url'], changes)
+
     def test_domestic_1_5_archive_preserves_source_and_replacement(self):
         entries = json.loads((ROOT / 'docs/releases/sources.json').read_text(encoding='utf-8'))['entries']
         old = next(entry for entry in entries if entry['tag'] == 'domestic-live-v1.5')
@@ -37,19 +50,25 @@ class ContributionGuideTests(unittest.TestCase):
                      '尚未合入 develop', 'BUG-071 仍待定位'):
             self.assertIn(text, source)
 
-    def test_bili_live_1_1_publication_records_agree(self):
+    def test_bili_live_1_1_archive_points_to_builtin_host(self):
         tag = 'bili-live-v1.1'
         url = f'https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/{tag}'
         readme = (ROOT / 'README.md').read_text(encoding='utf-8')
         changes = (ROOT / 'docs/changes/bili_live.md').read_text(encoding='utf-8')
-        self.assertIn(url, readme)
-        self.assertIn(f'[v1.1]({url})', readme)
+        self.assertNotIn(url, readme)
+        self.assertIn('[本体内置](https://github.com/Lanpropro/DD_Monitor_CE/releases/tag/v0.9.1)', readme)
+        self.assertIn('[@reon-nynes](https://github.com/reon-nynes)', readme)
+        self.assertIn('](plugins/bili_watchlater/README.md)', readme)
         self.assertIn('## 已发布 v1.1（2026-11-05）', changes)
-        self.assertIn(url, (ROOT / 'docs/changes/README.md').read_text(encoding='utf-8'))
+        self.assertIn('https://github.com/Lanpropro/DD_Monitor_Plugins/tree/bili-live-v1.1', changes)
         entries = json.loads((ROOT / 'docs/releases/sources.json').read_text(encoding='utf-8'))['entries']
         entry = next(item for item in entries if item['tag'] == tag)
-        self.assertEqual(entry['status'], 'online')
+        self.assertEqual(entry['status'], 'archived_verified')
         self.assertEqual(entry['release_url'], url)
+        self.assertEqual(entry['superseded_by_url'], 'https://github.com/Lanpropro/DD_Monitor_CE/releases/tag/v0.9.1')
+        self.assertEqual(entry['plugin_author'], 'reon-nynes')
+        self.assertEqual({asset['name'] for asset in entry['assets']},
+                         {'bili_live-1.1.zip', 'plugin-catalog.json'})
         self.assertTrue(entry['last_edit_verified'])
 
     def test_workflow_and_validation_commands(self):
@@ -162,6 +181,8 @@ class ContributionGuideTests(unittest.TestCase):
                         if entry['status'] != 'archived_verified'}
         prepared = {entry['tag']: entry['file'] for entry in release_sources['entries']
                     if entry['status'] == 'prepared'}
+        bundled = {entry['tag']: entry['superseded_by_url'] for entry in release_sources['entries']
+                   if 'superseded_by_url' in entry}
         platforms = {
             'domestic_live': {'huya', 'douyu', 'douyin'},
             'global_live': {'twitch', 'youtube'},
@@ -187,8 +208,11 @@ class ContributionGuideTests(unittest.TestCase):
                     self.assertIn(download[2], release_tags)
                 else:
                     candidate = f'{plugin_id.replace("_", "-")}-v{manifest["version"]}'
-                    self.assertIn(candidate, prepared)
-                    self.assertIn(f'(docs/releases/{prepared[candidate]})', row)
+                    if candidate in bundled:
+                        self.assertIn(f'[本体内置]({bundled[candidate]})', row)
+                    else:
+                        self.assertIn(candidate, prepared)
+                        self.assertIn(f'(docs/releases/{prepared[candidate]})', row)
                 icons = re.findall(r'<img src="docs/assets/platforms/([^"/]+)\.png"', row)
                 self.assertEqual(set(icons), platforms.get(plugin_id, set()))
                 if 'icon' in manifest:
@@ -223,7 +247,11 @@ class ContributionGuideTests(unittest.TestCase):
                     self.assertIn('release_updated_at', entry)
                     if entry['status'] == 'archived_verified':
                         self.assertRegex(entry['source_commit'], r'^[0-9a-f]{40}$')
-                        self.assertIn(entry['superseded_by'], {item['tag'] for item in entries})
+                        if 'superseded_by_url' in entry:
+                            self.assertRegex(entry['superseded_by_url'],
+                                             r'^https://github\.com/Lanpropro/DD_Monitor_CE/releases/tag/v[0-9.]+$')
+                        else:
+                            self.assertIn(entry['superseded_by'], {item['tag'] for item in entries})
                         self.assertTrue(entry['plugin_author'])
                         self.assertTrue(entry['release_author'])
                         self.assertIn('archived_at', entry)
@@ -267,7 +295,7 @@ class ContributionGuideTests(unittest.TestCase):
                 elif '尚无公开发布' in source:
                     self.assertIn(f'](../releases/RELEASE-{plugin_id.replace("_", "-")}-v', source)
                 else:
-                    self.assertRegex(source, r'https://github\.com/Lanpropro/DD_Monitor_Plugins/releases/tag/')
+                    self.assertRegex(source, r'https://github\.com/Lanpropro/DD_Monitor_Plugins/(?:releases/tag|tree)/')
         self.assertIn('(docs/changes/README.md)', (ROOT / 'README.md').read_text(encoding='utf-8'))
         self.assertIn('(docs/changes/README.md)', (ROOT / 'CONTRIBUTING.md').read_text(encoding='utf-8'))
 

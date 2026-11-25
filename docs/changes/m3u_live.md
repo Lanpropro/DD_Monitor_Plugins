@@ -2,14 +2,21 @@
 
 > 类型：增量记录 ｜ 状态：维护中 ｜ 适用插件：m3u_live ｜ 更新：2026-11-20 ｜ 读者：维护者
 
-插件 ID 为 `m3u_live`。尚无公开发布，首版在配套宿主开发版验收，见 [1.0 发布说明](../releases/RELEASE-m3u-live-v1.0.md)。
+插件 ID 为 `m3u_live`。当前公开基线为 [IPTV Play 1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/m3u-live-v1.0)，配套本体为 0.8 Hotfix 2。
 
 ## 待发布
+
+暂无。
+
+## 已发布 v1.0
+
+- 与 [0.8 Hotfix 2](https://github.com/Lanpropro/DD_Monitor_CE/releases/tag/v0.8) 配套。 [正式发布说明](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/m3u-live-v1.0) · [ZIP](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/m3u-live-v1.0/m3u_live-1.0.zip)
+- 正式包已按标签逐文件核验，离线 11 项通过。实际发布便携包能装载插件，公开商店条目通过下载、摘要和图标核验。
 
 ### 2026-11-20｜1.0 与通用宿主接口
 
 - 沿用已验收的频道预设、列表导入、台标与首帧封面。预设、解析和频道探测随插件包提供，宿主只提供原生导入和卡片接口。
-- 初版 v0.8 缺少该接口，安装包留作发布候选，等配套宿主公开后再启用商店分发。
+- 频道导入、预设和关注卡片接口随本体 0.8 Hotfix 2 公开。
 
 ### 2026-11-19｜更名并加入电视预设
 

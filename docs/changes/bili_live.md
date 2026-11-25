@@ -2,7 +2,7 @@
 
 插件 ID：`bili_live`。
 
-上次公开发布基线：[bili-live-v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.1)。
+最后公开发布基线：[bili-live-v1.1 源码标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/bili-live-v1.1)。直播互动现由 [DD监控室CE v0.9.1](https://github.com/Lanpropro/DD_Monitor_CE/releases/tag/v0.9.1) 内置提供。
 
 记录规则与条目模板见[增量记录入口](README.md)。
 
@@ -20,7 +20,7 @@
 
 ## 已发布 v1.1（2026-11-05）
 
-[发布说明](../releases/RELEASE-bili-live-v1.1.md) · [GitHub Release](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.1)。源码提交 `5dae9abc1e8991767f0f1c705530c351a7e766fe`；公开安装包 SHA256：`0afa256d970f4ddf03f24de23522555ac5dcd11ddb75e9f1372a56c88db7c992`。
+[发布说明](../releases/RELEASE-bili-live-v1.1.md) · [源码标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/bili-live-v1.1)。源码提交 `5dae9abc1e8991767f0f1c705530c351a7e766fe`；公开安装包 SHA256：`0afa256d970f4ddf03f24de23522555ac5dcd11ddb75e9f1372a56c88db7c992`。
 
 ### 2026-11-05｜修复：收到的独立表情支持通过 +1 原样发送
 

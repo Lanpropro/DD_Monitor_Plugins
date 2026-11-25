@@ -11,11 +11,11 @@
 | 国内直播平台 | [domestic_live](domestic_live.md) | [domestic-live-v2.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v2.0) |
 | 海外直播平台 | [global_live](global_live.md) | [global-live-v1.2](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2) |
 | 比赛二路同步 | [match_sync](match_sync.md) | [match-sync-v1.7.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.7.0) |
-| B站直播互动 | [bili_live](bili_live.md) | [bili-live-v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.1) |
+| B站直播互动 | [bili_live](bili_live.md) | [1.1 历史发布](../releases/RELEASE-bili-live-v1.1.md) |
 | 网络代理 | [proxy_control](proxy_control.md) | [proxy-control-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/proxy-control-v1.0) |
 | B站稍后再看（验收候选） | [bili_watchlater](bili_watchlater.md) | 尚无公开发布 |
-| IPTV Play | [m3u_live](m3u_live.md) | 尚无公开发布 |
-| 企鹅体育 | [qie_live](qie_live.md) | 尚无公开发布 |
+| IPTV Play | [m3u_live](m3u_live.md) | [m3u-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/m3u-live-v1.0) |
+| 企鹅体育 | [qie_live](qie_live.md) | [qie-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/qie-live-v1.0) |
 
 基线按正式 Release 核对，使用公开发布版本，不以开发分支的清单版本替代。该机制从 2026-10-31 起启用；此前的开发增量尚未逐项回溯，文件没有条目不代表发布后没有改动。
 
@@ -60,5 +60,5 @@
 - [斗鱼直播候选记录](douyu_live.md)
 - [抖音直播候选记录](douyin_live.md)
 - [Twitch直播候选记录](twitch_live.md)
-- [YouTube直播候选记录](youtube_live.md)
+- [YouTube 直播记录](youtube_live.md) · [v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.1)
 - [CHZZK直播候选记录](chzzk_live.md)

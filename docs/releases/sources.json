@@ -240,14 +240,38 @@
     {
       "tag": "bili-live-v1.1",
       "file": "RELEASE-bili-live-v1.1.md",
-      "status": "online",
+      "status": "archived_verified",
       "source_kind": "github_release",
       "release_id": 435193844,
-      "release_updated_at": "2026-11-05T12:47:04Z",
+      "release_updated_at": "2026-11-05T13:05:24Z",
       "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.1",
       "last_edit_verified": true,
-      "raw_body_sha256": "3544dd016d20b00767d170aa7c336ccf56c0c6ed37b91b3954c99fcd4afcd7a7",
-      "sha256": "3544dd016d20b00767d170aa7c336ccf56c0c6ed37b91b3954c99fcd4afcd7a7"
+      "raw_body_sha256": "4b43278c36caa50eb5d15d6b1583ca038f72bc22f03c6d5f5b712a239174f38c",
+      "sha256": "d4504236c9fc744808ce2626735b1c5aaa34d7254148b7a8683c5ad7cc4f730e",
+      "release_name": "B站直播互动 v1.1",
+      "release_author": "Lanpropro",
+      "plugin_author": "reon-nynes",
+      "release_created_at": "2026-11-05T12:45:45Z",
+      "release_published_at": "2026-11-05T12:47:04Z",
+      "source_commit": "5dae9abc1e8991767f0f1c705530c351a7e766fe",
+      "archived_at": "2026-11-24T09:55:12.502901+00:00",
+      "superseded_by_url": "https://github.com/Lanpropro/DD_Monitor_CE/releases/tag/v0.9.1",
+      "assets": [
+        {
+          "id": 713392799,
+          "name": "bili_live-1.1.zip",
+          "size": 68071,
+          "sha256": "0afa256d970f4ddf03f24de23522555ac5dcd11ddb75e9f1372a56c88db7c992",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/bili-live-v1.1/bili_live-1.1.zip"
+        },
+        {
+          "id": 713392848,
+          "name": "plugin-catalog.json",
+          "size": 8136,
+          "sha256": "e619987abbe9493355428d107d05fa47f51016981cd5c08374806e12383f16e6",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/bili-live-v1.1/plugin-catalog.json"
+        }
+      ]
     },
     {
       "tag": "domestic-live-v2.0",
@@ -437,11 +461,31 @@
     {
       "tag": "youtube-live-v1.0",
       "file": "RELEASE-youtube-live-v1.0.md",
-      "status": "prepared",
-      "source_kind": "repository_candidate",
-      "base_commit": "ae3d1c64763284a7f82930491aee684210dd719f",
-      "last_edit_verified": false,
-      "sha256": "ad02f33a4ccca0911658f117a391cece9e3b082f2314d751b3f1af1a73bdc686"
+      "status": "archived_verified",
+      "source_kind": "github_release",
+      "release_id": 451099919,
+      "release_updated_at": "2026-11-19T09:17:57Z",
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.0",
+      "last_edit_verified": true,
+      "raw_body_sha256": "ad02f33a4ccca0911658f117a391cece9e3b082f2314d751b3f1af1a73bdc686",
+      "sha256": "ad02f33a4ccca0911658f117a391cece9e3b082f2314d751b3f1af1a73bdc686",
+      "release_name": "YouTube 直播 v1.0",
+      "release_author": "Lanpropro",
+      "plugin_author": "Lanpropro",
+      "release_created_at": "2026-11-19T08:47:54Z",
+      "release_published_at": "2026-11-19T09:17:57Z",
+      "source_commit": "a7c9316134a0e85f36bcbcdf2d05d0ced4b48cc0",
+      "assets": [
+        {
+          "id": 766983477,
+          "name": "youtube_live-1.0.zip",
+          "size": 12163116,
+          "sha256": "cd81a1b67aabb44286dcd8e13e45cb4114c3da674cfd20210c15c0d9037e115d",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/youtube-live-v1.0/youtube_live-1.0.zip"
+        }
+      ],
+      "archived_at": "2026-11-25T13:36:46+00:00",
+      "superseded_by": "youtube-live-v1.1"
     },
     {
       "tag": "chzzk-live-v1.0",
@@ -455,20 +499,83 @@
     {
       "tag": "m3u-live-v1.0",
       "file": "RELEASE-m3u-live-v1.0.md",
-      "status": "prepared",
-      "source_kind": "repository_candidate",
+      "status": "online",
+      "source_kind": "github_release",
       "base_commit": "f71f7c5586d072a428d8d5e66ea9dbb6f64dc6f4",
-      "last_edit_verified": false,
-      "sha256": "cb241d3a9988feb14138f236d61d7b879a4eb8580bc176df636325ec499cd6ac"
+      "last_edit_verified": true,
+      "sha256": "cb241d3a9988feb14138f236d61d7b879a4eb8580bc176df636325ec499cd6ac",
+      "raw_body_sha256": "3cd382b112426a808f8c4663c91604f03ac3db5f6237c526fd2082c134dab77e",
+      "release_id": 452348556,
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/m3u-live-v1.0",
+      "release_updated_at": "2026-11-20T16:51:40Z",
+      "release_published_at": "2026-11-20T16:51:40Z",
+      "release_created_at": "2026-11-20T06:30:18Z",
+      "release_author": "Lanpropro",
+      "plugin_author": "Lanpropro",
+      "release_name": "IPTV Play v1.0",
+      "source_commit": "f6a3d6d9c7bb29dae74f0eec11722a7103691ddd",
+      "assets": [
+        {
+          "id": 770751227,
+          "name": "m3u_live-1.0.zip",
+          "size": 73591,
+          "sha256": "3a974893b5ec032cf34bd31e182721361b2018ebbeba49b5b6588eaef2892381",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/m3u-live-v1.0/m3u_live-1.0.zip"
+        }
+      ]
     },
     {
       "tag": "qie-live-v1.0",
       "file": "RELEASE-qie-live-v1.0.md",
-      "status": "prepared",
-      "source_kind": "repository_candidate",
+      "status": "online",
+      "source_kind": "github_release",
       "base_commit": "f71f7c5586d072a428d8d5e66ea9dbb6f64dc6f4",
-      "last_edit_verified": false,
-      "sha256": "e9a14177aa5a2575284a27d05a092859aa16a48e67053f5d657271a1a00c8678"
+      "last_edit_verified": true,
+      "sha256": "e9a14177aa5a2575284a27d05a092859aa16a48e67053f5d657271a1a00c8678",
+      "release_id": 452348489,
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/qie-live-v1.0",
+      "release_updated_at": "2026-11-20T06:35:14Z",
+      "release_published_at": "2026-11-20T06:35:14Z",
+      "release_created_at": "2026-11-20T06:30:18Z",
+      "release_author": "Lanpropro",
+      "plugin_author": "Lanpropro",
+      "release_name": "企鹅体育 v1.0",
+      "source_commit": "f6a3d6d9c7bb29dae74f0eec11722a7103691ddd",
+      "assets": [
+        {
+          "id": 770750976,
+          "name": "qie_live-1.0.zip",
+          "size": 36182,
+          "sha256": "7af3e6d1c04ec29342905e93719d00bb78a427e36d58ee6c02c6efc59349103d",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/qie-live-v1.0/qie_live-1.0.zip"
+        }
+      ]
+    },
+    {
+      "tag": "youtube-live-v1.1",
+      "file": "RELEASE-youtube-live-v1.1.md",
+      "status": "online",
+      "source_kind": "github_release",
+      "last_edit_verified": true,
+      "sha256": "54a4baa6844ea2aa5d3f635b02bd1c00e81bc1288bd5c80fdc5a5ae4ecdc9c29",
+      "raw_body_sha256": "54a4baa6844ea2aa5d3f635b02bd1c00e81bc1288bd5c80fdc5a5ae4ecdc9c29",
+      "release_id": 458138655,
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.1",
+      "release_created_at": "2026-11-25T13:16:05Z",
+      "release_updated_at": "2026-11-25T13:16:42Z",
+      "release_published_at": "2026-11-25T13:16:42Z",
+      "release_name": "YouTube 直播 v1.1",
+      "source_commit": "7454ef811f0483d4e86843f5f2afb440391e5636",
+      "prerelease": false,
+      "assets": [
+        {
+          "id": 791628874,
+          "name": "youtube_live-1.1.zip",
+          "size": 12163157,
+          "sha256": "577f2c663f17933f17ecbdc1cbf35cdd04488c0f2ca3eee560fc6eeeb442ae06",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/youtube-live-v1.1/youtube_live-1.1.zip"
+        }
+      ]
     }
   ],
   "tags_without_recoverable_body": [

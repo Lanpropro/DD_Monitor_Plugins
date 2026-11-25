@@ -21,9 +21,9 @@
 | <img src="plugins/douyu_live/icon.png" alt="" width="20" height="20"> [斗鱼直播](plugins/douyu_live/README.md) | 直播播放、画质选择、账号关注、弹幕互动、礼物互动 | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyu-live-v1.0) |
 | <img src="plugins/douyin_live/icon.png" alt="" width="20" height="20"> [抖音直播](plugins/douyin_live/README.md) | 直播播放、画质选择、账号关注、官网弹幕输入（实验性） | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyin-live-v1.0) |
 | <img src="plugins/twitch_live/icon.png" alt="" width="20" height="20"> [Twitch直播](plugins/twitch_live/README.md) | 公开直播播放、画质选择、账号关注 | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/twitch-live-v1.0) |
-| <img src="plugins/youtube_live/icon.png" alt="" width="20" height="20"> [YouTube直播](plugins/youtube_live/README.md) | 公开直播播放、画质选择、账号关注 | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.0) |
+| <img src="plugins/youtube_live/icon.png" alt="" width="20" height="20"> [YouTube直播](plugins/youtube_live/README.md) | 公开直播播放、画质选择、账号关注 | [@Lanpropro](https://github.com/Lanpropro) | [v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.1) |
 | <img src="plugins/chzzk_live/icon.png" alt="" width="20" height="20"> [CHZZK直播](plugins/chzzk_live/README.md) | 公开直播播放、画质选择、弹幕观看 | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/chzzk-live-v1.0) |
-| <img src="plugins/qie_live/icon.png" alt="" width="20" height="20"> [企鹅体育](plugins/qie_live/README.md) | 公开直播播放、固定 720p、只读弹幕 | [@Lanpropro](https://github.com/Lanpropro) | [1.0 发布说明](docs/releases/RELEASE-qie-live-v1.0.md) |
+| <img src="plugins/qie_live/icon.png" alt="" width="20" height="20"> [企鹅体育](plugins/qie_live/README.md) | 公开直播播放、固定 720p、只读弹幕 | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/qie-live-v1.0) |
 
 <details>
 <summary>旧版组合包与迁移</summary>
@@ -41,11 +41,11 @@
 
 | 插件 | 功能 | 作者与维护 | 下载 |
 | --- | --- | --- | --- |
-| <img src="plugins/match_sync/icon.png" width="24" alt=""> [比赛二路同步](plugins/match_sync/README.md) | 对齐比赛主画面与多路解说，混合声音及弹幕。使用其他平台前先启用对应平台插件。 | 维护 [@Lanpropro](https://github.com/Lanpropro) | [2.0 Pre-release 2](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v2.0.2) |
-| <img src="docs/assets/platforms/bilibili.png" alt="" width="20" height="20"> [B站直播互动](plugins/bili_live/README.md) | 使用本体登录，发送弹幕和表情，浏览礼物目录及背包。 | 作者 [@reon-nynes](https://github.com/reon-nynes)，兼容维护 [@Lanpropro](https://github.com/Lanpropro) | [v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-live-v1.1) |
+| <img src="plugins/match_sync/icon.png" width="24" alt=""> [比赛二路同步](plugins/match_sync/README.md) | 对齐比赛主画面与多路解说，混合声音及弹幕。使用其他平台前先启用对应平台插件。 | 维护 [@Lanpropro](https://github.com/Lanpropro) | [2.0 Pre-release 2](docs/releases/RELEASE-match-sync-v2.0.2.md) |
+| <img src="docs/assets/platforms/bilibili.png" alt="" width="20" height="20"> [B站直播互动](plugins/bili_live/README.md) | 使用本体登录，发送弹幕和表情，浏览礼物目录及背包。 | 作者 [@reon-nynes](https://github.com/reon-nynes)，兼容维护 [@Lanpropro](https://github.com/Lanpropro) | [本体内置](https://github.com/Lanpropro/DD_Monitor_CE/releases/tag/v0.9.1) |
 | <img src="docs/assets/platforms/bilibili.png" alt="" width="20" height="20"> [B站稍后再看](plugins/bili_watchlater/README.md) | 浏览稍后再看，将视频放入画面墙。需要本体 **0.8 热修复 1** 或具备相同接口的更新版本。 | 作者[@Mrhaimian](https://github.com/Mrhaimian)，兼容维,UI制作 [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-watchlater-v1.0) |
 | [网络代理](plugins/proxy_control/README.md) | 导入订阅与节点，按需启动代理，查看连接、测速与切换配置。 | 维护 [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/proxy-control-v1.0) |
-| <img src="plugins/m3u_live/icon.png" alt="" width="20" height="20"> [IPTV Play](plugins/m3u_live/README.md) | 电视预设、M3U 播放列表及 HLS 导入。需要配套宿主的通用频道接口。 | [@Lanpropro](https://github.com/Lanpropro) | [1.0 发布说明](docs/releases/RELEASE-m3u-live-v1.0.md) |
+| <img src="plugins/m3u_live/icon.png" alt="" width="20" height="20"> [IPTV Play](plugins/m3u_live/README.md) | 电视预设、M3U 播放列表及 HLS 导入。需要配套宿主的通用频道接口。 | [@Lanpropro](https://github.com/Lanpropro) | [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/m3u-live-v1.0) |
 
 ## 安装与更新
 
