@@ -27,7 +27,6 @@
 | 抖音直播 | [1.0](RELEASE-douyin-live-v1.0.md) | [douyin-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyin-live-v1.0) |
 | 斗鱼直播 | [1.0](RELEASE-douyu-live-v1.0.md) | [douyu-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyu-live-v1.0) |
 | 虎牙直播 | [1.0](RELEASE-huya-live-v1.0.md) | [huya-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/huya-live-v1.0) |
-| YouTube 直播 | [1.0](RELEASE-youtube-live-v1.0.md) | [youtube-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.0) |
 | Twitch 直播 | [1.0](RELEASE-twitch-live-v1.0.md) | [twitch-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/twitch-live-v1.0) |
 | CHZZK 直播 | [1.0](RELEASE-chzzk-live-v1.0.md) | [chzzk-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/chzzk-live-v1.0) |
 | B站稍后再看 | [1.0](RELEASE-bili-watchlater-v1.0.md) | [bili-watchlater-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-watchlater-v1.0) |
@@ -39,6 +38,7 @@
 
 | 插件 | 历史说明 | 保留源码 | 替代版本 |
 | --- | --- | --- | --- |
+| YouTube 直播 | [1.0](RELEASE-youtube-live-v1.0.md) | [youtube-live-v1.0 标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/youtube-live-v1.0) | [1.1](RELEASE-youtube-live-v1.1.md) |
 | 比赛二路同步 | [1.7.0](RELEASE-match-sync-v1.7.0.md) | [match-sync-v1.7.0 标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/match-sync-v1.7.0) | [2.0 preview](RELEASE-match-sync-v2.0-pre.1.md) |
 | 比赛二路同步 | [1.6.1](RELEASE-match-sync-v1.6.1.md) | [match-sync-v1.6.1 标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/match-sync-v1.6.1) | [1.7.0](RELEASE-match-sync-v1.7.0.md) |
 | 比赛二路同步 | [1.6](RELEASE-match-sync-v1.6.md) | [match-sync-v1.6 标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/match-sync-v1.6) | [1.7.0](RELEASE-match-sync-v1.7.0.md) |

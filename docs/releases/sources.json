@@ -552,15 +552,19 @@
     {
       "tag": "youtube-live-v1.0",
       "file": "RELEASE-youtube-live-v1.0.md",
-      "status": "online",
+      "status": "archived_verified",
       "source_kind": "github_release",
-      "last_edit_verified": true,
-      "sha256": "ad02f33a4ccca0911658f117a391cece9e3b082f2314d751b3f1af1a73bdc686",
       "release_id": 451099919,
-      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.0",
       "release_updated_at": "2026-11-19T09:17:57Z",
-      "release_published_at": "2026-11-19T09:17:57Z",
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.0",
+      "last_edit_verified": true,
       "raw_body_sha256": "ad02f33a4ccca0911658f117a391cece9e3b082f2314d751b3f1af1a73bdc686",
+      "sha256": "ad02f33a4ccca0911658f117a391cece9e3b082f2314d751b3f1af1a73bdc686",
+      "release_name": "YouTube 直播 v1.0",
+      "release_author": "Lanpropro",
+      "plugin_author": "Lanpropro",
+      "release_created_at": "2026-11-19T08:47:54Z",
+      "release_published_at": "2026-11-19T09:17:57Z",
       "source_commit": "a7c9316134a0e85f36bcbcdf2d05d0ced4b48cc0",
       "assets": [
         {
@@ -570,7 +574,9 @@
           "sha256": "cd81a1b67aabb44286dcd8e13e45cb4114c3da674cfd20210c15c0d9037e115d",
           "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/youtube-live-v1.0/youtube_live-1.0.zip"
         }
-      ]
+      ],
+      "archived_at": "2026-11-25T13:36:46+00:00",
+      "superseded_by": "youtube-live-v1.1"
     },
     {
       "tag": "chzzk-live-v1.0",

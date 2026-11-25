@@ -17,8 +17,8 @@
 
 ## 已发布 v1.0（2026-11-19）
 
-- 与 [本体 0.8 热修复 1](https://github.com/Lanpropro/DD_Monitor_CE/releases/tag/v0.8) 配套发布。 [公开说明](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.0) · [ZIP](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/youtube-live-v1.0/youtube_live-1.0.zip)
-- 标签源码 a7c9316134a0e85f36bcbcdf2d05d0ced4b48cc0 已进入 `develop` 与 `main`。正式包 12163116 字节，SHA-256 `cd81a1b67aabb44286dcd8e13e45cb4114c3da674cfd20210c15c0d9037e115d`。
+- 与 [本体 0.8 热修复 1](https://github.com/Lanpropro/DD_Monitor_CE/releases/tag/v0.8) 配套发布，现由 1.1 替代。[归档发布说明](../releases/RELEASE-youtube-live-v1.0.md)与[源码标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/youtube-live-v1.0)继续保留。
+- 正式安装包 12163116 字节，SHA-256 `cd81a1b67aabb44286dcd8e13e45cb4114c3da674cfd20210c15c0d9037e115d`。
 
 ## 待发布
 
