@@ -11,9 +11,10 @@ from .youtube_tools import YouTubeMediaError
 
 
 PROVIDER_SHA256 = 'cbbd34d9a3b17e96af4204d153361da38402332fbfa4def9d4517c8a823ed233'
+YT_DLP_VERSION = '2026.11.23'
 TOOLS = {
-    'yt-dlp.exe': ('https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe',
-                   'f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d'),
+    'yt-dlp.exe': (f'https://github.com/yt-dlp/yt-dlp/releases/download/{YT_DLP_VERSION}/yt-dlp.exe',
+                   '622ed48023cac1daa52a3bf3a6ac38f03514de214b5f0fa069389fd0f6d17e5c'),
     'node.exe': ('https://nodejs.org/dist/v24.11.0/win-x64/node.exe',
                  'b7d912484d42e7a0d0cb5b26a86410ec973a79ece7d61ad535e2d1a97a9026e1'),
 }
@@ -35,7 +36,7 @@ def ensure_runtime(proxy, cancelled, *, cache=None):
     if os.name != 'nt':
         raise YouTubeMediaError('YouTube 高画质组件目前支持 Windows x64')
     base = Path(cache) if cache else Path(os.environ.get('LOCALAPPDATA', tempfile.gettempdir())) / 'DDMonitorCE/YouTubeMedia'
-    root = base / ('2026.10.26-node24.11.0-' + PROVIDER_SHA256[:12])
+    root = base / f'{YT_DLP_VERSION}-node24.11.0-{PROVIDER_SHA256[:12]}'
     while not _lock.acquire(timeout=.1):
         if cancelled():
             raise YouTubeMediaError('YouTube 高画质准备已取消')
