@@ -1,7 +1,5 @@
 # 插件发布记录
 
-- [比赛二路同步 2.0 Pre-release 2](RELEASE-match-sync-v2.0.2.md) · Windows x64 D3D11 试验呈现与画中画、弹幕优化。
-
 > 类型：索引 ｜ 状态：维护中 ｜ 适用版本：全部版本 ｜ 更新：2026-11-15 ｜ 读者：维护者
 
 发布说明集中保存在本目录。2026-11-03 同步当前 GitHub Release 的最新正文，包括维护者在网页上的修改；正文仅统一换行和文件末尾换行，不改写内容。
@@ -20,6 +18,7 @@
 
 | 插件 | 仓库说明 | GitHub 来源 |
 | --- | --- | --- |
+| 比赛二路同步 | [2.0 Pre-release 2](RELEASE-match-sync-v2.0.2.md) | [GitHub Release](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v2.0.2) · 插件商店可获取 |
 | YouTube 直播 | [1.1](RELEASE-youtube-live-v1.1.md) | [youtube-live-v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.1) |
 | 比赛二路同步 | [2.0 pre release](RELEASE-match-sync-v2.0-pre.1.md) | [GitHub Release](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v2.0-pre.1) · 插件商店可获取 |
 | 国内直播平台 | [2.0](RELEASE-domestic-live-v2.0.md) | [domestic-live-v2.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v2.0) |
