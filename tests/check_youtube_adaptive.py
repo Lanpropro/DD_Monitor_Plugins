@@ -1,11 +1,13 @@
 """Independent YouTube quality selection, segment reads and cancellation; no accounts."""
 import argparse
 from collections import deque
+from hashlib import sha256
 import importlib
 import io
 import os
 from pathlib import Path
 import sys
+from tempfile import TemporaryDirectory
 import threading
 import types
 import unittest
@@ -252,12 +254,36 @@ class IsolationTests(unittest.TestCase):
         self.assertNotIn('网页登录', text)
 
     def test_provider_bundle_integrity_and_private_script_only(self):
-        import tempfile
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             runtime.unpack_provider(ROOT / 'plugins/youtube_live/youtube-provider.zip', Path(directory))
             scripts = Path(directory) / 'provider/plugins/script/yt_dlp_plugins/extractor'
             self.assertEqual({p.name for p in scripts.iterdir()}, {'getpot_bgutil.py', 'getpot_bgutil_script.py'})
             self.assertTrue((Path(directory) / 'provider/server/build/generate_once.js').is_file())
+
+    @unittest.skipUnless(os.name == 'nt', 'The private runtime currently supports Windows')
+    def test_updated_extractor_is_prepared_separately_from_the_ready_old_runtime(self):
+        with TemporaryDirectory() as directory:
+            base = Path(directory)
+            previous = base / f'2026.10.26-node24.11.0-{runtime.PROVIDER_SHA256[:12]}'
+            previous.mkdir()
+            (previous / 'ready').touch()
+            binaries = {'yt-dlp.exe': b'new extractor', 'node.exe': b'node runtime'}
+            for name in binaries:
+                (previous / name).write_bytes(b'previous runtime')
+            pins = {name: (runtime.TOOLS[name][0], sha256(data).hexdigest()) for name, data in binaries.items()}
+            responses = {url: MagicMock() for url, _ in pins.values()}
+            for name, (url, _) in pins.items():
+                responses[url].__enter__.return_value.iter_content.return_value = [binaries[name]]
+            with patch.dict(runtime.TOOLS, pins), patch.object(runtime.requests, 'Session') as session, \
+                    patch.object(runtime, 'unpack_provider'):
+                http = session.return_value.__enter__.return_value
+                http.get.side_effect = lambda url, **_kwargs: responses[url]
+                current = runtime.ensure_runtime('', lambda: False, cache=base)
+                self.assertEqual(runtime.ensure_runtime('', lambda: False, cache=base), current)
+            self.assertEqual(current, base / f'{runtime.YT_DLP_VERSION}-node24.11.0-{runtime.PROVIDER_SHA256[:12]}')
+            self.assertEqual(http.get.call_count, 2)
+            self.assertEqual((current / 'yt-dlp.exe').read_bytes(), binaries['yt-dlp.exe'])
+            self.assertEqual((previous / 'yt-dlp.exe').read_bytes(), b'previous runtime')
 
     def test_legacy_and_sibling_plugins_have_no_adaptive_modules(self):
         self.assertNotIn('youtube_playback', (ROOT / 'plugins/global_live/plugin.py').read_text(encoding='utf-8'))
