@@ -12,7 +12,7 @@
 
 首次打开或自动模式下高画质来源不可用时，会尝试原有HLS路径；已经展示的手选高画质失败会明确报错。当前代理出现过元数据连接与分片读取失败；50秒媒体验证不等于所有网络下的完整播放验收。
 
-需要包含`retain_media_source`接口的配套开发宿主；旧宿主继续使用原HLS。首次高画质播放自动准备固定版本yt-dlp 2026.10.26和Node 24.11.0（Windows x64），通过现有代理下载官方文件并核对SHA256，无需用户安装Python包、Node或手填Token。不读取浏览器资料、Cookie或现有登录令牌；遇到YouTube访问验证会给出固定错误，不承诺所有网络均可匿名播放。
+需要包含`retain_media_source`接口的宿主（建议使用 0.8 热修复 1 或更新版本）；旧宿主继续使用原HLS。首次高画质播放自动准备固定版本yt-dlp 2026.11.23和Node 24.11.0（Windows x64），通过现有代理下载官方文件并核对SHA256，无需用户安装Python包、Node或手填Token。不读取浏览器资料、Cookie或现有登录令牌；遇到YouTube访问验证会给出固定错误，不承诺所有网络均可匿名播放。
 
 私有来源校验组件为bgutil 2.0.2，随包保存源码、锁文件与许可证；只启用脚本提供器，不连接本机未知HTTP服务。缓存位于`%LOCALAPPDATA%/DDMonitorCE/YouTubeMedia`。重建组件：检出`26475e9d3665b972c4aeb83b4dbaafcf64b88438`，从server/package.json移除可选canvas原生依赖并更新锁文件，`npm ci --ignore-scripts`、`node node_modules/typescript/bin/tsc`，再运行`python tools/build_youtube_provider.py --provider <源码目录>`。实际变更说明在组件内`SOURCE.json`，未用canvas原生扩展；下载地址、SHA256在`youtube_runtime.py`中固定。
 
