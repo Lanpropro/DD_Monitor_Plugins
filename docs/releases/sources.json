@@ -630,6 +630,15 @@
           "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/qie-live-v1.0/qie_live-1.0.zip"
         }
       ]
+    },
+    {
+      "tag": "youtube-live-v1.1",
+      "file": "RELEASE-youtube-live-v1.1.md",
+      "status": "prepared",
+      "source_kind": "repository_candidate",
+      "base_commit": "7454ef811f0483d4e86843f5f2afb440391e5636",
+      "last_edit_verified": false,
+      "sha256": "54a4baa6844ea2aa5d3f635b02bd1c00e81bc1288bd5c80fdc5a5ae4ecdc9c29"
     }
   ],
   "tags_without_recoverable_body": [

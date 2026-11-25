@@ -1,16 +1,19 @@
 """Single-platform ZIP autonomy and legacy migration; no accounts/network/messages."""
 import argparse
 from copy import deepcopy
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
 parser=argparse.ArgumentParser()
 parser.add_argument('--host',type=Path,required=True)
+parser.add_argument('--previous-youtube-archive', type=Path)
 args, remaining=parser.parse_known_args()
 sys.path.insert(0,str(args.host.resolve()))
 os.environ['DDM_NO_SAVE']='1'
@@ -22,16 +25,20 @@ from ddm.plugins import PluginManager
 KINDS=('huya','douyu','douyin','twitch','youtube','chzzk')
 
 
+def archive_for(plugin_id):
+    manifest = json.loads((ROOT / 'plugins' / plugin_id / 'plugin.json').read_text(encoding='utf-8'))
+    return ROOT / 'dist' / f"{plugin_id}-{manifest['version']}.zip"
+
+
 class PackageTests(unittest.TestCase):
     def install(self,manager,plugin_id):
-        version='2.0' if plugin_id=='domestic_live' else '1.2' if plugin_id=='global_live' else '1.0'
-        manager.install_zip(str(ROOT/'dist'/f'{plugin_id}-{version}.zip'))
+        manager.install_zip(str(archive_for(plugin_id)))
 
     def test_independent_packages_require_app_08(self):
         offers = []
         for kind in KINDS:
             plugin_id = f'{kind}_live'
-            with zipfile.ZipFile(ROOT / 'dist' / f'{plugin_id}-1.0.zip') as archive:
+            with zipfile.ZipFile(archive_for(plugin_id)) as archive:
                 manifest = json.loads(archive.read(f'{plugin_id}/plugin.json'))
             self.assertEqual(manifest['min_app_version'], '0.8', plugin_id)
             offers.append(dict(id=plugin_id, available=True, min_app_version=manifest['min_app_version']))
@@ -44,7 +51,7 @@ class PackageTests(unittest.TestCase):
         icons = set()
         for kind in KINDS:
             plugin_id = f'{kind}_live'
-            with zipfile.ZipFile(ROOT / 'dist' / f'{plugin_id}-1.0.zip') as archive:
+            with zipfile.ZipFile(archive_for(plugin_id)) as archive:
                 manifest = json.loads(archive.read(f'{plugin_id}/plugin.json'))
                 self.assertEqual(manifest['icon'], 'icon.png', plugin_id)
                 icon = archive.read(f'{plugin_id}/{manifest["icon"]}')
@@ -153,17 +160,53 @@ class PackageTests(unittest.TestCase):
         result=subprocess.run([sys.executable,str(ROOT/'tools/build_plugins.py'),'--plugin','youtube_live'],
                               capture_output=True,text=True,timeout=30)
         self.assertEqual(result.returncode,0,result.stderr)
-        self.assertEqual(result.stdout.strip(),'youtube_live-1.0.zip')
+        self.assertEqual(result.stdout.strip(), archive_for('youtube_live').name)
         self.assertEqual(other.stat().st_mtime_ns,before)
 
     def test_bundled_files_match_the_single_maintained_source(self):
         recipes=json.loads((ROOT/'tools/platform_bundles.json').read_text(encoding='utf-8'))
         for plugin_id,recipe in recipes.items():
-            with zipfile.ZipFile(ROOT/'dist'/f'{plugin_id}-1.0.zip') as archive:
+            with zipfile.ZipFile(archive_for(plugin_id)) as archive:
                 for destination,source in recipe.items():
                     self.assertEqual(archive.read(plugin_id+'/'+destination),(ROOT/source).read_bytes())
                 self.assertIsNone(archive.testzip())
                 self.assertLess(len(archive.namelist()),256)
+
+    def test_youtube_1_1_store_offer_and_restart_upgrade(self):
+        if args.previous_youtube_archive is None:
+            self.skipTest('Pass the verified public YouTube 1.0 archive to run the upgrade check')
+        from ddm import online, plugin_updates
+
+        plugin_id = 'youtube_live'
+        candidate = archive_for(plugin_id)
+        previous = args.previous_youtube_archive
+        tag = 'youtube-live-v1.1'
+        url = f'https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/{tag}'
+        releases = [{'html_url': url, 'assets': [dict(
+            name=candidate.name, size=candidate.stat().st_size,
+            digest='sha256:' + sha256(candidate.read_bytes()).hexdigest(),
+            browser_download_url=f'{url.replace("/tag/", "/download/")}/{candidate.name}',
+        )]}]
+        with patch.object(online, 'releases', return_value=releases), patch.object(online, 'download', return_value=candidate):
+            offer, = online.plugin_catalog(None, '0.8')
+        self.assertEqual((offer['id'], offer['version'], offer['min_app_version']), (plugin_id, '1.1', '0.8'))
+        self.assertTrue(offer['available'] and offer['icon_png'])
+        with tempfile.TemporaryDirectory() as directory:
+            manager = PluginManager(plugins_dir=directory, enabled=[plugin_id])
+            self.assertEqual(manager.install_zip(str(previous)), plugin_id)
+            marker = Path(directory) / plugin_id / 'fixture-user-data.txt'
+            marker.write_text('keep', encoding='utf-8')
+            self.assertEqual(manager.catalog()[0]['version'], '1.0')
+            self.assertEqual(plugin_updates.install(manager, str(candidate), offer), plugin_id)
+            self.assertEqual(plugin_updates.pending_versions(manager), {plugin_id: '1.1'})
+            manager.load()
+            try:
+                self.assertFalse(manager.skipped)
+                self.assertEqual(manager.catalog()[0]['version'], '1.1')
+                self.assertEqual(set(manager.platforms), {'youtube'})
+                self.assertEqual(marker.read_text(encoding='utf-8'), 'keep')
+            finally:
+                manager.unload()
 
 
 if __name__=='__main__':
