@@ -11,10 +11,10 @@ def check(app, host, module):
     audio = import_module(module.__package__ + '.audio')
     diagnostic = import_module(module.__package__ + '.diagnostics')
     # Silence only the trial output device, before the very first submitted sample.
-    for trial, silent, muted in (('trial', '1', True), ('', '1', False), ('trial', '0', False)):
+    for trial, silent, muted in (('1', '1', True), ('0', '1', False), ('1', '0', False)):
         pump = Mock()
         sink = Mock()
-        with patch.dict(os.environ, DDM_MATCH_QUICK_PLUGIN=trial, DDM_MATCH_MONITOR_SILENT=silent), \
+        with patch.dict(os.environ, DDM_MATCH_MONITOR=trial, DDM_MATCH_MONITOR_SILENT=silent), \
                 patch.object(audio, 'QAudioSink', return_value=sink):
             feed = audio.AudioFeed(pump, None, None)
             feed.start()
