@@ -4,12 +4,25 @@ from importlib import import_module
 import os
 from pathlib import Path
 import sys
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
 
 def check(app, host, module):
     audio = import_module(module.__package__ + '.audio')
     diagnostic = import_module(module.__package__ + '.diagnostics')
+    # Silence only the trial output device, before the very first submitted sample.
+    for trial, silent, muted in (('trial', '1', True), ('', '1', False), ('trial', '0', False)):
+        pump = Mock()
+        sink = Mock()
+        with patch.dict(os.environ, DDM_MATCH_QUICK_PLUGIN=trial, DDM_MATCH_MONITOR_SILENT=silent), \
+                patch.object(audio, 'QAudioSink', return_value=sink):
+            feed = audio.AudioFeed(pump, None, None)
+            feed.start()
+            feed.timer.stop()
+            assert (call.setVolume(0.) in sink.method_calls) == muted
+            if muted:
+                assert sink.method_calls.index(call.setVolume(0.)) < sink.method_calls.index(call.start())
+            pump.fill.assert_called_once()
     metrics = diagnostic.AudioReadMetrics()
     metrics.record(10, 100., .01, 1., 3, 40., at=8.)
     metrics.record(10, 110., .01, 1., 3, 40., at=10.)
@@ -75,6 +88,7 @@ def check(app, host, module):
             pump._fill()
             assert len(pump.read_metrics.samples) == 1, 'Rejected writes must not advance evidence'
             report = pump.read_metrics.stats()
+            assert (report['written_blocks'], report['tracks_min'], report['tracks_max']) == (1, 1, 1)
             assert report['sources'][0]['channels'] == [3]
             assert report['sources'][0]['rate_min'] == 1.02
             probe = diagnostic.PlaybackProbe(host, Path('unused-audio-metrics.jsonl'))
@@ -82,6 +96,9 @@ def check(app, host, module):
             try:
                 assert probe.snapshot()['audio_reads'] == report
                 assert probe.snapshot()['audio_pipeline'] == pump.timings.stats()
+                pump.read_metrics.record_mix([(b'', 1), (b'', 0), (b'', 40)])
+                mixed = pump.read_metrics.stats()
+                assert (mixed['written_blocks'], mixed['tracks_min'], mixed['tracks_max']) == (2, 1, 2)
             finally:
                 probe.deleteLater()
         pump.sink = pump.device = None

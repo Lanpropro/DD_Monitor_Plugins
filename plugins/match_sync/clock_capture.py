@@ -13,16 +13,40 @@ from .video import av, image_from_frame, np
 from .clock_sync import parse_clock
 
 
-def capture_band(history, anchor, crop, cancelled, *, preview=False):
+EVENT_BEFORE = 15.0
+EVENT_AFTER = 10.0
+EVENT_INTERVAL = .125
+
+
+def capture_event_band(history, anchor, crop, cancelled, *, deadline):
+    """Allow future frames to arrive, retaining gaps as gaps in the filmstrip."""
+    segment = history.segment_at(anchor)
+    if segment is None:
+        raise ValueError('点击位置没有可用的赛事画面，请回到正常播放后重试')
+    while not cancelled.is_set():
+        bounds = segment.bounds()
+        if bounds is None or not bounds[0] <= anchor <= bounds[1] + .05:
+            raise ValueError('点击位置已离开缓存，请重新获取画面')
+        start = max(bounds[0], anchor - EVENT_BEFORE)
+        end = min(bounds[1], anchor + EVENT_AFTER)
+        if end >= anchor + EVENT_AFTER or time.monotonic() >= deadline:
+            return capture_band(segment, anchor, crop, cancelled, event_window=(start, end))
+        cancelled.wait(.1)
+    return []
+
+
+def capture_band(history, anchor, crop, cancelled, *, preview=False, event_window=None):
     if cancelled.is_set():
         return []
-    start = anchor if preview else anchor - 1.5
+    start, end = event_window or (anchor if preview else anchor - 1.5, anchor)
     segment = history.segment_at(start)
     if segment is None or segment is not history.segment_at(anchor):
         raise ValueError('所选播放位置的连续缓存不足，请等待缓存后重新采样')
     history = segment
     origin = history.origin
-    result = history.packet_range(None, start - origin)
+    # Subtracting a large monotonic origin can round a stored keyframe
+    # timestamp slightly below its packet timestamp.
+    result = history.packet_range(None, start - origin + .000001)
     if result is None:
         raise ValueError('该位置缺少关键帧，请等待缓存后重新采样')
     config, packets, _reset = result
@@ -33,6 +57,7 @@ def capture_band(history, anchor, crop, cancelled, *, preview=False):
     frames = []
     deadline = time.monotonic() + 12
     last = float('-inf')
+    full_event = event_window is not None and crop == (0, 0, 1, 1)
     while packets and not cancelled.is_set():
         for packet in packets:
             if cancelled.is_set():
@@ -45,18 +70,20 @@ def capture_band(history, anchor, crop, cancelled, *, preview=False):
                     continue
                 if preview:
                     return [(stamp, image_from_frame(frame, width=640))]
-                if stamp > anchor + .001:
-                    if len(frames) < 12 or frames[-1][0] - frames[0][0] < 1.1:
-                        raise ValueError('连续画面不足，请重新采样')
-                    return frames
-                if stamp - last < .065:
+                if stamp > end + .001:
+                    return checked_frames(frames, event_window)
+                exact_event = event_window and abs(stamp - anchor) <= .001
+                if not exact_event and stamp - last < (EVENT_INTERVAL if event_window else .065):
                     continue
                 # Limit the full-frame conversion before applying the normalized
                 # crop; a 4K source must not become a 4K QImage on the worker.
-                image = image_from_frame(frame, width=1280)
-                x, y, width, height = crop
-                image = image.copy(round(x * image.width()), round(y * image.height()),
-                                   max(1, round(width * image.width())), max(1, round(height * image.height())))
+                if full_event:
+                    image = image_from_frame(frame, width=480)
+                else:
+                    image = image_from_frame(frame, width=1280)
+                    x, y, width, height = crop
+                    image = image.copy(round(x * image.width()), round(y * image.height()),
+                                       max(1, round(width * image.width())), max(1, round(height * image.height())))
                 image = image.scaled(480, 160, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 frames.append((stamp, image))
                 last = stamp
@@ -64,6 +91,14 @@ def capture_band(history, anchor, crop, cancelled, *, preview=False):
         if result is None or result[2]:
             break
         packets = result[1]
+    return checked_frames(frames, event_window)
+
+
+def checked_frames(frames, event_window):
+    if event_window:
+        if len(frames) < 2:
+            raise ValueError('赛事事件前后画面不足，请重新采样')
+        return frames
     if len(frames) >= 12 and frames[-1][0] - frames[0][0] >= 1.1:
         return frames
     raise ValueError('未能取得连续计时器画面，请重新采样')

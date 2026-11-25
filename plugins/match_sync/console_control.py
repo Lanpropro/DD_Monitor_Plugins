@@ -43,13 +43,25 @@ def _layout_restore_control(viewer):
 
 
 def set_comparison_visible(viewer, visible):
+    bridge = getattr(viewer, 'monitor_bridge', None)
+    timing = bridge.buttons.pending_paint.get(viewer.compare) if bridge is not None else None
     sizes = viewer.body_split.sizes()
+    if timing:
+        started = time.perf_counter()
     viewer.comparison_panel.setVisible(visible)
+    if timing:
+        bridge.buttons.elapsed(timing[0], 'panel_visibility_ms', started)
+        started = time.perf_counter()
     viewer.generation += 1
     height = 240 if visible else 0
     if len(sizes) == 3:
-        viewer.body_split.setSizes([max(1, sizes[0] + sizes[1] - height), height, sizes[2]])
-    if visible:
+        split = viewer.body_split
+        handles = int(visible) + int(not viewer.settings_panel.isHidden())
+        picture_height = split.contentsRect().height() - handles * split.handleWidth() - height - sizes[2]
+        split.setSizes([max(1, picture_height), height, sizes[2]])
+    if timing:
+        bridge.buttons.elapsed(timing[0], 'splitter_sizes_ms', started)
+    if visible and not (viewer.split_presentation and viewer.auxiliary_timer.isActive()):
         viewer.comparison_panel.render(viewer.live_clock(), viewer.shifts())
 
 
@@ -190,8 +202,12 @@ def end_row_drag(viewer):
 
 
 def show_comparison(viewer, room_id):
+    already_open = viewer.compare.isChecked()
     viewer.compare.setChecked(True)
-    viewer.comparison_panel.render(viewer.live_clock(), viewer.shifts())
+    if viewer.split_presentation and viewer.auxiliary_timer.isActive():
+        viewer.comparison_panel.sync_targets()
+    elif already_open:
+        viewer.comparison_panel.render(viewer.live_clock(), viewer.shifts())
     index = viewer.comparison_panel.target.findData(room_id)
     if index >= 0:
         viewer.comparison_panel.target.setCurrentIndex(index)
@@ -208,4 +224,4 @@ def set_chat_visible(viewer, visible):
 
 def position_removal_notice(viewer):
     viewer.removal_notice.move(max(0, (viewer.settings_panel.width() - viewer.removal_notice.width()) // 2),
-        max(0, viewer.settings_panel.height() - viewer.console_footer.height() - viewer.removal_notice.height() - 8))
+        max(0, viewer.settings_panel.height() - viewer.removal_notice.height() - 8))

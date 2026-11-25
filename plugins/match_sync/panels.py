@@ -1,7 +1,7 @@
 """Shared appearance of the playback and sending consoles."""
 import ctypes
 import sys
-from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, QSignalBlocker, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGridLayout, QHBoxLayout, QLabel, QListView, QPushButton, QScrollArea, QStyledItemDelegate, QStyle, QToolTip, QVBoxLayout, QWidget
 
@@ -232,7 +232,7 @@ class ConsoleIconButton(QPushButton):
             painter.drawLine(QPointF(7, -6), QPointF(7, 6))
 
 
-def native_console_button(button, tooltip, size=32):
+def native_console_button(button, tooltip, size=32, *, unchecked_hover=None):
     """Keep the host's icon drawing and behavior with the console's spacing."""
     button.setFixedSize(size, size)
     button.setAutoDefault(False)
@@ -241,13 +241,16 @@ def native_console_button(button, tooltip, size=32):
     button.setToolTip(tooltip)
     button.setAccessibleName(tooltip)
     use_link_cursor(button)
+    hover_rule = (f'QPushButton:!checked:hover {{background: {unchecked_hover};}}'
+                  if unchecked_hover is not None else '')
     button.setStyleSheet(f'''QPushButton {{background: transparent; border: none; outline: none;
         padding: 0; border-radius: 6px;}}
         QPushButton:hover {{background: {console_hover_color()};}}
         QPushButton:pressed {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}
         QPushButton:checked {{background: {theme.ACCENT_SOFT}; color: {theme.ACCENT};}}
         QPushButton:checked:hover {{background: {console_hover_color()};}}
-        QPushButton:disabled {{color: {theme.TEXT4};}}''')
+        QPushButton:disabled {{color: {theme.TEXT4};}}
+        {hover_rule}''')
     return button
 
 
@@ -281,16 +284,14 @@ class ConsoleChannels(QComboBox):
         self.setFocusPolicy(Qt.NoFocus)
         for label, value in (('原始声道', 0), ('仅左输出', 3), ('仅右输出', 4)):
             self.addItem(label, value)
-        self.left = native_console_button(QPushButton('L'), '左声道')
-        self.right = native_console_button(QPushButton('R'), '右声道')
+        self.left = native_console_button(QPushButton('L'), '左声道', unchecked_hover=theme.CONTENT_HOVER)
+        self.right = native_console_button(QPushButton('R'), '右声道', unchecked_hover=theme.CONTENT_HOVER)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
         for button in (self.left, self.right):
             button.setFixedSize(30, 32)
             button.setCheckable(True)
-            button.setStyleSheet(button.styleSheet() + f'''
-                QPushButton:!checked:hover {{background: {theme.CONTENT_HOVER};}}''')
             button.clicked.connect(self._clicked)
             layout.addWidget(button)
         use_link_cursor(self)
@@ -395,6 +396,15 @@ class MatchSettingsDialog(QDialog):
         form.addRow('缓存余量', viewer.buffer_reserve)
         form.addRow('画中画画质', viewer.crop_quality)
         viewer.crop_quality.show()
+        if viewer.d3d11_picture is not None:
+            self.picture_renderer = QComboBox(self)
+            self.picture_renderer.addItem('光栅', False)
+            self.picture_renderer.addItem('D3D11（试验，推荐用于减轻卡顿）', True)
+            self.picture_renderer.setToolTip('主画面卡顿时可尝试 D3D11。实播对照中，D3D11 明显减少了主画面的长间隔。')
+            form.addRow('主画面渲染', self.picture_renderer)
+            self._sync_picture_renderer()
+            self.picture_renderer.currentIndexChanged.connect(self._picture_renderer_changed)
+            viewer.d3d11_picture.stateChanged.connect(self._sync_picture_renderer)
         options_column.addLayout(form)
         self.quality_status = QLabel()
         self.quality_status.setWordWrap(True)
@@ -424,13 +434,22 @@ class MatchSettingsDialog(QDialog):
         close.rejected.connect(self.close)
         layout.addWidget(close)
 
+    def _picture_renderer_changed(self, _index):
+        self.viewer.d3d11_picture.select(self.picture_renderer.currentData())
+
+    def _sync_picture_renderer(self):
+        gpu = self.viewer.d3d11_picture
+        with QSignalBlocker(self.picture_renderer):
+            self.picture_renderer.setCurrentIndex(self.picture_renderer.findData(gpu.requested))
+        self.picture_renderer.setEnabled(gpu.available)
+
     def _preview_size_changed(self, ratio):
         self.viewer.replay_preview_ratio = ratio
         self.viewer.replay_bar.preview.reposition()
         self.viewer.changed()
 
     def refresh_quality_status(self):
-        crops = list(self.viewer.floating_crops.values())
+        crops = list(self.viewer.all_floating_crops())
         if self.viewer.crop_quality.currentData() != 'light':
             self.quality_status.setText('')
         elif not crops:

@@ -138,6 +138,13 @@ def check(app, host, module, output=None):
                 reset = next(button for button in dialog.findChildren(QPushButton) if button.text() == '使用整个画面')
                 confirm = buttons.button(QDialogButtonBox.Ok)
                 cancel = buttons.button(QDialogButtonBox.Cancel)
+                assert dialog.windowFlags() & Qt.FramelessWindowHint
+                assert dialog.titlebar.breadcrumb.text() == dialog.windowTitle()
+                assert dialog.titlebar.close_button.accessibleName() == '关闭画中画选区'
+                assert [button.objectName() for button in (reset, confirm, cancel)] == ['IconButton', 'PrimaryButton', 'IconButton']
+                picker = dialog.findChild(module.floating_control.CropSelections)
+                assert picker.add_button.objectName() == picker.remove_button.objectName() == 'IconButton'
+                assert picker.buttons[0].objectName() == picker.arrangement_toggle.objectName() == 'PickerTab'
                 centers = [button.mapTo(dialog, button.rect().center()).y() for button in (reset, confirm, cancel)]
                 assert max(centers) - min(centers) <= 1, 'All crop actions belong on the same row'
                 gap = confirm.mapTo(dialog, QPoint()).x() - reset.mapTo(dialog, reset.rect().topRight()).x()
@@ -147,10 +154,19 @@ def check(app, host, module, output=None):
                 if output:
                     output.parent.mkdir(parents=True, exist_ok=True)
                     dialog.grab().save(str(output.with_name('selection.png')))
-                dialog.hide()
                 return QDialog.Accepted
-            with patch.object(module.QDialog, 'exec', select_region):
-                viewer.choose_crop(row, floating=True)
+            dialog = viewer.choose_crop(row, floating=True)
+            assert dialog.isVisible() and not dialog.isModal() and app.activeModalWidget() is None
+            assert viewer.choose_crop(row, floating=True) is dialog
+            previous = row.volume.value()
+            QTest.keyClick(row.volume, Qt.Key_Right if previous < 100 else Qt.Key_Left)
+            assert row.audio_controls[2] != previous and dialog.isVisible()
+            row.volume.setValue(previous)
+            assert not viewer.floating_crops
+            dialog.done(select_region(dialog))
+            app.sendPostedEvents(None, QEvent.DeferredDelete)
+            assert not any(d.findChild(module.floating_control.CropSelections)
+                           for d in viewer.findChildren(QDialog)), 'Finished selectors must release their frame and timer'
             assert row.room_id in viewer.floating_crops and row.crop == original_crop
             floating = viewer.show_floating_crop(row, (.5, .5, .5, .5), (1, source))
             QTest.qWait(30)
@@ -224,15 +240,15 @@ def check(app, host, module, output=None):
                 selecting.crop = QRectF(.4, .4, .5, .5)
                 adjusted.append(True)
                 return QDialog.Accepted
-            with patch.object(module.QDialog, 'exec', adjust_region):
-                QTest.mouseClick(floating, Qt.LeftButton, pos=floating.adjust_rect().center())
+            QTest.mouseClick(floating, Qt.LeftButton, pos=floating.adjust_rect().center())
+            row.crop_editor.done(adjust_region(row.crop_editor))
             assert adjusted and floating.crop == QRectF(.4, .4, .5, .5)
             assert row.crop == original_crop, 'Fine tuning must not change alignment/comparison crops'
             def cancel_adjustment(dialog):
                 dialog.findChild(module.Canvas).crop = QRectF(0, 0, 1, 1)
                 return QDialog.Rejected
-            with patch.object(module.QDialog, 'exec', cancel_adjustment):
-                QTest.mouseClick(floating, Qt.LeftButton, pos=floating.adjust_rect().center())
+            QTest.mouseClick(floating, Qt.LeftButton, pos=floating.adjust_rect().center())
+            row.crop_editor.done(cancel_adjustment(row.crop_editor))
             assert floating.crop == QRectF(.4, .4, .5, .5), 'Cancel must preserve the applied crop'
             floating.fit_geometry(10, 10, 400)
             anchor = floating.mapTo(host, floating.rect().bottomRight() - QPoint(4, 4))
@@ -369,10 +385,100 @@ def check(app, host, module, output=None):
             assert host.childAt(position) is other
             QTest.mouseClick(host.windowHandle(), Qt.LeftButton, pos=position)
             assert not viewer.floating_crops
-            viewer.show_floating_crop(viewer.rows['1'], (0, 0, 1, 1), (1, source))
+            main = viewer.rows['1']
+            viewer.canvas.set_frame((1, source))
+            first_crop = viewer.show_floating_crop(main, (0, 0, .3, .3), (1, source))
+            def add_second(dialog):
+                picker = dialog.findChild(module.floating_control.CropSelections)
+                canvas = dialog.findChild(module.Canvas)
+                dialog.setAttribute(Qt.WA_DontShowOnScreen)
+                dialog.show()
+                app.processEvents()
+                first_color = canvas.selection_color
+                picker.add_button.click()
+                assert picker.active == 1 and not canvas.selection_ready
+                assert canvas.selection_color != first_color
+                assert canvas.other_selections == ((first_crop.crop, first_color),)
+                app.processEvents()
+                picker.bar.activate()
+                assert picker.buttons[0].x() < picker.buttons[1].x()
+                canvas.crop = QRectF(.5, .5, .4, .4)
+                canvas.selection_ready = True
+                canvas.selection_finished.emit()
+                picker.buttons[0].click()
+                canvas.crop = QRectF(.1, 0, .3, .3)
+                picker.buttons[1].click()
+                assert canvas.crop == QRectF(.5, .5, .4, .4)
+                assert canvas.other_selections[0][0] == QRectF(.1, 0, .3, .3)
+                picker.add_button.click()
+                picker.use_full_frame()
+                assert len(picker.rects) == 3
+                picker.remove_button.click()
+                assert len(picker.rects) == 2 and picker.active == 1
+                assert picker.arrangements is None
+                assert not picker.arrangement_toggle.isChecked()
+                picker.arrangement_toggle.click()
+                assert not picker.arrangements.isHidden()
+                picker.arrangements.buttons[16].click()
+                if output:
+                    app.processEvents()
+                    dialog.grab().save(str(output.with_name('selection-composition.png')))
+                    module.theme.apply('light')
+                    app.processEvents()
+                    dialog.grab().save(str(output.with_name('selection-composition-light.png')))
+                    module.theme.apply('dark')
+                return QDialog.Accepted
+            dialog = viewer.choose_crop(main, floating=True)
+            dialog.done(add_second(dialog))
+            first, second = viewer.floating_crops['1'].values()
+            assert first is first_crop and second.crop == QRectF(.5, .5, .4, .4)
+            assert first.crop == QRectF(.1, 0, .3, .3)
+            assert first.geometry().right() < second.geometry().left()
+            assert abs(first.y() - second.y()) <= 1
+            original_geometry = first.geometry(), second.geometry()
+            def add_without_layout(dialog):
+                picker = dialog.findChild(module.floating_control.CropSelections)
+                assert picker.arrangements is None and not picker.arrangement_toggle.isChecked()
+                picker.add_button.click()
+                picker.use_full_frame()
+                return QDialog.Accepted
+            dialog = viewer.choose_crop(main, floating=True)
+            dialog.done(add_without_layout(dialog))
+            assert (first.geometry(), second.geometry()) == original_geometry
+            third = viewer.floating_crops['1'][2]
+            assert third.crop == QRectF(0, 0, 1, 1)
+            def delete_new(dialog):
+                picker = dialog.findChild(module.floating_control.CropSelections)
+                picker.buttons[2].click()
+                picker.remove_button.click()
+                return QDialog.Accepted
+            dialog = viewer.choose_crop(main, floating=True)
+            dialog.done(delete_new(dialog))
+            assert list(viewer.all_floating_crops()) == [first, second]
+            def remove_first(dialog):
+                picker = dialog.findChild(module.floating_control.CropSelections)
+                picker.remove_button.click()
+                dialog.titlebar.close_button.click()
+                assert dialog.result() == QDialog.Rejected
+            dialog = viewer.choose_crop(main, floating=True)
+            remove_first(dialog)
+            assert list(viewer.all_floating_crops()) == [first, second], 'Cancel keeps saved crops'
+            stale = viewer.choose_crop(main, floating=True)
+            first.close()
+            stale.accept()
+            assert main.crop_editor is None
+            assert list(viewer.all_floating_crops()) == [second]
+            stale = viewer.choose_crop(main, floating=True)
+            main.decoder = object()
+            stale.findChild(module.floating_control.CropSelections).use_full_frame()
+            stale.accept()
+            main.decoder = None
+            assert list(viewer.all_floating_crops()) == [second] and second.crop == QRectF(.5, .5, .4, .4)
+            viewer.choose_crop(main, floating=True)
             viewer.stop()
-            assert not viewer.floating_crops
+            assert not viewer.floating_crops and main.crop_editor is None
             return {'passed': True, 'source_resolution': '1920x1080', 'app_wide_drag': True,
+                    'multiple_crops_per_room': True, 'independent_close': True,
                     'wheel_corner_resize': True, 'four_corner_resize': True, 'editable_selection': True,
                     'inline_actions': True, 'fine_tune_button': True, 'replay_source_time': True,
                     'resize_placement_restored': True, 'cursor_zoom': True, 'burst_repaints_100_to_1': True, 'network_requests': 0}
@@ -384,19 +490,119 @@ def check(app, host, module, output=None):
             app.processEvents()
 
 
+def check_native_input(app, module):
+    """Check the Windows hit target after moving over the player's native children."""
+    import ctypes
+    from ctypes import wintypes
+
+    from PySide6.QtCore import QEvent, QPoint, Qt
+    from PySide6.QtGui import QColor, QImage
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QMainWindow, QWidget
+    from ddm import plugins
+
+    # This is the same attribute the desktop host sets before QApplication.
+    assert app.testAttribute(Qt.AA_DontCreateNativeWidgetSiblings)
+    hit_test = ctypes.windll.user32.ChildWindowFromPointEx
+    hit_test.argtypes = (wintypes.HWND, wintypes.POINT, wintypes.UINT)
+    hit_test.restype = wintypes.HWND
+    host = QMainWindow()
+    host.settings, host.rooms = {}, []
+    host.setAttribute(Qt.WA_ShowWithoutActivating)
+    host.setWindowFlag(Qt.Tool)
+    host.resize(1200, 820)
+    host.move(app.primaryScreen().geometry().topLeft() - QPoint(2400, 2100))
+    root = QWidget()
+    host.setCentralWidget(root)
+    content = QWidget(root)
+    content.setGeometry(180, 0, 1020, 820)
+    with tempfile.TemporaryDirectory() as directory:
+        manager = plugins.PluginManager(window=host, plugins_dir=directory)
+        viewer = module.Viewer(plugins.PluginContext(manager, 'floating_native_input'), {})
+        viewer.embed(content)
+        try:
+            viewer.add_room('1', {'alias': 'Fixture'})
+            viewer.show()
+            host.show()
+            app.processEvents()
+            frame = QImage(640, 360, QImage.Format_RGB32)
+            frame.fill(Qt.red)
+            crop = viewer.show_floating_crop(viewer.rows['1'], (0, 0, 1, 1), (1, frame))
+            crop.fit_geometry(10, 40, 160)
+            app.processEvents()
+
+            def drag(surface, start, target):
+                release = surface.mapToGlobal(target)
+                QTest.mousePress(surface, Qt.LeftButton, pos=start)
+                assert crop.drag is not None, 'The crop must receive the press'
+                QTest.mouseMove(surface, target)
+                QTest.mouseRelease(surface, Qt.LeftButton, pos=surface.mapFromGlobal(release))
+                app.processEvents()
+                assert crop.drag is None
+
+            def hit_crop():
+                point = crop.mapTo(root, crop.rect().center())
+                ratio = root.devicePixelRatioF()
+                native_point = wintypes.POINT(round(point.x() * ratio), round(point.y() * ratio))
+                assert root.childAt(point) is crop
+                target = hit_test(int(root.winId()), native_point, 7)
+                assert QWidget.find(target or 0) is crop, 'Windows must route pointer input to the moved crop'
+
+            picture_center = viewer.picture.mapTo(host, viewer.picture.rect().center())
+            first = crop.pos()
+            # A native crop receives the gesture through its own window. For a
+            # non-native crop the Qt backing widget handles the initial press.
+            if crop.windowHandle() is None:
+                drag(host.windowHandle(), crop.mapTo(host, crop.rect().center()), picture_center)
+            else:
+                drag(crop.windowHandle(), crop.rect().center(), crop.mapFrom(host, picture_center))
+            assert crop.x() > first.x() + 200
+            hit_crop()
+            content.raise_()
+            app.processEvents()
+            hit_crop()
+            cover = QWidget(root)
+            cover.setAttribute(Qt.WA_NativeWindow)
+            cover.setGeometry(crop.geometry())
+            cover.show()
+            app.processEvents()
+            hit_crop()
+            app.sendEvent(crop, QEvent(QEvent.Leave))
+            assert not crop.tools_visible
+            QTest.mouseMove(crop.windowHandle(), crop.rect().center() + QPoint(1, 1))
+            assert crop.tools_visible, 'Moving the pointer over the crop must show its tools again'
+            second = crop.pos()
+            center = crop.rect().center()
+            drag(crop.windowHandle(), center, center + QPoint(74, 52))
+            assert (crop.pos() - second - QPoint(74, 52)).manhattanLength() <= 2, (crop.pos(), second)
+            hit_crop()
+            image = crop.grab().toImage()
+            assert image.pixelColor(image.rect().center()) == QColor('red'), 'The moved crop still paints its source'
+        finally:
+            viewer.close()
+            host.close()
+            app.processEvents()
+    return {'passed': True, 'native_hit_after_both_drags': True, 'hover_tools_return': True,
+            'stays_above_restacks_and_new_siblings': True}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--host', type=Path, required=True)
     parser.add_argument('--output', type=Path)
+    parser.add_argument('--native-input', action='store_true', help='Check real Windows child-window hit testing')
     args = parser.parse_args()
     sys.path[:0] = [str(args.host), str(Path(__file__).resolve().parents[1])]
-    os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+    os.environ['QT_QPA_PLATFORM'] = 'windows' if args.native_input else 'offscreen'
     os.environ['DDM_NO_SAVE'] = '1'
     from PySide6.QtWidgets import QApplication, QWidget
     from plugins.match_sync import viewer as module
+    if args.native_input:
+        from PySide6.QtCore import Qt
+        QApplication.setAttribute(Qt.AA_DontCreateNativeWidgetSiblings)
     app = QApplication([])
     module.theme.apply('dark')
-    print(check(app, QWidget(), module, args.output))
+    print(check_native_input(app, module) if args.native_input else check(app, QWidget(), module, args.output))
 
 
 if __name__ == '__main__':

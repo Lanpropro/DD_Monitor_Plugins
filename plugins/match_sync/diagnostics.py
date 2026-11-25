@@ -15,7 +15,9 @@ import sys
 import threading
 import time
 
-from PySide6.QtCore import QEvent, QObject, QTimer, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QTimer, Qt
+
+from .gui_timeline import GuiTimeline
 
 
 def stream_error_codes(message):
@@ -50,6 +52,13 @@ class StreamAcquisition:
         self.milestones = {}
         self.errors = deque(maxlen=8)
         self.previous = None
+        self.switch = None
+
+    def select_quality(self, previous_requested, previous_actual, requested):
+        if self.enabled:
+            with self.lock:
+                self.switch = dict(id=time.perf_counter_ns(), previous_requested_quality=previous_requested,
+                                   previous_actual_quality=previous_actual, requested_quality=requested, result='pending')
 
     def begin(self, attempt):
         if not self.enabled:
@@ -80,17 +89,28 @@ class StreamAcquisition:
             return
         with self.lock:
             self.milestones.setdefault(name, round((time.perf_counter() - self.started) * 1000, 3))
+            if name == 'first_cached_video' and self.switch is not None and self.switch['result'] == 'pending':
+                self.switch.update(result='video_cached', actual_quality=self.state.get('actual_quality'))
 
     def error(self, error):
-        if not self.enabled:
-            return
-        self.stderr(str(error))
         kind = type(error).__name__
+        cause = error
+        for _ in range(5):
+            if cause is None:
+                break
+            if type(cause).__name__ == 'LoginRequiredError':
+                kind = 'LoginRequiredError'
+                break
+            cause = cause.__cause__
         if kind not in ('TimeoutError', 'ConnectionError', 'PermissionError', 'FileNotFoundError',
-                        'OSError', 'HTTPError', 'InvalidDataError', 'FFmpegError', 'ValueError', 'RuntimeError'):
+                        'OSError', 'HTTPError', 'InvalidDataError', 'FFmpegError', 'ValueError',
+                        'RuntimeError', 'LoginRequiredError'):
             kind = 'other'
-        with self.lock:
-            self.state.update(error_phase=self.state.get('phase'), error_kind=kind)
+        if self.enabled:
+            self.stderr(str(error))
+            with self.lock:
+                self.state.update(error_phase=self.state.get('phase'), error_kind=kind)
+        return kind
 
     def stderr(self, text):
         if self.enabled:
@@ -114,11 +134,13 @@ class StreamAcquisition:
                 self.state['ffmpeg_exit_code'] = code
             self.mark('ffmpeg_exited')
 
-    def finish(self, outcome):
+    def finish(self, outcome, *, retry_delay=None):
         if self.enabled:
             self.mark('finished')
             with self.lock:
                 self.state.update(outcome=outcome, phase='cancelled' if outcome == 'cancelled' else 'retry_wait')
+                if outcome != 'cancelled' and retry_delay is not None:
+                    self.state['retry_delay_ms'] = round(retry_delay * 1000)
 
     def _receipt(self):
         return dict(self.state, milestones_ms=dict(self.milestones), error_codes=list(self.errors))
@@ -134,6 +156,12 @@ class StreamAcquisition:
                 result['elapsed_ms'] = round((time.perf_counter() - self.started) * 1000, 3)
             if self.previous is not None:
                 result['previous_attempt'] = self.previous
+            if self.switch is not None:
+                switch = dict(self.switch)
+                if switch['result'] == 'pending':
+                    switch['result'] = {'retry_wait': 'retrying', 'cancelled': 'cancelled'}.get(
+                        self.state.get('phase'), 'pending')
+                result['quality_switch'] = switch
             return result
         finally:
             self.lock.release()
@@ -262,12 +290,18 @@ class AudioReadMetrics:
     def __init__(self):
         self.enabled = os.environ.get('DDM_MATCH_DIAGNOSTICS', '1') != '0'
         self.samples = deque(maxlen=1024)
+        self.mix_blocks = deque(maxlen=1024)
         self.previous = {}
         self.serial = 0
 
     def reset(self):
         self.previous.clear()
         self.samples.clear()
+        self.mix_blocks.clear()
+
+    def record_mix(self, inputs):
+        if self.enabled:
+            self.mix_blocks.append((time.perf_counter(), sum(volume > 0 for _, volume in inputs)))
 
     def record(self, key, start, duration, rate, channel, gain, at=None):
         if not self.enabled:
@@ -305,7 +339,9 @@ class AudioReadMetrics:
                 channels=sorted({item[4] for item in values}),
                 gain_min=round(min(item[5] for item in values), 3),
                 gain_max=round(max(item[5] for item in values), 3)))
-        return dict(window_s=1, capacity_limited=bool(len(samples) == self.samples.maxlen
+        tracks = [count for at, count in tuple(self.mix_blocks) if now - 1 <= at <= now]
+        return dict(window_s=1, written_blocks=len(tracks), tracks_min=min(tracks, default=0),
+                    tracks_max=max(tracks, default=0), capacity_limited=bool(len(samples) == self.samples.maxlen
                     and samples[0][0] >= now - 1), sources=sources)
 
 
@@ -519,6 +555,8 @@ class PlaybackProbe(QObject):
         super().__init__(parent)
         self.path = Path(path)
         self.enabled = os.environ.get('DDM_MATCH_DIAGNOSTICS', '1') != '0'
+        self.split_picture_timing = int(getattr(parent, 'split_presentation', False))
+        self.gui_timeline = None
         self.timer = QTimer(self)
         self.timer.setTimerType(Qt.PreciseTimer)
         self.timer.setInterval(50)
@@ -531,6 +569,7 @@ class PlaybackProbe(QObject):
         self.frame = None
         self.transitions = deque(maxlen=60)
         self.renders = deque(maxlen=240)
+        self.auxiliary_updates = deque(maxlen=120)
         self.paints = deque(maxlen=120)
         self.mouse_count = 0
         self.mouse_target = ''
@@ -553,6 +592,7 @@ class PlaybackProbe(QObject):
         self.frame = None
         self.transitions.clear()
         self.renders.clear()
+        self.auxiliary_updates.clear()
         self.paints.clear()
         self.submitted.samples.clear()
         self.painted.samples.clear()
@@ -564,17 +604,28 @@ class PlaybackProbe(QObject):
         self.cpu_observation = (time.perf_counter(), time.process_time())
         self.last_render = self.last_tick = time.perf_counter()
         self.stage = 'idle'
+        if self.split_picture_timing and os.environ.get('DDM_DANMAKU_MOTION_CAPTURE') == '1':
+            self.gui_timeline = GuiTimeline()
+            app = QCoreApplication.instance()
+            app.match_gui_timeline = self.gui_timeline
+            self.parent().panel.match_gui_timeline = self.gui_timeline
         self.thread = threading.Thread(target=self._run, name='match-sync-diagnostics', daemon=True)
         self.thread.start()
         self.timer.start()
 
     def stop(self):
         self.timer.stop()
+        if self.gui_timeline is not None:
+            app = QCoreApplication.instance()
+            if app is not None and getattr(app, 'match_gui_timeline', None) is self.gui_timeline:
+                app.match_gui_timeline = None
+            self.parent().panel.match_gui_timeline = None
         self.stopped.set()
         if self.thread is not None:
             self.thread.join(.3)
             if not self.thread.is_alive():
                 self.thread = None
+                self.gui_timeline = None
         self.frame = None
         self.transitions.clear()
         self.pipeline_sources = ()
@@ -598,10 +649,12 @@ class PlaybackProbe(QObject):
         self.frame = frame
         self.clock_steps.record(time.perf_counter(), target)
 
-    def begin(self):
+    def begin(self, *, auxiliary=False):
         now = time.perf_counter()
-        self.render_gap = (now - self.last_render) * 1000
-        self.last_render = self.started = self.checkpoint = now
+        self.render_gap = 0. if auxiliary else (now - self.last_render) * 1000
+        if not auxiliary:
+            self.last_render = now
+        self.started = self.checkpoint = now
         self.stages = []
         self.stage = 'metadata'
 
@@ -610,10 +663,11 @@ class PlaybackProbe(QObject):
         self.stages.append((self.stage, round((now - self.checkpoint) * 1000, 3)))
         self.checkpoint, self.stage = now, stage
 
-    def end(self):
+    def end(self, *, auxiliary=False):
         self.mark('idle')
-        self.renders.append((time.perf_counter(), self.render_gap,
-                             (time.perf_counter() - self.started) * 1000, tuple(self.stages)))
+        now = time.perf_counter()
+        samples = self.auxiliary_updates if auxiliary else self.renders
+        samples.append((now, self.render_gap, (now - self.started) * 1000, tuple(self.stages)))
 
     def snapshot(self):
         now = time.perf_counter()
@@ -621,13 +675,18 @@ class PlaybackProbe(QObject):
         previous_wall, previous_cpu = self.cpu_observation
         self.cpu_observation = (now, cpu)
         renders = [item for item in tuple(self.renders) if now - item[0] < 1]
+        auxiliary = [item for item in tuple(self.auxiliary_updates) if now - item[0] < 1]
         paints = [item for item in tuple(self.paints) if now - item[0] < 1]
         slowest = max(renders, key=lambda item: item[2], default=None)
+        slowest_auxiliary = max(auxiliary, key=lambda item: item[2], default=None)
         last_fill = self.audio.last_fill if self.audio is not None else None
         result = dict(stage=self.stage, render_calls=len(renders),
                       render_gap_ms=round(max((item[1] for item in renders), default=0), 3),
                       render_ms=round(slowest[2], 3) if slowest else 0,
                       stages_ms=dict(slowest[3]) if slowest else {},
+                      auxiliary_calls=len(auxiliary),
+                      auxiliary_ms=round(slowest_auxiliary[2], 3) if slowest_auxiliary else 0,
+                      auxiliary_stages_ms=dict(slowest_auxiliary[3]) if slowest_auxiliary else {},
                       paint_calls=len(paints), paint_ms=round(max((item[1] for item in paints), default=0), 3),
                       mouse_events=self.mouse_count, mouse_target=self.mouse_target,
                       mouse_age_ms=round((now - self.mouse_time) * 1000, 1) if self.mouse_time else None,
@@ -655,24 +714,32 @@ class PlaybackProbe(QObject):
         return result
 
     def _run(self):
-        handler = None
+        handler = timeline_handler = None
+        timeline = self.gui_timeline
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             handler = RotatingFileHandler(self.path, maxBytes=2 * 1024 ** 2, backupCount=2, encoding='utf-8')
-            def write(event, **fields):
+            def write(event, *, destination=handler, **fields):
                 payload = dict(time=datetime.now().astimezone().isoformat(timespec='milliseconds'),
                                pid=os.getpid(), event=event, **fields)
-                handler.emit(logging.makeLogRecord(dict(msg=json.dumps(payload, ensure_ascii=False))))
+                destination.emit(logging.makeLogRecord(dict(msg=json.dumps(payload, ensure_ascii=False))))
+            if timeline is not None:
+                timeline_handler = RotatingFileHandler(self.path.with_name('match-gui-timeline.jsonl'),
+                    maxBytes=8 * 1024 ** 2, backupCount=2, encoding='utf-8')
+                write('gui_timeline_start', destination=timeline_handler,
+                      fields=['label', 'offset_ms', 'wall_ms', 'thread_cpu_ms', 'value'])
             from .video import PictureReader
             from .media import Decoder, analysis_gray
             write('start', schema=3, picture_code=hashlib.sha256(marshal.dumps(PictureReader.get.__code__)).hexdigest(),
                   capture_code=hashlib.sha256(marshal.dumps(Decoder._capture.__code__)).hexdigest(),
                   analysis_gray_code=hashlib.sha256(marshal.dumps(analysis_gray.__code__)).hexdigest(),
-                  audio_read_metrics=1, pts_gap_recovery=2, stack_budget_window_s=60, stream_acquisition=1,
-                  replay_preview_metrics=1, replay_preview_continuous=1)
+                  audio_read_metrics=1, pts_gap_recovery=2, stack_budget_window_s=60, stream_acquisition=2,
+                  replay_preview_metrics=1, replay_preview_continuous=1, split_picture_timing=self.split_picture_timing,
+                  gui_timeline=int(timeline is not None))
             sampled = 0
             sample_window = time.perf_counter()
             last_stack = last_report = 0.0
+            last_timeline = time.perf_counter()
             reported_stall = False
             while not self.stopped.wait(.05):
                 now = time.perf_counter()
@@ -702,6 +769,12 @@ class PlaybackProbe(QObject):
                             state['picture_stack'] = stack(reader_thread.ident)
                             sampled += 1
                     write('playback', **state)
+                    if timeline is not None:
+                        cutoff = now - .05  # Let the paint's enclosing Qt dispatch finish.
+                        sample = timeline.sample(last_timeline, cutoff)
+                        if sample is not None:
+                            write('gui_timeline', destination=timeline_handler, **sample)
+                        last_timeline = max(last_timeline, cutoff)
                     last_report = now
             write('stop')
         except OSError as error:
@@ -709,3 +782,5 @@ class PlaybackProbe(QObject):
         finally:
             if handler is not None:
                 handler.close()
+            if timeline_handler is not None:
+                timeline_handler.close()

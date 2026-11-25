@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+     role="img" aria-labelledby="title desc">
+  <title id="title">比赛二路同步</title>
+  <desc id="desc">白色侧身山羊跃过右倾的数字二，搭配竞赛方格旗、播放三角和同步箭头。</desc>
+
+  <!-- The goat's eye and ear are cut from the same white silhouette. -->
+  <path fill="#fff" fill-rule="evenodd" transform="translate(-27 -3) scale(1.16)"
+        d="M83 46c9-7 21-6 34-4 9 2 19-2 25-6l8-5
+           c-5-4-8-11-7-17 4 6 10 9 16 12-2-5-1-9 1-13 1 7 5 10 9 13
+           l5 2 5 7 8 5q4 5-2 7l-9-1-5 8-2-6q-6 2-9 7l11 2
+           q5 2 2 6l-8 7h-7l4-5 3-3h-11l-13 12h-9l3-4 5-8
+           c-14 4-25 3-33-1l-8 7 4 5h-9l-3-5 3-7-7 5-3 8h-8l2-8 5-9
+           c-6-3-9-9-12-12q-3-4-1-8 6 5 13 9z
+           M170 33a1.7 1.7 0 1 0 0 3.4 1.7 1.7 0 1 0 0-3.4z
+           M152 34l9-3-3 5z"/>
+
+  <g fill="#fff" transform="translate(0 24)">
+    <path transform="translate(25 61) skewX(-29)"
+          d="M0 0h12v12H0zM24 0h12v12H24zM12 12h12v12H12z"/>
+    <path d="M54 94h112c12 0 17 7 13 14-3 6-11 10-22 14l-31 10
+             22-18H38zM49 196h161l-18 18H25z"/>
+    <path fill-rule="evenodd"
+          d="M78 59h112c26 0 43 15 43 35 0 23-17 40-46 51l-75 29h112l-16 16H38l23-23
+             119-46c17-6 25-14 25-24 0-10-8-17-22-17H59z
+             M174 64v13l15-6.5z"/>
+    <g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="5">
+      <path d="M188 150h30m-7-6 7 6-7 6"/>
+      <path d="M217 163h-38m7-6-7 6 7 6"/>
+    </g>
+  </g>
+</svg>

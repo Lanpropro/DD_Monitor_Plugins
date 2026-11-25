@@ -81,7 +81,7 @@
 | Twitch直播 | `twitch_live` | 1.0 |
 | YouTube直播 | `youtube_live` | 1.1 |
 | CHZZK直播 | `chzzk_live` | 1.0 |
-| 比赛二路同步 | `match_sync` | 1.7.0 |
+| 比赛二路同步 | `match_sync` | 2.0.2 |
 | B站直播互动 | `bili_live` | 1.1 |
 | B站稍后再看 | `bili_watchlater` | 1.0 |
 | 网络代理 | `proxy_control` | 1.0 |

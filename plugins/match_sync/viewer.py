@@ -1,6 +1,7 @@
 """One selectable match picture, independently mixed audio, and labelled chat."""
 from __future__ import annotations
 
+import os
 import threading
 import time
 from pathlib import Path
@@ -31,8 +32,15 @@ from . import viewer_ui, host_integration, console_control, session_control
 from . import source_control, chat_control, alignment_control, playback_timing, picture_control, recording_control, replay_control, presentation, floating_control
 
 
+# Opening a dialog sends these events to every affected widget in the host.
+_PANEL_EVENTS = frozenset((QEvent.WindowBlocked, QEvent.WindowUnblocked, QEvent.WindowActivate,
+                          QEvent.WindowDeactivate, QEvent.FontChange, QEvent.PaletteChange, QEvent.StyleChange))
+
+
 class Viewer(QDialog):
-    def __init__(self, context, sources, initial_room=None):
+    split_presentation = True
+
+    def __init__(self, context, sources, initial_room=None, *, workspace_crops=False):
         super().__init__(context.window)
         self.context = context
         self.sources = sources
@@ -82,18 +90,40 @@ class Viewer(QDialog):
         self.offset_target = None
         self.suppressed = {}
         self.embedded = False
+        self.workspace_crops = workspace_crops
         self.floating_crops = {}
+        self.crop_stack_timer = QTimer(self)
+        self.crop_stack_timer.setSingleShot(True)
+        self.crop_stack_timer.timeout.connect(lambda: floating_control.raise_floating_crops(self))
         self.stream_info_dialog = None
         viewer_ui.build_ui(self)
+        from .d3d11_picture import install as install_d3d11
+        self.d3d11_picture = install_d3d11(self)
+        if (os.environ.get('DDM_MATCH_MONITOR') == '1' and context.name == 'match_sync'
+                and not workspace_crops and self.quick_danmaku is not None
+                and self.d3d11_picture is not None):
+            from .monitor_bridge import MonitorBridge
+            self.monitor_bridge = MonitorBridge(self)
         self.audio = AudioPump(self)
-        self.audio.status.connect(self.audio_status.setText)
+        self.audio.status.connect(self.context.notify)
         self.host_audio_timer = QTimer(self)
         self.host_audio_timer.setInterval(100)
         self.host_audio_timer.timeout.connect(self._suppress_host_audio)
         self.render_timer = QTimer(self)
         self.render_timer.setTimerType(Qt.PreciseTimer)
         self.render_timer.setInterval(33)
-        self.render_timer.timeout.connect(self.render)
+        if self.split_presentation:
+            self.render_timer.timeout.connect(self._picture_tick)
+        else:
+            self.render_timer.timeout.connect(self.render)
+        self.auxiliary_timer = QTimer(self)
+        self.auxiliary_timer.setInterval(16)
+        self.auxiliary_timer.timeout.connect(self._auxiliary_tick)
+        self._picture_due = self._presentation_update = None
+        self.super_chat_timer = QTimer(self)
+        self.super_chat_timer.setTimerType(Qt.PreciseTimer)
+        self.super_chat_timer.setSingleShot(True)
+        self.super_chat_timer.timeout.connect(lambda: chat_control._tick_super_chats(self))
         self.playback_probe = PlaybackProbe(self, Path(config_module.REPO) / 'logs' / 'match-playback.jsonl')
         self.playback_probe.preview = self.replay_bar.preview.metrics
         self.playback_probe.audio = self.audio
@@ -136,6 +166,14 @@ class Viewer(QDialog):
 
     def eventFilter(self, watched, event):
         kind = event.type()
+        if kind in _PANEL_EVENTS:
+            return super().eventFilter(watched, event)
+        if kind in (QEvent.MouseButtonRelease, QEvent.KeyRelease):
+            bridge = getattr(self, 'monitor_bridge', None)
+            if bridge is not None:
+                bridge.buttons.input(watched, event)
+        if kind in (QEvent.Show, QEvent.ZOrderChange) and self.floating_crops:
+            floating_control.schedule_crop_raise(self, watched)
         if kind == QEvent.Timer and watched is getattr(self, '_native_clip_timer', None):
             self.native_clip_retry_blocks += 1
             watched.stop()
@@ -152,6 +190,9 @@ class Viewer(QDialog):
                     self._handle_shortcut(action)
                 return True
         elif kind == QEvent.Show:
+            bridge = getattr(self, 'monitor_bridge', None)
+            if bridge is not None and bridge.panels.active is not None:
+                bridge.panels.shown(watched)
             if watched is self.picture.cover or watched in self.hidden_host_widgets:
                 watched.hide()
         elif (kind in (QEvent.DragEnter, QEvent.DragMove, QEvent.Drop)
@@ -270,6 +311,14 @@ class Viewer(QDialog):
     def _add_dragged(self, room_id):
         return source_control._add_dragged(self, room_id)
 
+    def workspace_room_action(self):
+        if self.embedded and not self.workspace_crops and self.context.name == 'match_sync':
+            return '添加二路', self._add_workspace_rooms
+        return None
+
+    def _add_workspace_rooms(self, rooms):
+        return source_control.add_workspace_rooms(self, rooms)
+
     def changed(self, *_args):
         self.save_timer.start()
 
@@ -290,9 +339,6 @@ class Viewer(QDialog):
 
     def _apply_crop_quality(self):
         return floating_control._apply_crop_quality(self)
-
-    def _close_floating_crop(self, key):
-        return floating_control._close_floating_crop(self, key)
 
     def _buffer_reserve_changed(self):
         return playback_timing._buffer_reserve_changed(self)
@@ -473,6 +519,12 @@ class Viewer(QDialog):
     def render(self):
         return presentation.render(self)
 
+    def _picture_tick(self):
+        return presentation.render_picture_tick(self)
+
+    def _auxiliary_tick(self):
+        return presentation.render_auxiliary_tick(self)
+
     def _render(self, probe):
         return presentation._render(self, probe)
 
@@ -500,14 +552,17 @@ class Viewer(QDialog):
     def flush_crop_background(self):
         return floating_control.flush_crop_background(self)
 
-    def show_floating_crop(self, row, crop, frame):
-        return floating_control.show_floating_crop(self, row, crop, frame)
+    def all_floating_crops(self):
+        return (crop for crops in self.floating_crops.values() for crop in crops.values())
+
+    def show_floating_crop(self, row, crop, frame, *, slot=0):
+        return floating_control.show_floating_crop(self, row, crop, frame, slot=slot)
 
     def render_floating_crops(self, clock, shifts):
         return floating_control.render_floating_crops(self, clock, shifts)
 
-    def choose_crop(self, row, floating=False):
-        return floating_control.choose_crop(self, row, floating)
+    def choose_crop(self, row, floating=False, *, current=None):
+        return floating_control.choose_crop(self, row, floating, current=current)
 
     def _suppress_host_audio(self):
         return host_integration._suppress_host_audio(self)

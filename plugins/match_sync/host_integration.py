@@ -32,7 +32,8 @@ def _shortcut_action(viewer, watched, event):
         return None
     if isinstance(watched, (QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox)):
         return None
-    if isinstance(watched, QComboBox) and watched.isEditable():
+    if isinstance(watched, QComboBox) and (watched.isEditable() or
+            (event.modifiers() == Qt.NoModifier and event.key() in (Qt.Key_Up, Qt.Key_Down))):
         return None
     pressed = QKeySequence(event.keyCombination()).toString()
     shortcuts = getattr(viewer.context.window, "shortcuts", {})

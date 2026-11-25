@@ -77,7 +77,8 @@ def submit_alignment_hint(viewer, room_id, direction):
     if main_position is None:
         main_position = clock + shifts[viewer.alignment.reference]
     position = clock + shifts[room_id]
-    floating = viewer.floating_crops.get(room_id)
+    floating = next((item for item in viewer.floating_crops.get(room_id, {}).values()
+                     if item.isVisible() and item.frame_key is not None), None)
     card = viewer.comparison_panel.cards.get(room_id)
     if viewer.compare.isChecked() and card is not None and card[2].isVisible() and card[2].frame_key is not None:
         position = card[2].frame_key
