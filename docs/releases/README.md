@@ -8,7 +8,6 @@
 
 ## 待发布草稿
 
-- [YouTube 直播 1.1](RELEASE-youtube-live-v1.1.md)：恢复 2K／4K 画质，待受检发布。
 - [虎牙直播1.0](RELEASE-huya-live-v1.0.md)：独立平台首发，保留最新海外及平台拆分修复，待受检发布。
 - [斗鱼直播1.0](RELEASE-douyu-live-v1.0.md)：独立平台首发，保留最新海外及平台拆分修复，待受检发布。
 - [抖音直播1.0](RELEASE-douyin-live-v1.0.md)：独立平台首发，保留最新海外及平台拆分修复，待受检发布。
@@ -22,6 +21,7 @@
 
 | 插件 | 仓库说明 | GitHub 来源 |
 | --- | --- | --- |
+| YouTube 直播 | [1.1](RELEASE-youtube-live-v1.1.md) | [youtube-live-v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.1) |
 | 比赛二路同步 | [1.7.0](RELEASE-match-sync-v1.7.0.md) | [match-sync-v1.7.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.7.0) |
 | 国内直播平台 | [2.0](RELEASE-domestic-live-v2.0.md) | [domestic-live-v2.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v2.0) |
 | 海外直播平台 | [1.2](RELEASE-global-live-v1.2.md) | [global-live-v1.2](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2) |

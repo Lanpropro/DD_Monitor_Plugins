@@ -1,10 +1,10 @@
 # YouTube直播增量记录
 
-插件ID：`youtube_live`。本插件尚未公开发布，当前为0.1开发候选。
+插件ID：`youtube_live`。当前公开基线为 [v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.1)。
 
-协议实现来源于[组合插件公开基线](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2)及后续开发源码；独立包当前没有自己的公开发布基线。
+协议实现来源于[组合插件公开基线](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2)及后续开发源码；独立包的发布记录见下文。
 
-## 待发布
+## 已发布 v1.1（2026-11-25）
 
 ### 2026-11-25｜恢复 YouTube 直播的 2K／4K 画质选项
 
@@ -12,7 +12,12 @@
 
 使用反馈中的公开直播，在隔离的比赛二路界面从低画质分别切到 2K 与 4K，确认实际解码为 2560×1440 与 3840×2160，均为 VP9、60 FPS，并收到音频。通过 YouTube 取流回归、独立平台包检查及宿主媒体源检查。多路同时 4K 的流畅度尚未验收。
 
-### 2026-11-19｜1.0正式发布准备
+- 正式标签源码 `7454ef811f0483d4e86843f5f2afb440391e5636`。ZIP 大小 12163157 字节，SHA-256 `577f2c663f17933f17ecbdc1cbf35cdd04488c0f2ca3eee560fc6eeeb442ae06`。 [公开说明](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.1) · [ZIP](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/youtube-live-v1.1/youtube_live-1.1.zip)
+- 使用公开 v1.0 附件验证 0.8 热修复宿主重启升级、插件数据保留和商店识别。GitHub 受检发布工作流已通过。
+
+## 待发布
+
+### 2026-11-19｜1.0正式发布准备（历史记录）
 
 维护者要求随0.8热修复1发布，六个独立平台插件的版本统一为1.0，稍后再看保持1.0。保留最新develop中的海外播放、账号、音频同步和平台拆分修复；旧组合包版本及附件不覆盖。源码先经PR进入develop/main，再从标签Git对象构建并由受检工作流公开。尚未公开发布，最终包大小和SHA256在发布后核对记录。
 
