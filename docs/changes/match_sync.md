@@ -2,18 +2,17 @@
 
 插件 ID：`match_sync`。
 
-当前公开预览：[2.0 preview](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v2.0-pre.1)。上次正式发布：[1.7.0 归档](../releases/RELEASE-match-sync-v1.7.0.md)。
+当前公开预览：[2.0 Pre-release 2](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v2.0.2)。
 
 记录规则与条目模板见[增量记录入口](README.md)。
 
 ## 待发布
 
-### 比赛二路同步 2.0 Pre-release 2
+[PR #65](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/65) 已按维护者要求关闭，未合并；实现分支保留，完整独立框选接线未纳入当前开发基线，也不记为已验收。
+
+## 已发布 2.0 Pre-release 2（2026-11-26）
 
 本次打包当前已联调的 Qt Quick 滚动弹幕、D3D11 原生呈现、画中画和控件响应优化。Windows x64 随包提供原生呈现程序。主画面设置提示 D3D11 可减少播放卡顿，并记忆手动选择。使用旧本体的 Qt Quick 能力时同样保留透明叠加和光栅回退。原生合成与交互回归使用隔离素材，实播性能记录来自前置候选。详见[预览版说明](../releases/RELEASE-match-sync-v2.0.2.md)。
-
-
-当前 `develop` 的运行源码与 v1.7.0 标签一致，暂无经核对属于该版本之后的增量。[PR #65](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/65) 已按维护者要求关闭，未合并；实现分支保留，完整独立框选接线未纳入当前开发基线，也不记为已验收。
 
 ## 已发布 v1.7.0（2026-11-13）
 
