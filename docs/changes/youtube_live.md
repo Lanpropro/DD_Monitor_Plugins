@@ -1,8 +1,19 @@
 # YouTube直播增量记录
 
-插件ID：`youtube_live`。当前公开基线为 [v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.0)。
+插件ID：`youtube_live`。当前公开基线为 [v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.1)。
 
 协议实现来源于[组合插件公开基线](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2)及后续开发源码；独立包的发布记录见下文。
+
+## 已发布 v1.1（2026-11-25）
+
+### 2026-11-25｜恢复 YouTube 直播的 2K／4K 画质选项
+
+旧版 yt-dlp 遇到更新后的 YouTube 播放器脚本时解析失败，二路回退到这场直播最高仅有 1080p60 的 HLS 列表。将解析器固定到上游稳定版 2026.11.23，使用独立缓存目录和对应的 SHA256 校验。[上游问题记录](https://github.com/yt-dlp/yt-dlp/issues/18123)
+
+使用反馈中的公开直播，在隔离的比赛二路界面从低画质分别切到 2K 与 4K，确认实际解码为 2560×1440 与 3840×2160，均为 VP9、60 FPS，并收到音频。通过 YouTube 取流回归、独立平台包检查及宿主媒体源检查。多路同时 4K 的流畅度尚未验收。
+
+- 正式标签源码 `7454ef811f0483d4e86843f5f2afb440391e5636`。ZIP 大小 12163157 字节，SHA-256 `577f2c663f17933f17ecbdc1cbf35cdd04488c0f2ca3eee560fc6eeeb442ae06`。 [公开说明](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.1) · [ZIP](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/youtube-live-v1.1/youtube_live-1.1.zip)
+- 使用公开 v1.0 附件验证 0.8 热修复宿主重启升级、插件数据保留和商店识别。GitHub 受检发布工作流已通过。
 
 ## 已发布 v1.0（2026-11-19）
 
@@ -10,12 +21,6 @@
 - 标签源码 a7c9316134a0e85f36bcbcdf2d05d0ced4b48cc0 已进入 `develop` 与 `main`。正式包 12163116 字节，SHA-256 `cd81a1b67aabb44286dcd8e13e45cb4114c3da674cfd20210c15c0d9037e115d`。
 
 ## 待发布
-
-### 2026-11-25｜恢复 YouTube 直播的 2K／4K 画质选项
-
-旧版 yt-dlp 遇到更新后的 YouTube 播放器脚本时解析失败，二路回退到这场直播最高仅有 1080p60 的 HLS 列表。将解析器固定到上游稳定版 2026.11.23，使用独立缓存目录和对应的 SHA256 校验。[上游问题记录](https://github.com/yt-dlp/yt-dlp/issues/18123)
-
-使用反馈中的公开直播，在隔离的比赛二路界面从低画质分别切到 2K 与 4K，确认实际解码为 2560×1440 与 3840×2160，均为 VP9、60 FPS，并收到音频。通过 YouTube 取流回归、独立平台包检查及宿主媒体源检查。多路同时 4K 的流畅度尚未验收。
 
 ### 2026-11-19｜1.0正式发布准备（历史记录）
 
