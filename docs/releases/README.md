@@ -12,13 +12,13 @@
 
 ## 待发布草稿
 
-- [YouTube 直播 1.1](RELEASE-youtube-live-v1.1.md)：恢复 2K／4K 画质，待受检发布。
 - [IPTV Play 1.0](RELEASE-m3u-live-v1.0.md)，等待支持频道列表接口的宿主发布。
 
 ## 当前在线发布说明
 
 | 插件 | 仓库说明 | GitHub 来源 |
 | --- | --- | --- |
+| YouTube 直播 | [1.1](RELEASE-youtube-live-v1.1.md) | [youtube-live-v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.1) |
 | 比赛二路同步 | [2.0 pre release](RELEASE-match-sync-v2.0-pre.1.md) | [GitHub Release](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v2.0-pre.1) · 插件商店可获取 |
 | 国内直播平台 | [2.0](RELEASE-domestic-live-v2.0.md) | [domestic-live-v2.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v2.0) |
 | 海外直播平台 | [1.2](RELEASE-global-live-v1.2.md) | [global-live-v1.2](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/global-live-v1.2) |

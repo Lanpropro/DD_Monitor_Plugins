@@ -634,11 +634,28 @@
     {
       "tag": "youtube-live-v1.1",
       "file": "RELEASE-youtube-live-v1.1.md",
-      "status": "prepared",
-      "source_kind": "repository_candidate",
-      "base_commit": "7454ef811f0483d4e86843f5f2afb440391e5636",
-      "last_edit_verified": false,
-      "sha256": "54a4baa6844ea2aa5d3f635b02bd1c00e81bc1288bd5c80fdc5a5ae4ecdc9c29"
+      "status": "online",
+      "source_kind": "github_release",
+      "last_edit_verified": true,
+      "sha256": "54a4baa6844ea2aa5d3f635b02bd1c00e81bc1288bd5c80fdc5a5ae4ecdc9c29",
+      "raw_body_sha256": "54a4baa6844ea2aa5d3f635b02bd1c00e81bc1288bd5c80fdc5a5ae4ecdc9c29",
+      "release_id": 458138655,
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.1",
+      "release_created_at": "2026-11-25T13:16:05Z",
+      "release_updated_at": "2026-11-25T13:16:42Z",
+      "release_published_at": "2026-11-25T13:16:42Z",
+      "release_name": "YouTube 直播 v1.1",
+      "source_commit": "7454ef811f0483d4e86843f5f2afb440391e5636",
+      "prerelease": false,
+      "assets": [
+        {
+          "id": 791628874,
+          "name": "youtube_live-1.1.zip",
+          "size": 12163157,
+          "sha256": "577f2c663f17933f17ecbdc1cbf35cdd04488c0f2ca3eee560fc6eeeb442ae06",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/youtube-live-v1.1/youtube_live-1.1.zip"
+        }
+      ]
     }
   ],
   "tags_without_recoverable_body": [

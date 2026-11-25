@@ -16,7 +16,7 @@
 | 抖音直播 | [douyin_live](douyin_live.md) | [douyin-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyin-live-v1.0) |
 | 斗鱼直播 | [douyu_live](douyu_live.md) | [douyu-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyu-live-v1.0) |
 | 虎牙直播 | [huya_live](huya_live.md) | [huya-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/huya-live-v1.0) |
-| YouTube 直播 | [youtube_live](youtube_live.md) | [youtube-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.0) |
+| YouTube 直播 | [youtube_live](youtube_live.md) | [youtube-live-v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.1) |
 | Twitch 直播 | [twitch_live](twitch_live.md) | [twitch-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/twitch-live-v1.0) |
 | CHZZK 直播 | [chzzk_live](chzzk_live.md) | [chzzk-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/chzzk-live-v1.0) |
 | B站稍后再看 | [bili_watchlater](bili_watchlater.md) | [bili-watchlater-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/bili-watchlater-v1.0) |
