@@ -1,5 +1,6 @@
 """校验 ZIP、源码一致、真实宿主导入及平台注册。"""
 import argparse
+import base64
 from base64 import b64decode
 import json
 import os
@@ -22,6 +23,7 @@ def main():
     os.chdir(args.host.resolve())  # Resolve the host's bundled VLC DLLs on Windows.
     os.environ["DDM_NO_SAVE"] = "1"
     from ddm.plugins import PluginManager
+    from ddm.plugin_icons import decode_catalog_icon
     from PySide6.QtGui import QImage
     versions = {path.parent.name: json.loads(path.read_text(encoding="utf-8"))["version"]
                 for path in (ROOT / "plugins").glob("*/plugin.json")}
@@ -46,6 +48,7 @@ def main():
     proxy_notes = ROOT / 'docs/releases' / f'RELEASE-proxy-control-v{proxy_version}.md'
     assert proxy_notes.read_text(encoding='utf-8').startswith(f'# 网络代理 v{proxy_version}\n')
     display_names = {'domestic_live': '国内直播平台', 'global_live': '海外直播平台', 'match_sync': '比赛二路同步', 'bili_live': 'B站直播互动', 'proxy_control': '网络代理', 'huya_live': '虎牙直播', 'douyu_live': '斗鱼直播', 'douyin_live': '抖音直播', 'twitch_live': 'Twitch直播', 'youtube_live': 'YouTube直播', 'chzzk_live': 'CHZZK直播', 'bili_watchlater': 'B站稍后再看', 'm3u_live': 'IPTV Play', 'qie_live': '企鹅体育'}
+    display_names['live_translate'] = '实时翻译'
     selected = set(args.plugin or versions)
     with tempfile.TemporaryDirectory() as directory:
         manager = PluginManager(plugins_dir=directory, enabled=[])
@@ -60,6 +63,13 @@ def main():
                 assert manifest["id"] == plugin_id
                 assert manifest["name"] == display_names[plugin_id]
                 assert manifest["version"] == versions[plugin_id]
+                if plugin_id == 'live_translate':
+                    assert manifest['icon'] == 'store-icon.png'
+                    assert 'live_translate/prepare_runtime.py' in names
+                    assert not any('/vendor/' in name or name.endswith(('.onnx', '.gguf', '.exe'))
+                                   for name in names)
+                    icon = archive.read('live_translate/' + manifest['icon'])
+                    assert decode_catalog_icon(base64.b64encode(icon).decode('ascii')) == icon
                 if plugin_id in ('m3u_live', 'qie_live'):
                     assert manifest['icon'] == 'icon.png'
                     assert archive.read(f'{plugin_id}/icon.png').startswith(b'\x89PNG\r\n\x1a\n')

@@ -13,6 +13,7 @@
 | 比赛二路同步 | [match_sync](match_sync.md) | [match-sync-v1.7.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.7.0) |
 | B站直播互动 | [bili_live](bili_live.md) | [1.1 历史发布](../releases/RELEASE-bili-live-v1.1.md) |
 | 网络代理 | [proxy_control](proxy_control.md) | [proxy-control-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/proxy-control-v1.0) |
+| 实时翻译 | [live_translate](live_translate.md) | [1.0 发布候选](../releases/RELEASE-live-translate-v1.0.md) |
 | B站稍后再看（验收候选） | [bili_watchlater](bili_watchlater.md) | 尚无公开发布 |
 | IPTV Play | [m3u_live](m3u_live.md) | [m3u-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/m3u-live-v1.0) |
 | 企鹅体育 | [qie_live](qie_live.md) | [qie-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/qie-live-v1.0) |
