@@ -8,7 +8,6 @@
 
 ## 待发布草稿
 
-- [实时翻译 1.0](RELEASE-live-translate-v1.0.md) · 默认准备两套 1.7B 模型。[0.1 开发预览](RELEASE-live-translate-v0.1.md)。
 
 - [虎牙直播1.0](RELEASE-huya-live-v1.0.md)：独立平台首发，保留最新海外及平台拆分修复，待受检发布。
 - [斗鱼直播1.0](RELEASE-douyu-live-v1.0.md)：独立平台首发，保留最新海外及平台拆分修复，待受检发布。
@@ -22,6 +21,7 @@
 
 | 插件 | 仓库说明 | GitHub 来源 |
 | --- | --- | --- |
+| 实时翻译 | [1.0](RELEASE-live-translate-v1.0.md) | [live-translate-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/live-translate-v1.0) |
 | 比赛二路同步 | [2.0 Pre-release 2](RELEASE-match-sync-v2.0.2.md) | [GitHub Release](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v2.0.2) · 插件商店可获取 |
 | YouTube 直播 | [1.1](RELEASE-youtube-live-v1.1.md) | [youtube-live-v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.1) |
 | 比赛二路同步 | [1.7.0](RELEASE-match-sync-v1.7.0.md) | [match-sync-v1.7.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.7.0) |
@@ -33,6 +33,8 @@
 
 
 ## 替代版本的核验归档
+
+- [实时翻译 0.1 开发预览](RELEASE-live-translate-v0.1.md) · 贡献者曾在 fork 中提供的试用版。
 
 新版公开下载及商店、网站入口验证完成后，先同步旧 Release 最新正文和来源信息、提交归档，再删除旧发布页及附件。保留源码标签和提交；原始 Release JSON、安装包及目录附件另存本地备份，不加入源码仓库。
 
