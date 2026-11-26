@@ -8,6 +8,8 @@
 
 ## 待发布草稿
 
+- [实时翻译 1.0](RELEASE-live-translate-v1.0.md) · 默认准备两套 1.7B 模型。[0.1 开发预览](RELEASE-live-translate-v0.1.md)。
+
 - [虎牙直播1.0](RELEASE-huya-live-v1.0.md)：独立平台首发，保留最新海外及平台拆分修复，待受检发布。
 - [斗鱼直播1.0](RELEASE-douyu-live-v1.0.md)：独立平台首发，保留最新海外及平台拆分修复，待受检发布。
 - [抖音直播1.0](RELEASE-douyin-live-v1.0.md)：独立平台首发，保留最新海外及平台拆分修复，待受检发布。
