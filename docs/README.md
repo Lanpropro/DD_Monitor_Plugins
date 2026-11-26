@@ -47,6 +47,7 @@
 | 比赛二路同步 | 2.0.2 | [README](../plugins/match_sync/README.md) |
 | B站直播互动 | 1.1 | [README](../plugins/bili_live/README.md) |
 | 网络代理 | 1.0 | [README](../plugins/proxy_control/README.md) |
+| 实时翻译 | 1.0 | [README](../plugins/live_translate/README.md) |
 | IPTV Play | 1.0 | [README](../plugins/m3u_live/README.md) |
 | 企鹅体育 | 1.0 | [README](../plugins/qie_live/README.md) |
 | B站稍后再看 | 1.0 | [README](../plugins/bili_watchlater/README.md) |
