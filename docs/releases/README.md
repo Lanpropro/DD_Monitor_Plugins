@@ -10,6 +10,7 @@
 
 ## 待发布草稿
 
+- [实时翻译 1.0](RELEASE-live-translate-v1.0.md) · 默认准备两套 1.7B 模型。[0.1 开发预览](RELEASE-live-translate-v0.1.md)。
 - [IPTV Play 1.0](RELEASE-m3u-live-v1.0.md)，等待支持频道列表接口的宿主发布。
 - [企鹅体育 1.0](RELEASE-qie-live-v1.0.md)，公开直播 720p 播放和只读弹幕。
 - [虎牙直播1.0](RELEASE-huya-live-v1.0.md)：独立平台首发，保留最新海外及平台拆分修复，待受检发布。

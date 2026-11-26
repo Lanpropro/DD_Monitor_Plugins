@@ -85,6 +85,7 @@
 | B站直播互动 | `bili_live` | 1.1 |
 | B站稍后再看 | `bili_watchlater` | 1.0 |
 | 网络代理 | `proxy_control` | 1.0 |
+| 实时翻译 | `live_translate` | 1.0 |
 | IPTV Play | `m3u_live` | 1.0 |
 | 企鹅体育 | `qie_live` | 1.0 |
 | 国内直播平台（组合包） | `domestic_live` | 2.0 |
