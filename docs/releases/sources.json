@@ -4,6 +4,24 @@
   "normalization": "CRLF or repeated CR to LF; one final LF for synchronized release bodies",
   "entries": [
     {
+      "tag": "live-translate-v1.0",
+      "file": "RELEASE-live-translate-v1.0.md",
+      "status": "prepared",
+      "source_kind": "repository_candidate",
+      "base_commit": "ca971a92ede914674f08a1ed52d1732401a200be",
+      "last_edit_verified": false,
+      "sha256": "0ed5769f4c8ed522def40d2a5a921b992b46c5297bba8549c73b95843034f755"
+    },
+    {
+      "tag": "live-translate-v0.1",
+      "file": "RELEASE-live-translate-v0.1.md",
+      "status": "historical",
+      "source_kind": "repository_history",
+      "source_commit": "ca971a92ede914674f08a1ed52d1732401a200be",
+      "last_edit_verified": false,
+      "sha256": "991a10541500e616c577458243db47529df96a89670ecf29a5b7d221e077ae14"
+    },
+    {
       "tag": "match-sync-v2.0.2",
       "file": "RELEASE-match-sync-v2.0.2.md",
       "status": "online",

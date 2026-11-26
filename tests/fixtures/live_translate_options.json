@@ -1,0 +1,20 @@
+{
+  "engine": "qwen3_asr",
+  "model_dir": "work/live-translate-runtime/qwen3-asr-0.6b-int8",
+  "python": "work/live-translate-runtime/runtime/Scripts/python.exe",
+  "endpoint": "",
+  "model": "",
+  "translation_mode": "local",
+  "local_model": "work/live-translate-runtime/translation/Qwen3-0.6B-Q8_0.gguf",
+  "local_server": "work/live-translate-runtime/translation/b12211/llama-server.exe",
+  "source_language": "日语",
+  "target_language": "简体中文",
+  "threads": 2,
+  "timeout": 1.5,
+  "music_detection": false,
+  "music_model_dir": "",
+  "local_prompt": "",
+  "api_prompt": "",
+  "glossary_language": "",
+  "glossary": []
+}

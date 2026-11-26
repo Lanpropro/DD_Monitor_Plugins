@@ -13,6 +13,7 @@
 | 比赛二路同步 | [match_sync](match_sync.md) | [2.0 preview](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v2.0-pre.1) |
 | B站直播互动 | [bili_live](bili_live.md) | [1.1 历史发布](../releases/RELEASE-bili-live-v1.1.md) |
 | 网络代理 | [proxy_control](proxy_control.md) | [proxy-control-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/proxy-control-v1.0) |
+| 实时翻译 | [live_translate](live_translate.md) | [1.0 发布候选](../releases/RELEASE-live-translate-v1.0.md) |
 | 抖音直播 | [douyin_live](douyin_live.md) | [douyin-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyin-live-v1.0) |
 | 斗鱼直播 | [douyu_live](douyu_live.md) | [douyu-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/douyu-live-v1.0) |
 | 虎牙直播 | [huya_live](huya_live.md) | [huya-live-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/huya-live-v1.0) |

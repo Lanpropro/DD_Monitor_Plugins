@@ -12,6 +12,7 @@
 
 ## 待发布草稿
 
+- [实时翻译 1.0](RELEASE-live-translate-v1.0.md) · 默认准备两套 1.7B 模型。[0.1 开发预览](RELEASE-live-translate-v0.1.md)。
 - [IPTV Play 1.0](RELEASE-m3u-live-v1.0.md)，等待支持频道列表接口的宿主发布。
 
 ## 当前在线发布说明
