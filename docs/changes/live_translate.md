@@ -1,10 +1,14 @@
 # 实时翻译增量记录
 
-> 类型：记录 ｜ 状态：草案 ｜ 适用版本：live-translate 0.1 ｜ 更新：2026-11-16 ｜ 读者：维护者
+> 类型：记录 ｜ 状态：维护中 ｜ 适用版本：live-translate 1.0 ｜ 更新：2026-11-26 ｜ 读者：维护者
 
 插件 ID：`live_translate`。首个公开候选版本为 `0.1` 开发预览。
 
-## 1.0 商店候选
+## 2026-11-26 已发布 1.0
+
+- [正式发布](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/live-translate-v1.0)，通过 [发布核验](https://github.com/Lanpropro/DD_Monitor_Plugins/actions/runs/45768127089)。
+- 源码 `ca971a92ede914674f08a1ed52d1732401a200be` 已通过 [#105](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/105) 和 [#106](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/106) 分别集成到 `develop`、`main`。
+- `live_translate-1.0.zip` 共 103564 字节，SHA-256 `1b8bf3d5d976bae00d9d3d20a25f4d958e5d5da5bf8be984ead4b93be1ef8dab`。公开附件已通过实际商店读取、图标核对及隔离加载验证。
 
 新增商店 PNG 图标。首次准备默认下载 Qwen3-ASR 1.7B INT8 和 Qwen3 1.7B Q8_0，固定来源修订并逐文件校验。已保存的模型路径继续使用，R13 检测与译文处理逻辑沿用现有实现。安装和模型出处见 [1.0 发布说明](../releases/RELEASE-live-translate-v1.0.md)。
 
@@ -237,8 +241,8 @@
 
 - PR：[DD_Monitor_Plugins #74](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/74)，目标分支 `develop`，当前待维护者审阅，尚未合并。
 - 宿主配套 PR：[DD_Monitor_CE #234](https://github.com/Lanpropro/DD_Monitor_CE/pull/234)，提供 `set_tile_caption()` / `clear_tile_caption()`；旧宿主继续回退独立字幕窗。
-- 发布基线：上游尚无公开发布基线。
-- 预发布：[live-translate-v0.1](https://github.com/Soraray/DD_Monitor_Plugins/releases/tag/live-translate-v0.1)，由贡献账号 `Soraray` 的 fork 代管，供 PR 审阅和附件下载；合并后由维护者镜像到主仓库 Release。
+- 发布基线：[live-translate-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/live-translate-v1.0)。以下 0.1 附件为开发预览历史。
+- 预发布：[live-translate-v0.1](https://github.com/Soraray/DD_Monitor_Plugins/releases/tag/live-translate-v0.1)，由贡献账号 `Soraray` 的 fork 代管，供 PR 审阅和附件下载。
 - 附件：`live_translate-0.1.zip` 47,176 B，SHA256 `f80c282b11f698e7a3959b7519e7bfc932d9a9bef6794f6edec46a783e270712`；`live_translate-0.1-offline.zip` 750,841,281 B，SHA256 `2cccb71e9d8f725473412bf35537a5e55f7dfc18403ccc2d9fa6d2b983940fdd`。
 - 旧宿主没有字幕覆盖层接口时回退独立字幕窗；内嵌字幕需要配套宿主接口。
 - 进程归组由插件自身完成，不要求宿主修改；宿主进程内的识别线程随插件卸载和会话停止回收。
