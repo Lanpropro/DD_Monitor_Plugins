@@ -23,7 +23,6 @@
 | --- | --- | --- |
 | 实时翻译 | [1.0](RELEASE-live-translate-v1.0.md) | [live-translate-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/live-translate-v1.0) |
 | 比赛二路同步 | [2.0（包版本 2.0.3）](RELEASE-match-sync-v2.0.3.md) | [GitHub Release](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v2.0.3) · 插件商店可获取 |
-| 比赛二路同步 | [2.0 Pre-release 2](RELEASE-match-sync-v2.0.2.md) | [GitHub Release](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v2.0.2) · 插件商店可获取 |
 | YouTube 直播 | [1.1](RELEASE-youtube-live-v1.1.md) | [youtube-live-v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.1) |
 | 比赛二路同步 | [1.7.0](RELEASE-match-sync-v1.7.0.md) | [match-sync-v1.7.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v1.7.0) |
 | 国内直播平台 | [2.0](RELEASE-domestic-live-v2.0.md) | [domestic-live-v2.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/domestic-live-v2.0) |
@@ -41,6 +40,8 @@
 
 | 插件 | 历史说明 | 保留源码 | 替代版本 |
 | --- | --- | --- | --- |
+| 比赛二路同步 | [2.0 Pre-release 1](RELEASE-match-sync-v2.0-pre.1.md) | [match-sync-v2.0-pre.1 标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/match-sync-v2.0-pre.1) | [2.0 正式版](RELEASE-match-sync-v2.0.3.md) |
+| 比赛二路同步 | [2.0 Pre-release 2](RELEASE-match-sync-v2.0.2.md) | [match-sync-v2.0.2 标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/match-sync-v2.0.2) | [2.0 正式版](RELEASE-match-sync-v2.0.3.md) |
 | YouTube 直播 | [1.0](RELEASE-youtube-live-v1.0.md) | [youtube-live-v1.0 标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/youtube-live-v1.0) | [1.1](RELEASE-youtube-live-v1.1.md) |
 | 比赛二路同步 | [1.6.1](RELEASE-match-sync-v1.6.1.md) | [match-sync-v1.6.1 标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/match-sync-v1.6.1) | [1.7.0](RELEASE-match-sync-v1.7.0.md) |
 | 比赛二路同步 | [1.6](RELEASE-match-sync-v1.6.md) | [match-sync-v1.6 标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/match-sync-v1.6) | [1.7.0](RELEASE-match-sync-v1.7.0.md) |
@@ -50,6 +51,8 @@
 | B站直播互动 | [1.1](RELEASE-bili-live-v1.1.md) | [bili-live-v1.1 标签](https://github.com/Lanpropro/DD_Monitor_Plugins/tree/bili-live-v1.1) | [DD监控室CE v0.9.1 内置](https://github.com/Lanpropro/DD_Monitor_CE/releases/tag/v0.9.1) |
 
 二路 1.5、B站 1.0 与国内平台 1.5 于 2026-11-05 在删除前分别核对最新正文及两个附件，正文未改写。作者、原发布者、发布时间、最后更新时间、源码提交和附件大小／SHA256 均保存在 [sources.json](sources.json)。`archived_verified` 表示归档前已核对网页最后编辑版，与下方无法确认最后编辑版的旧备份区分。
+
+2.0 Pre-release 2 的归档说明取自删除前的网页正文。此前提交的正文和校验记录可在原提交中查阅。 [原正文](https://github.com/Lanpropro/DD_Monitor_Plugins/blob/d3180833b04536541d4f98b78d6e7a5024d17572/docs/releases/RELEASE-match-sync-v2.0.2.md) · [原来源记录](https://github.com/Lanpropro/DD_Monitor_Plugins/blob/d3180833b04536541d4f98b78d6e7a5024d17572/docs/releases/sources.json)
 
 ## 已删除 Release 的可恢复快照
 
