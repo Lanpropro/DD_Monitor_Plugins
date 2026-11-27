@@ -32,6 +32,36 @@
       ]
     },
     {
+      "tag": "match-sync-v2.0-pre.1",
+      "file": "RELEASE-match-sync-v2.0-pre.1.md",
+      "status": "archived_verified",
+      "source_kind": "github_release",
+      "release_id": 456918811,
+      "release_updated_at": "2026-11-24T15:30:30Z",
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v2.0-pre.1",
+      "last_edit_verified": true,
+      "raw_body_sha256": "2b1e3fbb565b523a3ced2f3b7ebabb6bec16ed05a7278af309fcd51e5c6e75b6",
+      "sha256": "96e2f9b32fac00ca0505ca6e9e78380883a8abe556a7fa2440f68d352902b79b",
+      "release_name": "比赛二路同步 2.0 pre release",
+      "release_author": "Lanpropro",
+      "plugin_author": "Lanpropro",
+      "release_created_at": "2026-11-24T14:58:52Z",
+      "release_published_at": "2026-11-24T15:00:24Z",
+      "source_commit": "57e98cef78c31b3bda9edb75daf03c7e9c849a06",
+      "prerelease": false,
+      "assets": [
+        {
+          "id": 787633156,
+          "name": "match_sync-2.0.zip",
+          "size": 241028,
+          "sha256": "b9f9edc4a731d021a2bac4f1568e24fc3fc28a55a0a11f67066497972c10b0f9",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/match-sync-v2.0-pre.1/match_sync-2.0.zip"
+        }
+      ],
+      "archived_at": "2026-11-27T11:39:11+00:00",
+      "superseded_by": "match-sync-v2.0.3"
+    },
+    {
       "tag": "live-translate-v1.0",
       "file": "RELEASE-live-translate-v1.0.md",
       "status": "online",
@@ -71,14 +101,14 @@
     {
       "tag": "match-sync-v2.0.2",
       "file": "RELEASE-match-sync-v2.0.2.md",
-      "status": "online",
+      "status": "archived_verified",
       "source_kind": "github_release",
       "release_id": 458381240,
-      "release_updated_at": "2026-11-25T16:51:05Z",
+      "release_updated_at": "2026-11-25T16:57:04Z",
       "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v2.0.2",
       "last_edit_verified": true,
-      "raw_body_sha256": "18801397b9323486d6cc87db80823f5433a25cceb1c2b579fc6b17cfe6f5cbd8",
-      "sha256": "cb4604d0cc3ce2c825a4fff76cf6063a2ed22589af7f4cd8c763f69f0b79ad11",
+      "raw_body_sha256": "26de5df8c36cf3054ce2b18b4b42632797b1699f6f649cb81e2863e978ed858a",
+      "sha256": "3414bd265d0d7f927f95d3e1d7cd3849d897d77865562892846300a5b63c1966",
       "release_name": "比赛二路同步 2.0 Pre-release 2",
       "release_author": "Lanpropro",
       "plugin_author": "Lanpropro",
@@ -94,7 +124,9 @@
           "sha256": "72c25a87861d31d64db1f058060f2755f4368dbdd5be4f2d8b4519b24948ae3f",
           "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/match-sync-v2.0.2/match_sync-2.0.2.zip"
         }
-      ]
+      ],
+      "archived_at": "2026-11-27T11:39:11+00:00",
+      "superseded_by": "match-sync-v2.0.3"
     },
     {
       "tag": "bili-live-v1.0",
