@@ -2,25 +2,19 @@
 
 插件 ID：`match_sync`。
 
-当前公开预览：[2.0 Pre-release 2](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v2.0.2)。
+当前公开版本：[2.0（包版本 2.0.3）](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v2.0.3)。
 
 记录规则与条目模板见[增量记录入口](README.md)。
 
 ## 待发布
 
-### 2026-11-27｜好友同看操作固定在底部
-
-「复核画面」和「退出同看」固定在右侧面板底部。成员和同步详情超出高度时在按钮上方滚动。同步状态用圆点和文字显示，背景沿用右侧面板。
-
-### 2026-11-27｜好友同看成员与同步面板
-
-右侧「好友同看」按建房或加入、等待、匹配、锁定与重连显示对应操作。房间内可复制六位房间码，查看成员的公开昵称、圆形头像和角色，并按需展开同步详情。切换到弹幕控制台或收起右栏时，同看会话继续运行。仍使用旧协议的房间会以平台和 ID 显示成员，访客和缺失的头像保留占位。
-
-### 2026-11-26｜在播放控制台一键校准比赛声
-
-两路或三路完成对齐并入混后自动取样。点击任一已入混直播路声音控件末尾的波形图标，即可检测当前混音、应用副路声音补偿并自动复测。校准状态和撤销操作位于控制台工具栏。短暂重连保留补偿，重新入混后再复测。
-
 [PR #65](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/65) 已按维护者要求关闭，未合并；实现分支保留，完整独立框选接线未纳入当前开发基线，也不记为已验收。
+
+## 已发布 2.0（2026-11-27）
+
+安装包版本为 2.0.3，最低本体版本为 0.9.1。包含三人好友同看、独立滚动的成员与同步详情、一键比赛声校准、最长 30 分钟回看和新用户默认 D3D11。已验证公开版 2.0.2 升级保留配置，并对照发布标签核验了公开 ZIP。
+
+详见[发布说明](../releases/RELEASE-match-sync-v2.0.3.md)、[公开附件](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v2.0.3)及[develop PR](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/109)和[main PR](https://github.com/Lanpropro/DD_Monitor_Plugins/pull/110)。
 
 ## 已发布 2.0 Pre-release 2（2026-11-26）
 
