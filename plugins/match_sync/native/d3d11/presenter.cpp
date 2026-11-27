@@ -21,7 +21,9 @@ struct Header {
     volatile LONG stop;
     UINT width, height, stride, slot_bytes;
     volatile LONG presented;
-    std::byte reserved[36];
+    UINT padding;
+    volatile LONG64 displayed_timestamp_us;
+    std::byte reserved[24];
 };
 static_assert(sizeof(Header) == 64);
 
@@ -227,8 +229,10 @@ int run(const wchar_t* mapping_name, const wchar_t* event_name, bool warp, bool 
             throw std::runtime_error("shared slot pixel marker differs from the frame sequence");
         const HRESULT presented = swap->Present(1, 0);
         check(presented, "present");
-        if (presented == S_OK)
+        if (presented == S_OK) {
+            InterlockedExchange64(&header.displayed_timestamp_us, frame.timestamp_us);
             InterlockedIncrement(&header.presented);
+        }
         presents += presented == S_OK;
         occluded += presented == DXGI_STATUS_OCCLUDED;
         other_success += presented != S_OK && presented != DXGI_STATUS_OCCLUDED;

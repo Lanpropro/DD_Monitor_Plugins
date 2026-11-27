@@ -95,9 +95,7 @@ def _render_overlay(viewer, clock, shifts):
                                     or not remaining_seconds(event.get('end_time'))))):
             viewer.overlay_pending.pop(key, None)
         else:
-            overlay_event = dict(event)
-            if not event.get('color'):
-                overlay_event['text'] = f"【{event['source_label']}】 {event.get('text') or ''}"
+            overlay_event = dict(event, color=event.get('color') or viewer.rows[key].color)
             if viewer.video_danmaku.add_event(overlay_event):
                 viewer.overlay_pending.pop(key, None)
                 viewer.overlay_last = key

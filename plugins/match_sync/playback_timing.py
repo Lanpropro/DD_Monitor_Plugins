@@ -121,9 +121,11 @@ def _recover_clock(viewer, clock, shifts):
     viewer.audio.correction += recovered - clock
     ahead = bounds[1] - recovered - shifts[main.room_id]
     viewer._update_late_buffer(now, recovered, shifts, ahead, bounds[1] - bounds[0] - .5)
-    viewer.playback_rate = viewer.safety_buffer.rate(now, ahead, minimum=viewer.late_buffer.floor)
+    buffer_rate = viewer.safety_buffer.rate(now, ahead, minimum=viewer.late_buffer.floor)
     if viewer.late_buffer.building:
-        viewer.playback_rate = min(viewer.playback_rate, .98)
+        buffer_rate = min(buffer_rate, .98)
+    room = getattr(viewer, "watch_room", None)
+    viewer.playback_rate = 1.0 if room and room.link and room.link.online else buffer_rate
     return recovered
 
 
@@ -164,6 +166,10 @@ def _update_late_buffer(viewer, now, clock, shifts, ahead, capacity):
         else:
             text = f"{'、'.join(names)}持续晚到，正在平滑增加主路缓冲；切换较晚的一路为主画面可更快对齐"
         detail = f"主画面持续播放，以最多约 2% 的轻微降速积累共同缓冲；目标副路余量 {viewer.reserve_seconds} 秒，需要数分钟逐步积累。"
+        room = getattr(viewer, "watch_room", None)
+        if room and room.link and room.link.online:
+            text = f"{'、'.join(names)}副路缓冲不足 · 好友同看保持 1.0×"
+            detail = "主路按正常速度播放；较晚的副路可能需要等待缓存。"
     elif viewer.late_buffer.limited:
         text = f"当前缓存容量不足以保留 {viewer.reserve_seconds} 秒播放余量"
         detail = "继续播放并保留已积累余量；历史缓存容量或断流缺口限制了连续可播放时长，不表示比赛画面失配。"

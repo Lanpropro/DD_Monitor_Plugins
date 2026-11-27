@@ -2,7 +2,8 @@
 import logging
 import os
 
-from PySide6.QtCore import QEvent, QObject, QTimer
+from PySide6.QtCore import QEvent, QObject, QPoint, QTimer
+from PySide6.QtGui import QRegion
 from PySide6.QtWidgets import QApplication
 
 
@@ -71,7 +72,19 @@ class WindowedDanmaku(QObject):
 
     def occluders(self):
         yield self.viewer.replay_bar.preview
-        yield from self.viewer.all_floating_crops()
+        if not hasattr(self.layer, 'set_child_occlusion'):
+            yield from self.viewer.all_floating_crops()
+
+    def crop_occlusion(self):
+        region = QRegion()
+        origin = self.picture.mapToGlobal(QPoint())
+        for crop in self.viewer.all_floating_crops():
+            if crop.isVisible():
+                mask = crop.mask()
+                if mask.isEmpty():
+                    mask = QRegion(crop.rect())
+                region |= mask.translated(crop.mapToGlobal(QPoint()) - origin)
+        return region.intersected(QRegion(self.picture.rect()))
 
     def eventFilter(self, watched, event):
         kind = event.type()
@@ -96,6 +109,8 @@ class WindowedDanmaku(QObject):
                 self.layer.set_group_visible(self.overlay._quick_group, self.overlay.isVisible())
             self.picture._update_quick_danmaku_mask()
             self.layer.resize()
+            if hasattr(self.layer, 'set_child_occlusion'):
+                self.layer.set_child_occlusion(self.crop_occlusion())
         except (AttributeError, ImportError, OSError, RuntimeError):
             logging.getLogger(__name__).exception('Match Sync Qt Quick danmaku fell back to raster')
             self.fallback()

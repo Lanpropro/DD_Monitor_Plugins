@@ -118,6 +118,7 @@ class RoomRow(QFrame):
         self.setAcceptDrops(True)
         self.platform = platform if platform is not None else viewer.context.manager.platform_for(room_id)
         self.crop_editor = None
+        self.region_editor = None
         self.decoder = None
         self.chat = None
         self.paused = False
@@ -214,6 +215,16 @@ class RoomRow(QFrame):
         self.channel.audibleChanged.connect(self.audible.setChecked)
         self.audible.toggled.connect(self.channel.set_audible)
         self.channel.currentIndexChanged.connect(viewer.changed)
+        self.calibrate_sound = ConsoleIconButton('sound_calibration', '一键校准比赛声（当前混音）')
+        self.calibrate_sound.setEnabled(False)
+        self.calibrate_sound.clicked.connect(lambda: viewer.sound_calibration.calibrate(room_id))
+        self.undo_sound_calibration = ConsoleIconButton('undo_sound_calibration', '撤销本路声音校准')
+        self.undo_sound_calibration.hide()
+        self.undo_sound_calibration.clicked.connect(lambda: viewer.sound_calibration.restore(room_id))
+        self.sound_offset_info = QLabel()
+        self.sound_offset_info.setTextFormat(Qt.PlainText)
+        self.sound_offset_info.setStyleSheet(f'font-size: {theme.FONT_CAPTION}px;')
+        self.sound_offset_info.hide()
         for signal in (self.channel.currentIndexChanged, self.volume.valueChanged, self.audible.toggled):
             signal.connect(self.refresh_audio_icon)
             signal.connect(viewer.sync_picture)
@@ -286,8 +297,9 @@ class RoomRow(QFrame):
         for button in (self.hint_fast, self.hint_slow, self.clock_button):
             button.setFocusPolicy(Qt.StrongFocus)
             clock_layout.addWidget(button)
+        clock_layout.addWidget(self.sound_offset_info)
         clock_layout.addStretch()
-        self.clock_controls.setFixedWidth(44 * 2 + 32 + 4 * 2)
+        self.clock_controls.setMinimumWidth(44 * 2 + 32 + 4 * 2)
         self.join = QPushButton("确认对齐并加入")
         self.join.setAutoDefault(False)
         self.join.setFixedHeight(28)
@@ -348,9 +360,11 @@ class RoomRow(QFrame):
         groups = [identity]
         self.group_separators = []
         for index, widgets in enumerate(((floating, self.realign),
-                        (self.independent, self.audible, self.volume, self.volume_number, self.channel),
+                        (self.independent, self.audible, self.volume, self.volume_number, self.channel,
+                         self.undo_sound_calibration, self.calibrate_sound),
                         (self.show_chat, self.color_choice),
-                        (self.offset_box, self.assist, self.clock_controls), (region, self.remove_button)), 1):
+                        (self.offset_box, self.assist, self.clock_controls),
+                        (region, self.remove_button)), 1):
             group = QWidget()
             line = QHBoxLayout(group)
             line.setContentsMargins(0, 0, 0, 0)

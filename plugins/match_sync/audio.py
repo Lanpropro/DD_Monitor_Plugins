@@ -25,6 +25,18 @@ def observed_media_time(observation, played):
     return value
 
 
+def synchronized_pcm_block(target, frames, rate, previous_end):
+    """Keep small alignment corrections continuous in the source sample clock."""
+    requested = round(target * RATE)
+    start = requested
+    if previous_end is not None and abs(requested - previous_end) <= RATE // 100:
+        start = previous_end
+    # Recover the accumulated sub-block timing error gradually. A seek or
+    # reconnect beyond the continuity window uses the new position directly.
+    adjustment = max(-frames * .01, min(frames * .01, (requested - start) * .1))
+    return start / RATE, max(1, round(frames * rate + adjustment))
+
+
 class AudioFeed(QObject):
     """Own the output device and its timer entirely on the audio thread."""
     def __init__(self, pump, output, fmt):
@@ -63,6 +75,8 @@ class AudioFeed(QObject):
             if pump.sink is None:
                 return
             clock = pump._clock() if pump.flush_clock is None else pump.flush_clock
+            if pump.mix_lag_probe is not None:
+                pump.mix_lag_probe.cancel()
             pump.sink.reset()
             pump.device = pump.sink.start()
             pump.anchor = clock
@@ -73,6 +87,7 @@ class AudioFeed(QObject):
             pump.clock_observation = pump.clock_floor = None
             pump.replay_cursors.clear()
             pump.independent_cursors.clear()
+            pump.sync_cursors.clear()
             pump.read_metrics.reset()
 
     @Slot()
@@ -86,6 +101,8 @@ class AudioFeed(QObject):
         if self.timer is not None:
             self.timer.stop()
         with self.pump.lock:
+            if self.pump.mix_lag_probe is not None:
+                self.pump.mix_lag_probe.cancel()
             sink, self.pump.sink = self.pump.sink, None
             self.pump.device = None
             self.pump.clock_observation = self.pump.clock_floor = None
@@ -119,6 +136,10 @@ class AudioPump(QObject):
         self.replay_offset = None
         self.replay_cursors = {}
         self.independent_cursors = {}
+        self.sync_cursors = {}
+        self.mix_lag_probe = None
+        self.sound_trims = {}
+        self.trim_clock = 0.
         self.read_metrics = AudioReadMetrics()
         self.timings = StageTimings()
         self.timer = QTimer(self)
@@ -158,6 +179,7 @@ class AudioPump(QObject):
 
     def stop(self):
         self.timer.stop()
+        self.sound_trims.clear()
         self.last_fill = None
         if self.thread is not None:
             QMetaObject.invokeMethod(self.feed, "stop", Qt.BlockingQueuedConnection)
@@ -174,6 +196,7 @@ class AudioPump(QObject):
         self.clock_observation = self.clock_floor = None
         self.snapshot = (1.0, ())
         self.independent_cursors.clear()
+        self.sync_cursors.clear()
         self.read_metrics.reset()
         self.timings.samples.clear()
 
@@ -216,6 +239,44 @@ class AudioPump(QObject):
             return self.anchor + media + min(max(0, played - first), end - first) / RATE * rate
         return self.anchor + played / RATE
 
+    def trim_goal(self, key):
+        route = self.sound_trims.get(key)
+        return route[2] if route else 0
+
+    def set_trim(self, key, milliseconds):
+        v = self.viewer
+        main = v.main.currentData()
+        if key == main:
+            raise ValueError('Main audio is the reference')
+        current = self.sound_trims.get(key)
+        self.sound_trims[key] = (v.rows[main], v.rows[key],
+                                 milliseconds, current[3] if current else 0.)
+        self.trim_clock = time.monotonic()
+
+    def trims_settled(self):
+        return all(goal == current for _, _, goal, current in self.sound_trims.values())
+
+    def advance_trims(self, replaying):
+        # At most 7 ms per second and 0.7 ms per GUI update. The synchronized
+        # sample cursor follows this ramp without skipping or rereading a block.
+        v = self.viewer
+        now = time.monotonic()
+        step = min(.1, max(0., now - self.trim_clock)) * 7
+        self.trim_clock = now
+        main = v.rows.get(v.main.currentData())
+        for key, (ref, secondary, goal, current) in tuple(self.sound_trims.items()):
+            row = v.rows.get(key)
+            # Reopening the same stream replaces its PCM history, not the
+            # user's choice for this pair of rooms. New evidence is measured separately.
+            if replaying or main is not ref or row is not secondary or key in v.independent_playback:
+                del self.sound_trims[key]
+                continue
+            current = goal if abs(goal - current) <= step else current + (step if goal > current else -step)
+            if current == goal == 0:
+                del self.sound_trims[key]
+            else:
+                self.sound_trims[key] = (ref, secondary, goal, current)
+
     def update_snapshot(self):
         # Widgets and room collections belong to the GUI thread. The output
         # thread receives only immutable values and thread-safe media histories.
@@ -223,6 +284,8 @@ class AudioPump(QObject):
         rate = self.viewer.playback_rate
         replaying = self.viewer.replay.active
         clock = self.clock()
+        if self.sound_trims:
+            self.advance_trims(replaying)
         shown_clock, shown_shifts = self.viewer.replay.presentation(clock, shifts)
         if replaying:
             rate = 1.0
@@ -250,6 +313,8 @@ class AudioPump(QObject):
                 else:
                     local_rate = rate + self.viewer.relative_rates.get(room_id, 1.0) - 1.0
                     position = shown_shifts[room_id]
+                    if room_id in self.sound_trims:
+                        position -= self.sound_trims[room_id][3] / 1000
                 inputs.append((row.decoder.history, position,
                                local_rate,
                                channel, volume * (1.0 if replaying else row.mix_gain)))
@@ -288,6 +353,7 @@ class AudioPump(QObject):
             positions = []
             started = time.perf_counter()
             for history, shift, local_rate, channel, volume in sources:
+                source_frames = max(1, round(frames * local_rate))
                 if isinstance(shift, tuple):
                     # Map to this room's monotonic timeline, including queued
                     # output. The main picture can hold or jump its clock.
@@ -301,10 +367,13 @@ class AudioPump(QObject):
                     target = sample / RATE
                 else:
                     target = clock + shift
-                    cursor = self.replay_cursors.get(history) if self.replay_offset is not None else None
-                    if cursor is not None and abs(clock - cursor[0]) < .01 and abs(target - cursor[1]) < .05:
-                        target = cursor[1]
-                source_frames = max(1, round(frames * local_rate))
+                    if self.replay_offset is None:
+                        target, source_frames = synchronized_pcm_block(
+                            target, frames, local_rate, self.sync_cursors.get(history))
+                    else:
+                        cursor = self.replay_cursors.get(history)
+                        if cursor is not None and abs(clock - cursor[0]) < .01 and abs(target - cursor[1]) < .05:
+                            target = cursor[1]
                 pcm = history.pcm_at(target, source_frames)
                 positions.append((history, target, source_frames))
                 pcm = route_pcm_s16_stereo(pcm, channel)
@@ -321,10 +390,17 @@ class AudioPump(QObject):
             written = count // 4
             if written:
                 self.read_metrics.record_mix(inputs)
+                probe = self.mix_lag_probe
+                if probe is not None and probe.buffers:
+                    if self.replay_offset is None:
+                        probe.append(sources, inputs, written)
+                    else:
+                        probe.cancel()
             actual_rate = media_frames / frames
             self.clock_segments.append((self.written, self.written + written, self.media_written, actual_rate))
             self.media_written += written / RATE * actual_rate
             independent_cursors = {}
+            sync_cursors = {}
             for (history, target, source_frames), source in zip(positions, sources):
                 self.read_metrics.record(id(history), target,
                     source_frames / RATE * written / frames, source[2], source[3], source[4])
@@ -333,7 +409,10 @@ class AudioPump(QObject):
                 elif self.replay_offset is not None:
                     self.replay_cursors[history] = (clock + written / RATE * actual_rate,
                         target + source_frames / RATE * written / frames)
+                else:
+                    sync_cursors[history] = round(target * RATE) + round(source_frames * written / frames)
             self.independent_cursors = independent_cursors
+            self.sync_cursors = sync_cursors
             self.written += written
         self.clock_snapshot = self._clock()
         self.clock_observation = (now, self.played, self.written, self.anchor, tuple(self.clock_segments))

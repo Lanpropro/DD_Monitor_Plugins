@@ -79,13 +79,15 @@ def main():
         manager = PluginManager(host, str(Path(directory) / 'plugins'))
         try:
             if upgrade:
+                with zipfile.ZipFile(args.previous) as previous:
+                    previous_version = json.loads(previous.read('match_sync/plugin.json'))['version']
                 manager.install_zip(str(args.previous))
                 sentinel = Path(manager.plugins_dir) / 'match_sync/user-data.txt'
                 sentinel.write_text('preserve user data', encoding='utf-8')
                 manager.plugin_settings['match_sync'] = {'offline_sentinel': True}
                 stage(manager, str(args.archive), 'match_sync', version)
                 assert pending_versions(manager) == {'match_sync': version}
-                assert manager.catalog()[0]['version'] == '1.6.1'
+                assert manager.catalog()[0]['version'] == previous_version
                 apply_pending(manager)
                 assert sentinel.read_text(encoding='utf-8') == 'preserve user data'
                 assert manager.plugin_settings['match_sync']['offline_sentinel']
@@ -126,7 +128,7 @@ def main():
                 panel.popup.hide()
             manager.unload()
             assert not panel.entries and not panel._rows
-            print('PASS:', 'upgrade 1.6.1 -> ' + version if upgrade else 'fresh install ' + version,
+            print('PASS:', f'upgrade {previous_version} -> {version}' if upgrade else 'fresh install ' + version,
                   'search, launch real empty viewer, return, orientation and unload')
         finally:
             if not manager._unloaded:
