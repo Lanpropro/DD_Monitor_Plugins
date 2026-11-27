@@ -6,11 +6,30 @@
     {
       "tag": "match-sync-v2.0.3",
       "file": "RELEASE-match-sync-v2.0.3.md",
-      "status": "prepared",
-      "source_kind": "repository_candidate",
-      "base_commit": "1c72430d47fd19050af5cbf1c2925953e31c1677",
+      "status": "online",
+      "source_kind": "github_release",
+      "release_id": 460438005,
+      "release_updated_at": "2026-11-27T10:16:58Z",
+      "release_url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v2.0.3",
+      "last_edit_verified": true,
+      "raw_body_sha256": "f5dcc3529752b027621b108440ee75ec3a1ce9df4c67521af16bf5e9e95edfa1",
       "sha256": "f5dcc3529752b027621b108440ee75ec3a1ce9df4c67521af16bf5e9e95edfa1",
-      "last_edit_verified": false
+      "release_name": "比赛二路同步 2.0",
+      "release_author": "Lanpropro",
+      "plugin_author": "Lanpropro",
+      "release_created_at": "2026-11-27T10:13:58Z",
+      "release_published_at": "2026-11-27T10:16:58Z",
+      "source_commit": "1c72430d47fd19050af5cbf1c2925953e31c1677",
+      "prerelease": false,
+      "assets": [
+        {
+          "id": 799979157,
+          "name": "match_sync-2.0.3.zip",
+          "size": 19304696,
+          "sha256": "c9cf9f6d35117003fa25c1f6c28387e5a041cfbd80b961c747f0c6117ecb52a3",
+          "url": "https://github.com/Lanpropro/DD_Monitor_Plugins/releases/download/match-sync-v2.0.3/match_sync-2.0.3.zip"
+        }
+      ]
     },
     {
       "tag": "live-translate-v1.0",
