@@ -103,7 +103,7 @@ def showEvent(viewer, event, _base):
                 widget.hide()
     with viewer._switch_stage('show_controls'):
         viewer._sync_sidebar_marks()
-        viewer.send_console.sync_height()
+        viewer.send_console.queue_height_sync()
     viewer.console_content_height = None
     viewer.align_room_controls()
     _base(event)
@@ -194,16 +194,18 @@ def _restore_host_widgets(viewer):
     viewer._release_host_audio()
     sidebar = getattr(viewer.context.window, "sidebar", None)
     if sidebar is not None:
-        for item in tuple(viewer.sidebar_item_styles):
-            if isValid(item):
-                viewer._style_sidebar_item(item, False, False)
-            else:
-                viewer.sidebar_item_styles.pop(item)
-        viewer._sync_strip_marks(sidebar, False)
+        with viewer._switch_stage('restore_sidebar_marks'):
+            for item in tuple(viewer.sidebar_item_styles):
+                if isValid(item):
+                    viewer._style_sidebar_item(item, False, False)
+                else:
+                    viewer.sidebar_item_styles.pop(item)
+            viewer._sync_strip_marks(sidebar, False)
     previous, viewer.hidden_host_widgets = viewer.hidden_host_widgets, {}
-    for widget, visible in previous.items():
-        widget.removeEventFilter(viewer)
-        widget.setVisible(visible)
+    with viewer._switch_stage('show_host_widgets'):
+        for widget, visible in previous.items():
+            widget.removeEventFilter(viewer)
+            widget.setVisible(visible)
     resume = getattr(viewer.context.window, "set_match_sync_playback", None)
     if viewer.embedded and callable(resume):
         with viewer._switch_stage('resume_host_playback'):

@@ -4,6 +4,7 @@ from pathlib import Path
 import cProfile
 from collections import Counter
 from PySide6.QtCore import QEvent, QObject, QTimer
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QAbstractButton, QApplication, QDialog
 from shiboken6 import isValid
 
@@ -104,7 +105,11 @@ class PanelProbe(QObject):
                 QApplication.instance().installEventFilter(self)
                 self.profiler = cProfile.Profile()
                 self.profiler.enable()
-            self.bridge.buttons.click(button)
+            if action == 'add_room':
+                from PySide6.QtCore import Qt
+                QTest.mouseClick(button, Qt.LeftButton)
+            else:
+                self.bridge.buttons.click(button)
             self.result['click_return_ms'] = round((perf_counter() - self.started) * 1000, 3)
         QTimer.singleShot(0, self, click)
         return dict(queued=True)
@@ -112,7 +117,7 @@ class PanelProbe(QObject):
     def shown(self, obj):
         if self.panel is not None:
             return
-        if self.active in ('pip', 'pip_volume'):
+        if self.active in ('pip', 'pip_volume', 'region'):
             if not isinstance(obj, QDialog):
                 return
         elif type(obj).__name__ != self.panels.get(self.active):
@@ -165,7 +170,6 @@ class PanelProbe(QObject):
             panel.removeEventFilter(self)
             if action == 'pip_volume':
                 from PySide6.QtCore import Qt
-                from PySide6.QtTest import QTest
                 from .floating_control import CropSelections
                 viewer = self.bridge.viewer
                 row = tuple(viewer.rows.values())[self.result['source']]

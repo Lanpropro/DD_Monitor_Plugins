@@ -1,0 +1,13 @@
+name = "ddm-watch-rooms-ff03034"
+main = "worker.js"
+compatibility_date = "2026-06-01"
+workers_dev = true
+preview_urls = false
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "WatchRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["WatchRoom"]

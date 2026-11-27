@@ -179,9 +179,17 @@ def _playback_position(viewer, probe, *, combined=False):
     viewer.replay.observe(now, clock, {key: shift for key, shift in shifts.items()
                                    if key == viewer.alignment.reference or viewer.rows[key].sync_state == '已同步'})
     shown_clock, shown_shifts = viewer.replay.presentation(clock, shifts, now)
-    if viewer.replay.active and not viewer.replay.valid(shown_clock, shown_shifts, viewer.replay_histories()):
-        viewer.return_live()
-        shown_clock, shown_shifts = clock, shifts
+    if viewer.replay.active:
+        histories = viewer.replay_histories()
+        if not viewer.replay.valid(shown_clock, shown_shifts, histories):
+            following = viewer.replay.advance_gap(shown_clock, now, histories)
+            if following is None:
+                viewer.return_live()
+                shown_clock, shown_shifts = clock, shifts
+            else:
+                shown_clock, shown_shifts = following, viewer.replay.shifts_at(following)
+                viewer.overlay_pending.clear()
+                viewer.audio.flush()
     return clock, shifts, wanted, shown_clock, shown_shifts
 
 
@@ -245,6 +253,7 @@ def _render_auxiliary(viewer, probe, position, waiting, dragging_crop, refresh_s
                                  main_started=viewer.stable_reference_shift is not None,
                                  screen_hz=screen.refreshRate() if screen else 0,
                                  playback_rate=viewer.playback_rate, replay=viewer.replay.active,
+                                 late_buffer_building=viewer.late_buffer.building,
                                  audio_clock_interpolated=viewer.audio.clock_observation is not None,
                                  native_clip_retry_blocks=viewer.native_clip_retry_blocks,
                                  sidebar_backlog=sidebar_depth, sidebar_oldest_ms=round(sidebar_age, 1),

@@ -160,6 +160,7 @@ def _start_row(viewer, row):
     if seed.get("quality", row.quality) != row.quality:
         seed.pop("url", None)
     seed["quality"] = row.quality
+    seed['replay_seconds'] = viewer.replay.seconds
     seed['highest_quality'] = row.quality_auto and row.room_id == viewer.alignment.reference
     policy = viewer._crop_source_policy(row)
     seed['crop_quality_policy'] = policy
@@ -262,6 +263,8 @@ def _reset(viewer, row, worker):
 def _stop_row(row):
     if row.crop_editor is not None:
         row.crop_editor.reject()
+    if row.region_editor is not None:
+        row.region_editor.reject()
     row.clear_buffer_warning()
     row.alignment_hint, row.hint_pending, row.hint_searching = None, False, False
     if row.decoder is not None:

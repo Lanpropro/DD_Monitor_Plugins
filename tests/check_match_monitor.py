@@ -10,17 +10,18 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 
-async def run(host, pid, seconds, check_controls):
+async def run(host, pid, seconds, check_controls, check_watch_party=False):
     script = Path(__file__).resolve().parents[1] / 'tools/match_monitor/server.py'
     params = StdioServerParameters(command=sys.executable, args=[str(script), '--host', str(host)],
                                   env=dict(os.environ))
     async with stdio_client(params) as streams, ClientSession(*streams) as client:
         await client.initialize()
         names = {t.name for t in (await client.list_tools()).tools}
-        assert names == {'get_scene', 'set_presenter', 'set_scrolling', 'start_sample', 'stop_sample',
+        assert names == {'get_watch_party_state', 'recheck_watch_party', 'get_scene', 'set_presenter', 'set_scrolling', 'start_sample', 'stop_sample',
+                         'measure_mix_lag', 'sound_calibration',
                          'get_button_timings', 'set_comparison_open', 'restore_crop', 'set_follow_filter', 'trial_short_switch',
                          'set_main_paused', 'set_follow_folder', 'probe_follow_folders',
-                         'get_sources', 'set_row_toggle', 'set_console_open', 'set_sidebar_multiselect', 'set_sidebar_collapsed', 'set_raster_paint', 'hold_periodic_search', 'set_main_quality', 'set_independent', 'set_precise_wait', 'get_crop_layout', 'confirm_mix', 'probe_panel', 'list_visible_buttons'}
+                         'get_sources', 'set_row_toggle', 'set_console_open', 'set_sidebar_multiselect', 'set_sidebar_collapsed', 'set_raster_paint', 'hold_periodic_search', 'set_main_quality', 'set_independent', 'set_precise_wait', 'get_crop_layout', 'confirm_mix', 'probe_panel', 'probe_interaction', 'list_visible_buttons'}
 
         async def call(name, **args):
             out = await client.call_tool(name, args)
@@ -28,7 +29,24 @@ async def run(host, pid, seconds, check_controls):
                 raise RuntimeError(out.content[0].text)
             return json.loads(out.content[0].text)
 
+        if check_watch_party:
+            assert pid, "Use the PID of the isolated test viewer"
+            before = await call('get_watch_party_state', pid=pid)
+            assert before['room'] == '123456' and before['online'] and before['locked']
+            assert before['side'] == 0
+            reply = await call('recheck_watch_party', pid=pid)
+            assert reply['requested'] and '已请求' in reply['status']
+            assert (await call('get_watch_party_state', pid=pid))['status'] == reply['status']
+            print("PASS: real stdio watch-party state and one GUI-thread manual request")
+            return
         if check_controls:
+            for tool in ('get_watch_party_state', 'recheck_watch_party'):
+                assert (await client.call_tool(tool, {'pid': pid})).isError, 'No room exists in this fixture'
+            assert (await call('measure_mix_lag', pid=pid))['state'] == 'idle'
+            assert (await call('sound_calibration', pid=pid, slot=0, action='state'))['phase'] == 'idle'
+            assert (await client.call_tool('sound_calibration', dict(pid=pid, slot=0, action='apply'))).isError
+            for action in ('drag', 'sender', 'page'):
+                assert (await client.call_tool('probe_interaction', dict(pid=pid, action=action, source=99))).isError
             assert (await client.call_tool('set_sidebar_collapsed', dict(pid=pid, collapsed=True))).isError
             assert (await client.call_tool('probe_panel', dict(pid=pid, action='host_pip'))).isError
             assert (await client.call_tool('probe_panel', dict(pid=pid, action='functions'))).isError
@@ -131,5 +149,6 @@ if __name__ == '__main__':
     parser.add_argument('--pid', type=int)
     parser.add_argument('--seconds', type=int, default=5)
     parser.add_argument('--check-controls', action='store_true', help='Use only on an isolated fixture viewer')
+    parser.add_argument('--check-watch-party', action='store_true', help='Use only on the isolated watch-room fixture')
     args = parser.parse_args()
-    asyncio.run(run(args.host, args.pid, args.seconds, args.check_controls))
+    asyncio.run(run(args.host, args.pid, args.seconds, args.check_controls, args.check_watch_party))

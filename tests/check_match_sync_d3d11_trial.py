@@ -155,6 +155,18 @@ def check_device_clock_target():
     assert isclose(target.sample(4.18), 120.11)
     audio.clock_observation = (4.6, RATE // 2, RATE, 100., ())
     assert isclose(target.sample(4.6), 120.13), 'Never advance beyond the originally queued audio'
+    from dataclasses import replace
+    from threading import Event
+    moving = Event()
+    moving.set()
+    moving_target = replace(target, settings_move=moving)
+    # The device has played another 300 ms from a newly queued normal-speed segment.
+    audio.clock_observation = (4.6, RATE // 2, RATE, 100.,
+                               ((2 * half, RATE, .15, 1.),))
+    assert isclose(moving_target.sample(4.6), 120.43)
+    assert isclose(moving_target.sample(8.), 120.43), 'A stalled device cannot advance the picture'
+    moving.clear()
+    assert isclose(moving_target.sample(4.6), 120.13)
     audio.correction += 1
     assert isclose(target.sample(4.6), 120.08)
     audio.correction = .125
@@ -165,7 +177,7 @@ def check_device_clock_target():
 
 
 def check(app, host, native_dir, visible_alpha, quick=False, monitor_python=None, host_path=None):
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import QPoint, Qt
     from PySide6.QtGui import QImage
     from PySide6.QtTest import QTest
     from ddm import plugins
@@ -257,7 +269,7 @@ def check(app, host, native_dir, visible_alpha, quick=False, monitor_python=None
             reopened.close()
             reopened.deleteLater()
             app.processEvents()
-        if monitor_python:
+        if quick:
             viewer.add_room('1')
         alignment = viewer.alignment
         alignment.reference = '1'
@@ -298,6 +310,7 @@ def check(app, host, native_dir, visible_alpha, quick=False, monitor_python=None
             assert gpu.requested, 'D3D11 trial fell back before receiving frames'
             assert viewer.canvas.native_presenting and gpu.diagnostics()['backend'] == 'd3d11'
             assert gpu.diagnostics()['presented'] >= 3
+            assert gpu.worker.latest.displayed_stamp > 0, 'Native presenter must acknowledge a media timestamp'
             child = gpu.hwnd
             user = ctypes.WinDLL('user32')
             user.IsWindowVisible.argtypes = (wintypes.HWND,)
@@ -351,6 +364,22 @@ def check(app, host, native_dir, visible_alpha, quick=False, monitor_python=None
             assert gpu.user.GetParent(gpu.hwnd) == int(viewer.picture.video.winId())
             assert viewer.canvas.frame is not None, 'Retain the snapshot for comparison and crop UI'
             assert alignment.shifts(delays) == shifts and viewer.generation == generation
+            if quick and hasattr(quick_layer, 'set_child_occlusion'):
+                origin = viewer.picture.mapTo(viewer.floating_surface(), QPoint())
+                row = viewer.rows['1']
+                crop = viewer.show_floating_crop(row, (.1, .1, .5, .5), (1., image))
+                crop.fit_geometry(origin.x() + 20, origin.y() + 20, 150)
+                viewer.quick_danmaku.sync()
+                first = quick_layer._child_occlusion.boundingRect()
+                group_mask = quick_layer.group_masks[overlay._quick_group]
+                assert not first.isEmpty()
+                crop.fit_geometry(origin.x() + 200, origin.y() + 20, 150)
+                viewer.quick_danmaku.sync()
+                assert quick_layer._child_occlusion.boundingRect().x() > first.x() + 100
+                assert quick_layer.group_masks[overlay._quick_group] == group_mask
+                crop.close()
+                viewer.quick_danmaku.sync()
+                assert quick_layer._child_occlusion.isEmpty()
             if visible_alpha:
                 gpu.render(decoder, 10 + time.perf_counter() - start, 1.)
                 QTest.qWait(100)

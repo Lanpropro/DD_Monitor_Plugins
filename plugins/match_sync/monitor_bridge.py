@@ -1,13 +1,13 @@
 """Same-user named pipe for the opt-in Windows match diagnostics."""
-import json
 import math
 import os
 import sys
 from time import monotonic
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QTimer
-from PySide6.QtNetwork import QLocalServer
+from .local_control import LocalControlServer
 from .button_timings import ButtonTimings
+from .interaction_probe import InteractionProbe
 from .panel_probe import PanelProbe
 
 
@@ -17,14 +17,13 @@ class MonitorBridge(QObject):
         self.viewer = viewer
         self.buttons = ButtonTimings(viewer)
         self.panels = PanelProbe(self)
+        self.interactions = InteractionProbe(self)
         self.match_hold_until = 0.
         self.original_switch_interval = None
         self.restore_switch_timer = QTimer(self)
         self.restore_switch_timer.setSingleShot(True)
         self.restore_switch_timer.timeout.connect(self.restore_switch_interval)
-        self.server = QLocalServer(self)
-        self.server.setSocketOptions(QLocalServer.UserAccessOption)
-        self.server.newConnection.connect(self.accept)
+        self.server = LocalControlServer(self, self.dispatch)
         viewer.installEventFilter(self)
         if viewer.isVisible():
             self.listen()
@@ -49,33 +48,14 @@ class MonitorBridge(QObject):
             sys.setswitchinterval(self.original_switch_interval)
             self.original_switch_interval = None
 
-    def accept(self):
-        while self.server.hasPendingConnections():
-            peer = self.server.nextPendingConnection()
-            peer.setReadBufferSize(1025)
-            peer.disconnected.connect(peer.deleteLater)
-            QTimer.singleShot(3000, peer, peer.abort)
-            peer.readyRead.connect(lambda p=peer: self.respond(p))
-            if peer.bytesAvailable():
-                self.respond(peer)
-
-    def respond(self, peer):
-        if not peer.canReadLine():
-            if peer.bytesAvailable() >= 1024:
-                peer.abort()
-            return
-        try:
-            request = json.loads(bytes(peer.readLine(1024)))
-            reply = {'state': self.dispatch(request)}
-        except (ValueError, TypeError, KeyError, AttributeError):
-            reply = {'error': 'Invalid diagnostic request'}
-        peer.write(json.dumps(reply).encode('ascii') + b'\n')
-        peer.disconnectFromServer()
-
     def dispatch(self, request):
         v = self.viewer
         presenter = v.d3d11_picture
         button = v.picture.danmaku_button
+        if set(request) == {'command', 'action', 'source', 'slot'} and request['command'] == 'probe_interaction':
+            return self.interactions.start(request['action'], request['source'], request['slot'])
+        if request == {'command': 'interaction_result'}:
+            return dict(self.interactions.result)
         if set(request) == {'command', 'paused'} and request['command'] == 'pause_picture':
             row = v.rows.get(v.main.currentData())
             paused = request['paused']
@@ -228,6 +208,44 @@ class MonitorBridge(QObject):
                     crops.append(dict(source=source, slot=slot, rect=item.crop.getRect(),
                                       placement=[pos.x(), pos.y(), item.width()]))
             return {'crops': crops}
+        if set(request) == {'command', 'action', 'slot'} and request['command'] == 'sound_calibration':
+            bar = v.sound_calibration
+            action, slot = request['action'], request['slot']
+            if type(slot) is not int or not 0 <= slot < len(v.rows):
+                raise ValueError('Source unavailable')
+            key = tuple(v.rows)[slot]
+            if action == 'start':
+                bar.start()
+            elif action in ('apply', 'undo'):
+                if not bar.change(key, undo=action == 'undo'):
+                    raise ValueError('Calibration action unavailable')
+            elif action != 'state':
+                raise ValueError('Unknown calibration action')
+            index = bar.keys.index(key) if key in bar.keys and key != v.main.currentData() else None
+            return dict(phase=bar.phase, estimate_ms=bar.estimate(key),
+                        goal_ms=v.audio.trim_goal(key), settled=v.audio.trims_settled(),
+                        text=bar.status_text, can_undo=key in bar.previous,
+                        measured_ms=[relative[index] for at, _, relative in bar.evidence.windows
+                                     if index is not None and monotonic() - at <= 60 and index in relative])
+        if request in ({'command': 'start_mix_lag'}, {'command': 'mix_lag'}):
+            from .mix_lag_probe import MixLagProbe
+            audio = v.audio
+            with audio.lock:
+                probe = audio.mix_lag_probe
+                if probe is not None and monotonic() > probe.deadline:
+                    probe.cancel()
+                if request['command'] == 'start_mix_lag' and (probe is None or probe.result['state'] not in ('collecting', 'analyzing')):
+                    rows = tuple(v.rows.values())
+                    if (len(rows) != 3 or v.replay.active or v.independent_playback or not v.running
+                            or any(r.decoder is None or r.sync_state != '已同步' for r in rows)):
+                        raise ValueError('Three synchronized live sources required')
+                    probe = MixLagProbe([r.decoder.history for r in rows])
+                    audio.mix_lag_probe = probe
+                    def expire(sample=probe):
+                        with audio.lock:
+                            sample.cancel()
+                    QTimer.singleShot(20500, self, expire)
+                return probe.result if probe is not None else {'state': 'idle'}
         if request == {'command': 'sources'}:
             return {'sources': [dict(slot=i, main=key == v.main.currentData(),
                 independent=key in v.independent_playback, confirmed=row.match_confirmed,

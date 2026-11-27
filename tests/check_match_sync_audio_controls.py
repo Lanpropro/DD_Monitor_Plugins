@@ -71,7 +71,7 @@ def check(app, host, module):
                 viewer.independent_playback['1'] = (0., 0.)
                 pump.update_snapshot()
                 assert len(pump.snapshot[1]) == 1 and pump.snapshot[1][0][2] == 1.
-                assert pump.independent_histories == frozenset((first.decoder.history,))
+                assert pump.snapshot[1][0][:2] == (first.decoder.history, (0., 0.))
                 viewer.sync_waiting = False
                 viewer.independent_playback.clear()
                 viewer.replay.delay = 5.
