@@ -2,7 +2,7 @@
   "id": "match_sync",
   "name": "比赛二路同步",
   "icon": "icon.png",
-  "description": "选择一路比赛主画面，自动对齐B 站及已接入平台的多个二路直播间，混合主播声音和带来源标记的弹幕。",
-  "version": "2.0.2",
+  "description": "对齐多路比赛直播，混合声音与弹幕，支持最长 30 分钟回看及最多三人好友同看。",
+  "version": "2.0.3",
   "min_app_version": "0.9.1"
 }

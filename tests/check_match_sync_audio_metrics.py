@@ -10,6 +10,24 @@ from unittest.mock import Mock, call, patch
 def check(app, host, module):
     audio = import_module(module.__package__ + '.audio')
     diagnostic = import_module(module.__package__ + '.diagnostics')
+    lag = import_module(module.__package__ + '.mix_lag_probe')
+    np = lag.np
+    rng = np.random.default_rng(32)
+    signal = rng.normal(size=3 * audio.RATE // 4) * 1500
+    delayed = np.roll(signal, 423) + rng.normal(size=signal.size) * 800
+    for first, second, expected in ((signal, delayed, 35.25), (delayed, signal, -35.25)):
+        window, = lag.pair_windows(first, second)
+        assert window['usable'] and window['lag_ms'] == expected, window
+    assert not lag.pair_windows(signal, rng.normal(size=signal.size) * 1000)[0]['usable']
+    assert not lag.pair_windows(signal, np.zeros_like(signal))[0]['usable']
+    histories = [object() for _ in range(3)]
+    capture = lag.MixLagProbe(histories)
+    sources = [(history, 0) for history in histories]
+    inputs = [(bytes(range(16)), 40)] * 3
+    capture.append(sources, inputs, 2)
+    assert capture.buffers == [bytearray(range(8))] * 3
+    capture.append(sources[::-1], inputs, 2)
+    assert capture.result['state'] == 'interrupted' and not capture.buffers
     # Silence only the trial output device, before the very first submitted sample.
     for trial, silent, muted in (('1', '1', True), ('0', '1', False), ('1', '0', False)):
         pump = Mock()
@@ -58,6 +76,7 @@ def check(app, host, module):
             requested.append((start, frames))
             return output
     history = History()
+    other_history = History()
     class Sink:
         free = 0
         def processedUSecs(self):
@@ -101,10 +120,27 @@ def check(app, host, module):
                 assert (mixed['written_blocks'], mixed['tracks_min'], mixed['tracks_max']) == (2, 1, 2)
             finally:
                 probe.deleteLater()
+            # A fresh GUI shift arrives one millisecond later than the actual
+            # source cursor. Keep the next read contiguous after a partial write.
+            pump.snapshot = (.98, ((history, .001, .98, 3, 40.), (other_history, 0., .98, 0, 50.)))
+            sink.free = device.accepted = 480 * 4
+            pump._fill()
+            assert round(requested[-2][0] * audio.RATE) == 245
+            assert requested[-2][1] == 475
+            assert round(requested[-1][0] * audio.RATE) == 240
+            assert abs(pump.read_metrics.samples[-2][2]) < 1e-9
+            # Losing a source drops its cursor. A larger confirmed correction
+            # also takes effect directly instead of smoothing across it.
+            pump.snapshot = (.98, ((history, .08, .98, 3, 40.),))
+            sink.free = device.accepted = 480 * 4
+            expected = round((pump.media_written + .08) * audio.RATE)
+            pump._fill()
+            assert round(requested[-1][0] * audio.RATE) == expected
+            assert other_history not in pump.sync_cursors
         pump.sink = pump.device = None
         pump.stop()
         assert not pump.read_metrics.samples and not pump.read_metrics.previous
-        assert not pump.timings.samples
+        assert not pump.timings.samples and not pump.sync_cursors
         return dict(passed=True, media_playback=False, numeric_gap_and_overlap=True,
                     bounded_sources_and_samples=True, partial_and_rejected_write=True,
                     manual_channel_preserved=True, privacy=True, stop_reset=True,

@@ -174,7 +174,7 @@ def check(app, host, module, output=None):
         viewer = module.Viewer(plugins.PluginContext(manager, 'sending_check'), {})
         assert viewer.send_console.findChild(module.QLabel, 'SendContext') is None
         assert viewer.send_console.work.isHidden()
-        assert viewer.send_console.title.text() == '弹幕控制台'
+        assert viewer.send_console.console_tabs.tabText(0) == '弹幕控制台'
         assert not viewer.notice.text()
         assert not viewer.panel.body.toPlainText().strip(), 'No instructional text before a room is added'
         viewer.setAttribute(Qt.WA_DontShowOnScreen, host.testAttribute(Qt.WA_DontShowOnScreen))
@@ -278,15 +278,24 @@ def check(app, host, module, output=None):
             assert idle_bookmark.pixelColor(sample) == disabled_bookmark.pixelColor(sample), 'Text alone and a stale Qt hover flag must not highlight the bookmark'
             assert enabled_bookmark.pixelColor(sample) != disabled_bookmark.pixelColor(sample), 'Only enabled bookmarks show blue hover fill'
             console.save_text.setAttribute(Qt.WA_UnderMouse, False)
-            select({'2'})
+            with patch.object(console, '_layout_workspace', wraps=console._layout_workspace) as layout:
+                select({'2'})
+                assert layout.call_count == 0, 'Checking a recipient must not lay out every composer'
+            actions = console.save_text.parentWidget()
+            assert actions.layout().indexOf(console.save_text) >= 0
+            assert actions.width() == actions.layout().sizeHint().width()
             second.setText('draft 2')
             item = console.rooms.item(1)
             position = console.rooms.visualItemRect(item).center()
             before_clicks = set(console.checked_rooms())
             with patch.object(module.motion, 'enabled', return_value=True):
-                for index in range(6):
-                    QTest.mouseClick(console.rooms.viewport(), Qt.LeftButton, pos=position)
-                    assert ('2' in console.checked_rooms()) == (index % 2 == 1)
+                viewport = console.rooms.viewport()
+                with patch.object(viewport, 'repaint', wraps=viewport.repaint) as repaint:
+                    for index in range(6):
+                        QTest.mouseClick(viewport, Qt.LeftButton, pos=position)
+                        assert ('2' in console.checked_rooms()) == (index % 2 == 1)
+                        assert repaint.call_args.args == (console.rooms.visualItemRect(item),)
+                    assert repaint.call_count == 6
                 delegate = console.rooms.itemDelegate()
                 assert delegate.animations['2'].duration() == 180
                 assert delegate.animations['2'].state() == delegate.animations['2'].State.Running
@@ -294,15 +303,33 @@ def check(app, host, module, output=None):
             QTest.mouseDClick(console.rooms.viewport(), Qt.LeftButton, pos=position)
             QTest.mouseRelease(console.rooms.viewport(), Qt.LeftButton, pos=position)
             assert '2' not in console.checked_rooms(), 'Double-click must count the next press, not swallow it'
-            QTest.qWait(200)
+            finishing = delegate.animations.get('2')
+            if finishing is not None:
+                finishing.setCurrentTime(finishing.duration())
+            assert '2' not in delegate.animations, 'Completed animations must release their model index'
             with patch.object(module.motion, 'enabled', return_value=True):
                 select({'2'})
+                animation = delegate.animations['2']
+                with patch.object(console.rooms, 'update', wraps=console.rooms.update) as redraw:
+                    animation.setCurrentTime(animation.duration() // 3)
+                    assert redraw.call_args.args == (console.rooms.indexFromItem(item),)
                 QTest.qWait(20)
                 entering = console.rooms.viewport().grab().toImage()
                 QTest.qWait(200)
                 assert entering != console.rooms.viewport().grab().toImage(), 'Card insertion must produce visible intermediate frames'
             assert console.stack.currentWidget() is console.rows['2']
             assert first.text() == 'draft 1' and not sent
+            from PySide6.QtCore import QObject
+            from plugins.match_sync.interaction_probe import InteractionProbe
+            bridge = QObject(viewer)
+            bridge.viewer = viewer
+            bridge.panels = types.SimpleNamespace(active=None)
+            probe = InteractionProbe(bridge)
+            assert probe.start('sender', 1, 0)['queued']
+            QTest.qWait(400)
+            assert probe.result['changed'] and probe.result['restored'] and not probe.result['pending']
+            assert probe.result['paints'] and all(len(paint['bounds']) == 4 for paint in probe.result['paints'])
+            assert console.checked_rooms() == ['2'] and first.text() == 'draft 1' and not sent
             assert console.rooms.count() == 3
             assert '有草稿' in console.rooms.item(0).text()
             select({'1'})

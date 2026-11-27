@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 from collections import deque
+from html import escape
 import time
 
-from ddm.widgets import DanmakuPanel
+from ddm.images import load_room_avatar
+from ddm.widgets import DanmakuPanel, circular_pixmap
 
 from .panels import ChatConnectionIcon
 from PySide6.QtGui import QCursor, QFont, QImage, QPainter, QPen, QTextCursor
@@ -15,6 +17,7 @@ from ddm import motion, theme
 class SendingDanmakuPanel(DanmakuPanel):
     PLAYBACK_BATCH = 16
     PLAYBACK_BACKLOG = 64
+    SOURCE_DISPLAY_SETTING = 'chat_source_display'
 
     def __init__(self, viewer):
         super().__init__(viewer)
@@ -26,7 +29,11 @@ class SendingDanmakuPanel(DanmakuPanel):
         previous.deleteLater()
         self._refresh_count()
         self.viewer = viewer
-        self._adding_divider = False
+        context = getattr(viewer, 'context', None)
+        self.source_display = ('avatar' if context is not None
+                               and context.setting(self.SOURCE_DISPLAY_SETTING) == 'avatar' else 'name')
+        self._source_avatars = {}
+        self._legacy_entry_fields = None
         self._replay_section = False
         self._playback_events = deque()
         self._playback_flush = QTimer(self)
@@ -117,11 +124,12 @@ class SendingDanmakuPanel(DanmakuPanel):
     def add_event(self, event):
         if hasattr(super(), 'add_events'):
             return super().add_event(event)
-        self._adding_divider = bool(event.get('_replay_divider'))
-        super().add_event(event)
-        self._blocks[-1]['source_room'] = str(event.get('source_room') or '')
-        self._blocks[-1]['_replay_divider'] = self._adding_divider
-        self._adding_divider = False
+        self._legacy_entry_fields = self._source_fields(event)
+        try:
+            super().add_event(event)
+            self._blocks[-1].update(self._legacy_entry_fields)
+        finally:
+            self._legacy_entry_fields = None
 
     def add_events(self, events):
         append = getattr(super(), 'add_events', None)
@@ -132,12 +140,58 @@ class SendingDanmakuPanel(DanmakuPanel):
 
     def _event_entry(self, event):
         entry = super()._event_entry(event)
-        entry['source_room'] = str(event.get('source_room') or '')
-        entry['_replay_divider'] = bool(event.get('_replay_divider'))
+        entry.update(self._source_fields(event))
         return entry
 
+    @staticmethod
+    def _source_fields(event):
+        return dict(source_room=str(event.get('source_room') or ''),
+                    source_label=str(event.get('source_label') or ''),
+                    _replay_divider=bool(event.get('_replay_divider')))
+
+    def set_source_display(self, display):
+        if display == self.source_display:
+            return
+        self.source_display = display
+        self.viewer.context.set_setting(self.SOURCE_DISPLAY_SETTING, display)
+        if self._blocks:
+            self._render_all()
+
+    def _source_avatar(self, room):
+        row = self.viewer.rows.get(room)
+        face = row.avatar.pixmap() if row is not None else None
+        cached, rendition = self._source_avatars.get(room, (None, None))
+        if face is None or face.isNull():
+            face = cached if room in self._source_avatars else load_room_avatar(room)
+        if face is None or face.isNull():
+            self._source_avatars[room] = None, None
+            return None
+        size = self._font_size() + 4
+        dpr = self.body.viewport().devicePixelRatioF()
+        signature = face.cacheKey(), size, dpr
+        key = f'match-source-avatar:{room.encode().hex()}'
+        if signature != rendition or key not in self._images:
+            image = circular_pixmap(face, round(size * dpr))
+            image.setDevicePixelRatio(dpr)
+            self._images[key] = image
+            self._register_image(key, image)
+            self._source_avatars[room] = face, signature
+        return key, size
+
+    def _medal_html(self, medal):
+        # Use the host's inline badge position before the sender's name.
+        avatar = medal.get('_match_source_avatar')
+        if avatar is None:
+            return super()._medal_html(medal)
+        key, size, label = avatar
+        return (f'<img src="{escape(key, quote=True)}" width="{size}" height="{size}" '
+                f'alt="{escape(label, quote=True)}" style="vertical-align:middle">&#160;'
+                + super()._medal_html(medal))
+
     def _block_html(self, entry):
-        if self._adding_divider or entry.get('_replay_divider'):
+        if self._legacy_entry_fields is not None:
+            entry = dict(entry, **self._legacy_entry_fields)
+        if entry.get('_replay_divider'):
             width = max(1, self.body.viewport().width() - 24)
             line = QImage(width, 80, QImage.Format_ARGB32)
             line.fill(Qt.transparent)
@@ -155,6 +209,12 @@ class SendingDanmakuPanel(DanmakuPanel):
             key = 'replay-separator-' + str(abs(hash(text)))
             self._register_image(key, line)
             return f'<p align="center" style="margin:0;"><img src="{key}" width="{width}" height="80"></p>'
+        room, label = entry.get('source_room'), entry.get('source_label')
+        if self.source_display == 'avatar' and room and label:
+            avatar = self._source_avatar(room)
+            if avatar is not None:
+                entry = dict(entry, uname=entry['uname'].removeprefix(f'【{label}】 '),
+                             medal=dict(entry['medal'], _match_source_avatar=(*avatar, label)))
         return super()._block_html(entry)
 
     def eventFilter(self, watched, event):

@@ -18,7 +18,7 @@ except ImportError:
     av = None
     VideoReformatter = None
 
-from .engine import History, np
+from .engine import History, RATE, np
 from .replay_cache import DiskAudioRing, PacketStore
 from .diagnostics import FrameCadence, StageTimings
 
@@ -127,9 +127,11 @@ class VideoHistory(History):
         self.video_size = (0, 0)
         self.sequence = 0
         self.received_frames = 0
+        self._packet_rate = deque(maxlen=10)
         self.details = deque()
         self.pending_frames = deque()
         self.previous = None
+        self.retained = ()
         self.intervals = deque()
 
     def _track(self, timestamp):
@@ -138,22 +140,28 @@ class VideoHistory(History):
         else:
             self.intervals[-1][1] = timestamp
 
-    def segment_at(self, timestamp):
-        if self.previous is not None:
-            bounds = self.previous.bounds()
-            if bounds and bounds[0] <= timestamp <= bounds[1] + .05:
-                return self.previous
-        bounds = super().bounds()
-        if bounds and bounds[0] <= timestamp <= bounds[1] + .05:
-            return self
+    def segment_at(self, timestamp, *, include_retained=True):
+        previous = self.previous
+        for segment in (previous, self, *(self.retained if include_retained else ())):
+            if segment is not None:
+                bounds = segment.bounds()
+                if bounds and bounds[0] <= timestamp <= bounds[1] + .05:
+                    return segment
         return None
 
     def bounds_at(self, timestamp, minimum_duration=0.):
-        segment = self.segment_at(timestamp)
+        segment = self.segment_at(timestamp, include_retained=not minimum_duration)
         if segment is not None and segment is not self:
-            retained = segment.bounds_at(timestamp, minimum_duration)
+            retained = segment._local_bounds_at(timestamp, minimum_duration)
             if retained is not None or not minimum_duration:
                 return retained
+        return self._local_bounds_at(timestamp, minimum_duration)
+
+    def replay_bounds_at(self, timestamp):
+        segment = self.segment_at(timestamp)
+        return (segment, segment._local_bounds_at(timestamp)) if segment is not None else (None, None)
+
+    def _local_bounds_at(self, timestamp, minimum_duration=0.):
         with self.lock:
             bounds = super().bounds()
             if bounds is None:
@@ -168,9 +176,10 @@ class VideoHistory(History):
 
     def frame_at(self, timestamp):
         segment = self.segment_at(timestamp)
-        if segment is not None and segment is not self:
-            return segment.frame_at(timestamp)
-        bounds = self.bounds_at(timestamp)
+        return (segment or self)._local_frame_at(timestamp)
+
+    def _local_frame_at(self, timestamp):
+        bounds = self._local_bounds_at(timestamp)
         if bounds is None or not bounds[0] <= timestamp <= bounds[1] + .05:
             return None
         with self.lock:
@@ -178,18 +187,52 @@ class VideoHistory(History):
             return self.frames[index] if index >= 0 else None
 
     def pcm_at(self, timestamp, frames):
+        if self.retained:
+            return self._retained_pcm_at(timestamp, frames)
         segment = self.segment_at(timestamp)
         if segment is not None and segment is not self:
-            return segment.pcm_at(timestamp, frames)
+            return History.pcm_at(segment, timestamp, frames)
         return super().pcm_at(timestamp, frames)
 
-    def trim_bytes(self, limit):
+    def _retained_pcm_at(self, timestamp, frames):
+        remaining = [(0, frames)]
+        output = None
+        previous = self.previous
+        for segment in (previous, self, *self.retained):
+            if segment is None or segment.origin is None:
+                continue
+            audio = segment.audio
+            offset = round((timestamp - segment.origin) * RATE)
+            begin, end = max(0, audio.end - audio.capacity) - offset, audio.end - offset
+            if output is None and begin <= 0 and end >= frames:
+                return audio.read(offset, frames)
+            uncovered = []
+            for first, last in remaining:
+                start, stop = max(first, begin), min(last, end)
+                if stop <= start:
+                    uncovered.append((first, last))
+                    continue
+                if output is None:
+                    output = bytearray(frames * 4)
+                output[start * 4:stop * 4] = audio.read(offset + start, stop - start)
+                if first < start:
+                    uncovered.append((first, start))
+                if stop < last:
+                    uncovered.append((stop, last))
+            remaining = uncovered
+            if not remaining:
+                break
+        return bytes(output) if output is not None else bytes(frames * 4)
+
+    def trim_bytes(self, limit, *, before=None):
         with self.lock:
-            while self.packets and self.byte_size > limit:
+            origin = self.origin or 0
+            while self.packets and (self.byte_size > limit or
+                                    before is not None and origin + self.packets[0].time < before):
                 self.byte_size -= len(self.packets.popleft().data)
                 while self.packets and not self.packets[0].keyframe:
                     self.byte_size -= len(self.packets.popleft().data)
-            first = self.packets[0].time + (self.origin or 0) if self.packets else float('inf')
+            first = self.packets[0].time + origin if self.packets else float('inf')
             self._trim_keyframes()
             while self.frames and self.frames[0][0] < first:
                 self.frames.popleft()
@@ -198,6 +241,23 @@ class VideoHistory(History):
         first = self.packets[0].sequence if self.packets else float('inf')
         while self.keyframes and self.keyframes[0].sequence < first:
             self.keyframes.popleft()
+
+    def _trim_retained(self, now):
+        before = now - self.seconds
+        budget = max(0, self.byte_limit - self.byte_size)
+        kept = []
+        for segment in self.retained:
+            bounds = segment.bounds()
+            if bounds is None or bounds[1] < before:
+                continue
+            if segment.byte_size > budget or bounds[0] < before:
+                segment.trim_bytes(budget, before=before)
+            if segment.byte_size:
+                budget -= segment.byte_size
+                kept.append(segment)
+        if self.previous is not None and self.previous not in kept:
+            self.previous.trim_bytes(budget, before=before)
+        self.retained = tuple(kept)
 
     def set_origin(self, origin):
         with self.lock:
@@ -212,6 +272,11 @@ class VideoHistory(History):
     def snapshots(self):
         return super().snapshots() if self.origin is not None else []
 
+    def recent_video_rate(self):
+        with self.lock:
+            complete = tuple(self._packet_rate)[1:-1]
+        return sum(size for _, size in complete) / len(complete) if len(complete) >= 3 else None
+
     def append_packet(self, packet):
         data = bytes(packet)
         if self.packet_store is not None:
@@ -225,8 +290,21 @@ class VideoHistory(History):
             self.packets.append(record)
             if record.keyframe:
                 self.keyframes.append(record)
-            self.byte_size += len(record.data)
-            if self.previous is not None:
+            size = len(record.data)
+            self.byte_size += size
+            if record.dts is not None or record.pts is not None:
+                second = int((record.dts if record.dts is not None else record.pts) * record.time_base)
+                samples = self._packet_rate
+                if samples and abs(second - samples[-1][0]) > 1:
+                    samples.clear()
+                if samples and second <= samples[-1][0]:
+                    bucket, count = samples.pop()
+                    samples.append((bucket, count + size))
+                else:
+                    samples.append((second, size))
+            if self.retained:
+                self._trim_retained(time.monotonic())
+            elif self.previous is not None:
                 self.previous.trim_bytes(max(0, self.byte_limit - self.byte_size))
             while self.packets and (self.byte_size > self.byte_limit or
                                     record.time - self.packets[0].time > self.seconds):
@@ -274,9 +352,10 @@ class VideoHistory(History):
 
 
 class PictureReader:
-    """Only requested main/comparison pictures get full resolution RGB conversion."""
+    """Decode requested pictures off the GUI thread."""
 
-    def __init__(self):
+    def __init__(self, *, width=None):
+        self.width = width
         self.lock = threading.RLock()
         self.wake = threading.Event()
         self.cancelled = threading.Event()
@@ -354,6 +433,14 @@ class PictureReader:
                     key = max(past)
                     return key, self.images[key]
             return (frame[0], image) if image is not None else None
+
+    def clear_request(self):
+        with self.lock:
+            self.active = False
+            self.history = self.target = None
+            self.images.clear()
+            self.reset_requested = True
+            self.wake.set()
 
     def _run(self):
         codec = None
@@ -433,7 +520,7 @@ class PictureReader:
                         if pts + .00001 < max(target, requested_target - .05):
                             continue
                         self.decode_phase = 'convert'
-                        image = image_from_frame(frame, self.timings)
+                        image = image_from_frame(frame, self.timings, width=self.width)
                         key = history.origin + pts
                         with self.lock:
                             if not self.active or self.history is not history or self.cancelled.is_set():

@@ -13,7 +13,7 @@ from ddm import bili, recording
 from ddm.auto_quality import AUTO_QUALITY
 from .engine import FPS, Sample, SIGNATURE_BITS, np
 from .video import av, VideoHistory, PictureReader, StreamInput, reformat_frame, recording_template
-from .replay_cache import CACHE_BYTES, CACHE_SECONDS
+from .replay_cache import DiskAudioRing, REPLAY_SECONDS, cache_limits
 from .diagnostics import FrameCadence, StageTimings, StreamAcquisition
 
 # Compatibility exports; internal users import the owning module.
@@ -142,9 +142,27 @@ class Decoder:
         self.thread = None
         self.lock = threading.RLock()
 
-    @staticmethod
-    def _history():
-        return VideoHistory(seconds=CACHE_SECONDS, byte_limit=CACHE_BYTES, disk_cache=True)
+    def _history(self):
+        seconds, byte_limit = cache_limits(self.seed.get('replay_seconds', REPLAY_SECONDS))
+        return VideoHistory(seconds=seconds, byte_limit=byte_limit, disk_cache=True)
+
+    def cache_video_rate(self, now):
+        if self.last_frame_received and now - self.last_frame_received < FRAME_TIMEOUT:
+            return self.history.recent_video_rate()
+        return None
+
+    def _reconnect_history(self):
+        old = self.history
+        previous = (old.segment_at(self.playback_timestamp, include_retained=False)
+                    if self.playback_timestamp is not None else None)
+        history = self._history()
+        history.previous = previous or old.previous or old
+        history.retained = (old, *old.retained) if old.bounds() is not None else old.retained
+        self.history = history
+        old.previous = None
+        old.retained = ()
+        if isinstance(old.audio, DiskAudioRing):
+            old.audio.seal()
 
     def start(self) -> None:
         self.thread = threading.Thread(target=self._run,
@@ -284,11 +302,13 @@ class Decoder:
         if info:
             self.events.information.emit(info)
         self.acquisition.phase('play_url')
-        url, quality, _profile, headers = self._available_url(lambda quality: bili.play_url(
+        url, quality, profile, headers = self._available_url(lambda quality: bili.play_url(
             self.room_id, quality, cancelled=self.cancelled.is_set, source_offset=attempt), options)
         self.acquisition.mark('play_url_ready')
         self.acquisition.quality(actual=quality)
-        self.events.information.emit({"actual_quality": quality})
+        if options is None and all(qn != quality for _, qn in bili.QUALITY_CHOICES):
+            options = bili.room_quality_options(self.room_id, profile=profile)
+        self.events.information.emit({"actual_quality": quality, "quality_options": options})
         self.source_url, self.source_headers = url, headers
         return url, headers
 
@@ -352,11 +372,7 @@ class Decoder:
                     return
                 self.acquisition.phase('capture_setup')
                 if attempt:
-                    previous = (self.history.segment_at(self.playback_timestamp)
-                                if self.playback_timestamp is not None else None) or self.history
-                    previous.previous = None
-                    self.history = self._history()
-                    self.history.previous = previous
+                    self._reconnect_history()
                     self.events.reset.emit()
                 outcome = self._capture(executable, url, headers) or 'eof'
             except bili.Cancelled:

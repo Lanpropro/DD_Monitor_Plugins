@@ -13,6 +13,8 @@ def toggle_running(viewer):
     if not viewer.rows:
         viewer.notice.setText("请先添加直播间")
         return
+    viewer.replay = ReplayTimeline(viewer.replay_minutes * 60)
+    viewer.replay_bar.preview.set_retention(viewer.replay.seconds)
     viewer.running = True
     viewer.independent_playback.clear()
     viewer.independent_shifts.clear()
@@ -43,12 +45,15 @@ def toggle_running(viewer):
     viewer.sync_picture()
     viewer._sync_sidebar_marks()
     viewer.audio.start()
+    viewer.sound_calibration.enable()
     viewer.playback_probe.start()
     start_rendering(viewer)
     viewer.match_timer.start()
 
 
 def stop(viewer):
+    if getattr(viewer, 'watch_room', None) is not None:
+        viewer.watch_room.leave()
     viewer.clock_recovery.cancel()
     clock_dialog = getattr(viewer, 'clock_dialog', None)
     if clock_dialog is not None:
@@ -56,6 +61,7 @@ def stop(viewer):
     viewer.dismiss_buffer_notice()
     viewer.replay_bar.preview.stop()
     viewer.running = False
+    viewer.sound_calibration.disable()
     stop_rendering(viewer)
     viewer.panel.flush_playback_events()
     if viewer.stream_info_dialog is not None:
@@ -72,7 +78,7 @@ def stop(viewer):
     if viewer.fullscreen_dialog is not None:
         viewer.fullscreen_dialog.close()
     viewer._stop_recording()
-    viewer.replay = ReplayTimeline()
+    viewer.replay = ReplayTimeline(viewer.replay_minutes * 60)
     if viewer.multi_recorder is not None:
         viewer.multi_recorder.stop(wait=True)
     viewer.replay_bar.refresh(force=True)
@@ -124,11 +130,12 @@ def closeEvent(viewer, event, _base):
 
 def reject(viewer, _base):
     if viewer.embedded:
+        # Stop rendering the outgoing controls before resetting the room rows.
+        viewer.hide()
         viewer.stop()
         if viewer.save_timer.isActive():
             viewer.save_timer.stop()
             viewer.save()
-        viewer.hide()
         with viewer._switch_stage('restore_host_widgets'):
             viewer._restore_host_widgets()
         viewer.finished.emit(0)

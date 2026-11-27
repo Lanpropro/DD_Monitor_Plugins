@@ -124,7 +124,8 @@ def check(app, host, module, output=None):
             requests = []
             reader = SimpleNamespace(configure=lambda *args, **kwargs: requests.append(kwargs['active']))
             decoder = SimpleNamespace(picture_at=lambda stamp, exact=False: (stamp, source), pictures=reader,
-                                      history=SimpleNamespace(frame_at=lambda stamp: (stamp, source)),
+                                      history=SimpleNamespace(frame_at=lambda stamp: (stamp, source),
+                                                              bounds_at=lambda stamp: (stamp - 1, stamp + 1)),
                                       analysis_size=(320, 180), fps=30)
             row.decoder = decoder
             original_crop = row.crop
@@ -168,6 +169,32 @@ def check(app, host, module, output=None):
             assert not any(d.findChild(module.floating_control.CropSelections)
                            for d in viewer.findChildren(QDialog)), 'Finished selectors must release their frame and timer'
             assert row.room_id in viewer.floating_crops and row.crop == original_crop
+            from PySide6.QtWidgets import QAbstractButton
+            region_button = next(button for button in row.findChildren(QAbstractButton)
+                                 if button.accessibleName() == '选择对照区域')
+            region_button.click()
+            region = row.region_editor
+            assert region.isVisible() and not region.isModal() and app.activeModalWidget() is None
+            region_button.click()
+            assert row.region_editor is region
+            previous = row.volume.value()
+            QTest.keyClick(row.volume, Qt.Key_Right if previous < 100 else Qt.Key_Left)
+            assert row.audio_controls[2] != previous and region.isVisible()
+            row.volume.setValue(previous)
+            selected = QRectF(.2, .3, .35, .25)
+            region.findChild(module.Canvas).crop = selected
+            assert row.crop == original_crop
+            region.findChild(QDialogButtonBox).button(QDialogButtonBox.Cancel).click()
+            assert row.region_editor is None and row.crop == original_crop
+            region_button.click()
+            region = row.region_editor
+            region.findChild(module.Canvas).crop = selected
+            region.findChild(QDialogButtonBox).button(QDialogButtonBox.Ok).click()
+            assert row.region_editor is None and row.crop == selected.getRect()
+            assert viewer.compare.isChecked() and viewer.comparison_panel.zoom.isChecked()
+            row.crop = original_crop
+            viewer.compare.setChecked(False)
+            app.sendPostedEvents(None, QEvent.DeferredDelete)
             floating = viewer.show_floating_crop(row, (.5, .5, .5, .5), (1, source))
             QTest.qWait(30)
             assert floating.parentWidget() is host and floating.window() is host

@@ -9,6 +9,7 @@ import socket
 import sys
 import tempfile
 import time
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -147,6 +148,16 @@ def check(app, host, module, output=None):
             with patch.object(viewer, 'seek_replay'):
                 QTest.mouseRelease(bar.slider, Qt.LeftButton, pos=QPoint(30, 4))
             assert preview.isHidden() and not preview.timer.isActive()
+            hits = preview.metrics.state['cache_hits']
+            with patch.object(prepared, 'get', return_value=None):
+                assert wait_image(2).red() > 160, 'A hole in the prepared cache can use retained packets'
+                fallback = preview.fallback
+                assert fallback.thread.is_alive() and fallback is not decoder.pictures
+                assert preview.metrics.state['cache_hits'] == hits
+                assert decoder.pictures.target is live_target
+                with patch.object(viewer, 'seek_replay'):
+                    bar.slider.setSliderDown(False)
+            assert fallback.target is None and preview.isHidden(), 'Release cancels the fallback request'
             QTest.mouseMove(bar.slider, QPoint(80, 4))
             assert preview.isHidden() and not preview.timer.isActive()
             QTest.qWait(1100)
@@ -166,7 +177,44 @@ def check(app, host, module, output=None):
             viewer.open_match_settings()
             app.processEvents()
             dialog = viewer.match_settings
-            assert dialog.width() >= 840 and dialog.height() >= 580
+            assert dialog.window_header.breadcrumb.text() == '比赛二路设置'
+            duration = dialog.replay_duration
+            assert [duration.itemData(index) for index in range(duration.count())] == [5, 10, 20, 30]
+            assert duration.currentData() == 10
+            assert '正在测量' in dialog.replay_storage_hint.text()
+            measured = history.recent_video_rate()
+            assert measured is not None and measured > 0
+            decoder.last_frame_received = time.monotonic()
+            assert decoder.cache_video_rate(decoder.last_frame_received) == measured
+            assert decoder.cache_video_rate(decoder.last_frame_received + 20) is None
+            duration.setCurrentIndex(duration.findData(30))
+            assert '1 路合计约' in dialog.replay_storage_hint.text()
+            with patch.object(decoder, 'cache_video_rate', return_value=750_000):
+                unmeasured = SimpleNamespace(decoder=SimpleNamespace(cache_video_rate=lambda _now: None))
+                with patch.dict(viewer.rows, {'unmeasured': unmeasured}):
+                    dialog.refresh_replay_storage()
+                    assert '已测速 1/2 路约 1.81 GB' in dialog.replay_storage_hint.text()
+                duration.setCurrentIndex(duration.findData(5))
+                assert '1 路合计约 0.40 GB' in dialog.replay_storage_hint.text()
+                duration.setCurrentIndex(duration.findData(30))
+            dialog.refresh_replay_storage()
+            assert context.setting('replay_minutes') == 30
+            assert viewer.replay.seconds == 600 and history.seconds == 720, 'Keep the live session intact'
+            dialog.resize(540, 500)
+            app.processEvents()
+            assert dialog.preview_section.y() < dialog.playback_section.y() < dialog.recording_section.y()
+            assert dialog.page.verticalScrollBar().maximum() > 0
+            assert dialog.page.horizontalScrollBar().maximum() == 0
+            if output:
+                dialog.grab().save(str(output / 'settings-narrow.png'))
+            scroll = dialog.page.verticalScrollBar()
+            scroll.setValue(scroll.maximum())
+            track = dialog.track_checks['1'][0]
+            assert dialog.page.viewport().rect().contains(track.mapTo(dialog.page.viewport(), track.rect().center()))
+            scroll.setValue(0)
+            dialog.resize(1140, 620)
+            app.processEvents()
+            assert dialog.preview_section.y() == dialog.playback_section.y()
             assert dialog.preview_sizes.width() >= 500, 'The editable scene must have enough room'
             assert not any('重放最多回看' in label.text() or '两种模式共用来源' in label.text()
                            or '每路可选 1～6' in label.text() for label in dialog.findChildren(module.QLabel))
@@ -200,6 +248,10 @@ def check(app, host, module, output=None):
             editor.update()
             if output:
                 dialog.grab().save(str(output / 'settings.png'))
+                module.theme.apply('light')
+                app.processEvents()
+                dialog.grab().save(str(output / 'settings-light.png'))
+                module.theme.apply('dark')
             dialog.hide()
             viewer.picture.video.resize(240, 160)
             app.processEvents()
@@ -210,15 +262,31 @@ def check(app, host, module, output=None):
             assert prepared.cancelled.is_set() and not prepared.thread.is_alive()
             assert not prepared.frames and prepared.byte_size == 0
             assert decoder.preview_frames is None
+            assert not fallback.thread.is_alive()
             restored = module.Viewer(context, {})
             assert restored.replay_preview_ratio == ratio
+            assert restored.replay_minutes == 30
+            restored.add_room('1')
+            with (patch.object(module.Decoder, 'start'), patch.object(restored, '_start_chat'),
+                  patch.object(restored.audio, 'start'), patch.object(restored.playback_probe, 'start')):
+                restored.toggle_running()
+                active = restored.rows['1'].decoder
+                assert restored.replay.seconds == 1800
+                assert active.history.seconds == 1920
+                assert active.history.audio.capacity == 1920 * 48000
+                assert active.history.byte_limit == 2 * 1024 ** 3 * 1920 // 720
+                assert restored.replay_bar.preview.frames.seconds == 1920
+                assert restored.replay_bar.preview.frames.byte_limit == 32 * 1024 ** 2 * 1920 // 720
+                restored.replay_bar.refresh(force=True)
+                assert '最多 30 分钟' in restored.replay_bar.slider.toolTip()
             restored.close()
             restored.deleteLater()
             return dict(passed=True, real_cached_h264=True, thumbnail_width=240,
                         historical_offset=True, hover_does_not_open=True, drag_only=True, settings_ratio_matches=True, drag_origin_frozen=True,
                         main_reader_untouched=True, sizes_persisted=True, stop_cleanup=True,
                         real_network_requests=0, preview_metrics=True, continuous_while_dragging=True,
-                        no_preview_packet_decode=True, prepared_frames_reused=True, distinct_previews=len(distinct))
+                        ready_previews_without_packet_decode=True, missing_preview_fallback=True,
+                        storage_from_measured_rates=True, prepared_frames_reused=True, distinct_previews=len(distinct))
         finally:
             viewer.close()
             decoder.stop()
