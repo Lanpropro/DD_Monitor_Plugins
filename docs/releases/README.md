@@ -19,6 +19,7 @@
 | 插件 | 仓库说明 | GitHub 来源 |
 | --- | --- | --- |
 | 实时翻译 | [1.0](RELEASE-live-translate-v1.0.md) | [live-translate-v1.0](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/live-translate-v1.0) |
+| 比赛二路同步 | [2.0（包版本 2.0.3）](RELEASE-match-sync-v2.0.3.md) | 待发布候选 |
 | 比赛二路同步 | [2.0 Pre-release 2](RELEASE-match-sync-v2.0.2.md) | [GitHub Release](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v2.0.2) · 插件商店可获取 |
 | YouTube 直播 | [1.1](RELEASE-youtube-live-v1.1.md) | [youtube-live-v1.1](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/youtube-live-v1.1) |
 | 比赛二路同步 | [2.0 pre release](RELEASE-match-sync-v2.0-pre.1.md) | [GitHub Release](https://github.com/Lanpropro/DD_Monitor_Plugins/releases/tag/match-sync-v2.0-pre.1) · 插件商店可获取 |
