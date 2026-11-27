@@ -241,6 +241,7 @@ class MatchSyncPlugin(api.Plugin):
         self._applying = False
         self.switch_probe = None
         self._switch_timer = None
+        self._source_start_timer = None
 
     def on_load(self, context):
         self.context = context
@@ -249,6 +250,9 @@ class MatchSyncPlugin(api.Plugin):
         self._switch_timer = QTimer(host)
         self._switch_timer.setSingleShot(True)
         self._switch_timer.timeout.connect(self._apply_enabled)
+        self._source_start_timer = QTimer(host)
+        self._source_start_timer.setSingleShot(True)
+        self._source_start_timer.timeout.connect(self._start_visible_sources)
         sidebar = getattr(host, "sidebar", None)
         if hasattr(host, "_content") and hasattr(sidebar, "tool_row"):
             self.button = QAction("比赛二路", host)
@@ -323,6 +327,8 @@ class MatchSyncPlugin(api.Plugin):
         return []
 
     def set_enabled(self, enabled):
+        if not enabled:
+            self._source_start_timer.stop()
         if self._pending_enabled is not None:
             self.switch_probe.record('superseded')
         self._pending_enabled = bool(enabled)
@@ -358,13 +364,14 @@ class MatchSyncPlugin(api.Plugin):
 
     def _change_mode(self, enabled):
         if enabled:
-            self.open_viewer({})
+            self.open_viewer({}, defer_sources=True)
         elif self.viewer is not None:
             self.switch_probe.watch_target(getattr(self.context.window, 'wall', None))
             with self.switch_probe.span('close_viewer'):
                 self.viewer.close()
 
     def _closed(self):
+        self._source_start_timer.stop()
         if self.entry is not None:
             self.entry.set_mode(False)
         if self.button is not None:
@@ -372,7 +379,14 @@ class MatchSyncPlugin(api.Plugin):
             self.button.setChecked(False)
             self.button.blockSignals(False)
 
-    def open_viewer(self, room):
+    def _start_visible_sources(self):
+        viewer = self.viewer
+        if viewer is not None and viewer.isVisible() and viewer.rows and not viewer.running:
+            started = time.perf_counter()
+            viewer.toggle_running()
+            self.switch_probe.record('sources_started', duration_ms=round((time.perf_counter() - started) * 1000, 3))
+
+    def open_viewer(self, room, *, defer_sources=False):
         if self.viewer is None:
             with self.switch_probe.span('construct_viewer'):
                 self.viewer = Viewer(self.context, self.sources, room)
@@ -395,17 +409,25 @@ class MatchSyncPlugin(api.Plugin):
         if self.entry is not None:
             self.entry.set_mode(True)
         if self.button is not None and self.viewer.rows and not self.viewer.running:
-            with self.switch_probe.span('start_sources'):
-                self.viewer.toggle_running()
+            if defer_sources:
+                # Start after giving the exposed page a chance to paint.
+                self._source_start_timer.start(33)
+            else:
+                with self.switch_probe.span('start_sources'):
+                    self.viewer.toggle_running()
         if self.button is None:
             self.viewer.activateWindow()
 
     def on_unload(self):
         self._pending_enabled = None
+        if self._source_start_timer is not None:
+            self._source_start_timer.stop()
         if self._switch_timer is not None:
             self._switch_timer.stop()
         if self.viewer is not None:
             self.viewer.close()
+            self.viewer.deleteLater()
+            self.viewer = None
         if self.entry is not None:
             unregister = getattr(self.context, 'unregister_workspace_control', None)
             if unregister is not None:
@@ -421,6 +443,9 @@ class MatchSyncPlugin(api.Plugin):
         if self._switch_timer is not None:
             self._switch_timer.deleteLater()
             self._switch_timer = None
+        if self._source_start_timer is not None:
+            self._source_start_timer.deleteLater()
+            self._source_start_timer = None
 
 
 plugin = MatchSyncPlugin()

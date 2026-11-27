@@ -17,6 +17,7 @@ from .media import Chat, Decoder, PlatformChat
 from .sending import SendConsole, SendingDanmakuPanel
 from .panels import SettingsPanel
 from .replay import ReplayTimeline
+from .replay_cache import CACHE_MINUTES, DEFAULT_REPLAY_MINUTES
 from .floating import FloatingCrop
 from .diagnostics import PlaybackProbe
 # Compatibility exports: the implementation lives in the owning modules.
@@ -51,7 +52,9 @@ class Viewer(QDialog):
         self.saved_rooms = {str(item["room_id"]): item for item in context.setting("rooms", [])}
         self.running = False
         self.status_ui_due = 0.0
-        self.replay = ReplayTimeline()
+        replay_minutes = context.setting('replay_minutes', DEFAULT_REPLAY_MINUTES)
+        self.replay_minutes = int(replay_minutes) if replay_minutes in CACHE_MINUTES else DEFAULT_REPLAY_MINUTES
+        self.replay = ReplayTimeline(self.replay_minutes * 60)
         self._replay_live_anchor = 0.0
         self._replay_live_updated = 0.0
         self.overlay_pending = {}
@@ -213,13 +216,17 @@ class Viewer(QDialog):
             if hasattr(self, 'controls') and watched is self.controls.viewport():
                 self.align_room_controls()
             if watched is self.settings_panel and hasattr(self, 'send_console'):
-                self.send_console.sync_height()
                 self.position_removal_notice()
                 self.queue_console_height()
+                self.send_console.queue_height_sync()
+            if watched is getattr(self, 'console_toolbar', None) and hasattr(self, 'send_console'):
+                self.send_console.queue_height_sync()
             if watched is self.picture.bottom:
                 QTimer.singleShot(0, self._layout_restore_control)
             if self.embedded and watched is self.parentWidget():
                 self.setGeometry(watched.rect())
+        elif kind == QEvent.LayoutRequest and watched is getattr(self, 'chat_pane', None):
+            console_control.sync_chat_pane(self)
         elif kind == QEvent.FocusIn:
             for key, row in self.rows.items():
                 if watched is row.delay:

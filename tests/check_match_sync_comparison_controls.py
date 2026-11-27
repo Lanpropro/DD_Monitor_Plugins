@@ -28,6 +28,17 @@ def check(app, host, module, output=None):
                 widget.hide()
             viewer.resize(1800, 950)
             viewer.show()
+            sound = viewer.sound_calibration
+            assert viewer.console_toolbar.isAncestorOf(sound.message) and viewer.console_toolbar.isAncestorOf(sound.undo)
+            assert viewer.settings_panel.layout().count() == 2
+            for row in viewer.rows.values():
+                audio = row.channel.parentWidget()
+                icon = row.calibrate_sound
+                assert row.isAncestorOf(icon) and icon.isVisible()
+                assert isinstance(icon, panels.ConsoleIconButton) and icon.kind == 'sound_calibration'
+                assert audio.layout().itemAt(audio.layout().count() - 1).widget() is icon
+                assert icon.focusPolicy() == Qt.StrongFocus and '一键校准比赛声' in icon.accessibleName()
+                assert icon.text() == '' and not icon.isEnabled()
             viewer.compare.setChecked(True)
             QTest.qWait(30)
             panel = viewer.comparison_panel
@@ -53,10 +64,9 @@ def check(app, host, module, output=None):
                     image.fill(('#265776', '#464477', '#225d52')[index])
                     canvas.set_frame((100., image))
                     app.processEvents()
-                    assert name.geometry().left() == state.geometry().left()
-                    assert name.geometry().top() < canvas.geometry().top()
-                    assert state.geometry().bottom() >= state.parentWidget().height() - 4
-                    assert canvas.height() >= card.height() - 24
+                    assert name.geometry().right() < state.geometry().left()
+                    assert max(name.geometry().bottom(), state.geometry().bottom()) < canvas.geometry().top()
+                    assert canvas.height() >= card.height() - 48
                     assert abs(canvas.image_rect.width() / canvas.image_rect.height() - 16 / 9) < .02
                     if canvas.width() / canvas.height() >= 16 / 9:
                         assert abs(canvas.image_rect.top()) <= 1
@@ -83,11 +93,20 @@ def check(app, host, module, output=None):
                 opened.assert_called_once()
             panel.close_button.click()
             assert panel.isHidden() and not viewer.compare.isChecked()
+            viewer.resize(760, 700)
+            QTest.qWait(30)
+            row = viewer.rows['1']
+            audio = row.channel.parentWidget()
+            icon = row.calibrate_sound
+            assert icon.isVisible() and audio.rect().contains(icon.geometry())
+            assert viewer.controls.viewport().rect().contains(icon.mapTo(viewer.controls.viewport(), icon.rect().bottomRight()))
+            if output:
+                audio.grab().save(str(output.with_name(output.stem + '-calibration.png')))
             module.theme.apply('dark')
             return dict(passed=True, shared_console_material=True, timer_header_removed=True,
                         row_timer_retained=True, native_controls=True, dark_light=True,
                         zoom_and_source_selection=True, close_preserves_session=True,
-                        media_playback=False, real_network_requests=0)
+                        calibration_on_playback_console=True, media_playback=False, real_network_requests=0)
         finally:
             viewer.close()
             viewer.deleteLater()

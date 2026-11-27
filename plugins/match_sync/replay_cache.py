@@ -5,9 +5,23 @@ import threading
 
 from .engine import AudioRing, RATE
 
-REPLAY_SECONDS = 600
-CACHE_SECONDS = 720  # Also retain the live reserve and cross-stream alignment margin.
+CACHE_MINUTES = (5, 10, 20, 30)
+DEFAULT_REPLAY_MINUTES = 10
+REPLAY_SECONDS = DEFAULT_REPLAY_MINUTES * 60
+CACHE_MARGIN_SECONDS = 120  # Live reserve and cross-stream alignment margin.
+CACHE_SECONDS = REPLAY_SECONDS + CACHE_MARGIN_SECONDS
 CACHE_BYTES = 2 * 1024 ** 3
+
+
+def cache_limits(replay_seconds):
+    seconds = replay_seconds + CACHE_MARGIN_SECONDS
+    return seconds, CACHE_BYTES * seconds // CACHE_SECONDS
+
+
+def estimated_disk_gb(minutes, video_rates):
+    seconds, video_limit = cache_limits(minutes * 60)
+    return sum(min(rate * seconds, video_limit) + seconds * RATE * 4
+               for rate in video_rates) / 1_000_000_000
 
 
 class PacketSegment:
@@ -80,3 +94,13 @@ class DiskAudioRing(AudioRing):
         if self.data is None:
             return bytes(frames * 4)
         return super().read(start, frames)
+
+    def seal(self):
+        # A short-lived connection should not reserve a full live ring on disk.
+        with self.lock:
+            if self.data is not None and 0 < self.end < self.capacity:
+                try:
+                    self.data.resize(self.end * 4)
+                except (OSError, SystemError):
+                    return
+                self.capacity = self.end

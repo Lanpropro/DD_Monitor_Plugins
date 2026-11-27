@@ -188,7 +188,12 @@ def check(app, _host, module):
                         viewer._sync_sidebar_marks()
                     assert cards[0].property('matchSync') and '#fb7299' in source_stylesheet(cards[0].styleSheet())
                     viewer.changed()
-                    with patch.object(viewer, 'stop', wraps=viewer.stop) as stop, \
+                    stop_viewer = viewer.stop
+                    def stop_after_hide():
+                        assert viewer.isHidden(), 'Outgoing controls must be hidden during row teardown'
+                        stop_viewer()
+
+                    with patch.object(viewer, 'stop', side_effect=stop_after_hide) as stop, \
                             patch.object(viewer, '_restore_host_widgets', wraps=viewer._restore_host_widgets) as restore, \
                             patch.object(viewer, 'save', wraps=viewer.save) as save:
                         plugin.button.setChecked(False)

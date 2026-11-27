@@ -48,6 +48,14 @@ def check(app, host, module):
                 viewer.sync_waiting=True;viewer.locked_clock=held
                 history.start,history.end=held-.05,held+.45
                 assert viewer._recover_clock(held+1/60,shifts)>held and not viewer.sync_waiting
+                viewer.watch_room.link = SimpleNamespace(online=True)
+                for ahead in (.6, 12.):
+                    history.end = held + ahead
+                    viewer._recover_clock(held, shifts)
+                    assert viewer.playback_rate == 1. and not viewer.sync_waiting
+                viewer.watch_room.link = None
+                viewer._recover_clock(held, shifts)
+                assert viewer.playback_rate > 1.
                 main.paused=True
                 assert viewer._recover_clock(500.,shifts)==500.
             return dict(passed=True,media_playback=False,safety_reserve_before_resume=True,

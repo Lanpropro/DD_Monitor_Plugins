@@ -7,7 +7,9 @@ from PySide6.QtWidgets import QWidget
 
 from ddm import theme
 from .preview_frames import PreviewFrames
+from .replay_cache import CACHE_SECONDS, cache_limits
 from .diagnostics import PreviewMetrics
+from .video import PictureReader
 
 
 DEFAULT_PREVIEW_RATIO = 280 / 1280
@@ -87,7 +89,8 @@ class PreviewSizePicker(QWidget):
         painter.translate(stage.topLeft())
         painter.scale(factor, factor)
         painter.translate(geometry.topLeft())
-        paint_preview(painter, QRectF(0, 0, geometry.width(), geometry.height()), self.image, '02:30 / 10:00', placeholder='回看预览')
+        caption = f'02:30 / {self.viewer.replay_minutes:02d}:00'
+        paint_preview(painter, QRectF(0, 0, geometry.width(), geometry.height()), self.image, caption, placeholder='回看预览')
         painter.restore()
         corner = self.card_rect().topRight()
         painter.setPen(QPen(theme.qcolor(theme.ACCENT), 2))
@@ -145,7 +148,11 @@ class ReplayPreview(QWidget):
         self.image = QImage()
         self.caption = ''
         self.request = None
+        self.requested_at = 0.
         self.pending = False
+        self.displayed_at = None
+        self.fallback = None
+        self.fallback_active = False
         self.frames = PreviewFrames()
         self.metrics = PreviewMetrics()
         self.metrics.frames = self.frames
@@ -160,6 +167,12 @@ class ReplayPreview(QWidget):
     def reposition(self):
         parent = self.parentWidget()
         self.setGeometry(preview_geometry(parent.width(), parent.height(), self.viewer.replay_preview_ratio))
+
+    def set_retention(self, replay_seconds):
+        # Session start sets the limits before any decoder submits frames.
+        seconds, _ = cache_limits(replay_seconds)
+        self.frames.seconds = seconds
+        self.frames.byte_limit = PreviewFrames.DEFAULT_BYTE_LIMIT * seconds // CACHE_SECONDS
 
     def sync_source(self):
         key = self.viewer.alignment.reference or self.viewer.main.currentData()
@@ -186,6 +199,11 @@ class ReplayPreview(QWidget):
             return
         target = stamp + shifts[key]
         frame = history.frame_at(target)
+        if frame is None and getattr(history, 'retained', ()):
+            stamp = self.viewer.replay.seek_target(stamp, time.monotonic(), {key: history})
+            if stamp is not None:
+                target = stamp + self.viewer.replay.shifts_at(stamp)[key]
+                frame = history.frame_at(target)
         if frame is None:
             self.dismiss()
             return
@@ -193,10 +211,14 @@ class ReplayPreview(QWidget):
         self.metrics.timings.record('preview_lookup', time.perf_counter() - started)
         request = (key, history, frame)
         if request != self.request:
-            if self.request is None or self.request[:2] != request[:2]:
+            if (self.request is None or self.request[:2] != request[:2] or self.displayed_at is None
+                    or abs(frame[0] - self.displayed_at) > PreviewFrames.MAX_FRAME_ERROR):
                 self.image = QImage()
+                self.displayed_at = None
+            self._cancel_fallback()
             self.metrics.request()
             self.request = request
+            self.requested_at = time.monotonic()
             self.pending = True
         self.caption = caption
         self.reposition()
@@ -222,14 +244,26 @@ class ReplayPreview(QWidget):
         result = self.frames.get(history, frame)
         self.metrics.timings.record('preview_get', time.perf_counter() - started)
         if result is not None:
+            self._cancel_fallback()
             self._accept(result, frame, cached=True)
-        elif not self.image.isNull():
-            self.image = QImage()
-            self.update()
+        elif time.monotonic() - self.requested_at >= .12:
+            if self.fallback is None:
+                self.fallback = PictureReader(width=240)
+                self.fallback.configure(1024 * 1024, 8, lead=0.)
+            self.fallback_active = True
+            result = self.fallback.get(history, frame)
+            if result is not None:
+                self._accept(result, frame)
+
+    def _cancel_fallback(self):
+        if self.fallback_active:
+            self.fallback.clear_request()
+            self.fallback_active = False
 
     def _accept(self, result, frame, cached=False):
         if self.pending or self.image.cacheKey() != result[1].cacheKey():
             self.metrics.ready(frame[0] - result[0], cached=cached)
+            self.displayed_at = result[0]
             self.image = result[1]
             self.pending = False
             self.update()
@@ -241,9 +275,14 @@ class ReplayPreview(QWidget):
         self.request = None
         self.pending = False
         self.image = QImage()
+        self.displayed_at = None
+        self._cancel_fallback()
 
     def stop(self):
         self.dismiss()
+        if self.fallback is not None:
+            self.fallback.stop()
+            self.fallback = None
         if self.frames.source is not None:
             self.frames.source.preview_frames = None
         self.frames.stop()
@@ -259,8 +298,8 @@ class ReplayPreview(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        paint_preview(painter, self.rect(), self.image, self.caption, placeholder='此位置暂无预览')
-        if not self.image.isNull() and not self.pending:
+        paint_preview(painter, self.rect(), self.image, self.caption)
+        if not self.image.isNull():
             self.metrics.paint()
 
 

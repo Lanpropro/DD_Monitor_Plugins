@@ -11,10 +11,13 @@ from PySide6.QtNetwork import QLocalSocket
 from telemetry import latest, scene, summarize
 
 
-def control(pid, request):
+def control(pid, request, *, watch_party=False):
     peer = QLocalSocket()
-    peer.connectToServer(f'ddm-match-monitor-{pid}')
+    prefix = 'ddm-match-watch-party' if watch_party else 'ddm-match-monitor'
+    peer.connectToServer(f'{prefix}-{pid}')
     if not peer.waitForConnected(650):
+        if watch_party:
+            raise ValueError('Open or join a room with a watch-party MCP enabled plugin in the selected process.')
         raise ValueError('Control bridge unavailable. Open the match viewer in a new Quick diagnostic process.')
     try:
         peer.write(json.dumps(request).encode('ascii') + b'\n')
@@ -35,6 +38,16 @@ def control(pid, request):
 def make_server(logs):
     server = FastMCP('Match Sync diagnostics')
     active = {}
+
+    @server.tool()
+    def get_watch_party_state(pid: int) -> dict:
+        """Read the active local watch room, seat, connection, lock and latest UI status."""
+        return control(pid, {'command': 'state'}, watch_party=True)
+
+    @server.tool()
+    def recheck_watch_party(pid: int) -> dict:
+        """Queue one manual two-device check using the active room's normal UI handler."""
+        return control(pid, {'command': 'recheck'}, watch_party=True)
 
     @server.tool()
     def get_scene(pid: int | None = None) -> dict:
@@ -138,6 +151,16 @@ def make_server(logs):
         return control(pid, dict(command='console', panel=panel, opened=opened))
 
     @server.tool()
+    def sound_calibration(pid: int, action: Literal['start', 'state', 'apply', 'undo'], slot: int) -> dict:
+        """Use the comparison panel's common-sound controls on the specified source."""
+        return control(pid, dict(command='sound_calibration', action=action, slot=slot))
+
+    @server.tool()
+    def measure_mix_lag(pid: int, start: bool = False) -> dict:
+        """Start or poll a 12-second measurement. A positive lag means the second track sounds later."""
+        return control(pid, {'command': 'start_mix_lag' if start else 'mix_lag'})
+
+    @server.tool()
     def get_sources(pid: int) -> dict:
         """Read numeric quality choices and synchronization state by source slot."""
         return control(pid, dict(command='sources'))
@@ -170,6 +193,23 @@ def make_server(logs):
         finally:
             result = control(pid, dict(command='finish_panel'))
         return result
+
+    @server.tool()
+    def probe_interaction(pid: int, action: Literal['drag', 'sender', 'page'], source: int = 0, slot: int = 0) -> dict:
+        """Exercise a PiP drag, sender-card selection, or Match Sync page round trip."""
+        control(pid, dict(command='probe_interaction', action=action, source=source, slot=slot))
+        deadline = time.monotonic() + 12
+        while time.monotonic() < deadline:
+            time.sleep(.15)
+            try:
+                result = control(pid, dict(command='interaction_result'))
+            except ValueError:
+                if action != 'page':
+                    raise
+                continue
+            if not result.get('pending'):
+                return result
+        raise ValueError('Interaction did not finish')
 
     @server.tool()
     def confirm_mix(pid: int, source: int) -> dict:

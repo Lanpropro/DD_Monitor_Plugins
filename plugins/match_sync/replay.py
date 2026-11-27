@@ -3,7 +3,7 @@ from bisect import bisect_right
 from collections import deque
 import time
 
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFontDatabase, QPainter, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QSlider, QStyle, QToolTip, QVBoxLayout, QWidget
 from ddm import theme
@@ -14,8 +14,12 @@ from .replay_cache import REPLAY_SECONDS
 from .replay_preview import ReplayPreview
 
 
+RECONNECT_GAP_SECONDS = 5.0
+
+
 class ReplayTimeline:
-    def __init__(self):
+    def __init__(self, seconds=REPLAY_SECONDS):
+        self.seconds = seconds
         self.states = deque()
         self.messages = deque()
         self.delay = 0.0
@@ -28,9 +32,9 @@ class ReplayTimeline:
     def observe(self, now, live_clock, shifts):
         if not self.states or now - self.states[-1][0] >= .2:
             self.states.append((now, {key: live_clock + shift - now for key, shift in shifts.items()}))
-        while len(self.states) > 1 and self.states[1][0] < now - REPLAY_SECONDS:
+        while len(self.states) > 1 and self.states[1][0] < now - self.seconds:
             self.states.popleft()
-        while self.messages and self.messages[0][0] < now - REPLAY_SECONDS:
+        while self.messages and self.messages[0][0] < now - self.seconds:
             self.messages.popleft()
 
     def shifts_at(self, stamp):
@@ -49,49 +53,97 @@ class ReplayTimeline:
 
     @staticmethod
     def valid(stamp, shifts, histories, bounds_cache=None):
+        return ReplayTimeline._playable_segments(stamp, shifts, histories, bounds_cache) is not None
+
+    @staticmethod
+    def _playable_segments(stamp, shifts, histories, bounds_cache=None):
         if not histories or any(key not in shifts for key in histories):
-            return False
+            return None
+        segments = []
         for key, history in histories.items():
             target = stamp + shifts[key]
-            bounds = bounds_cache.get(key) if bounds_cache is not None else None
-            if bounds is None or not bounds[0] <= target <= bounds[1]:
-                bounds = history.bounds_at(target)
+            cached = bounds_cache.get(key) if bounds_cache is not None else None
+            if cached is not None and cached[1][0] <= target <= cached[1][1]:
+                segment, bounds = cached
+            else:
+                lookup = getattr(history, 'replay_bounds_at', None)
+                segment, bounds = lookup(target) if lookup is not None else (history, history.bounds_at(target))
+                if segment is None or bounds is None:
+                    return None
                 if bounds_cache is not None:
-                    bounds_cache[key] = bounds
-            origin = history.origin
-            audio = history.audio
-            if (bounds is None or origin is None or not bounds[0] <= target <= bounds[1]
+                    bounds_cache[key] = (segment, bounds)
+            origin = segment.origin
+            audio = segment.audio
+            if (origin is None or not bounds[0] <= target <= bounds[1]
                     or not origin + max(0, audio.end - audio.capacity) / RATE <= target < origin + audio.end / RATE):
-                return False
-        return True
+                return None
+            segments.append(segment)
+        return tuple(segments)
 
-    def available(self, now, histories):
+    def _ranges(self, now, histories):
+        ranges = []
         lower = upper = None
+        newer = None
+        missed = False
+        reconnect = any(getattr(history, 'retained', ()) for history in histories.values())
         # Reuse continuous video intervals within this scan only. A new scan
         # must observe eviction/reconnection; seek still validates independently.
         bounds_cache = {}
         for stamp, shifts in reversed(self.states):
-            if stamp < now - REPLAY_SECONDS:
+            if stamp < now - self.seconds:
                 break
-            if not self.valid(stamp, shifts, histories, bounds_cache):
-                if upper is not None:
-                    break
+            segments = self._playable_segments(stamp, shifts, histories, bounds_cache)
+            if segments is None:
+                if lower is not None:
+                    if not reconnect or lower - stamp > RECONNECT_GAP_SECONDS:
+                        break
+                    missed = True
                 continue
-            if upper is None:
+            if lower is None:
                 upper = stamp
+            elif segments != newer:
+                if lower - stamp > RECONNECT_GAP_SECONDS:
+                    break
+                ranges.append((lower, upper))
+                upper = stamp
+            elif missed:
+                break  # A gap within a single connection is not a reconnect.
             lower = stamp
-        return (lower, upper) if lower is not None else None
+            newer = segments
+            missed = False
+        if lower is not None:
+            ranges.append((lower, upper))
+        return ranges
+
+    def available(self, now, histories):
+        ranges = self._ranges(now, histories)
+        return (ranges[-1][0], ranges[0][1]) if ranges else None
+
+    def seek_target(self, stamp, now, histories):
+        ranges = self._ranges(now, histories)
+        if not ranges:
+            return None
+        stamp = min(max(stamp, ranges[-1][0]), ranges[0][1])
+        if self.valid(stamp, self.shifts_at(stamp), histories):
+            return stamp
+        return next((start for start, _end in reversed(ranges) if start > stamp), None)
 
     def seek(self, stamp, now, histories):
-        bounds = self.available(now, histories)
-        if bounds is None:
-            return False
-        stamp = min(max(stamp, bounds[0]), bounds[1])
-        if not self.valid(stamp, self.shifts_at(stamp), histories):
+        stamp = self.seek_target(stamp, now, histories)
+        if stamp is None:
             return False
         self.delay = max(.001, now - stamp)
         self.cursor = stamp
         return True
+
+    def advance_gap(self, stamp, now, histories):
+        ranges = self._ranges(now, histories)
+        for (start, _), (_, older_end) in zip(ranges, ranges[1:]):
+            if older_end <= stamp < start:
+                self.delay = max(.001, now - start)
+                self.cursor = start
+                return start
+        return None
 
     def live(self):
         self.delay = 0.0
@@ -313,6 +365,8 @@ class ReplayBar(QWidget):
         self.ruler = ReplayRuler(self.details)
         detail_layout.addWidget(self.ruler)
         self.details.hide()
+        for widget in (viewer.picture.bottom, slot, self, self.slider):
+            widget.installEventFilter(self)
         self.refresh(force=True)
 
     @staticmethod
@@ -352,11 +406,20 @@ class ReplayBar(QWidget):
         self.ruler.seconds = seconds
         self.ruler.duration = self.slider.maximum() / 1000
         self.ruler.update()
-        picture = self.viewer.picture
-        position = self.slider.mapTo(picture, QPoint())
-        self.details.setGeometry(position.x(), max(0, position.y() - 72), self.slider.width(), 66)
+        self._position_details()
         self.details.show()
         self.details.raise_()
+
+    def _position_details(self):
+        # A transparent playback bar is a separate top-level window on Windows.
+        picture = self.details.parentWidget()
+        position = picture.mapFromGlobal(self.slider.mapToGlobal(QPoint()))
+        self.details.setGeometry(position.x(), max(0, position.y() - 72), self.slider.width(), 66)
+
+    def eventFilter(self, watched, event):
+        if event.type() in (QEvent.Move, QEvent.Resize) and self.details.isVisible():
+            self._position_details()
+        return super().eventFilter(watched, event)
 
     @staticmethod
     def parse_time(text):
@@ -393,14 +456,14 @@ class ReplayBar(QWidget):
         timeline = self.viewer.replay
         bounds = timeline.available(now, self.viewer.replay_histories())
         self.window_start = bounds[0] if bounds else now
-        duration = min(REPLAY_SECONDS, max(0, now - self.window_start)) if bounds else 0
+        duration = min(timeline.seconds, max(0, now - self.window_start)) if bounds else 0
         enabled = duration > .5 and self.viewer.running
         if not enabled:
             self.preview.dismiss()
         self.slider.setEnabled(enabled)
         self.time_edit.setEnabled(enabled)
         self.back.setEnabled(timeline.active)
-        self.slider.setToolTip(f'当前可回看 {self.format_time(duration)}，最多 10 分钟')
+        self.slider.setToolTip(f'当前可回看 {self.format_time(duration)}，最多 {timeline.seconds // 60} 分钟')
         current = max(0, min(duration, now - timeline.delay - self.window_start))
         if not self.slider.isSliderDown() and not self.time_edit.scrubbing:
             self.slider.setRange(0, round(duration * 1000))

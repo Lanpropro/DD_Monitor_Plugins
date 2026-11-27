@@ -2,13 +2,16 @@
 import time
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QPalette
-from PySide6.QtWidgets import QApplication, QBoxLayout, QFrame, QHBoxLayout, QListView, QListWidget, QListWidgetItem, QLabel, QLayout, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPalette, QPixmap
+from PySide6.QtWidgets import QApplication, QBoxLayout, QFrame, QHBoxLayout, QListView, QListWidget, QListWidgetItem, QLabel, QLayout, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QTabBar, QVBoxLayout, QWidget
 
 from ddm.danmaku_actions import CommentToolbar
 from ddm.plugin_controls import TileControl
 from ddm import theme
-from .panels import ConsoleIconButton, SettingsPanel, console_button_style
+from . import console_control
+from .panels import ConsoleIconButton, RestorePanelButton, SettingsPanel
+from .watch_party import WatchRoom
+from .watch_party_panel import LOCKED, WAITING
 from .send_design import RecipientDelegate, SavedTextDelegate, SavedTextList, align_composer, colors, style_compose, stylesheet
 
 # Compatibility exports; internal users import the owning module.
@@ -30,8 +33,10 @@ class SendConsole(SettingsPanel):
         self.sendable_rooms = set()
         self.selected_room = None
         self.collapsed = False
-        self.expanded_without_settings = False
         self.inline_height = None
+        self.height_sync = QTimer(self)
+        self.height_sync.setSingleShot(True)
+        self.height_sync.timeout.connect(self.sync_height)
         self.excluded_rooms = set()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(1, 1, 1, 1)
@@ -41,28 +46,25 @@ class SendConsole(SettingsPanel):
         heading = QHBoxLayout(self.toolbar)
         heading.setContentsMargins(16, 10, 16, 10)
         heading.setSpacing(16)
-        self.title = QLabel('弹幕控制台')
-        self.title.setObjectName('SendTitle')
-        heading.addWidget(self.title, 1)
-        self.minimize = ConsoleIconButton('minimize', '最小化弹幕控制台')
+        self.console_tabs = QTabBar()
+        self.console_tabs.setObjectName('ConsoleTabs')
+        self.console_tabs.setExpanding(False)
+        self.console_tabs.setDrawBase(False)
+        self.console_tabs.setAccessibleName('右侧控制台')
+        self.console_tabs.addTab('弹幕控制台')
+        self.console_tabs.addTab('好友同看')
+        heading.addWidget(self.console_tabs)
+        heading.addStretch()
+        self.minimize = ConsoleIconButton('minimize', '收起右侧控制台')
         self.minimize.setObjectName('SendMinimize')
-        self.minimize.setAccessibleName('最小化发送台')
-        self.minimize.setToolTip('收起发送控制台，保留草稿并扩展弹幕栏。')
+        self.minimize.setToolTip('收起控制台，保留弹幕草稿与好友同看。')
         self.minimize.clicked.connect(lambda: self.set_collapsed(True))
         heading.addWidget(self.minimize)
+        self.toolbar.setFixedHeight(self.viewer.console_toolbar.sizeHint().height())
         layout.addWidget(self.toolbar)
-        self.restore_bar = QWidget(viewer.panel)
-        self.restore_bar.setObjectName('DanmakuBar')
-        restore_layout = QHBoxLayout(self.restore_bar)
-        restore_layout.setContentsMargins(10, 2, 10, 2)
-        self.restore = QPushButton('展开发送', self.restore_bar)
-        self.restore.setFixedWidth(90)
-        self.restore.setStyleSheet(console_button_style('QPushButton'))
+        self.restore = RestorePanelButton('send', '展开弹幕控制台', viewer.restore_group)
         self.restore.clicked.connect(lambda: self.set_collapsed(False))
-        restore_layout.addWidget(self.restore)
-        restore_layout.addStretch(1)
-        viewer.panel.layout().addWidget(self.restore_bar)
-        self.restore_bar.hide()
+        viewer.restore_group.layout().addWidget(self.restore)
         self.restore.hide()
         self.rooms = QListWidget()
         self.rooms.setAccessibleName('左键勾选主播；选一位单发，选多位同文发送')
@@ -93,7 +95,14 @@ class SendConsole(SettingsPanel):
         self.body_scroll.setFrameShape(QFrame.NoFrame)
         self.body_scroll.setWidgetResizable(True)
         self.body_scroll.setWidget(body)
-        layout.addWidget(self.body_scroll, 1)
+        viewer.watch_room = WatchRoom(viewer)
+        viewer.watch_room.activity_changed.connect(self.update_watch_tab)
+        console_pages = QStackedWidget()
+        console_pages.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        console_pages.addWidget(self.body_scroll)
+        console_pages.addWidget(viewer.watch_room)
+        self.console_tabs.currentChanged.connect(console_pages.setCurrentIndex)
+        layout.addWidget(console_pages, 1)
         self.stack = QStackedWidget()
         self.pages = QStackedWidget()
         page_policy = QSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -219,13 +228,28 @@ class SendConsole(SettingsPanel):
         self.viewer.playback_probe.timings.record('chat_action_open', time.perf_counter() - started)
         return menu
 
+    def update_watch_tab(self, phase):
+        icon = QIcon()
+        if phase:
+            pixmap = QPixmap(10, 10)
+            pixmap.fill(Qt.transparent)
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(LOCKED if phase == 'locked' else WAITING))
+            painter.drawEllipse(2, 2, 6, 6)
+            painter.end()
+            icon = QIcon(pixmap)
+        self.console_tabs.setTabIcon(1, icon)
+        self.console_tabs.setTabToolTip(1, self.viewer.watch_room.status.text() if phase else '')
+
     def refresh_design(self):
         style = stylesheet()
         if self.styleSheet() != style:
             self.setStyleSheet(style)
+        self.viewer.watch_room.refresh_design()
         c = colors()
         self.divider.setStyleSheet(f'QFrame#SendDivider {{background: {theme.BORDER_STRONG}; border: none;}}')
-        self.toolbar.setFixedHeight(self.viewer.console_toolbar.sizeHint().height())
         for row in self.rows.values():
             for entry in row.tile._plugin_controls.applicable():
                 align_composer(entry.control.widget, self)
@@ -237,9 +261,6 @@ class SendConsole(SettingsPanel):
             if editor.palette() != palette:
                 editor.setPalette(palette)
         self.rooms.viewport().update()
-        restore_style = console_button_style('QPushButton')
-        if self.restore.styleSheet() != restore_style:
-            self.restore.setStyleSheet(restore_style)
         self.refresh_interactions()
         self._layout_workspace()
         self.update()
@@ -495,8 +516,11 @@ class SendConsole(SettingsPanel):
             self.rooms.clearSelection()
             if self.rooms.currentItem() is item:
                 self.rooms.setCurrentItem(None)
-            self.rooms.viewport().update()
-        self.rooms.itemDelegate().animate(key, checked)
+        delegate = self.rooms.itemDelegate()
+        delegate.animate(item, checked)
+        if delegate.pointer_change:
+            # Show the check state before switching the composer and its layout.
+            self.rooms.viewport().repaint(self.rooms.visualItemRect(item))
         self._update_selection()
         self.viewer.playback_probe.timings.record('send_recipient_selection', time.perf_counter() - started)
 
@@ -523,13 +547,20 @@ class SendConsole(SettingsPanel):
                 composer = editor.parentWidget()
                 bookmark_layout = getattr(composer, '_match_actions', composer).layout()
         if bookmark_layout.indexOf(self.save_text) < 0:
-            self.save_text.parentWidget().layout().removeWidget(self.save_text)
+            previous_actions = self.save_text.parentWidget()
+            previous_actions.layout().removeWidget(self.save_text)
             bookmark_layout.addWidget(self.save_text, 0, Qt.AlignVCenter)
             self.save_text.show()
-        self._layout_workspace()
+            for actions in (previous_actions, bookmark_layout.parentWidget()):
+                if getattr(actions.parentWidget(), '_match_actions', None) is actions:
+                    actions.setFixedWidth(actions.layout().sizeHint().width())
         self.saved_texts.setEnabled(not self.batch_panel.timer.isActive())
         self.refresh_store_state()
         self.refresh_interactions()
+
+    def queue_height_sync(self):
+        # Both panes may be laying out in response to the same resize.
+        self.height_sync.start(0)
 
     def sync_height(self):
         if self.inline_height is not None:
@@ -539,24 +570,25 @@ class SendConsole(SettingsPanel):
         scroll_state = self.viewer.panel._scroll_state()
         settings = self.viewer.settings_panel
         if not settings.isHidden():
-            self.expanded_without_settings = False
             self.setFixedHeight(settings.height())
-        visible = not self.collapsed and (not settings.isHidden() or self.expanded_without_settings)
+            self.toolbar.setFixedHeight(self.viewer.console_toolbar.height())
+        visible = not self.collapsed
         self.setVisible(visible)
         if self.viewer.panel.property('joined') != visible:
             self.viewer.panel.setProperty('joined', visible)
             self.viewer.panel.style().unpolish(self.viewer.panel)
             self.viewer.panel.style().polish(self.viewer.panel)
             self.viewer.panel.update()
-        self.restore.setVisible(not visible)
-        self.restore_bar.setVisible(not visible)
         self.parentWidget().layout().activate()
         self.viewer.panel._restore_scroll_state(scroll_state)
 
     def set_collapsed(self, collapsed):
         self.collapsed = collapsed
-        self.expanded_without_settings = not collapsed and self.viewer.settings_panel.isHidden()
         self.sync_height()
+        if self.inline_height is None:
+            self.restore.setVisible(collapsed)
+            self.viewer._layout_restore_control()
+            console_control.sync_chat_pane(self.viewer)
 
     def hideEvent(self, event):
         self.batch_panel.stop()

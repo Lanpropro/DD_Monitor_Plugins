@@ -18,6 +18,11 @@ try:
 except ImportError:
     SettingsTitleBar = None
 
+try:
+    from ddm.sidebar_navigation import NavigationButton
+except ImportError:
+    NavigationButton = None
+
 def _crop_source_policy(viewer, row):
     if row.room_id not in viewer.floating_crops:
         return 'source'
@@ -188,8 +193,8 @@ def selection_color(slot):
     return QColor.fromHsv((198 + slot * 137) % 360, 190, 250)
 
 
-class FloatingCropDialog(QDialog):
-    def __init__(self, parent, title):
+class CropDialog(QDialog):
+    def __init__(self, parent, title, close_label):
         super().__init__(parent, Qt.Dialog | Qt.FramelessWindowHint)
         self.setWindowTitle(title)
         self.setAttribute(Qt.WA_TranslucentBackground)
@@ -201,8 +206,8 @@ class FloatingCropDialog(QDialog):
         self.titlebar.breadcrumb.setObjectName('SettingsTitle')
         self.titlebar.breadcrumb.setTextFormat(Qt.PlainText)
         self.titlebar.breadcrumb.setText(title)
-        self.titlebar.close_button.setToolTip('关闭画中画选区')
-        self.titlebar.close_button.setAccessibleName('关闭画中画选区')
+        self.titlebar.close_button.setToolTip(close_label)
+        self.titlebar.close_button.setAccessibleName(close_label)
 
     def paintEvent(self, _event):
         painter = QPainter(self)
@@ -238,20 +243,12 @@ class CropSelections(QWidget):
         self.bar.setContentsMargins(0, 0, 0, 0)
         self.bar.setSpacing(6)
         self.group = QButtonGroup(self)
-        self.add_button = QToolButton()
-        self.add_button.setObjectName('IconButton')
-        self.add_button.setCursor(Qt.PointingHandCursor)
-        self.add_button.setFixedHeight(32)
-        self.add_button.setText('＋')
+        self.add_button = self._action('新增画中画', 'plus', '＋')
         self.add_button.setAccessibleName('新增画中画')
         self.add_button.setToolTip('新增画中画选区')
         self.add_button.clicked.connect(self.add_selection)
         self.bar.addWidget(self.add_button)
-        self.remove_button = QToolButton()
-        self.remove_button.setObjectName('IconButton')
-        self.remove_button.setCursor(Qt.PointingHandCursor)
-        self.remove_button.setFixedHeight(32)
-        self.remove_button.setText('×')
+        self.remove_button = self._action('删除当前选区', 'close', '×')
         self.remove_button.setAccessibleName('删除当前选区')
         self.remove_button.setToolTip('删除当前选区（Delete）')
         self.remove_button.clicked.connect(self.remove_selection)
@@ -279,6 +276,16 @@ class CropSelections(QWidget):
             self.select(current if current in self.rects else next(iter(self.rects)))
         else:
             self.add_selection()
+
+    @staticmethod
+    def _action(label, icon, fallback):
+        if NavigationButton is not None:
+            return NavigationButton(label, icon)
+        button = QToolButton()
+        button.setText(fallback)
+        button.setFixedSize(34, 34)
+        button.setCursor(Qt.PointingHandCursor)
+        return button
 
     def insert_button(self, slot):
         button = QToolButton()
@@ -393,10 +400,11 @@ def arrange_crops(crops, arrangements, primary):
 
 
 def choose_crop(viewer, row, floating=False, *, current=None):
-    if floating and row.crop_editor is not None:
-        row.crop_editor.raise_()
-        row.crop_editor.activateWindow()
-        return row.crop_editor
+    editor = row.crop_editor if floating else row.region_editor
+    if editor is not None:
+        editor.raise_()
+        editor.activateWindow()
+        return editor
     decoder = row.decoder
     group = viewer.floating_crops.get(row.room_id, {})
     frozen = None
@@ -419,14 +427,14 @@ def choose_crop(viewer, row, floating=False, *, current=None):
     if frame is None and frozen is None:
         viewer.notice.setText("请先开始观看，收到画面后再选择对照区域")
         return
-    title = f"{row.label()}：" + ('框选悬浮画面' if floating else '拖选计时器或共同内容，仅用于放大对照')
-    if floating and SettingsTitleBar is not None:
-        dialog = FloatingCropDialog(viewer, title)
-        dialog.resize(QSize(900, 600).boundedTo(dialog.screen().availableGeometry().size()))
+    title = f"{row.label()}：" + ('框选悬浮画面' if floating else '框选对照区域')
+    if SettingsTitleBar is not None:
+        close_label = '关闭画中画选区' if floating else '关闭对照选区'
+        dialog = CropDialog(viewer, title, close_label)
     else:
         dialog = QDialog(viewer)
         dialog.setWindowTitle(title)
-        dialog.resize(900, 600)
+    dialog.resize(QSize(900, 600).boundedTo(dialog.screen().availableGeometry().size()))
     canvas = Canvas(selecting=True)
     canvas.set_frame(frame)
     canvas.waiting = frame is None
@@ -440,34 +448,17 @@ def choose_crop(viewer, row, floating=False, *, current=None):
     reset.clicked.connect(picker.use_full_frame if picker is not None else canvas.reset_selection)
     buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
     confirm = buttons.button(QDialogButtonBox.Ok)
-    if floating:
-        reset.setObjectName('IconButton')
-        confirm.setObjectName('PrimaryButton')
-        confirm.setText('确定')
-        confirm.setStyleSheet('QPushButton:disabled { background: palette(button); color: palette(placeholder-text); }')
-        cancel = buttons.button(QDialogButtonBox.Cancel)
-        cancel.setObjectName('IconButton')
-        cancel.setText('取消')
-        for button in (reset, *buttons.buttons()):
-            button.setCursor(Qt.PointingHandCursor)
-    else:
-        confirm.setObjectName('MatchSyncCropConfirm')
-        dialog.setStyleSheet(f"""
-            QPushButton {{
-                background: {theme.CONTENT_HOVER}; color: {theme.TEXT1};
-                border: 1px solid {theme.BORDER_STRONG}; border-radius: 6px;
-                padding: 6px 16px;
-            }}
-            QPushButton:hover {{ background: {theme.ELEVATED}; border-color: {theme.ACCENT}; }}
-            QPushButton:pressed {{ background: {theme.CONTENT}; }}
-            QPushButton:focus {{ border: 2px solid {theme.ACCENT}; }}
-            QPushButton#MatchSyncCropConfirm {{ background: #006a92; color: #ffffff; border-color: #006a92; }}
-            QPushButton#MatchSyncCropConfirm:hover {{ background: #007ba8; }}
-            QPushButton#MatchSyncCropConfirm:pressed {{ background: #005778; }}
-            QPushButton:disabled, QPushButton#MatchSyncCropConfirm:disabled {{
-                background: {theme.CONTENT_HOVER}; color: {theme.TEXT3}; border-color: {theme.BORDER};
-            }}
-        """)
+    confirm.setObjectName('PrimaryButton')
+    confirm.setText('确定')
+    confirm.setStyleSheet(f'QPushButton#PrimaryButton:disabled {{ background: {theme.ELEVATED}; '
+                          f'color: {theme.TEXT3}; border: 1px solid {theme.BORDER}; '
+                          f'border-radius: {theme.CONTROL_HEIGHT // 2}px; }}')
+    cancel = buttons.button(QDialogButtonBox.Cancel)
+    cancel.setObjectName('IconButton')
+    cancel.setText('取消')
+    reset.setObjectName('IconButton')
+    for button in (reset, confirm, cancel):
+        button.setCursor(Qt.PointingHandCursor)
     if frame is None:
         confirm.setEnabled(False)
         prepare = QTimer(dialog)
@@ -489,16 +480,14 @@ def choose_crop(viewer, row, floating=False, *, current=None):
     buttons.accepted.connect(dialog.accept)
     buttons.rejected.connect(dialog.reject)
     layout = QVBoxLayout(dialog)
-    if isinstance(dialog, FloatingCropDialog):
+    if isinstance(dialog, CropDialog):
         layout.setContentsMargins(20, 12, 20, 20)
         layout.setSpacing(10)
         layout.addWidget(dialog.titlebar)
     hint = QLabel('Ctrl＋滚轮：缩放　滚轮：上下平移　Shift＋滚轮：左右平移'
-                  if floating else "自动匹配始终使用完整画面；框选仅用于放大对照、人工微调偏移。"
-                  "两路请选择相同计时器，框选不会改变自动匹配或读取计时器数字。")
+                  if floating else '请框选各路相同的计时器或共同内容，便于放大对照和微调偏移。自动匹配使用完整画面。')
     hint.setWordWrap(True)
-    if floating:
-        hint.setObjectName('SettingsHint')
+    hint.setObjectName('SettingsHint')
     layout.addWidget(hint)
     if picker is not None:
         layout.addWidget(picker, 0, Qt.AlignLeft)
@@ -541,9 +530,13 @@ def choose_crop(viewer, row, floating=False, *, current=None):
         dialog.show()
         return dialog
 
-    result = dialog.exec()
-    dialog.deleteLater()
-    if result == QDialog.Accepted and viewer.rows.get(row.room_id) is row:
+    row.region_editor = dialog
+
+    def finish_region(result):
+        row.region_editor = None
+        dialog.deleteLater()
+        if result != QDialog.Accepted or viewer.rows.get(row.room_id) is not row or row.decoder is not decoder:
+            return
         rect = canvas.crop
         if rect.isEmpty():
             return
@@ -551,3 +544,7 @@ def choose_crop(viewer, row, floating=False, *, current=None):
         viewer.comparison_panel.zoom.setChecked(True)
         viewer.show_comparison(row.room_id)
         viewer.changed()
+
+    dialog.finished.connect(finish_region)
+    dialog.show()
+    return dialog
