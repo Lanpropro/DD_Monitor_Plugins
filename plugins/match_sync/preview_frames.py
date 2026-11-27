@@ -13,8 +13,12 @@ from .video import image_from_frame
 
 
 class PreviewFrames:
-    def __init__(self, byte_limit=32 * 1024 * 1024):
+    DEFAULT_BYTE_LIMIT = 32 * 1024 * 1024
+    MAX_FRAME_ERROR = .65
+
+    def __init__(self, byte_limit=DEFAULT_BYTE_LIMIT):
         self.byte_limit = byte_limit
+        self.seconds = CACHE_SECONDS
         self.lock = threading.Lock()
         self.wake = threading.Event()
         self.cancelled = threading.Event()
@@ -23,6 +27,7 @@ class PreviewFrames:
         self.generation = 0
         self.next_pts = None
         self.frames = deque()
+        self.archived = {}
         self.byte_size = self.produced = self.dropped = 0
         self.thread_cpu_s = 0.
         self.timings = StageTimings()
@@ -36,11 +41,27 @@ class PreviewFrames:
             self._reset(source.history if source is not None else None)
 
     def _reset(self, history):
+        self._start_epoch(history)
+        self.archived.clear()
+        self.byte_size = 0
+
+    def _start_epoch(self, history):
         self.history = history
         self.generation += 1
         self.pending = self.next_pts = None
-        self.frames.clear()
-        self.byte_size = 0
+        self.frames = deque()
+
+    def _reconnect(self, history):
+        retained = {id(segment) for segment in getattr(history, 'retained', ())}
+        for key in tuple(self.archived):
+            if key not in retained:
+                _, _, frames = self.archived.pop(key)
+                self.byte_size -= sum(len(data) for _, data in frames)
+        if id(self.history) in retained and self.frames:
+            self.archived[id(self.history)] = self.generation, self.history.origin, self.frames
+        else:
+            self.byte_size -= sum(len(data) for _, data in self.frames)
+        self._start_epoch(history)
 
     def submit(self, source, history, frame, pts):
         # Capture only lends a frame reference. It never waits for conversion.
@@ -51,7 +72,7 @@ class PreviewFrames:
             if self.cancelled.is_set() or source is not self.source:
                 return False
             if history is not self.history:
-                self._reset(history)
+                self._reconnect(history)
             if self.next_pts is not None and pts + .0001 < self.next_pts:
                 return False
             self.next_pts = pts if self.next_pts is None else self.next_pts
@@ -93,8 +114,18 @@ class PreviewFrames:
                     self.frames.append((pts, encoded))
                     self.byte_size += len(encoded)
                     self.produced += 1
+                    if self.archived:
+                        cutoff = self.history.origin + pts - self.seconds
+                        while self.archived:
+                            key = next(iter(self.archived))
+                            _, origin, frames = self.archived[key]
+                            if self.byte_size <= self.byte_limit and origin + frames[0][0] >= cutoff:
+                                break
+                            self.byte_size -= len(frames.popleft()[1])
+                            if not frames:
+                                self.archived.pop(key)
                     while self.frames and (self.byte_size > self.byte_limit
-                                           or pts - self.frames[0][0] > CACHE_SECONDS):
+                                           or pts - self.frames[0][0] > self.seconds):
                         self.byte_size -= len(self.frames.popleft()[1])
             self.thread_cpu_s = time.thread_time() - cpu
             work = frame = image = data = encoded = buffer = None
@@ -104,15 +135,20 @@ class PreviewFrames:
         if not self.lock.acquire(blocking=False):
             return None
         try:
-            if history is not self.history:
+            if history is self.history:
+                generation, frames = self.generation, self.frames
+            elif id(history) in self.archived:
+                generation, _, frames = self.archived[id(history)]
+            else:
                 return None
-            index = bisect_right(self.frames, frame[1], key=lambda item: item[0]) - 1
-            if index < 0:
+            if not frames:
                 return None
-            pts, encoded = self.frames[index]
-            if frame[1] - pts > .25:
+            index = bisect_right(frames, frame[1], key=lambda item: item[0])
+            nearest = range(max(0, index - 1), min(len(frames), index + 1))
+            pts, encoded = frames[min(nearest, key=lambda i: abs(frames[i][0] - frame[1]))]
+            if abs(frame[1] - pts) > self.MAX_FRAME_ERROR:
                 return None
-            key = self.generation, pts
+            key = generation, pts
         finally:
             self.lock.release()
         if key != self.decoded_key:
@@ -128,7 +164,8 @@ class PreviewFrames:
         if not self.lock.acquire(blocking=False):
             return dict(result, worker_busy=True)
         try:
-            return dict(result, prepared_count=len(self.frames), prepared_bytes=self.byte_size,
+            prepared_count = len(self.frames) + sum(len(frames) for _, _, frames in self.archived.values())
+            return dict(result, prepared_count=prepared_count, prepared_bytes=self.byte_size,
                         prepared_bounds=(self.frames[0][0], self.frames[-1][0]) if self.frames else None,
                         produced=self.produced, dropped=self.dropped, queued=int(self.pending is not None),
                         byte_limit=self.byte_limit, sample_fps=8, width=240)

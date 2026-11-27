@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import time
-from PySide6.QtCore import QEasingCurve, QPoint, QPropertyAnimation
+from PySide6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, Qt
+from PySide6.QtWidgets import QWidget
 from ddm import motion
 
 
@@ -26,18 +27,23 @@ def set_settings_visible(viewer, visible):
 
 def _layout_restore_control(viewer):
     tile = viewer.picture
+    group = viewer.restore_group
+    visible = any(not button.isHidden() for button in
+                  (viewer.restore_settings, viewer.restore_chat, viewer.send_console.restore))
+    if group.isHidden() == visible:
+        group.setVisible(visible)
+    tile._bottom_layout_signature_value = None
     tile._layout_bottom_controls()
-    if viewer.restore_settings.isHidden():
+    if not visible:
         return
-    viewer.restore_settings.setFixedWidth(58 if tile.width() < 420 else 90)
-    viewer.restore_settings.setText("展开" if tile.width() < 420 else "展开设置")
     layout = tile.bottom.layout()
     fixed = [layout.itemAt(i).widget() for i in range(layout.count())]
     fixed = [widget for widget in fixed if widget is not None and not widget.isHidden()
              and widget not in (tile.volume_slider, tile.status_label)]
     margins = layout.contentsMargins()
     remaining = tile.width() - margins.left() - margins.right() - layout.spacing() * (len(fixed) + 1) - 8
-    remaining -= sum(widget.sizeHint().width() if widget is tile.recording_time else widget.width() for widget in fixed)
+    remaining -= sum(widget.sizeHint().width() if widget in (group, tile.recording_time)
+                     else widget.width() for widget in fixed)
     tile.volume_slider.setFixedWidth(max(18, min(86, remaining)))
     layout.activate()
 
@@ -125,6 +131,7 @@ def fit_console_height(viewer):
         return
     height = viewer.console_content_height
     viewer.body_split.setSizes([max(1, sizes[0] + sizes[2] - height), sizes[1], height])
+    viewer.send_console.sync_height()
 
 
 def begin_row_drag(viewer, room_id):
@@ -218,8 +225,22 @@ def set_chat_visible(viewer, visible):
         return
     viewer.chat_collapsed = not visible
     viewer.panel.setVisible(visible)
-    viewer.chat_space.setVisible(not visible)
     viewer.restore_chat.setVisible(not visible)
+    viewer._layout_restore_control()
+    sync_chat_pane(viewer)
+
+
+def sync_chat_pane(viewer):
+    if viewer.send_console.inline_height is not None:
+        return
+    pane = viewer.chat_pane
+    content = [widget for widget in pane.findChildren(QWidget, options=Qt.FindDirectChildrenOnly)
+               if widget is not viewer.chat_space and not widget.isHidden()]
+    sender_only = content == [viewer.send_console]
+    if viewer.chat_space.isHidden() == sender_only:
+        viewer.chat_space.setVisible(sender_only)
+    if pane.isHidden() == bool(content):
+        pane.setVisible(bool(content))
 
 
 def position_removal_notice(viewer):

@@ -13,21 +13,24 @@ from .canvas import Canvas
 from .clock_sync import (ClockReading, calculate_event_offsets, calculate_offsets, format_clock, parse_clock,
                          suggest_transition, valid_region)
 from .clock_capture import EVENT_AFTER, EVENT_BEFORE, capture_band, capture_event_band, recognize_bands
-from .panels import ConsoleIconButton, console_button_style, use_link_cursor
+from .panels import ConsoleIconButton, use_link_cursor
 
 
 CLICK_FRAME_ROLE = Qt.UserRole
 
 
-def settings_button(text, tooltip):
-    button = QPushButton(text)
+def settings_button(text, tooltip, *, primary=False, button=None):
+    button = button or QPushButton()
+    button.setText(text)
+    button.setObjectName('PrimaryButton' if primary else 'IconButton')
     button.setAutoDefault(False)
     button.setDefault(False)
     button.setFocusPolicy(Qt.StrongFocus)
-    button.setFixedHeight(32)
     button.setToolTip(tooltip)
     button.setAccessibleName(tooltip)
-    button.setStyleSheet(console_button_style('QPushButton'))
+    button.setStyleSheet(f'QPushButton#{button.objectName()}:disabled {{ background: {theme.ELEVATED}; '
+                         f'color: {theme.TEXT3}; border: 1px solid {theme.BORDER}; '
+                         f'border-radius: {theme.CONTROL_HEIGHT // 2}px; }}')
     use_link_cursor(button)
     return button
 
@@ -400,10 +403,8 @@ class ClockDialog(QDialog):
         self.mode.addItem('正计时', 1)
         self.mode.currentIndexChanged.connect(self.mode_changed)
         self.refresh = settings_button('获取画面', '从现有缓存获取画面')
-        self.refresh.setFixedWidth(max(88, self.refresh.fontMetrics().horizontalAdvance(self.refresh.text()) + 20))
         self.refresh.clicked.connect(self.refresh_previews)
-        self.sample = settings_button('采样并识别', '采样计时器并本地识别')
-        self.sample.setFixedWidth(max(104, self.sample.fontMetrics().horizontalAdvance(self.sample.text()) + 20))
+        self.sample = settings_button('采样并识别', '采样计时器并本地识别', primary=True)
         self.sample.clicked.connect(lambda: self.start_job(preview=False))
         self.jump = settings_button('回到点击帧', '定位到各路标记的点击帧')
         self.jump.clicked.connect(self.center_on_click)
@@ -437,15 +438,14 @@ class ClockDialog(QDialog):
         self.status.setObjectName('ClockDialogStatus')
         self.status.setWordWrap(True)
         self.calculate = settings_button('计算偏移', '根据已核对的计时器计算偏移')
-        self.calculate.setFixedWidth(max(92, self.calculate.fontMetrics().horizontalAdvance(self.calculate.text()) + 20))
         self.calculate.clicked.connect(self.calculate_proposal)
-        self.apply = settings_button('确认应用', '确认偏移并手动锁定')
-        self.apply.setFixedWidth(max(92, self.apply.fontMetrics().horizontalAdvance(self.apply.text()) + 20))
+        self.apply = settings_button('确认应用', '确认偏移并手动锁定', primary=True)
         self.apply.setEnabled(False)
         self.apply.clicked.connect(self.apply_proposal)
-        close = settings_button('关闭', '关闭计时器对齐')
-        close.setFixedWidth(max(72, close.fontMetrics().horizontalAdvance(close.text()) + 20))
-        close.clicked.connect(self.reject)
+        close = QDialogButtonBox(QDialogButtonBox.Close)
+        close.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        settings_button('关闭', '关闭计时器对齐', button=close.button(QDialogButtonBox.Close))
+        close.rejected.connect(self.reject)
         footer = QFrame()
         footer.setObjectName('ClockDialogFooter')
         actions = QHBoxLayout(footer)

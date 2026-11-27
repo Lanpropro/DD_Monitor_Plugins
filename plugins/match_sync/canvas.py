@@ -19,6 +19,10 @@ class Canvas(QFrame):
         self.waiting = False
         self.zoom_crop = False
         self.frame_key = None
+        self.painted_stamp = None
+        self.painted_frames = 0
+        self.watch_last_paint = None
+        self.watch_paint_gap = 0.
         self.requested_frame_key = None
         self.frame = None
         self.missing_since = None
@@ -185,6 +189,13 @@ class Canvas(QFrame):
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
         started = time.perf_counter()
         painter.drawImage(self.image_rect, image, QRectF(source))
+        if self.frame_key != self.painted_stamp:
+            self.painted_frames += 1
+            self.painted_stamp = self.frame_key
+            if self.watch_last_paint is not None:
+                now = time.perf_counter()
+                self.watch_paint_gap = max(self.watch_paint_gap, now - self.watch_last_paint)
+                self.watch_last_paint = now
         if self.paint_probe is not None and self.paint_probe.thread is not None:
             self.paint_probe.timings.record('main_draw_image', time.perf_counter() - started)
         if self.selecting:

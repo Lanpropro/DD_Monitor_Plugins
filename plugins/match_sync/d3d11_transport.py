@@ -98,6 +98,9 @@ class FrameTransport:
     def displayed(self):
         return struct.unpack_from('<I', self.map, PRESENTED)[0]
 
+    def displayed_stamp(self):
+        return struct.unpack_from('<q', self.map, 32)[0] / 1_000_000
+
     def _stop_child(self):
         if self.process.poll() is None:
             self.swap(self.address + ctypes.sizeof(wintypes.LONG), 1)

@@ -1,4 +1,4 @@
-"""Opt-in main-picture presentation from the existing audio clock and frame cache."""
+"""D3D11 main-picture presentation from the existing audio clock and frame cache."""
 from collections import deque
 from dataclasses import dataclass
 import os
@@ -27,20 +27,23 @@ class PlaybackTarget:
     audio: object = None
     observation: tuple | None = None
     correction: float = 0.
+    settings_move: Event | None = None
 
     def sample(self, now):
         elapsed = max(0., now - self.sampled_at)
         advance = min(elapsed, .080) * self.rate
         if elapsed > .080 and self.observation is not None:
-            # Beyond the usual extrapolation window, follow only device-confirmed
-            # progress within audio already queued when the GUI supplied this target.
+            # Outside a native settings drag, stay within the GUI's original audio queue.
             current = self.audio.clock_observation
             observed, played, written, anchor, _ = self.observation
             if (current is not None and current[0] > self.sampled_at and current[3] == anchor
                     and self.audio.correction == self.correction and current[1] >= played):
                 at_target = min(written, played + max(0., self.sampled_at - observed) * RATE)
-                confirmed = (observed_media_time(self.observation, min(written, current[1]))
-                             - observed_media_time(self.observation, at_target))
+                if self.settings_move is not None and self.settings_move.is_set() and current[4]:
+                    played_time = observed_media_time(current, min(current[1], current[2]))
+                else:
+                    played_time = observed_media_time(self.observation, min(written, current[1]))
+                confirmed = played_time - observed_media_time(self.observation, at_target)
                 advance = max(advance, min(confirmed, elapsed * self.rate))
         return self.stamp + advance
 
@@ -53,6 +56,7 @@ class PresentedFrame:
     process_id: int
     submitted: int
     presented: int
+    displayed_stamp: float = 0.
 
 
 class PictureWorker:
@@ -145,7 +149,7 @@ class PictureWorker:
                 poll_interval_max = wait_max = lookup_max = target_age_max = 0.
                 duplicates = missing = 0
                 self.latest = PresentedFrame(target, (stamp, image), output.hwnd, output.process.pid,
-                                             output.sequence, output.displayed())
+                                             output.sequence, output.displayed(), output.displayed_stamp())
                 last = identity
         except (OSError, RuntimeError, ValueError, TypeError, BufferError) as error:
             self.error = str(error)
@@ -178,9 +182,10 @@ class D3D11Picture(QObject):
     def __init__(self, viewer, directory):
         super().__init__(viewer)
         self.viewer, self.directory = viewer, directory
+        self.settings_move = Event()
         self.canvas = viewer.canvas
         self.worker = None
-        self.requested = viewer.context.setting('main_picture_renderer', 'raster') == 'd3d11'
+        self.requested = viewer.context.setting('main_picture_renderer', 'd3d11') == 'd3d11'
         self.available = True
         self.hwnd = None
         self.area = None
@@ -252,7 +257,7 @@ class D3D11Picture(QObject):
         audio = viewer.audio
         observation = None if viewer.sync_waiting or viewer.offset_repositioning else audio.clock_observation
         worker.target = PlaybackTarget(decoder, generation, stamp, perf_counter(), rate,
-                                       audio, observation, audio.correction)
+                                       audio, observation, audio.correction, self.settings_move)
         latest = worker.latest
         if (latest is None or latest.target.decoder is not decoder or latest.target.generation != generation
                 or not stamp - .15 <= latest.frame[0] <= stamp + .05):

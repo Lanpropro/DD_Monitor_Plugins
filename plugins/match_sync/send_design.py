@@ -1,5 +1,5 @@
 """Scoped, opaque sending-workspace styling and recipient rendering."""
-from PySide6.QtCore import QEvent, QObject, QPoint, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
+from PySide6.QtCore import QEvent, QModelIndex, QObject, QPersistentModelIndex, QPoint, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QLineEdit, QListWidget, QPushButton, QSizePolicy, QStyle, QStyledItemDelegate, QWidget
 
@@ -150,7 +150,9 @@ def stylesheet():
     return f'''
         #MatchSyncSendConsole {{background: transparent; border: none;}}
         #MatchSyncSendConsole QLabel {{color: {c['text']}; background: transparent; border: none;}}
-        #MatchSyncSendConsole #SendTitle {{font-size: {theme.FONT_CONTROL}px; font-weight: 600;}}
+        #ConsoleTabs::tab {{color: {c['secondary']}; background: transparent; padding: 2px 6px;
+            border-bottom: 2px solid transparent;}}
+        #ConsoleTabs::tab:selected {{color: {c['text']}; border-bottom-color: {c['accent']};}}
         #MatchSyncSendConsole #SendToolbar {{border-bottom: 1px solid {theme.BORDER_STRONG};}}
         #MatchSyncSendConsole #SendContext {{font-weight: 600;}}
         #MatchSyncSendConsole #SendFeedback {{color: {c['secondary']};}}
@@ -306,18 +308,22 @@ class RecipientDelegate(QStyledItemDelegate):
         self.animations = {}
         self.pointer_change = False
 
-    def animate(self, key, checked):
+    def animate(self, item, checked):
+        view = self.parent()
+        key = item.data(Qt.UserRole)
         previous = self.animations.get(key)
         start = previous.currentValue() if previous is not None else float(not checked)
-        if previous is not None:
-            previous.stop()
-            previous.deleteLater()
+        self.forget(key)
+        if not self.pointer_change or not motion.enabled():
+            return
+        index = QPersistentModelIndex(view.indexFromItem(item))
         animation = QVariantAnimation(self)
-        animation.setDuration(180 if self.pointer_change and motion.enabled() else 0)
+        animation.setDuration(180)
         animation.setEasingCurve(motion.THEME_WAVE_EASING)
         animation.setStartValue(start)
         animation.setEndValue(float(checked))
-        animation.valueChanged.connect(lambda _value: self.parent().viewport().update())
+        animation.valueChanged.connect(lambda _value: view.update(QModelIndex(index)))
+        animation.finished.connect(lambda: self.forget(key))
         self.animations[key] = animation
         animation.start()
 
@@ -411,16 +417,11 @@ class RecipientDelegate(QStyledItemDelegate):
         painter.setPen(QColor(c['accent'] if len(text) > 1 and text[1] == '✓' else c['secondary']))
         painter.drawText(left, top + line_height + metrics.ascent(),
                          metrics.elidedText(text[1] if len(text) > 1 else '', Qt.ElideRight, width))
-        if checked is not None:
-            painter.setPen(QPen(QColor(c['accent'] if selected else c['secondary']), 1.5))
+        if checked is not None and selected:
+            painter.setPen(QPen(QColor(c['accent']), 1.5))
             x, y = int(rect.right() - 21), int(rect.center().y() - 6)
-            if progress > 0:
-                painter.setOpacity(progress)
-                painter.translate(x + 6, y + 6)
-                painter.scale(.94 + .06 * progress, .94 + .06 * progress)
-                painter.translate(-x - 6, -y - 6)
-                painter.drawLine(x, y + 6, x + 4, y + 10)
-                painter.drawLine(x + 4, y + 10, x + 12, y + 1)
+            painter.drawLine(x, y + 6, x + 4, y + 10)
+            painter.drawLine(x + 4, y + 10, x + 12, y + 1)
         painter.restore()
 
     def sizeHint(self, option, index):

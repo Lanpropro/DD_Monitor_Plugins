@@ -121,6 +121,7 @@ class RaceViewer(Viewer):
     def set_settings_visible(self, visible):
         super().set_settings_visible(visible)
         self.restore_settings.hide()
+        self._layout_restore_control()
 
     def toggle_console(self):
         self.set_settings_visible(self.settings_panel.isHidden())

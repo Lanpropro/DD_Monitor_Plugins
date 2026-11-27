@@ -1,11 +1,21 @@
 """Shared appearance of the playback and sending consoles."""
 import ctypes
 import sys
+import time
 from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, QSignalBlocker, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGridLayout, QHBoxLayout, QLabel, QListView, QPushButton, QScrollArea, QStyledItemDelegate, QStyle, QToolTip, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QDialog, QFormLayout, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QListView, QPushButton, QScrollArea, QSizePolicy, QStyledItemDelegate, QStyle, QToolTip, QVBoxLayout, QWidget
 
 from ddm import theme
+from ddm.widgets import TileButton, _icon_color
+from .replay_cache import CACHE_MARGIN_SECONDS, CACHE_MINUTES, estimated_disk_gb
+
+try:
+    from ddm.settings_layout import SettingsColumns, SettingsSection
+    from ddm.settings_window import SettingsWindow
+except ImportError:
+    SettingsColumns = SettingsSection = None
+    SettingsWindow = QDialog
 
 
 class ChatConnectionIcon(QLabel):
@@ -110,20 +120,55 @@ def console_role_icon():
 
 
 class ConsoleNotice(QLabel):
-    """Keep console messages centered without growing the toolbar or a tooltip."""
+    """Allow console messages to wrap when the toolbar is narrow."""
     def __init__(self, text=''):
         super().__init__(text)
         self.setTextFormat(Qt.PlainText)
         self.setAlignment(Qt.AlignCenter)
         self.setMinimumWidth(0)
-        self.setFixedHeight(28)
+        self.setMinimumHeight(28)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.setWordWrap(True)
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setPen(self.palette().windowText().color())
-        painter.setFont(self.font())
-        text = self.fontMetrics().elidedText(self.text(), Qt.ElideRight, self.width())
-        painter.drawText(self.rect(), Qt.AlignCenter, text)
+
+class ConsoleToolbar(QWidget):
+    def __init__(self, leading, notices, trailing):
+        super().__init__()
+        self.setObjectName('MatchSyncToolbar')
+        self.setStyleSheet(f'QWidget#MatchSyncToolbar {{border-bottom: 1px solid {theme.BORDER_STRONG};}}')
+        heading = QGridLayout(self)
+        heading.setContentsMargins(16, 10, 16, 10)
+        heading.setHorizontalSpacing(16)
+        heading.setColumnStretch(1, 1)
+        heading.addWidget(leading, 0, 0, Qt.AlignLeft)
+        heading.addWidget(trailing, 0, 2, Qt.AlignRight)
+        heading.addWidget(notices, 0, 1)
+        self.notice_group = (leading, notices, trailing)
+
+    def event(self, event):
+        if event.type() in (QEvent.Resize, QEvent.LayoutRequest) and hasattr(self, 'notice_group'):
+            leading, notices, trailing = self.notice_group
+            heading = self.layout()
+            messages = [label for label in notices.findChildren(ConsoleNotice) if not label.isHidden()]
+            line_width = max((label.fontMetrics().horizontalAdvance(label.text()) for label in messages), default=0)
+            needed = len(messages) * line_width + max(0, len(messages) - 1) * notices.layout().spacing()
+            margins = heading.contentsMargins()
+            content_width = self.width() - margins.left() - margins.right()
+            available = content_width - 2 * heading.horizontalSpacing() - leading.sizeHint().width() - trailing.sizeHint().width()
+            position = (1, 0, 1, 3) if needed > max(0, available) else (0, 1, 1, 1)
+            if heading.getItemPosition(heading.indexOf(notices)) != position:
+                heading.removeWidget(notices)
+                heading.addWidget(notices, *position)
+            width = content_width if position[0] else available
+            height = max(0, notices.layout().heightForWidth(max(0, width)))
+            if notices.minimumHeight() != height:
+                notices.setMinimumHeight(height)
+            controls_height = max(leading.sizeHint().height(), trailing.sizeHint().height())
+            rows_height = controls_height + heading.verticalSpacing() + height if position[0] else max(controls_height, height)
+            minimum_height = margins.top() + rows_height + margins.bottom()
+            if self.minimumHeight() != minimum_height:
+                self.setMinimumHeight(minimum_height)
+        return super().event(event)
 
 
 class ConsoleIconButton(QPushButton):
@@ -190,6 +235,18 @@ class ConsoleIconButton(QPushButton):
             painter.drawLine(QPointF(-3, -9), QPointF(3, -9))
             painter.drawLine(QPointF(0, 1), QPointF(0, -3))
             painter.drawLine(QPointF(0, 1), QPointF(3, 3))
+        elif self.kind == 'sound_calibration':
+            for x, height in ((-7, 1.5), (-3.5, 4), (0, 7), (3.5, 4), (7, 1.5)):
+                painter.drawLine(QPointF(x, -height), QPointF(x, height))
+        elif self.kind == 'undo_sound_calibration':
+            painter.setBrush(Qt.NoBrush)
+            path = QPainterPath(QPointF(-7, -2))
+            path.lineTo(3, -2)
+            path.cubicTo(9, -2, 9, 6, 3, 6)
+            path.lineTo(-3, 6)
+            painter.drawPath(path)
+            painter.drawLine(QPointF(-7, -2), QPointF(-3, -6))
+            painter.drawLine(QPointF(-7, -2), QPointF(-3, 2))
         elif self.kind == 'independent':
             painter.setBrush(Qt.NoBrush)
             painter.drawRoundedRect(QRectF(-8, -7, 16, 14), 2, 2)
@@ -202,6 +259,11 @@ class ConsoleIconButton(QPushButton):
             painter.drawLine(QPointF(7, -1), QPointF(2, -2))
         elif self.kind == 'minimize':
             painter.drawLine(QPointF(-6, 3), QPointF(6, 3))
+        elif self.kind == 'copy':
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(QRectF(-3, -3, 9, 10), 1.5, 1.5)
+            painter.drawLine(QPointF(-6, 3), QPointF(-6, -6))
+            painter.drawLine(QPointF(-6, -6), QPointF(3, -6))
         elif self.kind == 'emote':
             painter.setBrush(Qt.NoBrush)
             painter.drawEllipse(QRectF(-7, -7, 14, 14))
@@ -230,6 +292,58 @@ class ConsoleIconButton(QPushButton):
             painter.drawLine(QPointF(0, -4), QPointF(4, 0))
             painter.drawLine(QPointF(0, 4), QPointF(4, 0))
             painter.drawLine(QPointF(7, -6), QPointF(7, 6))
+
+
+class RestorePanelButton(TileButton):
+    """Draw a compact icon on the host playback button surface."""
+
+    def __init__(self, kind, label, parent=None):
+        super().__init__(parent)
+        self.kind = kind
+        self.setObjectName('TileCtrl')
+        self.setProperty('tileButton', True)
+        self.setFixedSize(28, 26)
+        self.setFocusPolicy(Qt.TabFocus)
+        self.setAutoDefault(False)
+        self.setToolTip(label)
+        self.setAccessibleName(label)
+        use_link_cursor(self)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        scale_press = getattr(self, '_scale_press', None)
+        if scale_press is not None:
+            scale_press(painter)
+        painter.translate(self.width() / 2, self.height() / 2)
+        hovered = self.underMouse() or self.property('hovered')
+        color = _icon_color(self) if hovered else QColor('#ffffff')
+        painter.setPen(QPen(color, 1.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.setBrush(Qt.NoBrush)
+        if self.kind == 'playback':
+            painter.drawRoundedRect(QRectF(-8, -6, 16, 12), 2, 2)
+            painter.drawLine(QPointF(-8, 2), QPointF(8, 2))
+            return
+        bubble = QPainterPath(QPointF(-5, -6))
+        bubble.lineTo(5, -6)
+        bubble.quadTo(8, -6, 8, -3)
+        bubble.lineTo(8, 1)
+        bubble.quadTo(8, 4, 5, 4)
+        bubble.lineTo(-2, 4)
+        bubble.lineTo(-6, 7)
+        bubble.lineTo(-6, 4)
+        bubble.quadTo(-8, 4, -8, 1)
+        bubble.lineTo(-8, -3)
+        bubble.quadTo(-8, -6, -5, -6)
+        painter.drawPath(bubble)
+        if self.kind == 'chat':
+            painter.drawLine(QPointF(-4, -2.5), QPointF(4, -2.5))
+            painter.drawLine(QPointF(-4, .5), QPointF(1, .5))
+        else:
+            painter.drawLine(QPointF(-2, -3.5), QPointF(2, -3.5))
+            painter.drawLine(QPointF(0, -3.5), QPointF(0, 1.5))
+            painter.drawLine(QPointF(-2, 1.5), QPointF(2, 1.5))
 
 
 def native_console_button(button, tooltip, size=32, *, unchecked_hover=None):
@@ -367,62 +481,122 @@ class ConsoleChoice(QComboBox):
         painter.drawLine(x, 15, x + 3, 12)
 
 
-class MatchSettingsDialog(QDialog):
+class MatchSettingsDialog(SettingsWindow):
+    _MOVE_TIMER = 0x4D534452
+
     def __init__(self, viewer):
         super().__init__(viewer)
         self.viewer = viewer
+        self._moving_clock = None
+        self._move_hwnd = None
+        self._move_aux_due = 0.
+        self._painting_move = False
         self.setAttribute(Qt.WA_DontShowOnScreen, viewer.testAttribute(Qt.WA_DontShowOnScreen))
         self.setWindowTitle('比赛二路设置')
-        self.setMinimumSize(840, 580)
-        self.resize(1040, 720)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 16)
-        layout.setSpacing(16)
-        upper = QHBoxLayout()
-        upper.setSpacing(24)
-        preview_column = QVBoxLayout()
-        preview_column.setSpacing(8)
-        preview_column.addWidget(QLabel('回看预览大小'))
+        root = self.body_layout if SettingsColumns is not None else QVBoxLayout(self)
+        if SettingsColumns is not None:
+            self._drag_offset = None
+            self._drag_target = None
+            self._drag_timer = QTimer(self)
+            self._drag_timer.setSingleShot(True)
+            self._drag_timer.setInterval(16)
+            self._drag_timer.timeout.connect(self._apply_header_move)
+            self.window_header.installEventFilter(self)
+            self.window_header.breadcrumb.setText(self.windowTitle())
+            self.window_header.close_button.setAccessibleName('关闭比赛二路设置')
+            self.window_header.close_button.setToolTip('关闭比赛二路设置（修改自动保存）')
+            self.set_material(getattr(viewer.context.window, 'settings', {}))
+        self.page = QScrollArea(self)
+        self.page.setObjectName('SettingsPage')
+        self.page.setFrameShape(QFrame.NoFrame)
+        self.page.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.page.setWidgetResizable(True)
+        content = QWidget()
+        content.setObjectName('SettingsPage')
+        self.page.setWidget(content)
+        self.page.viewport().setAutoFillBackground(False)
+        content.setAutoFillBackground(False)
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(12, 4, 12, 12)
+        layout.setSpacing(12)
+        root.addWidget(self.page)
+        self.preview_section, preview_grid = self._section('回看与预览')
         from .replay_preview import PreviewSizePicker
-        self.preview_sizes = PreviewSizePicker(viewer, self)
+        self.preview_sizes = PreviewSizePicker(viewer, self.preview_section)
         self.preview_sizes.changed.connect(self._preview_size_changed)
-        preview_column.addWidget(self.preview_sizes, 1)
-        upper.addLayout(preview_column, 3)
-        options_column = QVBoxLayout()
-        options_column.setSpacing(12)
-        options_column.addWidget(QLabel('播放与画质'))
+        self.preview_sizes.setMinimumHeight(252)
+        preview_grid.addWidget(self.preview_sizes, 0, 0, 1, 2)
+        duration_label = QLabel('回看时长')
+        self.replay_duration = QComboBox()
+        duration_label.setBuddy(self.replay_duration)
+        self.replay_duration.setAccessibleName(duration_label.text())
+        for minutes in CACHE_MINUTES:
+            self.replay_duration.addItem(f'{minutes} 分钟', minutes)
+        self.replay_duration.setCurrentIndex(self.replay_duration.findData(viewer.replay_minutes))
+        self.replay_duration.currentIndexChanged.connect(self._replay_duration_changed)
+        preview_grid.addWidget(duration_label, 1, 0)
+        preview_grid.addWidget(self.replay_duration, 1, 1)
+        self.replay_storage_hint = QLabel()
+        self.replay_storage_hint.setObjectName('SettingsHint')
+        self.replay_storage_hint.setWordWrap(True)
+        preview_grid.addWidget(self.replay_storage_hint, 2, 0, 1, 2)
+        self.refresh_replay_storage()
+        self.playback_section, playback_grid = self._section('播放与画质')
+        self.playback_section.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Maximum)
         form = QFormLayout()
-        form.setVerticalSpacing(16)
+        form.setRowWrapPolicy(QFormLayout.WrapLongRows)
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        form.setVerticalSpacing(12)
         form.addRow('缓存余量', viewer.buffer_reserve)
         form.addRow('画中画画质', viewer.crop_quality)
         viewer.crop_quality.show()
-        if viewer.d3d11_picture is not None:
-            self.picture_renderer = QComboBox(self)
-            self.picture_renderer.addItem('光栅', False)
-            self.picture_renderer.addItem('D3D11（试验，推荐用于减轻卡顿）', True)
-            self.picture_renderer.setToolTip('主画面卡顿时可尝试 D3D11。实播对照中，D3D11 明显减少了主画面的长间隔。')
-            form.addRow('主画面渲染', self.picture_renderer)
-            self._sync_picture_renderer()
-            self.picture_renderer.currentIndexChanged.connect(self._picture_renderer_changed)
-            viewer.d3d11_picture.stateChanged.connect(self._sync_picture_renderer)
-        options_column.addLayout(form)
+        self._add_playback_options(form)
+        self.chat_source_display = QComboBox()
+        self.chat_source_display.setAccessibleName('弹幕列表来源')
+        self.chat_source_display.addItem('主播名称', 'name')
+        self.chat_source_display.addItem('主播头像', 'avatar')
+        self.chat_source_display.setCurrentIndex(self.chat_source_display.findData(viewer.panel.source_display))
+        self.chat_source_display.currentIndexChanged.connect(
+            lambda _index: viewer.panel.set_source_display(self.chat_source_display.currentData()))
+        form.addRow('弹幕列表来源', self.chat_source_display)
+        for index in range(form.rowCount()):
+            control = form.itemAt(index, QFormLayout.FieldRole).widget()
+            control.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            control.setMaximumWidth(280)
+        playback_grid.addLayout(form, 0, 0, 1, 2)
         self.quality_status = QLabel()
+        self.quality_status.setObjectName('SettingsHint')
         self.quality_status.setWordWrap(True)
-        options_column.addWidget(self.quality_status)
-        options_column.addStretch(1)
-        upper.addLayout(options_column, 2)
-        layout.addLayout(upper, 3)
-        recording_header = QHBoxLayout()
-        recording_header.addWidget(QLabel('录制音轨'))
-        recording_header.addStretch(1)
-        recording_header.addWidget(QLabel('录制格式'))
+        playback_grid.addWidget(self.quality_status, 1, 0, 1, 2)
+        self.recording_section, recording_grid = self._section('录制')
+        format_label = QLabel('录制格式')
+        format_label.setBuddy(viewer.record_format)
+        recording_grid.addWidget(format_label, 0, 0)
+        recording_grid.addWidget(viewer.record_format, 0, 1, Qt.AlignLeft)
         viewer.record_format.show()
-        recording_header.addWidget(viewer.record_format)
-        layout.addLayout(recording_header)
-        self.recording_routes = QScrollArea()
-        self.recording_routes.setWidgetResizable(True)
-        self.recording_routes.setMinimumHeight(140)
-        layout.addWidget(self.recording_routes, 2)
+        self.recording_routes = QWidget()
+        self.track_grid = QGridLayout(self.recording_routes)
+        self.track_grid.setContentsMargins(0, 0, 0, 0)
+        self.track_grid.setHorizontalSpacing(8)
+        self.track_grid.setVerticalSpacing(7)
+        self.track_grid.setColumnStretch(0, 2)
+        for number in range(1, 7):
+            self.track_grid.setColumnStretch(number, 1)
+        recording_grid.addWidget(self.recording_routes, 1, 0, 1, 2)
+        if SettingsColumns is not None:
+            sections = SettingsColumns()
+            sections.add_section('preview', self.preview_section)
+            sections.add_section('playback', self.playback_section)
+            sections.add_section('recording', self.recording_section, wide=True)
+            layout.addWidget(sections)
+        else:
+            for section in (self.preview_section, self.playback_section, self.recording_section):
+                layout.addWidget(section)
+            close = QPushButton('关闭')
+            close.setObjectName('IconButton')
+            close.clicked.connect(self.close)
+            root.addWidget(close, 0, Qt.AlignRight)
+        layout.addStretch(1)
         self.track_checks = {}
         self._recording_rooms = None
         self.refresh_recording_routes()
@@ -430,9 +604,29 @@ class MatchSettingsDialog(QDialog):
         self.status_timer.setInterval(500)
         self.status_timer.timeout.connect(self.refresh_quality_status)
         self.status_timer.timeout.connect(self.refresh_recording_routes)
-        close = QDialogButtonBox(QDialogButtonBox.Close)
-        close.rejected.connect(self.close)
-        layout.addWidget(close)
+        self.status_timer.timeout.connect(self.refresh_replay_storage)
+        area = self.screen().availableGeometry().size()
+        self.setMinimumSize(QSize(440, 420).boundedTo(area))
+        self.resize(QSize(1140, 620).boundedTo(area))
+
+    @staticmethod
+    def _section(title):
+        if SettingsSection is not None:
+            section = SettingsSection(title)
+            return section, section.grid
+        section = QGroupBox(title)
+        return section, QGridLayout(section)
+
+    def _add_playback_options(self, form):
+        if getattr(self.viewer, 'd3d11_picture', None) is None:
+            return
+        self.picture_renderer = QComboBox()
+        self.picture_renderer.addItem('光栅', False)
+        self.picture_renderer.addItem('D3D11（试验）', True)
+        form.addRow('主画面渲染', self.picture_renderer)
+        self._sync_picture_renderer()
+        self.picture_renderer.currentIndexChanged.connect(self._picture_renderer_changed)
+        self.viewer.d3d11_picture.stateChanged.connect(self._sync_picture_renderer)
 
     def _picture_renderer_changed(self, _index):
         self.viewer.d3d11_picture.select(self.picture_renderer.currentData())
@@ -447,6 +641,29 @@ class MatchSettingsDialog(QDialog):
         self.viewer.replay_preview_ratio = ratio
         self.viewer.replay_bar.preview.reposition()
         self.viewer.changed()
+
+    def _replay_duration_changed(self, _index):
+        minutes = self.replay_duration.currentData()
+        self.viewer.replay_minutes = minutes
+        self.viewer.context.set_setting('replay_minutes', minutes)
+        self.preview_sizes.update()
+        self.refresh_replay_storage()
+
+    def refresh_replay_storage(self):
+        sources = [row.decoder for row in self.viewer.rows.values() if row.decoder is not None]
+        now = time.monotonic()
+        rates = [rate for source in sources if (rate := source.cache_video_rate(now)) is not None]
+        if not sources:
+            storage = '开始播放后按各路实测码率计算磁盘占用。'
+        elif not rates:
+            storage = '正在测量当前直播码率…'
+        else:
+            amount = estimated_disk_gb(self.replay_duration.currentData(), rates)
+            scope = f'{len(sources)} 路合计' if len(rates) == len(sources) else f'已测速 {len(rates)}/{len(sources)} 路'
+            storage = f'{scope}约 {amount:.2f} GB，含 {CACHE_MARGIN_SECONDS // 60} 分钟缓冲。'
+        text = storage + '修改时长在下次开始播放时生效。'
+        if self.replay_storage_hint.text() != text:
+            self.replay_storage_hint.setText(text)
 
     def refresh_quality_status(self):
         crops = list(self.viewer.all_floating_crops())
@@ -469,33 +686,130 @@ class MatchSettingsDialog(QDialog):
         rooms = tuple((key, row.label()) for key, row in self.viewer.rows.items())
         if rooms != self._recording_rooms:
             self._recording_rooms = rooms
-            old = self.recording_routes.takeWidget()
-            if old is not None:
-                old.deleteLater()
-            body = QWidget()
-            grid = QGridLayout(body)
+            grid = self.track_grid
+            while grid.count():
+                widget = grid.takeAt(0).widget()
+                widget.hide()
+                widget.deleteLater()
             self.track_checks = {}
             if not rooms:
-                grid.addWidget(QLabel('添加直播间后可为各路分配音轨'), 0, 0)
-            for index, (key, label) in enumerate(rooms):
+                hint = QLabel('添加直播间后可为各路分配音轨')
+                hint.setObjectName('SettingsHint')
+                grid.addWidget(hint, 0, 0, 1, 7)
+            else:
+                source = QLabel('直播来源')
+                source.setObjectName('SettingsHint')
+                grid.addWidget(source, 0, 0)
+                for number in range(1, 7):
+                    label = QLabel(f'音轨 {number}')
+                    label.setObjectName('SettingsHint')
+                    grid.addWidget(label, 0, number, Qt.AlignHCenter)
+            for index, (key, label) in enumerate(rooms, 1):
                 name = QLabel(label)
-                name.setMaximumWidth(200)
+                name.setTextFormat(Qt.PlainText)
                 name.setWordWrap(True)
                 grid.addWidget(name, index, 0)
                 checks = []
                 for number in range(1, 7):
-                    check = QCheckBox(str(number))
-                    check.setAccessibleName(f'{label}录制音轨{number}')
+                    check = QCheckBox()
+                    check.setAccessibleName(f'{label} · 音轨 {number}')
+                    check.setToolTip(check.accessibleName())
                     check.setChecked(number in self.viewer.rows[key].record_tracks)
                     check.setCursor(Qt.PointingHandCursor)
                     check.toggled.connect(lambda _checked, k=key: self._record_tracks_changed(k))
-                    grid.addWidget(check, index, number)
+                    grid.addWidget(check, index, number, Qt.AlignHCenter)
                     checks.append(check)
                 self.track_checks[key] = checks
-            grid.setRowStretch(len(rooms), 1)
-            self.recording_routes.setWidget(body)
         self.recording_routes.setEnabled(self.viewer.multi_recorder is None)
         self.viewer.record_format.setEnabled(self.viewer.multi_recorder is None)
+
+    def _apply_header_move(self):
+        if self._drag_target is not None:
+            self.move(self._drag_target)
+            self._drag_target = None
+
+    def _native_move_clock(self):
+        presenter = getattr(self.viewer, 'd3d11_picture', None)
+        worker = getattr(presenter, 'worker', None)
+        target = getattr(worker, 'target', None)
+        if getattr(target, 'observation', None) is not None and self.viewer.canvas.native_presenting:
+            return getattr(presenter, 'settings_move', None)
+        return None
+
+    def nativeEvent(self, event_type, message):
+        if sys.platform == 'win32' and QApplication.platformName() == 'windows':
+            from ctypes import wintypes
+            msg = wintypes.MSG.from_address(int(message))
+            kind = msg.message
+            if kind == 0x0231:  # WM_ENTERSIZEMOVE
+                self._moving_clock = self._native_move_clock()
+                if self._moving_clock is not None:
+                    self._moving_clock.set()
+                    self._move_hwnd = msg.hWnd
+                    self._move_aux_due = 0.
+                    ctypes.windll.user32.SetTimer(ctypes.c_void_p(self._move_hwnd), self._MOVE_TIMER, 16, None)
+            elif kind == 0x0232 and self._moving_clock is not None:  # WM_EXITSIZEMOVE
+                self._end_native_move()
+            elif self._moving_clock is not None:
+                if kind == 0x0216:  # WM_MOVING
+                    self._refresh_during_move()
+                elif kind == 0x0113 and msg.wParam == self._MOVE_TIMER:  # WM_TIMER
+                    self._refresh_during_move()
+                    return True, 0
+        return super().nativeEvent(event_type, message)
+
+    def _refresh_during_move(self):
+        viewer = self.viewer
+        now = time.perf_counter()
+        if (self._painting_move or not viewer.running or not viewer.render_timer.isActive()
+                or viewer._picture_due is None or now < viewer._picture_due):
+            return
+        self._painting_move = True
+        try:
+            # The Windows move loop does not dispatch the usual Qt playback timers.
+            viewer._picture_tick()
+            if now >= self._move_aux_due and viewer.auxiliary_timer.isActive():
+                self._move_aux_due = now + 1 / 30
+                viewer._auxiliary_tick()
+                # Enhanced frames arrive as coalesced queued signals on each crop.
+                for crop in viewer.all_floating_crops():
+                    QApplication.sendPostedEvents(crop, QEvent.MetaCall)
+                QApplication.sendPostedEvents(viewer.window(), QEvent.UpdateRequest)
+        finally:
+            self._painting_move = False
+
+    def _end_native_move(self):
+        if self._move_hwnd is not None:
+            ctypes.windll.user32.KillTimer(ctypes.c_void_p(self._move_hwnd), self._MOVE_TIMER)
+            self._move_hwnd = None
+        if self._moving_clock is not None:
+            self._moving_clock.clear()
+            self._moving_clock = None
+
+    def eventFilter(self, watched, event):
+        if watched is getattr(self, 'window_header', None):
+            kind = event.type()
+            if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton and not self.isMaximized():
+                if self._native_move_clock() is not None:
+                    return False  # The header starts the native move; the picture follows device audio.
+                self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+                return True
+            if self._drag_offset is not None:
+                if kind == QEvent.MouseMove and event.buttons() & Qt.LeftButton:
+                    self._drag_target = event.globalPosition().toPoint() - self._drag_offset
+                    if not self._drag_timer.isActive():
+                        self._drag_timer.start()
+                    return True
+                if kind == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+                    self._drag_timer.stop()
+                    self._drag_target = event.globalPosition().toPoint() - self._drag_offset
+                    self._drag_offset = None
+                    self._apply_header_move()
+                    return True
+                if kind in (QEvent.Hide, QEvent.UngrabMouse, QEvent.WindowDeactivate):
+                    self._drag_timer.stop()
+                    self._drag_offset = self._drag_target = None
+        return super().eventFilter(watched, event)
 
     def _record_tracks_changed(self, key):
         if key in self.viewer.rows and self.viewer.multi_recorder is None:
@@ -506,9 +820,11 @@ class MatchSettingsDialog(QDialog):
         super().showEvent(event)
         self.refresh_quality_status()
         self.refresh_recording_routes()
+        self.refresh_replay_storage()
         self.status_timer.start()
 
     def hideEvent(self, event):
+        self._end_native_move()
         self.status_timer.stop()
         super().hideEvent(event)
 

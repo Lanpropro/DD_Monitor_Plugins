@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from .canvas import Canvas
 from .comparison import ComparisonPanel
-from .panels import (ConsoleIconButton, ConsoleModeToggle, ConsoleNotice, SettingsPanel,
+from .sound_calibration import SoundCalibration
+from .panels import (ConsoleIconButton, ConsoleModeToggle, ConsoleNotice, ConsoleToolbar, RestorePanelButton, SettingsPanel,
                      console_button_style, native_console_button, style_checkbox, use_link_cursor)
-from PySide6.QtWidgets import QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLayout, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QSplitter, QVBoxLayout, QWidget
 from PySide6.QtCore import QTimer, Qt
 from .replay import ReplayBar
 from .sending import SendConsole
@@ -69,11 +70,6 @@ def build_ui(viewer):
     viewer.compare.toggled.connect(viewer.set_comparison_visible)
     viewer.late_notice = ConsoleNotice()
     viewer.late_notice.setObjectName("MatchSyncLateNotice")
-    viewer.late_notice.setTextFormat(Qt.PlainText)
-    viewer.late_notice.setWordWrap(False)
-    viewer.late_notice.setAlignment(Qt.AlignCenter)
-    viewer.late_notice.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-    viewer.late_notice.setMinimumWidth(0)
     viewer.late_notice.hide()
     viewer.buffer_reserve = QComboBox()
     for label, seconds in (('缓存 2 秒 · 低延迟', 2), ('缓存 5 秒 · 均衡', 5), ('缓存 8 秒 · 抗波动', 8)):
@@ -105,20 +101,6 @@ def build_ui(viewer):
     viewer.minimize_settings = ConsoleIconButton('minimize', '最小化播放控制台')
     viewer.minimize_settings.setToolTip("收起设置栏，保留画面、声音和弹幕播放。")
     viewer.minimize_settings.clicked.connect(lambda: viewer.set_settings_visible(False))
-    viewer.restore_settings = QPushButton("展开设置")
-    viewer.restore_settings.setFixedWidth(90)
-    viewer.restore_settings.setStyleSheet(console_button_style('QPushButton'))
-    use_link_cursor(viewer.restore_settings)
-    viewer.restore_settings.clicked.connect(lambda: viewer.set_settings_visible(True))
-    viewer.restore_settings.hide()
-    viewer.console_toolbar = QWidget()
-    viewer.console_toolbar.setObjectName('MatchSyncToolbar')
-    viewer.console_toolbar.setStyleSheet(f'QWidget#MatchSyncToolbar {{border-bottom: 1px solid {theme.BORDER_STRONG};}}')
-    heading = QGridLayout(viewer.console_toolbar)
-    heading.setContentsMargins(16, 10, 16, 10)
-    heading.setHorizontalSpacing(16)
-    for column, stretch in enumerate((1, 2, 1)):
-        heading.setColumnStretch(column, stretch)
     leading = QWidget()
     leading_layout = QHBoxLayout(leading)
     leading_layout.setContentsMargins(0, 0, 0, 0)
@@ -126,19 +108,17 @@ def build_ui(viewer):
     viewer.main.hide()
     leading_layout.addWidget(viewer.automatic)
     leading_layout.addWidget(viewer.compare)
-    heading.addWidget(leading, 0, 0, Qt.AlignLeft)
     viewer.console_notices = QWidget()
-    viewer.console_notices.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+    viewer.console_notices.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
     notices = QHBoxLayout(viewer.console_notices)
     notices.setContentsMargins(0, 0, 0, 0)
     notices.setSpacing(8)
     viewer.notice = ConsoleNotice()
     viewer.buffer_notice = ConsoleNotice()
     viewer.buffer_notice.hide()
+    viewer.sound_calibration = SoundCalibration(viewer)
     for label in (viewer.notice, viewer.late_notice, viewer.buffer_notice):
-        label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         notices.addWidget(label, 1)
-    heading.addWidget(viewer.console_notices, 0, 1)
     trailing = QWidget()
     trailing_layout = QHBoxLayout(trailing)
     trailing_layout.setContentsMargins(0, 0, 0, 0)
@@ -151,7 +131,7 @@ def build_ui(viewer):
     viewer.match_settings_button.clicked.connect(viewer.open_match_settings)
     trailing_layout.addWidget(viewer.match_settings_button)
     trailing_layout.addWidget(viewer.minimize_settings)
-    heading.addWidget(trailing, 0, 2, Qt.AlignRight)
+    viewer.console_toolbar = ConsoleToolbar(leading, viewer.console_notices, trailing)
     viewer.picture = Tile({})
     viewer.picture.setProperty('keepWindowedVideoCursor', True)
     # Keep pixel hover inside the tile instead of dispatching it through
@@ -165,13 +145,37 @@ def build_ui(viewer):
         viewer._native_clip_timer.stop()
         viewer._native_clip_timer.installEventFilter(viewer)
     viewer.replay_bar = ReplayBar(viewer)
-    viewer.restore_settings.setParent(viewer.picture.bottom)
-    viewer.restore_settings.setObjectName("TileCtrl")
-    viewer.restore_settings.setFixedHeight(26)
-    viewer.picture.bottom.layout().insertWidget(viewer.picture.bottom.layout().indexOf(viewer.picture.danmaku_button),
-                                             viewer.restore_settings, 0, Qt.AlignVCenter)
+    bottom = viewer.picture.bottom
+    viewer.restore_group = QWidget(bottom)
+    viewer.restore_group.setObjectName('MatchSyncRestoreControls')
+    viewer.restore_group.setAttribute(Qt.WA_StyledBackground, True)
+    viewer.restore_group.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+    backing = getattr(theme, 'VIDEO_CONTROL_BACKING', (13, 17, 23, 118))
+    radius = getattr(theme, 'VIDEO_CONTROL_RADIUS', 9)
+    viewer.restore_group.setStyleSheet(f"""
+        #MatchSyncRestoreControls {{ background: rgba{(*backing[:3], 200)}; border-radius: {radius}px; }}
+        #MatchSyncRestoreControls[overVideo="true"] {{ background: rgba{backing}; }}
+        #MatchSyncRestoreControls #TileCtrl {{ background: transparent; border: none; }}
+        #MatchSyncRestoreControls #TileCtrl:hover, #MatchSyncRestoreControls #TileCtrl[hovered="true"] {{
+            background: palette(highlight);
+        }}
+        #MatchSyncRestoreControls #TileCtrl:pressed {{ background: palette(link-visited); }}
+    """)
+    restore_layout = QHBoxLayout(viewer.restore_group)
+    restore_layout.setContentsMargins(4, 0, 4, 0)
+    restore_layout.setSpacing(4)
+    viewer.restore_settings = RestorePanelButton('playback', '展开播放控制台', viewer.restore_group)
+    viewer.restore_settings.clicked.connect(lambda: viewer.set_settings_visible(True))
+    restore_layout.addWidget(viewer.restore_settings)
     viewer.restore_settings.hide()
-    viewer.picture.bottom.installEventFilter(viewer)
+    viewer.restore_chat = RestorePanelButton('chat', '展开弹幕列表', viewer.restore_group)
+    viewer.restore_chat.clicked.connect(lambda: viewer.set_chat_visible(True))
+    restore_layout.addWidget(viewer.restore_chat)
+    viewer.restore_chat.hide()
+    bottom.layout().insertWidget(bottom.layout().indexOf(viewer.picture.danmaku_button),
+                                 viewer.restore_group, 0, Qt.AlignVCenter)
+    viewer.restore_group.hide()
+    bottom.installEventFilter(viewer)
     viewer.canvas = Canvas(viewer.picture.video, limit_frame_damage=viewer.split_presentation)
     # Canvas owns the empty-state prompt, including when its skin is transparent.
     viewer.picture.cover.installEventFilter(viewer)
@@ -299,19 +303,10 @@ def build_ui(viewer):
     viewer.chat_space.hide()
     right_layout.addWidget(viewer.send_console)
     split.addWidget(right_pane)
+    right_pane.installEventFilter(viewer)
     viewer.minimize_chat = ConsoleIconButton('minimize', '最小化弹幕栏', viewer.panel.header)
     viewer.minimize_chat.clicked.connect(lambda: viewer.set_chat_visible(False))
     viewer.panel.header.layout().addWidget(viewer.minimize_chat)
-    viewer.restore_chat = QPushButton('展开弹幕', viewer.picture.bottom)
-    viewer.restore_chat.setObjectName('TileCtrl')
-    viewer.restore_chat.setFixedSize(90, 26)
-    viewer.restore_chat.setToolTip('恢复弹幕列表')
-    viewer.restore_chat.setStyleSheet(console_button_style('QPushButton'))
-    use_link_cursor(viewer.restore_chat)
-    viewer.restore_chat.clicked.connect(lambda: viewer.set_chat_visible(True))
-    viewer.picture.bottom.layout().insertWidget(
-        viewer.picture.bottom.layout().indexOf(viewer.picture.danmaku_button), viewer.restore_chat)
-    viewer.restore_chat.hide()
     viewer.settings_panel.installEventFilter(viewer)
     split.setSizes([930, 330])
     layout = QVBoxLayout(viewer)

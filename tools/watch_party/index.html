@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>比赛二路 · 同看连接试验</title>
+<style>
+* {box-sizing:border-box}
+body {margin:0; background:#10151d; color:#e6edf7; font:17px/1.6 "Source Sans 3","Microsoft YaHei",sans-serif}
+main {max-width:34rem; margin:8vh auto; padding:0 1.3rem}
+h1 {font-size:1.65rem; margin-bottom:.4rem}
+p {color:#bac9db}
+section {padding:1.3rem; background:#1a2330; border-radius:.8rem; margin:1.3rem 0}
+button,input {font:inherit; border:1px solid #708099; padding:.45rem .8rem; border-radius:.4rem}
+button {background:#c2dbff; cursor:pointer; color:#11243c}
+button:disabled {opacity:.45; cursor:default}
+form {margin-top:1.1rem; display:flex; gap:.5rem; flex-wrap:wrap; align-items:center}
+input {width:7rem}
+output {display:block; font:2.4rem/1.5 "IBM Plex Mono",monospace; font-variant-numeric:tabular-nums}
+</style>
+<main>
+<h1>好友同看连接试验</h1>
+<p>两台设备打开同一链接。房主建房，把六位房间码交给朋友。双方准备后，比较两边的演示计时。此页使用固定测试标记，实际直播仍在插件中播放。</p>
+<section id="lobby">
+<button id="create" disabled>创建房间</button>
+<form id="join"><label for="code">房间码</label>
+<input id="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required>
+<button id="joinButton" disabled>加入</button></form>
+</section>
+<section id="room" hidden>
+<strong id="roomCode"></strong>
+<output id="counter">—</output>
+<button id="ready" disabled>准备演示</button>
+</section>
+<p id="status" role="status">连接中…</p>
+</main>
+<script>
+const byId = id => document.getElementById(id);
+const statusText = text => { byId('status').textContent = text; };
+const send = message => ws.send(JSON.stringify(message));
+const marker = '123456789abcdef0'.repeat(8);
+let ws, seat, state, sentAt, clockOffset, bestRtt, pingTimer;
+let entryMessage = '';
+function ping() {
+  sentAt = performance.now();
+  send({type:'ping'});
+}
+function renderState() {
+  const both = state && state.online.length === 2 && state.online.every(Boolean);
+  const prepared = state && state.markers.filter(Boolean).length;
+  byId('ready').disabled = !both || clockOffset === null || state.start_ms !== null;
+  if (!state || state.start_ms === null) byId('counter').textContent = '—';
+  statusText(!both ? '等待朋友加入或重新连接。' : state.start_ms !== null ?
+    '双方已约定开始时刻。' : prepared === 1 ? '一人已准备，等待另一人。' : '双方在线，可以准备。');
+}
+function connect() {
+  state = seat = clockOffset = null;
+  bestRtt = Infinity;
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+  ws.onopen = () => {
+    ping();
+    let saved = JSON.parse(sessionStorage.getItem('match-seat') || 'null');
+    if (saved) send({type:'resume', ...saved});
+    else {
+      byId('create').disabled = byId('joinButton').disabled = false;
+      statusText(entryMessage || '已连接，可以创建或加入房间。');
+    }
+  };
+  let rounds = 0;
+  ws.onmessage = event => {
+    const d = JSON.parse(event.data);
+    if (d.type === 'pong') {
+      const end = performance.now(), rtt = end - sentAt;
+      if (rtt < bestRtt) {
+        bestRtt = rtt;
+        clockOffset = d.server_ms - (sentAt + end) / 2;
+      }
+      if (state) renderState();
+      pingTimer = setTimeout(ping, ++rounds < 5 ? 100 : 5000);
+    } else if (d.type === 'seat') {
+      entryMessage = '';
+      seat = {code:d.code, token:d.token};
+      sessionStorage.setItem('match-seat', JSON.stringify(seat));
+      byId('lobby').hidden = true;
+      byId('room').hidden = false;
+      byId('roomCode').textContent = '房间 ' + seat.code;
+    } else if (d.type === 'state') {
+      if (!state || d.revision > state.revision) state = d;
+      renderState();
+    } else if (d.type === 'error' && !seat) {
+      if (d.reason !== 'seat_online') sessionStorage.removeItem('match-seat');
+      byId('room').hidden = true;
+      byId('lobby').hidden = false;
+      entryMessage = ({
+        room_missing:'房间号不存在，请向房主核对最新房间码。',
+        room_full:'两人都在房间中。如果是你换了页面，请关闭原页面，稍后再点加入。',
+        host_offline:'房主暂时离线，请等房主回来后再点加入。',
+        seat_online:'原页面仍在线，正在等待恢复。请关闭重复打开的页面。'
+      })[d.reason] || '房间已失效，请重新建房或输入房主提供的房间码。';
+      statusText(entryMessage);
+    }
+  };
+  ws.onclose = () => {
+    clearTimeout(pingTimer);
+    state = null;
+    byId('counter').textContent = '—';
+    byId('create').disabled = byId('joinButton').disabled = byId('ready').disabled = true;
+    statusText(entryMessage || '连接已断开，正在重连…');
+    setTimeout(connect, 1500);
+  };
+}
+function enter(data) {
+  entryMessage = '';
+  byId('create').disabled = byId('joinButton').disabled = true;
+  send(data);
+}
+byId('create').onclick = () => enter({type:'create'});
+byId('join').onsubmit = e => { e.preventDefault(); enter({type:'join', code:byId('code').value}); };
+byId('ready').onclick = () => send({type:'ready',marker});
+function tick() {
+  if (state && state.start_ms !== null && clockOffset !== null) {
+    const elapsed = (performance.now() + clockOffset - state.start_ms) / 1000;
+    byId('counter').textContent = elapsed < 0 ? '即将开始' : elapsed.toFixed(2) + ' s';
+  }
+  requestAnimationFrame(tick);
+}
+connect();
+tick();
+</script>
+</html>
