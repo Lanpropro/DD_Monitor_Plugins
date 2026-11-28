@@ -12,6 +12,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ContributionGuideTests(unittest.TestCase):
+    def test_release_completion_checks_development_and_published_plugin_versions(self):
+        source = (ROOT / 'CONTRIBUTING.md').read_text(encoding='utf-8')
+        completion = source.split('### 发布完成与本机同步', 1)[1]
+        for value in ('`plugin.json`', '`origin/develop`', '`origin/main`', '公开 ZIP',
+                      '实际载入版本', 'SHA-256', '`dist/`', '`results/plugins/`',
+                      '原路径、现路径与校验值'):
+            self.assertIn(value, completion)
+
     def test_youtube_1_0_archive_preserves_source_and_replacement(self):
         entries = json.loads((ROOT / 'docs/releases/sources.json').read_text(encoding='utf-8'))['entries']
         old = next(entry for entry in entries if entry['tag'] == 'youtube-live-v1.0')

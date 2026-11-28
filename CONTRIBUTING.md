@@ -117,3 +117,9 @@ python -m compileall -q plugins tests tools
 - 日常候选先明确暂存并提交文件，确认工作树和暂存区无改动，再运行 `python tools/build_plugins.py`。它用 Git 跟踪清单选择路径，ZIP 内容读取工作树文件；包结构及源码一致性检查使用 `python tests/check_packages.py --host ../DD_Monitor_CE`。正式包按上述发布门槛从标签 Git 对象生成并核验。
 - 网站下载数据与 SHA256 在独立网站仓库维护，来自已发布附件；本机重新打包的哈希不能替代公开附件哈希。
 - 提交源码、推送分支、发布插件 ZIP 与部署网站是不同动作。发布或部署前准备可审阅的产物、版本和验证结果，再按维护者授权执行。
+
+### 发布完成与本机同步
+
+- 发布批次在待验收源码中提交该插件的 `plugin.json` 版本。发布前核对版本提交已进入 `origin/develop` 和 `origin/main`，再对照标签、待发布 ZIP 的清单和发布说明。各插件独立定版，其他插件沿用各自版本。
+- 发布后由同一执行者重新获取远端分支和标签，核对该 ID 在 `origin/develop`、`origin/main`、发布标签和公开 ZIP 中的版本与来源，并记录正式附件 SHA-256。日常插件源码目录和宿主中的安装副本分别核对实际路径、版本与来源。正在验收的版本、已指定的测试包或有未提交改动的工作区保持可用，记录其版本差异和去向。只对确认用于日常开发或正式验收的入口执行同步，并在宿主确认实际载入版本后登记结果。
+- 本机候选包输出到插件仓库的 `dist/` 或宿主的 `work/test-artifacts/<任务>/`。宿主的 `results/plugins/` 每个 ID 只放最新正式 ZIP。核对公开附件 SHA-256 后再放入。移动旧测试包时记录原路径、现路径与校验值，便于继续验收和恢复。[本机工作区维护](https://github.com/Lanpropro/DD_Monitor_CE/blob/develop/docs/development/workspace-maintenance.md#results-写入与发布收尾)
